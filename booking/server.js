@@ -42,7 +42,8 @@ const GOOGLE_CLIENT_SECRET = normalizeEnvValue(process.env.GOOGLE_CLIENT_SECRET)
 const GOOGLE_CALLBACK_URL = normalizeEnvValue(process.env.GOOGLE_CALLBACK_URL);
 const GOOGLE_OAUTH_ENABLED = Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && GOOGLE_CALLBACK_URL);
 const ALLOW_DEV_OTP_FALLBACK = normalizeEnvValue(process.env.ALLOW_DEV_OTP_FALLBACK || 'true').toLowerCase() !== 'false';
-const SHOW_DEV_OTP_IN_UI = !IS_PRODUCTION && ALLOW_DEV_OTP_FALLBACK;
+const SHOW_DEV_OTP_OVERRIDE = parseBooleanEnv(process.env.SHOW_DEV_OTP_IN_UI, false);
+const SHOW_DEV_OTP_IN_UI = ALLOW_DEV_OTP_FALLBACK && (!IS_PRODUCTION || SHOW_DEV_OTP_OVERRIDE);
 const TOKEN_COOKIE = 'booking_portal_token';
 const ALLOWED_SLOT_START_TIMES = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'];
 const LEGACY_ALLOWED_SLOT_START_TIMES = ['10:30', '11:30', '12:30', '13:30', '14:30', '15:30', '16:30', '17:30', '18:30', '19:30'];
@@ -487,6 +488,14 @@ function normalizeEnvValue(value) {
     normalized = normalized.slice(1, -1).trim();
   }
   return normalized;
+}
+
+function parseBooleanEnv(value, fallback = false) {
+  const normalized = normalizeEnvValue(value).toLowerCase();
+  if (!normalized) return fallback;
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
 }
 
 function normalizeOriginValue(value) {
