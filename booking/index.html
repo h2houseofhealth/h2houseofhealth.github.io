@@ -1,0 +1,1720 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="api-base-url" content="" />
+    <title>Booking House</title>
+    <link rel="icon" type="image/png" href="assets/brand/H2_icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:ital,wght@0,500;0,600;1,500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css?v=20260622-site-navigation" />
+
+  </head>
+
+  <body class="auth-mode app-booting">
+    <div class="storefront-header-wrapper">
+      <header class="storefront-header">
+        <div class="storefront-header__left">
+          <details class="storefront-header__drawer">
+            <summary aria-label="Menu">
+              <svg class="drawer-open-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                <path d="M.65 5.85h16.7M.65 11.85h16.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+              </svg>
+              <svg class="drawer-close-icon" width="18" height="17" viewBox="0 0 18 17" fill="none" aria-hidden="true">
+                <path d="m1.3.9 15.4 15.4M16.7.9 1.3 16.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+              </svg>
+            </summary>
+            <nav aria-label="Mobile navigation">
+              <a href="/">The House</a>
+              <a href="/pages/about-us.html">About The House</a>
+              <a href="/pages/by-the-house.html">By The House</a>
+              <a href="/pages/with-the-house.html">With The House</a>
+              <a href="/collections/all.html">House Merch</a>
+              <a class="is-active" href="/booking/" aria-current="page">Booking House</a>
+              <a href="/pages/contact.html">Contact</a>
+            </nav>
+          </details>
+
+          <a class="storefront-header__logo" href="/" aria-label="House of Health">
+            <img src="/cdn/shop/files/H2_Logo9664.png?v=1767874858&amp;width=135" alt="House of Health" width="135" height="50" />
+          </a>
+
+          <nav class="storefront-header__nav" aria-label="Main navigation">
+            <a href="/">The House</a>
+            <a href="/pages/about-us.html">About The House</a>
+            <a href="/pages/by-the-house.html">By The House</a>
+            <a href="/pages/with-the-house.html">With The House</a>
+            <a href="/collections/all.html">House Merch</a>
+            <a class="is-active" href="/booking/" aria-current="page">Booking House</a>
+            <a href="/pages/contact.html">Contact</a>
+          </nav>
+        </div>
+      </header>
+    </div>
+
+    <div class="background-shape shape-a"></div>
+    <div class="background-shape shape-b"></div>
+    <div class="leaf leaf-top-right" aria-hidden="true"></div>
+    <div class="leaf leaf-bottom-left" aria-hidden="true"></div>
+    <div class="grain" aria-hidden="true"></div>
+
+    <main class="portal">
+      <header class="portal-header">
+        <h1 class="sr-only">H2 House of Health Patient Booking House</h1>
+        <div class="top-actions" id="appArea" hidden>
+          <button id="profileBtn" class="profile-btn" type="button">
+            <span id="profileAvatar" class="profile-avatar"></span>
+            <span class="profile-meta">
+              <strong id="userName"></strong>
+              <span class="profile-badges">
+                <span class="role-chip" id="userRole"></span>
+                <span class="membership-badge" id="userMembershipBadge" hidden>&#9733; Member</span>
+              </span>
+            </span>
+          </button>
+          <button id="cartBtn" class="btn btn-secondary cart-btn user-only" type="button" aria-label="Cart">
+            <span class="cart-btn-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" focusable="false">
+                <path d="M4 5h2.2l1.6 8.4a1.4 1.4 0 0 0 1.38 1.16h7.6a1.4 1.4 0 0 0 1.35-1.03L19.6 8H7.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="9.4" cy="19" r="1.05" fill="currentColor"/>
+                <circle cx="17" cy="19" r="1.05" fill="currentColor"/>
+              </svg>
+            </span>
+            <span class="cart-btn-text">Cart</span>
+            <span id="cartCount" class="cart-count" hidden>0</span>
+          </button>
+          <button id="logoutBtn" class="btn btn-secondary" type="button">Logout</button>
+        </div>
+      </header>
+
+      <div id="authShell" class="auth-shell" hidden>
+        <div class="auth-hero" aria-hidden="true">
+          <img
+            class="auth-hero-img"
+            src="assets/membership_choice_hero.png"
+            alt=""
+          />
+        </div>
+
+        <section id="authCard" class="auth-card panel" aria-label="Authentication" hidden>
+          <div class="auth-brand">
+            <img class="auth-logo" src="assets/brand/H2_Logo.png" alt="H2 House of Health" />
+          </div>
+          <p class="auth-kicker">Secure Access</p>
+          <h2 id="authTitle">Sign in to continue</h2>
+          <p class="auth-lead">Book Hydrogen Sessions, Therapies, and Shots in one place.</p>
+          <form id="authForm" class="auth-form">
+            <label id="authNameWrap" hidden>
+              Full name
+              <input id="authName" type="text" autocomplete="name" />
+            </label>
+            <label id="authRoleWrap" hidden>
+              Register as
+              <select id="authRole">
+                <option value="user">Patient/User</option>
+              </select>
+            </label>
+            <label>
+              Email
+              <input id="authEmail" type="email" autocomplete="email" required />
+            </label>
+            <label>
+              Password
+              <div class="auth-password-field">
+                <input id="authPassword" type="password" autocomplete="current-password" required />
+                <button
+                  type="button"
+                  id="authPasswordToggleBtn"
+                  class="password-toggle-btn"
+                  aria-label="Show password"
+                  aria-pressed="false"
+                >
+                  <span class="password-toggle-text">Show password</span>
+                </button>
+              </div>
+            </label>
+            <label id="authOtpWrap" hidden>
+              OTP
+              <input id="authOtp" type="text" inputmode="numeric" maxlength="6" placeholder="Enter 6-digit OTP" />
+            </label>
+            <p id="authDevOtp" class="auth-dev-otp" role="status" hidden>
+              Development OTP: <strong id="authDevOtpValue"></strong>
+            </p>
+            <div id="authOtpActions" class="auth-otp-actions" hidden>
+              <button type="button" id="authResendOtpBtn" class="link-btn">Resend OTP</button>
+              <span id="authResendOtpHint" class="auth-otp-hint" hidden></span>
+            </div>
+            <button id="authSubmitBtn" class="btn btn-primary" type="submit">Sign in</button>
+          </form>
+          <div id="authDivider" class="auth-divider"><span>or</span></div>
+          <a id="googleAuthBtn" class="btn auth-google-btn" href="/auth/google">Continue with Google</a>
+          <p id="authError" class="auth-error"></p>
+          <p class="auth-forgot">
+            <button type="button" id="forgotPasswordBtn" class="link-btn">Forgot password?</button>
+          </p>
+          <p class="auth-switch">
+            <span id="authSwitchText">Don't have an account?</span>
+            <button type="button" id="authSwitchBtn" class="link-btn">Register</button>
+          </p>
+          <p class="auth-back">
+            <button type="button" id="authBackToChoicesBtn" class="link-btn">← Back to choices</button>
+          </p>
+        </section>
+      </div>
+
+      <section id="memberChoiceGate" class="panel app-only user-only member-choice-gate" aria-label="Choose membership mode" hidden>
+        <div class="container">
+          <div class="member-choice-topbar" aria-label="Section navigation">
+            <div class="member-choice-brand-lockup">
+              <img class="member-choice-brand-logo" src="assets/brand/H2_Logo.png" alt="H2 House of Health" />
+            </div>
+            <nav class="member-choice-nav" aria-label="Primary">
+              <a href="#cmp-perfect-01">Benefits</a>
+              <a href="#member-choice-experience">Treatments</a>
+              <a href="#member-choice-pricing">Pricing</a>
+            </nav>
+            <button id="publicBookSessionBtn" class="member-choice-topbar-cta member-choice-book-session-btn" type="button" data-public-book-session>
+              Book a Session
+              <span aria-hidden="true">→</span>
+            </button>
+            <button id="topExplorePlansBtn" class="member-choice-topbar-cta" type="button" aria-label="Sign in or login to member account">
+              Sign Up / Log In
+              <span aria-hidden="true">→</span>
+            </button>
+          </div>
+
+          <div class="member-choice-hero hero-inner">
+            <div class="member-choice-hero-copy member-choice-hero-text hero-content">
+              <p class="auth-kicker">Redefine wellness. Rejuvenate life.</p>
+              <h2 class="member-choice-title">Choose How You Want To <span class="member-choice-title-em">Continue</span></h2>
+              <p class="membership-copy">
+                Activate membership for exclusive benefits or continue with flexible non-member access. Wellness, tailored to you.
+              </p>
+
+              <div class="member-choice-benefits" aria-label="Membership highlights">
+                <p>
+                  <span class="member-choice-check" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none">
+                      <path d="M12 2.75c2.08 3.02 5.54 6.8 5.54 10.42A5.54 5.54 0 1 1 6.46 13.17C6.46 9.55 9.92 5.77 12 2.75Z" />
+                      <path d="M12 9.25c1.29 1.54 2.33 3.09 2.33 4.32A2.33 2.33 0 1 1 9.67 13.57c0-1.23 1.04-2.78 2.33-4.32Z" />
+                    </svg>
+                  </span>
+                  Book hydrogen, therapies &amp; shots all in one place.
+                </p>
+                <p>
+                  <span class="member-choice-check" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none">
+                      <path d="M4 12.5 8 15l4-6 4 6 4-2.5-1.7 8H5.7L4 12.5Z" />
+                      <path d="M8 20h8" />
+                    </svg>
+                  </span>
+                  Exclusive member pricing &amp; hydrogen session access.
+                </p>
+                <p>
+                  <span class="member-choice-check" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none">
+                      <path d="M7 3.5v3" />
+                      <path d="M17 3.5v3" />
+                      <path d="M4 8.5h16" />
+                      <rect x="4" y="5.5" width="16" height="15" rx="3" />
+                      <path d="m8 13 2 2 5-5" />
+                    </svg>
+                  </span>
+                  Change or cancel your plan anytime, effortlessly.
+                </p>
+              </div>
+
+              <div class="member-choice-trust" aria-label="Member trust">
+                <div class="member-choice-avatars" aria-hidden="true">
+                  <span>S</span>
+                  <span>A</span>
+                  <span>M</span>
+                  <span>R</span>
+                </div>
+                <div class="member-choice-trust-copy">
+                  <strong>★★★★★</strong>
+                  <p>Trusted by 2,000+ wellness seekers</p>
+                </div>
+                <button class="member-choice-trust-cta" type="button" data-member-choice-join>
+                  Explore All Plans
+                  <span aria-hidden="true">→</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="member-choice-hero-media member-choice-hero-visual hero-image">
+              <img
+                class="member-choice-hero-img"
+                src="assets/membership_choice_hero.png"
+                alt="Clinician performing a treatment session"
+                loading="lazy"
+                onerror="this.onerror=null;this.src='assets/service-experience.jpg';"
+              />
+            </div>
+          </div>
+
+          <div id="member-choice-experience" class="member-choice-experience" aria-label="Select your experience">
+            <p class="member-choice-experience-kicker">Experiences That Heal</p>
+            <h3 class="member-choice-experience-title section-title">Select Your <span>Experience</span></h3>
+            <div class="member-choice-experience-grid cards" role="group" aria-label="Continue options">
+              <button id="continueAsMemberBtn" class="member-choice-experience-card card-member is-featured" type="button">
+                <span class="member-choice-experience-badge">Most Popular</span>
+                <span class="member-choice-card-plan">Member</span>
+                <div class="member-choice-card-price-row">
+                  <strong class="member-choice-card-price">₹4,800</strong>
+                  <span class="member-choice-card-price-unit">/ session</span>
+                </div>
+                <div class="member-choice-card-highlight">
+                  <span class="member-choice-card-highlight-icon" aria-hidden="true">✦</span>
+                  <span>Save up to ₹1,50,000 annually</span>
+                </div>
+                <ul class="member-choice-card-list">
+                  <li>16 sessions included</li>
+                  <li>Exclusive member pricing</li>
+                  <li>Priority booking access</li>
+                  <li>Access to all included services</li>
+                  <li>Flexible plan management</li>
+                  <li>Exclusive offers &amp; early access</li>
+                </ul>
+                <span class="member-choice-card-cta">Become a Member</span>
+              </button>
+              <button id="continueAsNonMemberBtn" class="member-choice-experience-card card-light" type="button">
+                <span class="member-choice-experience-badge is-placeholder" aria-hidden="true">Most Popular</span>
+                <span class="member-choice-card-plan">Non-member</span>
+                <div class="member-choice-card-price-row">
+                  <strong class="member-choice-card-price">₹9,500</strong>
+                  <span class="member-choice-card-price-unit">/ session</span>
+                </div>
+                <div class="member-choice-card-highlight member-choice-card-highlight-neutral">
+                  <span class="member-choice-card-highlight-icon" aria-hidden="true">✦</span>
+                  <span>Pay only when you book</span>
+                </div>
+                <ul class="member-choice-card-list">
+                  <li>No free sessions</li>
+                  <li>Regular standard pricing</li>
+                  <li>Standard booking window</li>
+                  <li>Limited access to services</li>
+                  <li>No exclusive offers</li>
+                  <li>Pay per session</li>
+                </ul>
+                <span class="member-choice-card-cta">Continue as Non-member</span>
+              </button>
+            </div>
+            <div id="cmp-perfect-01" class="member-choice-comparison" aria-label="Member vs non-member comparison">
+              <div class="member-choice-comparison-body">
+                <div class="member-choice-matrix-block">
+                  <aside class="member-choice-matrix-side">
+                  <span class="member-choice-matrix-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none">
+                      <path d="M4 8.5 8 11l4-6 4 6 4-2.5-1.7 8.5H5.7L4 8.5Z" />
+                      <path d="M8 20h8" />
+                    </svg>
+                  </span>
+                  <h3>Compare Benefits</h3>
+                  <p>See the difference between member and non-member benefits side by side.</p>
+                  <a href="#member-choice-pricing">View Full Comparison →</a>
+                </aside>
+                <div class="member-choice-matrix-table-wrap table">
+                  <div class="member-choice-matrix-head" aria-hidden="true">
+                    <div>Included Services</div>
+                    <div class="is-member">Member</div>
+                    <div>Non-member</div>
+                  </div>
+                  <div class="member-choice-matrix-row">
+                    <div>IV Therapies</div>
+                    <div aria-label="Included"><span class="cmp-check" aria-hidden="true"></span></div>
+                    <div aria-label="Included"><span class="cmp-check" aria-hidden="true"></span></div>
+                  </div>
+                  <div class="member-choice-matrix-row">
+                    <div>IV Shots</div>
+                    <div aria-label="Included"><span class="cmp-check" aria-hidden="true"></span></div>
+                    <div aria-label="Included"><span class="cmp-check" aria-hidden="true"></span></div>
+                  </div>
+                  <div class="member-choice-matrix-row">
+                    <div>Labs</div>
+                    <div aria-label="Included"><span class="cmp-check" aria-hidden="true"></span></div>
+                    <div class="is-dash" aria-label="Not included"><span class="cmp-dash" aria-hidden="true"></span></div>
+                  </div>
+                  <div class="member-choice-matrix-row">
+                    <div>Imaging</div>
+                    <div aria-label="Included"><span class="cmp-check" aria-hidden="true"></span></div>
+                    <div class="is-dash" aria-label="Not included"><span class="cmp-dash" aria-hidden="true"></span></div>
+                  </div>
+                  <div class="member-choice-matrix-row">
+                    <div>Genome Testing</div>
+                    <div aria-label="Included"><span class="cmp-check" aria-hidden="true"></span></div>
+                    <div class="is-dash" aria-label="Not included"><span class="cmp-dash" aria-hidden="true"></span></div>
+                  </div>
+                  <div class="member-choice-matrix-row">
+                    <div>Concierge Primary Care</div>
+                    <div aria-label="Included"><span class="cmp-check" aria-hidden="true"></span></div>
+                    <div class="is-dash" aria-label="Not included"><span class="cmp-dash" aria-hidden="true"></span></div>
+                  </div>
+                </div>
+              </div>
+
+                <div id="member-choice-pricing" class="cmp-pricing-card pricing-box" aria-label="Session Pricing">
+                  <div class="cmp-pricing-headline">
+                    <span class="cmp-pricing-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none">
+                      <path d="m5 11.2 7.2-7.2a1 1 0 0 1 .7-.3h5.6a1 1 0 0 1 1 1v5.6a1 1 0 0 1-.3.7L12 18.2a1 1 0 0 1-1.4 0L5 12.6a1 1 0 0 1 0-1.4Z" />
+                      <circle cx="16.2" cy="7.8" r="1.3" />
+                    </svg>
+                  </span>
+                    <div>
+                      <h3>Session Pricing</h3>
+                      <p>Exclusive pricing for members. More value, better outcomes.</p>
+                    </div>
+                  </div>
+
+                    <div class="cmp-pricing-table-wrap table table">
+                      <div class="cmp-pricing-table-head pricing-header pricing-header">
+                        <div>Hydrogen Sessions</div>
+                        <div>Member price</div>
+                        <div>Regular Price</div>
+                      </div>
+                      <div class="cmp-pricing-table-row">
+                        <div>1 Hydrogen Session price</div>
+                        <div>₹4,800</div>
+                        <div>₹9,500</div>
+                      </div>
+                      <div class="cmp-pricing-table-row">
+                        <div>1 Week (4 hydrogen sessions)</div>
+                        <div>₹12,000</div>
+                        <div>₹28,000</div>
+                      </div>
+                      <div class="cmp-pricing-table-row">
+                        <div>2 Weeks (8 hydrogen sessions)</div>
+                        <div>₹22,000</div>
+                        <div>₹48,000</div>
+                      </div>
+                      <div class="cmp-pricing-table-row">
+                        <div>1 Month (16 hydrogen sessions)</div>
+                        <div>₹32,000</div>
+                        <div>₹64,000</div>
+                      </div>
+                  </div>
+                  </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="member-choice-about" class="member-choice-final-cta" aria-label="Explore plans">
+            <div class="member-choice-final-cta-points">
+              <div class="member-choice-final-cta-point">
+                <span aria-hidden="true">🛡</span>
+                <div>
+                  <strong>Premium Care</strong>
+                  <small>You Can Trust</small>
+                </div>
+              </div>
+              <div class="member-choice-final-cta-point">
+                <span aria-hidden="true">⚛</span>
+                <div>
+                  <strong>Science Backed</strong>
+                  <small>Therapies</small>
+                </div>
+              </div>
+              <div class="member-choice-final-cta-point">
+                <span aria-hidden="true">✿</span>
+                <div>
+                  <strong>Personalized</strong>
+                  <small>Wellness</small>
+                </div>
+              </div>
+              <div class="member-choice-final-cta-point">
+                <span aria-hidden="true">♡</span>
+                <div>
+                  <strong>Results</strong>
+                  <small>That Last</small>
+                </div>
+              </div>
+            </div>
+            <div class="member-choice-final-cta-actions">
+              <button id="member-choice-faqs" class="member-choice-final-cta-btn" type="button" data-member-choice-join>
+                Explore All Plans
+                <span aria-hidden="true">→</span>
+              </button>
+              <button class="member-choice-final-cta-btn" type="button" data-public-book-session>
+                Book a Session
+                <span aria-hidden="true">→</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="stats-grid admin-stats-grid app-only admin-only" aria-label="Booking summary" hidden>
+        <button id="adminStatTotal" class="stat-card" type="button">
+          <h2>Today's Bookings</h2>
+          <p id="totalCount">0</p>
+        </button>
+        <button id="adminHistoryCard" class="stat-card" type="button">
+          <h2>Total Bookings Till Date</h2>
+          <p id="historyCount">0</p>
+        </button>
+      </section>
+
+      <section id="adminTabNav" class="panel app-only admin-only user-tab-nav admin-tab-nav" aria-label="Admin navigation" hidden>
+        <div class="user-tab-grid admin-tab-grid">
+          <button id="adminTabCalendar" class="user-tab-btn" type="button">Calendar</button>
+          <button id="adminTabBookings" class="user-tab-btn" type="button">Booking records</button>
+          <button id="adminTabSessions" class="user-tab-btn" type="button">Session Tracking</button>
+          <button id="adminTabCoupons" class="user-tab-btn" type="button">Coupons</button>
+          <button id="adminTabMemberships" class="user-tab-btn" type="button">Memberships</button>
+          <button id="adminTabRescheduled" class="user-tab-btn" type="button">Reschedule</button>
+        </div>
+      </section>
+
+      <section id="userTabNav" class="panel app-only user-only user-tab-nav" aria-label="User navigation" hidden>
+        <div class="user-tab-grid">
+          <button id="userTabMembership" class="user-tab-btn" type="button">My Dashboard</button>
+          <button id="userTabServices" class="user-tab-btn" type="button">Services</button>
+          <button id="userTabBookings" class="user-tab-btn" type="button">My Bookings</button>
+          <button id="userTabCart" class="user-tab-btn" type="button">Cart</button>
+        </div>
+      </section>
+
+      <section id="membershipSection" class="panel app-only user-only" aria-label="Membership" hidden>
+        <div class="panel-head membership-head">
+          <div>
+            <h2 id="membershipSectionTitle">Membership Subscription</h2>
+            <p id="memberFlowLabel" class="service-panel-lead"></p>
+          </div>
+          <p id="membershipStatusText" class="membership-status"></p>
+        </div>
+        <section id="membershipDashboard" class="membership-dashboard">
+          <div class="membership-dashboard-head">
+            <div class="dashboard-left">
+              <h3 id="membershipWelcomeName">Member</h3>
+              <p id="membershipDashboardStatus" class="membership-copy"></p>
+            </div>
+            <div class="dashboard-actions membership-quick-actions">
+              <button id="membershipTakeMembershipBtn" class="btn btn-secondary" type="button" hidden>Become a Member</button>
+              <button id="membershipQuickAddPersonBtn" class="btn btn-secondary" type="button">Add Person</button>
+              <button id="membershipQuickHistoryBtn" class="btn btn-secondary" type="button">View History</button>
+            </div>
+            <div id="comboSidebar" class="combo-sidebar" hidden>
+              <button
+                id="comboSidebarTab"
+                class="combo-sidebar-tab"
+                type="button"
+                aria-expanded="false"
+                aria-controls="comboSidebarPanel"
+                aria-label="Open Combo Details"
+              >
+                <span class="combo-sidebar-tab-icon" aria-hidden="true">✦</span>
+                <span class="combo-sidebar-tab-text">Combo Details</span>
+              </button>
+
+              <aside id="comboSidebarPanel" class="combo-sidebar-panel" aria-hidden="true" aria-label="Combo Details">
+                <button id="comboSidebarClose" class="combo-sidebar-close" type="button" aria-label="Close Combo Details">
+                  &times;
+                </button>
+                <img
+                  class="combo-sidebar-image"
+                  src="assets/combo-banner.png"
+                  alt="Combo details banner"
+                  loading="lazy"
+                  onerror="this.onerror=null;this.src='assets/dashboard_membership_hero.png';"
+                />
+              </aside>
+            </div>
+            <div class="hero-banner dashboard-hero-banner">
+              <img
+                class="dashboard-hero-img"
+                src="assets/dashboard_membership_hero.png"
+                alt="Hydrogen therapy dashboard hero"
+              />
+            </div>
+          </div>
+          <div class="membership-stat-grid">
+            <button id="membershipStatMembersCard" class="membership-stat-card" type="button">
+              <span class="stat-icon stat-icon-session" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M12 2.75c2.08 3.02 5.54 6.8 5.54 10.42A5.54 5.54 0 1 1 6.46 13.17C6.46 9.55 9.92 5.77 12 2.75Z" />
+                  <path d="M12 9.25c1.29 1.54 2.33 3.09 2.33 4.32A2.33 2.33 0 1 1 9.67 13.57c0-1.23 1.04-2.78 2.33-4.32Z" />
+                </svg>
+              </span>
+              <span id="membershipStatSessionsLabel" class="stat-label">Hydrogen Sessions</span>
+              <strong id="membershipStatSessions">0</strong>
+              <small id="membershipStatSessionsMeta">Included</small>
+            </button>
+            <button id="membershipStatValidCard" class="membership-stat-card" type="button">
+              <span class="stat-icon stat-icon-members" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+                  <path d="M16.5 10a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
+                  <path d="M3.5 18.5a4.5 4.5 0 0 1 9 0" />
+                  <path d="M13 18.5a3.75 3.75 0 0 1 7.5 0" />
+                </svg>
+              </span>
+              <span id="membershipStatMembersLabel" class="stat-label">Members</span>
+              <strong id="membershipStatMembers">0</strong>
+              <small id="membershipStatMembersMeta">Covered</small>
+              <div id="membershipStatMembersDetails" class="membership-stat-member-details" hidden></div>
+            </button>
+            <button id="membershipStatExtraCard" class="membership-stat-card" type="button">
+              <span class="stat-icon stat-icon-valid" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M7 3.5v3" />
+                  <path d="M17 3.5v3" />
+                  <path d="M4 8.5h16" />
+                  <rect x="4" y="5.5" width="16" height="15" rx="3" />
+                  <path d="m8 13 2 2 5-5" />
+                </svg>
+              </span>
+              <span id="membershipStatValidLabel" class="stat-label">Valid Till</span>
+              <strong id="membershipStatValid">-</strong>
+              <small id="membershipStatValidMeta">Plan end</small>
+            </button>
+            <button id="membershipStatBecomeCard" class="membership-stat-card" type="button">
+              <span class="stat-icon stat-icon-session" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M12 5v14" />
+                  <path d="M5 12h14" />
+                </svg>
+              </span>
+              <span id="membershipStatExtraLabel" class="stat-label">Top Up Sessions</span>
+              <strong id="membershipStatExtra">0</strong>
+              <small id="membershipStatExtraMeta">Purchased</small>
+
+
+            </button>
+          </div>
+          <div class="membership-dashboard-row">
+            <div class="membership-progress-card">
+              <div class="membership-progress-head">
+                <h4 id="membershipUsageTitle">Hydrogen Session Usage</h4>
+                <span id="membershipUsageLabel" hidden>0 of 0 used</span>
+              </div>
+              <div class="usage-v2">
+                <div id="membershipUsageSessionHead" class="usage-v2-session-head">Membership Sessions</div>
+                <div id="membershipSessionBlocks" class="usage-v2-blocks" aria-label="Membership usage blocks"></div>
+                <div class="usage-v2-metrics">
+                  <div><strong id="membershipUsageCount">0 / 0</strong> Used</div>
+                  <div><strong id="membershipUsageRemaining">0</strong> Remaining</div>
+                </div>
+                <hr class="usage-v2-sep" />
+                <div class="usage-v2-subhead">Add-ons & Extras</div>
+                <div class="usage-v2-addons-grid">
+                  <div id="membershipTopUpBadge" class="usage-v2-addon-badge">
+                    <span>Top-up Sessions</span>
+                    <div id="membershipTopUpBlocks" class="usage-v2-mini-blocks"></div>
+                    <small><strong id="membershipTopUpUsage">0 / 0</strong> Used</small>
+                    <small><strong id="membershipTopUpCount">0</strong> Remaining</small>
+                  </div>
+                  <div class="usage-v2-addon-badge">
+                    <span>IV Therapies</span>
+                    <div id="membershipTherapyBlocks" class="usage-v2-mini-blocks"></div>
+                    <small><strong id="therapyUsageUsed">0 / 0</strong> Used</small>
+                    <small><strong id="therapyUsageCount">0</strong> Remaining</small>
+                  </div>
+                  <div class="usage-v2-addon-badge">
+                    <span>IV Shots</span>
+                    <div id="membershipShotsBlocks" class="usage-v2-mini-blocks"></div>
+                    <small><strong id="shotsUsageUsed">0 / 0</strong> Used</small>
+                    <small><strong id="shotsUsageCount">0</strong> Remaining</small>
+                  </div>
+                </div>
+                <hr class="usage-v2-sep" />
+                <div class="usage-v2-subhead">Attendance History</div>
+                <div class="usage-v2-attendance">
+                  <div><strong id="attendanceCompleted">0</strong> Completed</div>
+                  <div><strong id="attendanceUpcoming">0</strong> Upcoming</div>
+                  <div><strong id="attendanceMissed">0</strong> Missed</div>
+                  <div><strong id="attendanceScheduleLater">0</strong> Scheduled Later</div>
+                </div>
+                <p id="membershipConvertedTopUpNote" class="usage-v2-note" hidden></p>
+              </div>
+              <p id="membershipUsageNote" class="membership-copy" hidden></p>
+            </div>
+            <div class="membership-calendar-card" aria-label="Monthly calendar">
+              <div class="membership-calendar-head">
+                <h4>Session Calendar</h4>
+                <span id="membershipCalendarMonth" class="membership-calendar-month"></span>
+              </div>
+              <div class="membership-calendar-weekdays">
+                <span>Sun</span>
+                <span>Mon</span>
+                <span>Tue</span>
+                <span>Wed</span>
+                <span>Thu</span>
+                <span>Fri</span>
+                <span>Sat</span>
+              </div>
+              <div id="membershipCalendarGrid" class="membership-calendar-grid"></div>
+              <div id="membershipCalendarDetails" class="membership-calendar-details"></div>
+              <button id="membershipScheduleLaterFooter" class="membership-calendar-footer-link" type="button" hidden>
+                Schedule Sessions in Schedule Later
+              </button>
+            </div>
+            <div class="membership-highlight-card">
+              <div class="membership-highlight-visual" aria-hidden="true">
+                <span class="membership-highlight-icon">
+                  <svg viewBox="0 0 64 64" fill="none">
+                    <path d="M16 10v8" />
+                    <path d="M48 10v8" />
+                    <rect x="10" y="14" width="44" height="38" rx="10" />
+                    <path d="M10 24h44" />
+                    <path d="m24 36 6 6 12-14" />
+                  </svg>
+                </span>
+              </div>
+              <span class="membership-highlight-kicker">Upcoming</span>
+              <h4 id="membershipNextSessionTitle">No hydrogen sessions scheduled</h4>
+              <p id="membershipNextSessionMeta" class="membership-copy"></p>
+              <div class="service-sticky-actions">
+                <button id="membershipCardScheduleBtn" class="btn btn-primary" type="button">Schedule Hydrogen Session</button>
+                <button id="membershipCardTopUpBtn" class="btn btn-secondary" type="button">Buy Additional</button>
+              </div>
+            </div>
+            <div id="membershipPeopleCard" class="membership-progress-card membership-people-card" hidden>
+              <div class="membership-progress-head">
+                <h4>Membership Members</h4>
+                <button id="membershipAddPersonBtn" class="btn btn-secondary" type="button" hidden>Add Person</button>
+              </div>
+              <p id="membershipPeopleMeta" class="membership-copy"></p>
+              <div id="membershipPeopleList" class="membership-people-list"></div>
+            </div>
+          </div>
+        </section>
+        <div id="membershipBrowsePanel">
+          <section class="membership-hero" aria-label="Membership Highlights">
+            <div class="membership-hero-copy">
+              <div class="membership-billing-toggle" aria-hidden="true">
+                <span class="is-active">Annual</span>
+              </div>
+              <h3>Pricing</h3>
+              <p class="membership-copy">
+                Choose a membership plan that fits your wellness goals and get hydrogen therapy benefits across the year.
+              </p>
+            </div>
+            <div class="membership-hero-panel">
+              <div class="membership-hero-stat">
+                <strong>Hydrogen Sessions</strong>
+                <span>Included in every 1-year plan</span>
+              </div>
+              <div class="membership-hero-stat">
+                <strong>Diagnostics</strong>
+                <span>Lab tests, oxidative stress markers, and radiology support</span>
+              </div>
+              <div class="membership-hero-stat">
+                <strong>Member Value</strong>
+                <span>Lower hydrogen prices and exclusive services</span>
+              </div>
+            </div>
+          </section>
+          <div id="membershipPlans" class="membership-grid"></div>
+          <div class="dialog-actions">
+            <button id="membershipBackBtn" class="btn btn-secondary" type="button">Back</button>
+            <button id="membershipNextBtn" class="btn btn-primary" type="button">Next</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="servicesSection" class="panel app-only" aria-label="Services" hidden>
+        <div class="panel-head">
+          <div>
+            <h2>Services</h2>
+            <p id="servicePanelLead" class="service-panel-lead"></p>
+          </div>
+          <div class="admin-only admin-booking-target" hidden>
+            <div class="admin-customer-form">
+              <label>
+                Customer Name
+                <input id="adminCustomerName" type="text" placeholder="Enter caller name" maxlength="80" />
+              </label>
+              <label>
+                Email
+                <input id="adminCustomerEmail" type="email" placeholder="Enter customer email" />
+              </label>
+              <label>
+                Contact Number
+                <input id="adminCustomerPhone" type="tel" placeholder="Enter contact number" />
+              </label>
+            </div>
+          </div>
+        </div>
+        <div id="adminClientMeta" class="admin-client-meta admin-only" hidden></div>
+        <p id="adminCustomerMessage" class="membership-copy admin-only" hidden></p>
+        <div id="experienceCard" class="experience-card user-only">
+          <div class="experience-card-left">
+            <div class="experience-card-title">Demo Hydrogen Session</div>
+            <div class="experience-card-desc">30 min consultation + hydrogen session</div>
+          </div>
+          <div class="experience-card-right">
+            <button id="experienceBookBtn" class="experience-card-btn" type="button">Add to Cart</button>
+          </div>
+        </div>
+        <div id="serviceGrid" class="doctor-grid"></div>
+        <p id="serviceEmpty" class="empty-state" hidden>No services configured.</p>
+        <p id="servicePageNote" class="service-page-note user-only">
+          <span class="note-icon" aria-hidden="true">&#9888;&#65039;</span>
+          <span class="note-copy">
+            <strong>Note:</strong> Therapy/Shots require a 2-week gap between hydrogen sessions. (Whether taken separately or as an add-on
+            with Hydrogen Therapy) Hydrogen Therapy sessions can be taken up to 3 times per day.
+          </span>
+        </p>
+        <div class="dialog-actions user-only">
+          <button id="servicesBackBtn" class="btn btn-secondary" type="button">Back</button>
+          <button id="servicesNextBtn" class="btn btn-primary" type="button">Next</button>
+        </div>
+      </section>
+
+      <section id="adminCalendarSection" class="panel app-only admin-only" aria-label="Admin calendar" hidden>
+        <div class="panel-head admin-calendar-head">
+          <div>
+            <h2>Admin Calendar</h2>
+            <p class="membership-copy">View open slots, book for users, and track customer sessions.</p>
+          </div>
+          <button id="adminCalendarRefreshBtn" class="btn btn-secondary" type="button">Refresh Slots</button>
+        </div>
+        <div class="admin-calendar-controls">
+          <label>
+            Customer Name
+            <input id="adminCalendarCustomerName" type="text" placeholder="Enter caller name" maxlength="80" />
+          </label>
+          <label>
+            Email
+            <input id="adminCalendarCustomerEmail" type="email" placeholder="Enter customer email" />
+          </label>
+          <label>
+            Contact Number
+            <input id="adminCalendarCustomerPhone" type="tel" placeholder="Enter contact number" />
+          </label>
+          <label>
+            Date
+            <input id="adminCalendarDate" type="date" />
+          </label>
+          <label>
+            Category
+            <select id="adminCalendarCategory">
+              <option value="HYDROGEN SESSION">Hydrogen Session</option>
+              <option value="IV THERAPIES">Therapies</option>
+              <option value="IV SHOTS">Shots</option>
+            </select>
+          </label>
+          <label class="admin-calendar-service-field">
+            Service
+            <select id="adminCalendarService"></select>
+          </label>
+          <button id="adminCalendarBookConsultationBtn" class="btn btn-primary" type="button">Book Consultation</button>
+        </div>
+        <div class="admin-calendar-shell">
+          <section class="admin-calendar-month-panel" aria-label="Availability calendar">
+            <div class="admin-calendar-month-head">
+              <button id="adminCalendarPrevMonthBtn" class="icon-btn" type="button" aria-label="Previous month">&#8249;</button>
+              <div>
+                <p class="admin-calendar-kicker">Availability View</p>
+                <h3 id="adminCalendarMonthLabel">Month</h3>
+              </div>
+              <button id="adminCalendarNextMonthBtn" class="icon-btn" type="button" aria-label="Next month">&#8250;</button>
+            </div>
+            <div class="admin-calendar-weekdays" aria-hidden="true">
+              <span>Sun</span>
+              <span>Mon</span>
+              <span>Tue</span>
+              <span>Wed</span>
+              <span>Thu</span>
+              <span>Fri</span>
+              <span>Sat</span>
+            </div>
+            <div id="adminCalendarGrid" class="admin-calendar-grid"></div>
+          </section>
+          <section class="admin-calendar-day-panel" aria-label="Selected day slots">
+            <div class="admin-calendar-day-head">
+              <div>
+                <p class="admin-calendar-kicker">Selected Date</p>
+                <h3 id="adminCalendarSelectedDateLabel">Date</h3>
+              </div>
+              <p id="adminCalendarStatus" class="membership-copy"></p>
+            </div>
+            <div id="adminCalendarSlots" class="admin-calendar-slots"></div>
+            <p id="adminCalendarEmpty" class="empty-state" hidden>No services available for this date and category.</p>
+          </section>
+        </div>
+        <div id="adminCalendarTracker" class="admin-calendar-tracker"></div>
+      </section>
+
+      <section id="userBookingsSection" class="panel app-only user-only" aria-label="User bookings" hidden>
+        <div class="panel-head">
+          <div>
+            <h2>My Bookings</h2>
+            <p class="service-panel-lead">View and manage all your scheduled hydrogen sessions.</p>
+          </div>
+        </div>
+        <div id="bookingsCartNotice" class="user-cart-notice" hidden>
+          <p>
+            You have items waiting in your cart.
+            <button id="bookingsViewCartBtn" class="link-btn" type="button">View cart</button>
+          </p>
+        </div>
+        <div class="my-bookings-toolbar" aria-label="Booking status filters">
+          <button id="myBookingsFilterAll" class="my-bookings-filter is-active" type="button" data-booking-filter="all">All Bookings</button>
+          <button id="myBookingsFilterUpcoming" class="my-bookings-filter" type="button" data-booking-filter="upcoming">Upcoming</button>
+          <button id="myBookingsFilterCompleted" class="my-bookings-filter" type="button" data-booking-filter="completed">Completed</button>
+          <button id="myBookingsFilterScheduleLater" class="my-bookings-filter" type="button" data-booking-filter="schedule_later">Schedule Later</button>
+        </div>
+        <div id="myBookingsSummary" class="my-bookings-summary">
+          <div class="my-bookings-stats-grid">
+            <div class="my-bookings-stat-card">
+              <span class="stat-icon" aria-hidden="true">&#9679;</span>
+              <span class="stat-label">Total Hydrogen Sessions</span>
+              <strong id="myBookingsTotalSessions">0</strong>
+              <small>All bookings</small>
+            </div>
+            <div class="my-bookings-stat-card">
+              <span class="stat-icon" aria-hidden="true">&#9675;</span>
+              <span class="stat-label">Upcoming</span>
+              <strong id="myBookingsUpcomingCount">0</strong>
+              <small>Scheduled</small>
+            </div>
+            <div class="my-bookings-stat-card">
+              <span class="stat-icon" aria-hidden="true">&#9203;</span>
+              <span class="stat-label">Completed</span>
+              <strong id="myBookingsCompletedCount">0</strong>
+              <small>Finished</small>
+            </div>
+          </div>
+          
+          <div class="my-bookings-progress-card">
+            <div class="my-bookings-progress-head">
+              <h4>Hydrogen Session Progress</h4>
+              <span id="myBookingsProgressLabel">0 of 0 hydrogen sessions</span>
+            </div>
+            <div class="my-bookings-progress-bar">
+              <span id="myBookingsProgressBar"></span>
+            </div>
+            <p id="myBookingsProgressNote" class="membership-copy"></p>
+          </div>
+        </div>
+        
+        <div id="myBookingsUpcoming" class="my-bookings-upcoming">
+          <div class="panel-head">
+            <h3>Upcoming Sessions</h3>
+          </div>
+          <div id="myBookingsUpcomingList" class="my-bookings-upcoming-list"></div>
+          <p id="myBookingsUpcomingEmpty" class="empty-state" hidden>No upcoming sessions.</p>
+        </div>
+        
+        <div id="myBookingsRemaining" class="my-bookings-calendar">
+          <div class="panel-head">
+            <h3>Session Calendar</h3>
+            <span id="myBookingsCalendarMonth" class="my-bookings-calendar-month"></span>
+          </div>
+          <div class="my-bookings-calendar-weekdays">
+            <span>Sun</span>
+            <span>Mon</span>
+            <span>Tue</span>
+            <span>Wed</span>
+            <span>Thu</span>
+            <span>Fri</span>
+            <span>Sat</span>
+          </div>
+          <div id="myBookingsCalendarGrid" class="my-bookings-calendar-grid"></div>
+          <div id="myBookingsCalendarDetails" class="my-bookings-calendar-details"></div>
+          <button id="myBookingsScheduleLaterFooter" class="my-bookings-calendar-footer" type="button" hidden>
+            Schedule Sessions in Schedule Later
+          </button>
+        </div>
+  
+        <div class="table-wrap my-bookings-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Service</th>
+                <th>Date & Time</th>
+                <th>Status</th>
+                <th>Amount</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="bookingTableBody"></tbody>
+          </table>
+          <p id="emptyState" class="empty-state">No bookings found.</p>
+        </div>
+        <div class="dialog-actions">
+          <button id="bookingsBackBtn" class="btn btn-secondary" type="button">Back</button>
+        </div>
+      </section>
+
+      <section id="userCartSection" class="panel app-only user-only" aria-label="User cart" hidden>
+        <div class="panel-head">
+          <div>
+            <h2>Cart</h2>
+            <p class="service-panel-lead">Review all items and pay in one checkout.</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Service</th>
+                <th>Date & Time</th>
+                <th>Amount</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="cartTableBody"></tbody>
+          </table>
+          <div id="cartMobileList" class="cart-mobile-list" hidden></div>
+          <div id="cartEmptyState" class="empty-state cart-empty-state" hidden>
+            <div class="cart-empty-visual" aria-hidden="true">
+              <svg viewBox="0 0 120 120" role="presentation" focusable="false">
+                <defs>
+                  <linearGradient id="cartEmptyGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#f3d3b2" />
+                    <stop offset="100%" stop-color="#c8652d" />
+                  </linearGradient>
+                </defs>
+                <circle cx="60" cy="60" r="46" fill="rgba(255,255,255,0.92)" stroke="url(#cartEmptyGlow)" stroke-width="4" />
+                <path d="M36 48h8l6 26h30l6-18H54" fill="none" stroke="#8f4a2c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+                <circle cx="56" cy="82" r="4" fill="#8f4a2c" />
+                <circle cx="79" cy="82" r="4" fill="#8f4a2c" />
+                <path d="M47 36c3-5 9-8 13-8 4 0 9 2 12 6" fill="none" stroke="#c8652d" stroke-width="3" stroke-linecap="round" />
+                <path d="M78 29l2.4 4.8 5.3.8-3.9 3.8.9 5.2-4.7-2.5-4.7 2.5.9-5.2-3.9-3.8 5.3-.8z" fill="#f0a15f" opacity="0.95" />
+              </svg>
+            </div>
+            <div class="cart-empty-copy">
+              <span class="cart-empty-eyebrow">Nothing in your cart yet</span>
+              <strong>Your cart is empty.</strong>
+              <span>Choose a service below and add your first session to keep everything in one place.</span>
+            </div>
+            <div class="cart-empty-recommendations" aria-label="Recommended services">
+              <span class="cart-empty-recommendation">
+                <strong>Hydrogen Sessions</strong>
+                <small>Book a session or package</small>
+              </span>
+              <span class="cart-empty-recommendation">
+                <strong>IV Therapies</strong>
+                <small>See wellness and recovery options</small>
+              </span>
+              <span class="cart-empty-recommendation">
+                <strong>Wellness Add-ons</strong>
+                <small>Complete your booking in one visit</small>
+              </span>
+            </div>
+            <div class="cart-empty-actions">
+              <button id="cartEmptyBrowseBtn" class="btn btn-primary" type="button">Browse Services</button>
+              <button id="cartEmptyBookingsBtn" class="btn btn-secondary" type="button">View My Bookings</button>
+            </div>
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <div id="userCouponEntry" class="coupon-entry user-only" hidden>
+            <div id="userGeneralCoupons" class="general-coupons" hidden></div>
+            <label>
+              Coupon Code
+              <div class="coupon-entry-row">
+                <input id="userCouponCode" type="text" placeholder="Enter coupon code" />
+                <button id="userApplyCouponBtn" class="btn btn-secondary" type="button">Apply</button>
+              </div>
+            </label>
+            <div id="userCouponPreview" class="coupon-preview" hidden></div>
+          </div>
+            <div id="userCheckoutSummary" class="user-checkout-summary" hidden></div>
+            <button id="bookingsPayAllBtn" class="btn btn-primary" type="button" hidden>Pay Now</button>
+          </div>
+        </section>
+
+      <section id="adminUserSessionsSection" class="panel app-only admin-only admin-user-session-panel" aria-label="Admin bookings" hidden>
+        <div class="panel-head">
+          <h2>Session Tracking</h2>
+        </div>
+        <div class="admin-section-toolbar">
+          <p class="membership-copy">Search any user and open their session details from the cards below.</p>
+          <label class="admin-inline-search">
+            <span>Search</span>
+            <input id="adminSessionSearch" type="text" placeholder="Search users with id, name, email, phone number" />
+          </label>
+        </div>
+        <div id="adminUserCards" class="admin-user-grid"></div>
+        <p id="adminUserCardsEmpty" class="empty-state" hidden>No users found.</p>
+      </section>
+
+      <section id="adminHistorySection" class="panel app-only admin-only" aria-label="Admin bookings" hidden>
+        <div class="panel-head">
+          <h2 id="adminTableTitle">Today's Bookings</h2>
+        </div>
+        <div class="admin-section-toolbar">
+          <label class="admin-inline-search">
+            <span>From</span>
+            <input id="adminEmailAnalyticsStartDate" type="date" />
+          </label>
+          <label class="admin-inline-search">
+            <span>To</span>
+            <input id="adminEmailAnalyticsEndDate" type="date" />
+          </label>
+          <button id="adminEmailAnalyticsApplyBtn" class="btn btn-secondary" type="button">Apply</button>
+          <button id="adminEmailAnalyticsResetBtn" class="btn btn-secondary" type="button">Reset</button>
+          <button id="adminEmailAnalyticsExportBtn" class="btn btn-secondary" type="button">Export CSV</button>
+        </div>
+        <p id="adminPaymentLinkAnalytics" class="membership-copy"></p>
+        <div id="adminPaymentLinkFunnel" class="admin-email-funnel" hidden></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Patient</th>
+                <th>Service</th>
+                <th>Date & Time</th>
+                <th>Booked At</th>
+                <th>Status</th>
+                <th>Payment</th>
+                <th>Payment Link Email</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="adminBookingTableBody"></tbody>
+          </table>
+          <p id="adminEmptyState" class="empty-state">No bookings found.</p>
+        </div>
+        <div id="adminHistoryToggleBtnWrap" style="text-align: center; margin-top: 1rem;">
+          <button id="adminHistoryToggleBtn" class="btn btn-secondary" type="button" style="padding: 0.4rem 0.8rem; font-size: 0.85rem;">Hide History</button>
+        </div>
+      </section>
+
+      <section id="adminAllBookingsSection" class="panel app-only admin-only" aria-label="Booking history" hidden>
+        <div class="panel-head">
+          <h2 id="adminAllBookingTitle">History of All Bookings</h2>
+        </div>
+        <div class="admin-section-toolbar admin-section-toolbar--filters">
+          <p id="adminAllBookingModeText" class="membership-copy">All bookings across users. Use search to quickly find a user by name, phone, or email.</p>
+          <label class="admin-inline-search admin-inline-search--date">
+            <span>From</span>
+            <input id="adminAllBookingStartDate" type="date" />
+          </label>
+          <label class="admin-inline-search admin-inline-search--date">
+            <span>To</span>
+            <input id="adminAllBookingEndDate" type="date" />
+          </label>
+          <button id="adminAllBookingDateResetBtn" class="btn btn-secondary" type="button">Clear</button>
+          <div class="admin-date-nav" aria-label="Shift booking history date range">
+            <button id="adminAllBookingDatePrevBtn" class="btn btn-secondary admin-date-nav-btn" type="button" aria-label="Previous day" title="Previous day">&#8249;</button>
+            <button id="adminAllBookingDateNextBtn" class="btn btn-secondary admin-date-nav-btn" type="button" aria-label="Next day" title="Next day">&#8250;</button>
+          </div>
+          <label class="admin-inline-search admin-inline-search--search">
+            <span>Search</span>
+            <input id="adminAllBookingSearch" type="text" placeholder="Search by name, email, phone number, service" />
+          </label>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Patient</th>
+                <th>Service</th>
+                <th>Date & Time</th>
+                <th>Booked At</th>
+                <th>Status</th>
+                <th>Payment</th>
+                <th>Payment Link Email</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="adminAllBookingTableBody"></tbody>
+          </table>
+          <p id="adminAllBookingEmptyState" class="empty-state">No bookings found.</p>
+        </div>
+      </section>
+
+      <section id="adminMembershipSection" class="panel app-only admin-only admin-membership-panel" aria-label="Membership purchases" hidden>
+        <div class="panel-head">
+          <h2>Paid Memberships</h2>
+        </div>
+        <div class="admin-section-toolbar">
+          <p class="membership-copy">Click any member card to view full details, invoices, and covered members.</p>
+          <label class="admin-inline-search">
+            <span>Search</span>
+            <input id="adminMembershipSearch" type="text" placeholder="Search by ID, name, email, phone" />
+          </label>
+        </div>
+        <div id="adminMembershipOrdersList" class="admin-membership-circles"></div>
+        <p id="adminMembershipEmptyState" class="empty-state">No paid memberships found.</p>
+      </section>
+
+      <section id="adminRescheduledSection" class="panel app-only admin-only" aria-label="Missed session rescheduling" hidden>
+        <div class="panel-head">
+          <h2>Reschedule</h2>
+        </div>
+        <div class="admin-section-toolbar">
+          <p class="membership-copy">Bookings can be rescheduled before the slot starts, or within 15 minutes after a missed slot. Customer OTP verification is required.</p>
+          <label class="admin-inline-search">
+            <span>Search</span>
+            <input id="adminRescheduleSearch" type="text" placeholder="Search by name, email, phone number, service" />
+          </label>
+        </div>
+        <div class="admin-reschedule-date-filter">
+          <label class="admin-inline-search admin-inline-search--date">
+            <span>Date</span>
+            <input id="adminRescheduleDate" type="date" />
+          </label>
+          <button id="adminRescheduleDateClearBtn" class="btn btn-secondary" type="button">Clear</button>
+          <button id="adminRescheduleViewToggleBtn" class="btn btn-secondary" type="button">Rescheduled</button>
+        </div>
+        <div id="adminRescheduleSlotFilters" class="admin-reschedule-slot-filters" aria-label="Reschedule slot filters"></div>
+        <div id="adminRescheduleList" class="admin-reschedule-list"></div>
+        <p id="adminRescheduleEmptyState" class="empty-state">No bookings to reschedule or track.</p>
+      </section>
+
+      <section id="adminCouponsSection" class="panel app-only admin-only" aria-label="Coupons" hidden>
+        <div class="panel-head">
+          <h2>Coupons</h2>
+        </div>
+        <p class="membership-copy">Create single-use coupon codes for membership payments, service payments, or both.</p>
+        <div class="admin-discount-gate">
+          <button id="adminDiscountGateBtn" class="btn btn-secondary" type="button">Unlock Discounts</button>
+          <p id="adminDiscountGateMessage" class="membership-copy" hidden></p>
+        </div>
+        <div id="adminDiscountPanel" class="admin-discount-panel" hidden>
+          <div class="panel-head">
+            <h3>Member &amp; User Discounts</h3>
+          </div>
+          <p class="membership-copy">
+            Search users, select the ones you want, then apply a service discount by phone.
+          </p>
+          <div class="admin-discount-finder">
+            <div class="admin-discount-dropdown">
+              <div class="admin-discount-search-wrap">
+                <label class="admin-discount-search">
+                  Search users
+                  <input id="adminDiscountUserSearch" type="text" placeholder="Search users..." />
+                </label>
+                <div id="adminDiscountDropdown" class="admin-discount-dropdown-panel" hidden>
+                  <div id="adminDiscountUserResults" class="admin-discount-user-results"></div>
+                  <div id="adminDiscountUsersEmpty" class="admin-discount-no-results" hidden>
+                    <p>No users found.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="admin-discount-apply">
+                <div class="admin-discount-selected-summary">
+                  <span id="adminDiscountSelectedCount" class="admin-discount-selected-count">0 selected</span>
+                  <button id="adminDiscountSelectedBtn" class="btn btn-secondary" type="button">Selected</button>
+                  <div id="adminDiscountSelectedWindow" class="admin-discount-selected-window" hidden>
+                    <div class="admin-discount-selected-head">
+                      <h4>Selected Users</h4>
+                      <span id="adminDiscountSelectedWindowCount" class="admin-discount-selected-count">0 selected</span>
+                    </div>
+                    <div id="adminDiscountSelectedList" class="admin-discount-selected-list"></div>
+                  </div>
+                </div>
+                <label>
+                  Discount
+                  <input id="adminDiscountBulkPercent" type="number" min="1" max="100" step="1" placeholder="10" />
+                </label>
+                <button id="adminDiscountBulkApplyBtn" class="btn btn-primary" type="button">Apply Discount</button>
+              </div>
+            </div>
+          </div>
+          <div class="admin-discount-manual">
+            <h4>Manual Discount</h4>
+            <form id="adminDiscountForm" class="admin-discount-form">
+              <label>
+                Email
+                <input id="adminDiscountEmail" type="email" placeholder="Enter email" />
+              </label>
+              <label>
+                Phone
+                <input id="adminDiscountPhone" type="tel" placeholder="Enter phone number" />
+              </label>
+              <label>
+                Discount 
+                <input id="adminDiscountPercent" type="number" min="1" max="100" step="1" placeholder="10" />
+              </label>
+              <button id="adminDiscountSubmitBtn" class="btn btn-secondary" type="submit">Apply Discount</button>
+            </form>
+            <div id="adminDiscountList" class="admin-discount-list"></div>
+            <p id="adminDiscountEmptyState" class="empty-state">No discount phones saved.</p>
+          </div>
+        </div>
+        <form id="adminCouponForm" class="admin-discount-form">
+          <label>
+            Coupon Type
+            <select id="adminCouponType">
+              <option value="public">Public / Seasonal Coupon</option>
+              <option value="private" selected>Private / User Coupon</option>
+            </select>
+          </label>
+          <label>
+            Seasonal Offer Name
+            <input id="adminCouponFestivalName" type="text" placeholder="Optional seasonal label" />
+          </label>
+          <label id="adminCouponRecipientEmailWrap">
+            Recipient Email
+            <input id="adminCouponRecipientEmail" type="email" placeholder="user@example.com" />
+          </label>
+          <label>
+            Coupon Code
+            <input id="adminCouponCode" type="text" placeholder="Auto-generate" />
+          </label>
+          <label>
+            Description
+            <input id="adminCouponDescription" type="text" placeholder="Optional description" />
+          </label>
+          <label>
+            Discount 
+            <input id="adminCouponValue" type="number" min="1" max="100" step="1" placeholder="10" required />
+          </label>
+          <label class="admin-coupon-expiry-field">
+            Expires At
+            <div class="admin-coupon-expiry-controls">
+              <span class="admin-coupon-expiry-control">
+                <span>Date</span>
+                <input id="adminCouponExpiryDate" type="date" aria-label="Coupon expiry date" />
+              </span>
+              <span class="admin-coupon-expiry-control">
+                <span>Time</span>
+                <input id="adminCouponExpiryTime" type="time" aria-label="Coupon expiry time" />
+              </span>
+            </div>
+            <small>Leave blank for no expiry.</small>
+            <input id="adminCouponExpiresAt" type="hidden" />
+          </label>
+          <div class="admin-coupon-actions">
+            <button id="adminCouponSubmitBtn" class="btn btn-primary" type="submit">Generate &amp; Send</button>
+            <button id="adminCouponSaveOnlyBtn" class="btn btn-secondary" type="button">Save Only</button>
+          </div>
+        </form>
+        <p class="membership-copy">Single-use coupon: valid for one redemption only.</p>
+        <div id="adminCouponList" class="admin-discount-list"></div>
+        <p id="adminCouponEmptyState" class="empty-state">No coupons created yet.</p>
+        <div class="panel-head">
+          <h3>Active Seasonal Offers</h3>
+        </div>
+        <div id="adminSeasonalCouponList" class="admin-discount-list"></div>
+        <p id="adminSeasonalCouponEmptyState" class="empty-state">No seasonal offers available.</p>
+      </section>
+    </main>
+
+    <dialog id="bookingDialog" class="booking-dialog">
+      <form id="bookingForm" method="dialog">
+        <div class="dialog-head">
+          <h2 id="dialogTitle">Book Slot</h2>
+          <button id="closeDialogBtn" class="icon-btn" type="button" aria-label="Close">&times;</button>
+        </div>
+
+        <input id="bookingId" type="hidden" />
+
+        <div id="bookingCustomerStep" class="form-grid" hidden>
+          <label>
+            Customer Name
+            <input id="bookingCustomerName" type="text" maxlength="80" placeholder="Enter customer name" />
+          </label>
+          <label>
+            Customer Email
+            <input id="bookingCustomerEmail" type="email" placeholder="Enter customer email" />
+          </label>
+          <label>
+            Contact Number
+            <input id="bookingCustomerPhone" type="tel" inputmode="numeric" maxlength="10" placeholder="Enter contact number" />
+          </label>
+          <p id="bookingCustomerInlineMessage" class="form-message full-width" hidden></p>
+        </div>
+
+        <div id="bookingSchedulerSection" class="form-grid">
+          <label class="booking-service-select-field">
+            Service
+            <select id="serviceName" required></select>
+            <div id="experienceServiceLabel" class="experience-service-label" hidden>Hydrogen Therapy</div>
+          </label>
+          <label>
+            Date
+            <select id="bookingDate" required></select>
+          </label>
+          <label>
+            Time Slot
+            <select id="bookingTime" required></select>
+          </label>
+          <label id="addOnServiceLabel" class="full-width" hidden>
+            Add-on Service (Optional)
+            <select id="addOnService">
+              <option value="">No add-on</option>
+            </select>
+          </label>
+          <label id="addOnDateLabel" hidden>
+            Add-on Date
+            <select id="addOnDate"></select>
+          </label>
+          <label id="addOnTimeLabel" hidden>
+            Add-on Time Slot
+            <select id="addOnTime"></select>
+          </label>
+          <div id="bookingHydrogenAddOnScheduler" class="booking-hydrogen-addon-scheduler full-width" hidden></div>
+          <label class="full-width">
+            Notes
+            <textarea id="bookingNotes" rows="3" placeholder="Optional notes"></textarea>
+          </label>
+        </div>
+
+        <div id="bookingSummary" class="booking-summary" hidden>
+          <div class="summary-title">Payment Summary</div>
+          <div id="summaryContent" class="summary-content"></div>
+          <div class="summary-total">
+            <strong>Total Payable:</strong>
+            <span id="totalPayable">Rs. 0</span>
+          </div>
+        </div>
+
+        <div class="dialog-actions">
+          <button class="btn btn-secondary" type="button" id="cancelDialogBtn">Cancel</button>
+          <button class="btn btn-primary" type="submit">Confirm Book</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="profileDialog" class="profile-dialog">
+      <form id="profileForm" method="dialog">
+        <div class="dialog-head">
+          <h2>My Profile</h2>
+          <button id="closeProfileDialogBtn" class="icon-btn" type="button" aria-label="Close">&times;</button>
+        </div>
+
+        <div class="form-grid">
+          <label>
+            Full Name
+            <input id="profileName" type="text" required />
+          </label>
+          <label>
+            Age
+            <input id="profileAge" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" />
+          </label>
+          <label>
+            Gender
+            <select id="profileGender">
+              <option value="">Prefer not to say</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label>
+            Mobile Number
+            <input id="profileMobile" type="tel" placeholder="+91 98765 43210" />
+          </label>
+          <label class="full-width">
+            Profile Photo
+            <input id="profileAvatarFile" type="file" accept="image/png,image/jpeg,image/webp" />
+            <small>Accepted: JPG, PNG, WEBP up to 10MB</small>
+          </label>
+          <div class="full-width profile-upload-preview">
+            <img id="profileAvatarPreview" alt="Profile preview" />
+          </div>
+        </div>
+
+        <div class="dialog-actions">
+          <button class="btn btn-secondary" type="button" id="cancelProfileBtn">Cancel</button>
+          <button class="btn btn-primary" type="submit">Save Profile</button>
+        </div>
+        <p id="profileFormMessage" class="form-message" aria-live="polite"></p>
+      </form>
+    </dialog>
+
+    <dialog id="adminUserSessionDialog" class="profile-dialog">
+      <div class="admin-user-dialog">
+        <div class="dialog-head">
+          <div>
+            <h2 id="adminUserSessionTitle">Session Tracking</h2>
+            <p id="adminUserSessionMeta" class="membership-copy"></p>
+          </div>
+          <button id="adminUserSessionCloseBtn" class="icon-btn" type="button" aria-label="Close">&times;</button>
+        </div>
+        <div id="adminUserSessionKpis" class="admin-user-kpi-grid"></div>
+        <div class="admin-user-session-list-wrap">
+          <div class="panel-head admin-user-session-list-head">
+            <h3>Session History</h3>
+          </div>
+          <div id="adminUserSessionList" class="admin-user-session-list"></div>
+          <p id="adminUserSessionListEmpty" class="empty-state" hidden>No sessions found for this user.</p>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="membershipDialog" class="booking-dialog">
+      <form id="membershipForm" method="dialog">
+        <div class="dialog-head">
+          <h2 id="membershipDialogTitle">Membership Details</h2>
+          <button id="closeMembershipDialogBtn" class="icon-btn" type="button" aria-label="Close">&times;</button>
+        </div>
+        <div class="membership-dialog-content">
+          <p id="membershipPlanSummary" class="membership-checkout-summary"></p>
+          <div class="coupon-entry">
+            <div id="membershipGeneralCoupons" class="general-coupons" hidden></div>
+            <label>
+              Coupon Code
+              <div class="coupon-entry-row">
+                <input id="membershipCouponCode" type="text" placeholder="Enter coupon code" />
+                <button id="membershipApplyCouponBtn" class="btn btn-secondary" type="button">Apply</button>
+              </div>
+            </label>
+          </div>
+          <div id="membershipCouponPreview" class="coupon-preview" hidden></div>
+          <div id="membershipMembersGrid" class="membership-members-grid"></div>
+        </div>
+        <div class="membership-dialog-actions">
+          <button class="btn btn-primary" type="submit">Proceed to Payment</button>
+        </div>
+        <div class="dialog-actions">
+          <button class="btn btn-secondary" type="button" id="cancelMembershipBtn">Close</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="membershipAddPersonDialog" class="booking-dialog">
+      <form id="membershipAddPersonForm" method="dialog">
+        <div class="dialog-head">
+          <h2>Add Person</h2>
+          <button
+            id="closeMembershipAddPersonDialogBtn"
+            class="icon-btn"
+            type="button"
+            aria-label="Close"
+          >&times;</button>
+        </div>
+        <div class="membership-dialog-content">
+          <p id="membershipAddPersonValidityNote" class="membership-checkout-summary"></p>
+          <div class="membership-members-grid">
+            <div class="membership-member-row">
+              <h4>Person</h4>
+              <div class="form-grid">
+                <label>
+                  Full Name
+                  <input id="membershipAddPersonName" type="text" required />
+                </label>
+                <label>
+                  Place
+                  <input id="membershipAddPersonPlace" type="text" required />
+                </label>
+                <label>
+                  Email
+                  <input id="membershipAddPersonEmail" type="email" required />
+                </label>
+                <label>
+                  Contact Number
+                  <input id="membershipAddPersonContact" type="tel" required />
+                </label>
+              </div>
+            </div>
+          </div>
+          <p id="membershipAddPersonError" class="form-message" hidden></p>
+        </div>
+        <div class="dialog-actions">
+          <button class="btn btn-secondary" type="button" id="cancelMembershipAddPersonBtn">Cancel</button>
+          <button class="btn btn-primary" type="submit" id="saveMembershipAddPersonBtn">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="membershipRosterDialog" class="booking-dialog">
+      <form id="membershipRosterForm" method="dialog">
+        <div class="dialog-head">
+          <h2 id="membershipRosterDialogTitle">Covered Members</h2>
+          <button
+            id="closeMembershipRosterDialogBtn"
+            class="icon-btn"
+            type="button"
+            aria-label="Close"
+          >&times;</button>
+        </div>
+        <div class="membership-dialog-content">
+          <p id="membershipRosterSummary" class="membership-checkout-summary"></p>
+          <div id="membershipRosterList" class="membership-roster-list"></div>
+        </div>
+        <div class="dialog-actions">
+          <button id="cancelMembershipRosterBtn" class="btn btn-secondary" type="button">Close</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="bookingNotesDialog" class="booking-dialog">
+      <form method="dialog">
+        <div class="dialog-head">
+          <h2>Booking Notes</h2>
+          <button id="bookingNotesCloseBtn" class="icon-btn" type="button" aria-label="Close">&times;</button>
+        </div>
+
+        <input id="bookingNotesBookingId" type="hidden" />
+
+        <div class="note-input-container">
+          <label for="bookingNotesInput">Add Note</label>
+          <textarea id="bookingNotesInput" placeholder="Write a note for this booking..."></textarea>
+          <button id="bookingNotesAddBtn" class="btn btn-primary" type="button">Add Note</button>
+        </div>
+
+        <div id="bookingNotesList" class="admin-notes-modal-list"></div>
+        <p id="bookingNotesEmpty" class="empty-state" hidden>No notes yet.</p>
+      </form>
+    </dialog>
+
+    <dialog id="bookingEmailTimelineDialog" class="booking-dialog">
+      <form method="dialog">
+        <div class="dialog-head">
+          <h2>Payment Email Timeline</h2>
+          <button id="bookingEmailTimelineCloseBtn" class="icon-btn" type="button" aria-label="Close">&times;</button>
+        </div>
+        <input id="bookingEmailTimelineBookingId" type="hidden" />
+        <div class="dialog-actions">
+          <button id="bookingEmailTimelineResendBtn" class="btn btn-primary" type="button">Resend Payment Link</button>
+        </div>
+        <p id="bookingEmailTimelineMeta" class="membership-copy"></p>
+        <div id="bookingEmailTimelineAnalytics" class="coupon-preview" hidden></div>
+        <div id="bookingEmailTimelineList" class="admin-notes-modal-list"></div>
+        <p id="bookingEmailTimelineEmpty" class="empty-state" hidden>No payment-link email events yet.</p>
+      </form>
+    </dialog>
+
+    <dialog id="adminPaymentChoiceDialog" class="booking-dialog">
+      <div class="admin-payment-choice">
+        <div class="dialog-head">
+          <div>
+            <h2>Payment Method</h2>
+            <p id="adminPaymentChoiceMeta" class="membership-copy">Choose how to complete payment for this customer.</p>
+          </div>
+          <button id="adminPaymentChoiceCloseBtn" class="icon-btn" type="button" aria-label="Close">&times;</button>
+        </div>
+        <div class="dialog-actions admin-payment-choice-actions">
+          <button id="adminPaymentChoiceCashBtn" class="btn btn-primary" type="button">Paid in Cash</button>
+          <button id="adminPaymentChoiceLinkBtn" class="btn btn-secondary" type="button">Send Payment Link</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="noticeDialog" class="notice-dialog">
+      <div class="notice-shell">
+        <div class="dialog-head">
+          <h2 id="noticeDialogTitle">Notice</h2>
+          <button id="noticeDialogCloseBtn" class="icon-btn" type="button" aria-label="Close">&times;</button>
+        </div>
+        <pre id="noticeDialogBody" class="notice-body"></pre>
+        <div class="dialog-actions">
+          <button id="noticeDialogOkBtn" class="btn btn-primary" type="button">OK</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="confirmDialog" class="notice-dialog confirm-dialog">
+      <div class="notice-shell">
+        <div class="dialog-head">
+          <h2 id="confirmDialogTitle">Confirm</h2>
+          <button id="confirmDialogCloseBtn" class="icon-btn" type="button" aria-label="Close">&times;</button>
+        </div>
+        <pre id="confirmDialogBody" class="notice-body"></pre>
+        <div class="dialog-actions confirm-dialog-actions">
+          <button id="confirmDialogCancelBtn" class="btn btn-secondary" type="button">Cancel</button>
+          <button id="confirmDialogOkBtn" class="btn btn-primary" type="button">OK</button>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- GUEST CHECKOUT DIALOG -->
+    <dialog id="guestCheckoutDialog" class="booking-dialog guest-checkout-dialog">
+      <form id="guestCheckoutForm" method="dialog">
+        <div class="dialog-head">
+          <h2>Guest Checkout</h2>
+          <button id="closeGuestCheckoutDialog" class="icon-btn" type="button" aria-label="Close">&times;</button>
+        </div>
+
+        <div class="guest-checkout-content">
+          <p class="guest-checkout-lead">Complete your booking with your name, email, and phone number so the admin team can track it later.</p>
+          
+          <div class="guest-form-fields">
+            <label>
+              Full Name *
+              <input 
+                id="guestCheckoutName" 
+                type="text" 
+                maxlength="80" 
+                placeholder="Enter your full name"
+                required
+              />
+            </label>
+            
+            <label>
+              Email Address *
+              <input 
+                id="guestCheckoutEmail" 
+                type="email" 
+                placeholder="your@email.com"
+                required
+              />
+            </label>
+            
+            <label>
+              Phone Number *
+              <input 
+                id="guestCheckoutPhone" 
+                type="tel" 
+                inputmode="numeric"
+                maxlength="10" 
+                placeholder="10-digit mobile number"
+                required
+              />
+            </label>
+            
+            <p id="guestCheckoutError" class="form-error-message" hidden></p>
+          </div>
+
+          <div class="guest-checkout-terms">
+            <small>
+              We'll use your contact info to confirm your booking and send session reminders. 
+              <a href="#" target="_blank">Privacy Policy</a>
+            </small>
+          </div>
+
+          <div class="dialog-actions">
+            <button id="guestCheckoutCancel" class="btn btn-secondary" type="button">Back</button>
+            <button id="guestCheckoutSubmit" class="btn btn-primary" type="button">Continue to Payment</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- CHECKOUT OPTIONS DIALOG -->
+    <dialog id="checkoutOptionsDialog" class="booking-dialog checkout-options-dialog">
+      <form id="checkoutOptionsForm" method="dialog">
+        <div class="dialog-head">
+          <h2>How would you like to continue?</h2>
+          <button id="closeCheckoutOptionsDialog" class="icon-btn" type="button" aria-label="Close">&times;</button>
+        </div>
+
+        <div class="checkout-options-content">
+          <p class="checkout-options-lead">Choose your preferred checkout method:</p>
+          
+          <div class="checkout-options-grid">
+            <button id="checkoutWithGoogle" class="checkout-option-btn" type="button">
+              <span class="option-icon">🔐</span>
+              <span class="option-title">Continue with Google</span>
+              <span class="option-desc">Fast and secure with your Google account</span>
+            </button>
+            
+            <button id="checkoutWithEmailLogin" class="checkout-option-btn" type="button">
+              <span class="option-icon">📧</span>
+              <span class="option-title">Login / Register</span>
+              <span class="option-desc">Use your email and password</span>
+            </button>
+            
+            <button id="checkoutAsGuest" class="checkout-option-btn" type="button">
+              <span class="option-icon">👤</span>
+              <span class="option-title">Continue as Guest</span>
+              <span class="option-desc">Quick checkout with your email and phone</span>
+            </button>
+          </div>
+
+          <div class="dialog-actions">
+            <button id="checkoutOptionsContinueShopping" class="btn btn-secondary" type="button">Continue Shopping</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+    <script src="app.js?v=27"></script>
+  </body>
+</html>

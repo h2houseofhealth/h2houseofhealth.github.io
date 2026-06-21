@@ -1,0 +1,55 @@
+services:
+  - type: web
+    name: h2-house-of-health
+    runtime: node
+    plan: starter
+    region: singapore
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeployTrigger: off
+    healthCheckPath: /
+    disk:
+      name: app-data
+      mountPath: /var/data
+      sizeGB: 10
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: DATA_DIR
+        value: /var/data/data
+      - key: UPLOADS_DIR
+        value: /var/data/uploads
+      - key: JWT_SECRET
+        generateValue: true
+      - key: RAZORPAY_MODE
+        value: test
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: SENDGRID_OTP_TEMPLATE_ID
+        sync: false
+      - key: SENDGRID_FROM_EMAIL
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SES_API_REGION
+        sync: false
+      - key: SES_API_ACCESS_KEY_ID
+        sync: false
+      - key: SES_API_SECRET_ACCESS_KEY
+        sync: false
+      - key: SES_API_SESSION_TOKEN
+        sync: false

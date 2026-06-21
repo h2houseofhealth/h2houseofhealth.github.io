@@ -1,0 +1,10 @@
+node_modules/
+.env
+npm-debug.log*
+.DS_Store
+
+booking/data/*.db
+booking/data/*.db-shm
+booking/data/*.db-wal
+booking/uploads/*
+!booking/uploads/.gitkeep

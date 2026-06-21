@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pay Booking</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="portal" style="padding-top: 2rem;">
+      <section class="panel" style="max-width: 760px; margin: 0 auto;">
+        <div class="panel-head">
+          <div>
+            <h2>Booking Payment</h2>
+            <p id="paymentLead" class="service-panel-lead">Loading booking details...</p>
+          </div>
+        </div>
+        <div id="paymentSummary" class="admin-membership-list"></div>
+        <p id="paymentError" class="auth-error"></p>
+        <div class="dialog-actions">
+          <button id="payNowBtn" class="btn btn-primary" type="button" disabled>Pay Now</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+    <script src="payment.js?v=2"></script>
+  </body>
+</html>

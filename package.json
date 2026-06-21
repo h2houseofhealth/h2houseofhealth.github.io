@@ -1,0 +1,33 @@
+{
+  "name": "booking_management_portal",
+  "version": "1.0.0",
+  "description": "A lightweight booking management portal for H2 House Of Health.",
+  "main": "booking/server.js",
+  "scripts": {
+    "start": "node booking/server.js",
+    "dev": "node --watch booking/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@sendgrid/mail": "^8.1.6",
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^12.6.2",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.1.0",
+    "nodemailer": "^8.0.1",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "razorpay": "^2.9.6"
+  },
+  "engines": {
+    "node": "20.x"
+  }
+}
