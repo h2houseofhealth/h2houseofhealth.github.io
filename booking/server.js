@@ -976,7 +976,7 @@ app.post('/api/auth/register/complete', (req, res) => {
     membershipPeopleCount: null,
     membershipSubscriptionId: null,
   };
-
+  transferGuestBookingsToUserByEmail(email, user.id);
   const token = setAuthCookie(req, res, user);
   return res.status(201).json({ user, token });
 });
@@ -1041,6 +1041,7 @@ app.post('/api/auth/login', (req, res) => {
     } catch {
       syncedUser = null;
     }
+    transferGuestBookingsToUserByEmail(normalizedEmail, Number(user.id));
 
     const authSource = syncedUser || user;
     const authUser = {
@@ -8196,7 +8197,29 @@ function getUserByEmail(email) {
     )
     .get(normalizedEmail);
 }
+function transferGuestBookingsToUserByEmail(email, userId) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const numericUserId = Number(userId);
+  if (!normalizedEmail || !Number.isInteger(numericUserId) || numericUserId <= 0) {
+    return 0;
+  }
 
+  const guestUserId = ensureGuestBookingOwnerUser();
+  if (!Number.isInteger(guestUserId) || guestUserId <= 0 || guestUserId === numericUserId) {
+    return 0;
+  }
+
+  const result = db
+    .prepare(
+      `UPDATE bookings
+       SET user_id = ?
+       WHERE user_id = ?
+         AND LOWER(COALESCE(guest_email, '')) = ?`
+    )
+    .run(numericUserId, guestUserId, normalizedEmail);
+
+  return Number(result?.changes || 0);
+}
 function normalizeDiscountPhoneKey(phone) {
   const digits = String(phone || '').replace(/\D+/g, '');
   if (digits.length < 7) return '';
