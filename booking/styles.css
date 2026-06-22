@@ -1734,6 +1734,46 @@ h1, h2, h3 {
     z-index: 2;
   }
 
+  .dashboard-actions .btn,
+  .membership-quick-actions .btn {
+    flex: 1 1 100%;
+  }
+
+  .combo-sidebar {
+    position: static;
+    inset: auto;
+    width: 100%;
+    max-width: none;
+    margin-top: 0.25rem;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 0.55rem;
+    pointer-events: auto;
+    order: 3;
+  }
+
+  .combo-sidebar-tab {
+    width: 100%;
+    justify-content: center;
+    white-space: normal;
+    padding: 0.75rem 0.95rem;
+    text-align: center;
+    gap: 0.4rem;
+  }
+
+  .combo-sidebar-panel {
+    width: 100%;
+    max-width: 100%;
+    max-height: none;
+    transform: none;
+  }
+
+  .combo-sidebar-image {
+    max-height: 220px;
+    object-fit: cover;
+  }
+
   .progress-flex {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     text-align: left;
@@ -13463,6 +13503,56 @@ img {
     padding: 18px;
   }
 
+  #membershipSection .membership-dashboard-head {
+    gap: 12px;
+  }
+
+  #membershipSection .membership-dashboard-head .dashboard-actions,
+  #membershipSection .membership-dashboard-head .membership-quick-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  #membershipSection .membership-dashboard-head .dashboard-actions .btn,
+  #membershipSection .membership-dashboard-head .membership-quick-actions .btn {
+    width: 100%;
+  }
+
+  #membershipSection .membership-dashboard-head .combo-sidebar {
+    position: static;
+    inset: auto;
+    order: 3;
+    width: 100%;
+    max-width: none;
+    margin-top: 0.25rem;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 0.55rem;
+    pointer-events: auto;
+  }
+
+  #membershipSection .membership-dashboard-head .combo-sidebar-tab {
+    width: 100%;
+    justify-content: center;
+    white-space: normal;
+    padding: 0.75rem 0.95rem;
+    text-align: center;
+    gap: 0.4rem;
+  }
+
+  #membershipSection .membership-dashboard-head .combo-sidebar-panel {
+    width: 100%;
+    max-width: 100%;
+    max-height: none;
+    transform: none;
+  }
+
+  #membershipSection .membership-dashboard-head .combo-sidebar-image {
+    max-height: 220px;
+    object-fit: cover;
+  }
+
   .dashboard-hero-banner {
     width: 100%;
     max-width: none;
@@ -15790,15 +15880,21 @@ body.auth-mode .portal {
   .booking-dialog,
   .profile-dialog,
   .comparison-dialog,
-  .notice-dialog {
+  .notice-dialog,
+  .admin-user-dialog {
     width: min(100vw - 16px, 980px) !important;
     max-width: calc(100vw - 16px) !important;
     max-height: calc(100dvh - 16px) !important;
+    margin: auto;
   }
 
   .comparison-dialog-inner {
     height: calc(100dvh - 16px) !important;
     max-height: calc(100dvh - 16px) !important;
+  }
+
+  .notice-shell {
+    max-height: calc(100dvh - 16px);
   }
 
   #memberChoiceGate .cards,
@@ -15816,16 +15912,17 @@ body.auth-mode .portal {
   .booking-dialog,
   .profile-dialog,
   .comparison-dialog,
-  .notice-dialog {
-    width: calc(100vw - 12px) !important;
-    max-width: calc(100vw - 12px) !important;
-    max-height: calc(100dvh - 12px) !important;
+  .notice-dialog,
+  .admin-user-dialog {
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px) !important;
+    max-height: calc(100dvh - 16px) !important;
     border-radius: 14px;
   }
 
   .comparison-dialog-inner {
-    height: calc(100dvh - 12px) !important;
-    max-height: calc(100dvh - 12px) !important;
+    height: calc(100dvh - 16px) !important;
+    max-height: calc(100dvh - 16px) !important;
   }
 
   #bookingForm,
@@ -15836,6 +15933,31 @@ body.auth-mode .portal {
   #bookingEmailTimelineDialog form,
   .user-reschedule-picker form {
     padding: 0.9rem !important;
+  }
+
+  .guest-checkout-content,
+  .checkout-options-content {
+    padding: 16px;
+  }
+
+  .guest-checkout-lead,
+  .checkout-options-lead {
+    margin-bottom: 16px;
+  }
+
+  .guest-form-fields {
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .guest-checkout-terms {
+    margin-bottom: 16px;
+    padding: 10px 12px;
+  }
+
+  .checkout-options-grid {
+    gap: 12px;
+    margin-bottom: 16px;
   }
 
   .notice-shell {
@@ -15882,15 +16004,16 @@ body.auth-mode .portal {
   .booking-dialog,
   .profile-dialog,
   .comparison-dialog,
-  .notice-dialog {
-    width: calc(100vw - 8px) !important;
-    max-width: calc(100vw - 8px) !important;
-    max-height: calc(100dvh - 8px) !important;
+  .notice-dialog,
+  .admin-user-dialog {
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px) !important;
+    max-height: calc(100dvh - 16px) !important;
   }
 
   .comparison-dialog-inner {
-    height: calc(100dvh - 8px) !important;
-    max-height: calc(100dvh - 8px) !important;
+    height: calc(100dvh - 16px) !important;
+    max-height: calc(100dvh - 16px) !important;
   }
 
   #bookingForm,
@@ -16118,8 +16241,8 @@ body.auth-mode .portal {
 
 @media (max-width: 700px) {
   .notice-dialog {
-    width: calc(100vw - 20px) !important;
-    max-width: calc(100vw - 20px) !important;
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px) !important;
     margin: auto;
   }
 
@@ -16128,12 +16251,14 @@ body.auth-mode .portal {
   }
 
   .notice-shell {
-    max-height: calc(100dvh - 20px);
-    padding: 16px;
+    position: relative;
+    max-height: calc(100dvh - 16px);
+    padding: 18px 16px 16px;
     border-radius: 14px;
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-gutter: stable both-edges;
+    text-align: center;
   }
 
   .notice-shell h2 {
@@ -16142,8 +16267,24 @@ body.auth-mode .portal {
     line-height: 1.25;
   }
 
+  .notice-shell .dialog-head {
+    display: block;
+    margin-bottom: 12px !important;
+  }
+
+  .notice-shell .icon-btn {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+  }
+
   .notice-body {
-    max-height: calc(100dvh - 190px);
+    max-height: calc(100dvh - 184px);
     overflow-y: auto;
     padding: 12px;
     font-size: 0.98rem;
@@ -16151,6 +16292,15 @@ body.auth-mode .portal {
     word-break: normal;
     overflow-wrap: anywhere;
     scrollbar-gutter: stable;
+    text-align: center;
+  }
+
+  .notice-shell .dialog-actions {
+    justify-content: center;
+  }
+
+  .notice-dialog.confirm-dialog .dialog-actions {
+    justify-content: center;
   }
 
   .membership-copy,
@@ -16912,7 +17062,7 @@ body.app-booting .user-only {
   .guest-checkout-dialog,
   .checkout-options-dialog {
     --dialog-max-width: 100%;
-    border-radius: 0;
+    border-radius: 14px;
   }
 }
 

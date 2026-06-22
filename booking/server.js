@@ -1689,11 +1689,11 @@ app.post('/api/membership/create-order', requireAuth, async (req, res) => {
     planId === 'h2_add_person'
       ? Number(userRow?.membershipPeopleCount || req.user.membershipPeopleCount || 1) + 1
       : basePeopleCount + additionalPeople;
-  const totalAmountInr =
+  const subtotalAmountInr =
     planId === 'h2_add_person'
       ? Number(plan.priceInr || 0)
       : Number(plan.priceInr || 0) + additionalPeople * addPersonPriceInr;
-  const subtotalAmountPaise = Math.round(totalAmountInr * 100);
+  const subtotalAmountPaise = Math.round(subtotalAmountInr * 100);
   const couponResult = validateCouponForUser({
     code: req.body?.couponCode,
     userId: req.user.id,
@@ -1703,7 +1703,9 @@ app.post('/api/membership/create-order', requireAuth, async (req, res) => {
   if (couponResult.error) {
     return res.status(400).json({ message: couponResult.error });
   }
-  const amountInPaise = Math.max(100, Number(couponResult.finalAmountPaise || subtotalAmountPaise));
+  const taxableAmountPaise = Number(couponResult.finalAmountPaise || subtotalAmountPaise);
+  const amountInPaise = Math.max(100, Math.round(taxableAmountPaise * (1 + GST_RATE_PERCENT / 100)));
+  const gstAmountPaise = Math.max(0, amountInPaise - taxableAmountPaise);
 
   const memberDetailsResult = normalizeMembershipMembers(req.body?.memberDetails, targetPeopleCount);
   if (memberDetailsResult.error) {
@@ -1756,7 +1758,9 @@ app.post('/api/membership/create-order', requireAuth, async (req, res) => {
       plan: {
         id: plan.id,
         name: plan.name,
-        priceInr: totalAmountInr,
+        priceInr: Math.round(amountInPaise / 100),
+        subtotalAmountInr,
+        gstAmountInr: Math.round(gstAmountPaise / 100),
         basePriceInr: Number(plan.priceInr || 0),
         addPersonPriceInr,
         additionalPeople,
@@ -3200,7 +3204,8 @@ app.post('/api/hydrogen/create-order', requireAuth, async (req, res) => {
     addOnAmountInr: addOnPriceInr,
     forceChargeable,
   });
-  const totalAmountInr = Number(pricing.totalAmountInr || 0);
+  const pricingSummary = finalizeSummaryWithGst(pricing.summary || { totalAmountInr: pricing.totalAmountInr || 0 });
+  const totalAmountInr = Number(pricingSummary.totalAmountInr || 0);
   const hydrogenDailyLimitConflict = validateHydrogenDailySessionLimit(req.user.id, normalizedSlots);
   if (hydrogenDailyLimitConflict) {
     return res.status(409).json({
@@ -3346,7 +3351,7 @@ app.post('/api/hydrogen/create-order', requireAuth, async (req, res) => {
       totalSessions,
       amountInr: totalAmountInr,
       summary: {
-        ...(pricing.summary || {}),
+        ...pricingSummary,
         addOn: addOnSummary,
       },
       user: {
@@ -3436,8 +3441,9 @@ app.post('/api/hydrogen/book-pack', requireAuth, (req, res) => {
     addOnAmountInr: addOnPriceInr,
     forceChargeable,
   });
-  const totalAmountInr = Number(pricing.totalAmountInr || 0);
-  const freeHydrogenSessionsApplied = Number(pricing.summary?.freeSessionsApplied || 0);
+  const pricingSummary = finalizeSummaryWithGst(pricing.summary || { totalAmountInr: pricing.totalAmountInr || 0 });
+  const totalAmountInr = Number(pricingSummary.totalAmountInr || 0);
+  const freeHydrogenSessionsApplied = Number(pricingSummary.freeSessionsApplied || 0);
   const hydrogenDailyLimitConflict = validateHydrogenDailySessionLimit(req.user.id, normalizedSlots);
   if (hydrogenDailyLimitConflict) {
     return res.status(409).json({
@@ -3585,7 +3591,7 @@ app.post('/api/hydrogen/book-pack', requireAuth, (req, res) => {
       summary: {
         serviceName: service.name,
         addOn: addOnSummary,
-        ...(pricing.summary || {}),
+        ...pricingSummary,
       },
       bookings,
     });
@@ -3679,8 +3685,9 @@ app.post('/api/admin/hydrogen/book-pack', requireAuth, requireAdmin, (req, res) 
     addOnAmountInr: addOnPriceInr,
     forceChargeable,
   });
-  const totalAmountInr = Number(pricing.totalAmountInr || 0);
-  const freeHydrogenSessionsApplied = Number(pricing.summary?.freeSessionsApplied || 0);
+  const pricingSummary = finalizeSummaryWithGst(pricing.summary || { totalAmountInr: pricing.totalAmountInr || 0 });
+  const totalAmountInr = Number(pricingSummary.totalAmountInr || 0);
+  const freeHydrogenSessionsApplied = Number(pricingSummary.freeSessionsApplied || 0);
   const hydrogenDailyLimitConflict = validateHydrogenDailySessionLimit(targetUser.id, normalizedSlots);
   if (hydrogenDailyLimitConflict) {
     return res.status(409).json({
@@ -3818,7 +3825,7 @@ app.post('/api/admin/hydrogen/book-pack', requireAuth, requireAdmin, (req, res) 
       message: 'Hydrogen bookings saved successfully.',
       summary: {
         serviceName: service.name,
-        ...(pricing.summary || {}),
+        ...pricingSummary,
         addOn: addOnSummary,
       },
       bookings,
@@ -6430,6 +6437,7 @@ app.post('/api/public/payments/create-order', async (req, res) => {
         buildAggregatePaymentSummary(paymentContext.payableBookings, paymentContext.pricingUser)
       );
     }
+    paymentSummary = finalizeSummaryWithGst(paymentSummary);
   } catch (error) {
     return res.status(409).json({ message: error?.message || 'Unable to calculate payment total for this booking.' });
   }
@@ -6581,7 +6589,7 @@ app.post('/api/public/payments/create-order', async (req, res) => {
         serviceName: paymentSummary.serviceName || booking.serviceName,
         bookingDate: booking.bookingDate,
         bookingTime: booking.bookingTime,
-        amountInr: Number(paymentSummary.totalAmountInr || 0),
+        amountInr: Number(paymentSummary.payableAmountInr || paymentSummary.totalAmountInr || 0),
         guestName: paymentContext.kind === 'guest' ? paymentContext.guestAccess?.guestName || '' : '',
         guestEmail: paymentContext.kind === 'guest' ? paymentContext.guestAccess?.guestEmail || '' : '',
         guestPhone: paymentContext.kind === 'guest' ? paymentContext.guestAccess?.guestPhone || '' : '',
@@ -6734,6 +6742,7 @@ app.post('/api/payments/preview-cart-coupon', requireAuth, (req, res) => {
   try {
     paymentSummary = buildAggregatePaymentSummary(payableBookings, pricingUser);
     paymentSummary = applyOneUseAdminPhoneDiscountToSummary(payableBookings, { ...pricingUser, mobile: req.user.mobile || '' }, paymentSummary);
+    paymentSummary = finalizeSummaryWithGst(paymentSummary);
   } catch (error) {
     return res.status(409).json({ message: error?.message || 'Unable to calculate payment total for current bookings.' });
   }
@@ -6778,7 +6787,7 @@ app.post('/api/payments/create-cart-order', requireAuth, async (req, res) => {
     return res.status(409).json({ message: error?.message || 'Unable to calculate payment total for current bookings.' });
   }
 
-  const subtotalAmountPaise = Math.round(Number(paymentSummary.totalAmountInr || 0) * 100);
+  const subtotalAmountPaise = Math.round(Number(paymentSummary.subtotalAmountInr ?? paymentSummary.totalAmountInr ?? 0) * 100);
   const couponResult = validateCouponForUser({
     code: req.body?.couponCode,
     userId: req.user.id,
@@ -6789,7 +6798,9 @@ app.post('/api/payments/create-cart-order', requireAuth, async (req, res) => {
   if (couponResult.error) {
     return res.status(400).json({ message: couponResult.error });
   }
-  const amountInPaise = Math.max(100, Number(couponResult.finalAmountPaise || subtotalAmountPaise));
+  const taxableAmountPaise = Number(couponResult.finalAmountPaise || subtotalAmountPaise);
+  const amountInPaise = Math.max(100, Math.round(taxableAmountPaise * (1 + GST_RATE_PERCENT / 100)));
+  paymentSummary = finalizeSummaryWithGst(paymentSummary);
 
   try {
     const order = await razorpay.orders.create({
@@ -6832,6 +6843,9 @@ app.post('/api/payments/create-cart-order', requireAuth, async (req, res) => {
       amount: order.amount,
       currency: order.currency,
       summary: paymentSummary,
+      subtotalAmountInr: Number(paymentSummary.subtotalAmountInr || subtotalAmountPaise / 100),
+      gstAmountInr: Number(paymentSummary.gstAmountInr || Math.max(0, amountInPaise / 100 - subtotalAmountPaise / 100)),
+      payableAmountInr: Number(paymentSummary.payableAmountInr || amountInPaise / 100),
       coupon: serializeCouponPreview(couponResult),
       user: {
         name: req.user.name,
@@ -6965,6 +6979,7 @@ app.post('/api/payments/create-order', requireAuth, async (req, res) => {
         totalAmountInr: Number(oneUseSummary.totalAmountInr || paymentSummary.totalAmountInr || 0),
       };
     }
+    paymentSummary = finalizeSummaryWithGst(paymentSummary);
   } catch (error) {
     return res.status(409).json({ message: error?.message || 'Unable to calculate payment total for this booking.' });
   }
@@ -7043,11 +7058,13 @@ app.post('/api/payments/create-order', requireAuth, async (req, res) => {
       bookingId: booking.id,
       bookingCount: Number(paymentSummary.bookingCount || 1),
       summary: paymentSummary,
+      subtotalAmountInr: Number(paymentSummary.subtotalAmountInr || 0),
+      gstAmountInr: Number(paymentSummary.gstAmountInr || 0),
       booking: {
         serviceName: paymentSummary.serviceName || booking.serviceName,
         bookingDate: booking.bookingDate,
         bookingTime: booking.bookingTime,
-        amountInr: Number(paymentSummary.totalAmountInr || 0),
+        amountInr: Number(paymentSummary.payableAmountInr || paymentSummary.totalAmountInr || 0),
       },
       user: {
         name: req.user.name,
@@ -7060,13 +7077,10 @@ app.post('/api/payments/create-order', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/invoice/booking', requireAuth, (req, res) => {
+app.get('/invoice/booking', (req, res) => {
   const access = verifyInvoiceAccessToken(req.query?.token);
   if (!access || access.scope !== 'booking_invoice' || !Number.isInteger(access.bookingId) || !Number.isInteger(access.userId)) {
     return res.status(400).send('Invalid or expired invoice link');
-  }
-  if (req.user.role !== 'admin' && Number(req.user.id) !== Number(access.userId)) {
-    return res.status(403).send('You are not allowed to view this invoice');
   }
 
   const booking = db
@@ -7089,9 +7103,6 @@ app.get('/invoice/booking', requireAuth, (req, res) => {
     .get(access.bookingId);
   if (!booking || Number(booking.userId) !== access.userId) {
     return res.status(404).send('Invoice not found');
-  }
-  if (req.user.role !== 'admin' && Number(booking.userId) !== Number(req.user.id)) {
-    return res.status(403).send('You are not allowed to view this invoice');
   }
   if (String(booking.paymentStatus || '').trim().toLowerCase() !== 'paid') {
     return res.status(409).send('Invoice is available only for paid bookings');
@@ -7133,28 +7144,42 @@ app.get('/invoice/booking', requireAuth, (req, res) => {
     summary = null;
   }
 
-  const amountInr = Number(summary?.totalAmountInr ?? summary?.amountInr ?? 0);
+  const invoiceSummary = summary?.gstIncluded ? summary : summary ? finalizeSummaryWithGst(summary) : null;
+  const amountInr = Number(
+    invoiceSummary?.payableAmountInr ?? invoiceSummary?.totalAmountInr ?? invoiceSummary?.amountInr ?? 0
+  );
   if (amountInr <= 0) {
     return res.status(409).send('Invoice is available only for paid bookings with amount greater than 0');
   }
   const invoiceItems =
-    Array.isArray(summary?.invoiceItems) && summary.invoiceItems.length
-      ? summary.invoiceItems
+    Array.isArray(invoiceSummary?.invoiceItems) && invoiceSummary.invoiceItems.length
+      ? invoiceSummary.invoiceItems
       : [
           {
-            serviceName: summary?.serviceName || booking.serviceName || 'Booking',
+            serviceName: invoiceSummary?.serviceName || booking.serviceName || 'Booking',
             bookingDate: booking.bookingDate,
             bookingTime: booking.bookingTime,
-            amountInr,
-          },
-        ];
+          amountInr,
+        },
+      ];
+  const grossBreakdown = getGstBreakdownForAmountInr(amountInr, { fromGross: true });
+  const explicitSubtotalAmountInr = Number(invoiceSummary?.subtotalAmountInr);
+  const explicitGstAmountInr = Number(invoiceSummary?.gstAmountInr);
+  const useExplicitSplit =
+    Number.isFinite(explicitSubtotalAmountInr) &&
+    Number.isFinite(explicitGstAmountInr) &&
+    explicitSubtotalAmountInr > 0 &&
+    explicitGstAmountInr > 0;
+  const subtotalAmountInr = useExplicitSplit ? explicitSubtotalAmountInr : grossBreakdown.subtotalAmountInr;
+  const gstAmountInr = useExplicitSplit ? explicitGstAmountInr : grossBreakdown.gstAmountInr;
   const invoiceRowsHtml = invoiceItems
     .map((item) => {
       const itemDateTime = formatDateTimeWithComma(item.bookingDate || booking.bookingDate, item.bookingTime || booking.bookingTime);
+      const rowAmountInr = invoiceItems.length === 1 ? subtotalAmountInr : Number(item.amountInr || 0);
       return `<tr>
           <td>${escapeHtml(item.serviceName || 'Booking')}</td>
           <td>${escapeHtml(itemDateTime)}</td>
-          <td class="right">Rs. ${Number(item.amountInr || 0).toLocaleString('en-IN')}</td>
+          <td class="right">Rs. ${Number(rowAmountInr || 0).toLocaleString('en-IN')}</td>
         </tr>`;
     })
     .join('');
@@ -7240,7 +7265,6 @@ app.get('/invoice/booking', requireAuth, (req, res) => {
         <h1 class="title">Billing Invoice</h1>
         <div class="muted">Invoice No: ${escapeHtml(invoiceNo)}</div>
         ${paidAtLabel ? `<div class="muted">Paid at: ${escapeHtml(paidAtLabel)}</div>` : ''}
-        <div class="muted gst"><strong>GSTIN:</strong> <span class="gst-space">${escapeHtml(BUSINESS_GSTIN || '-')}</span></div>
       </div>
       <div>
         <div class="muted"><strong>Customer</strong></div>
@@ -7263,6 +7287,10 @@ app.get('/invoice/booking', requireAuth, (req, res) => {
       </tbody>
       <tfoot>
         <tr>
+          <td colspan="2" class="right">GST ${GST_RATE_PERCENT}%</td>
+          <td class="right">Rs. ${Number(gstAmountInr || 0).toLocaleString('en-IN')}</td>
+        </tr>
+        <tr>
           <td colspan="2" class="right total">Total</td>
           <td class="right total">Rs. ${Number(amountInr || 0).toLocaleString('en-IN')}</td>
         </tr>
@@ -7278,13 +7306,10 @@ app.get('/invoice/booking', requireAuth, (req, res) => {
 </html>`);
 });
 
-app.get('/invoice/membership', requireAuth, (req, res) => {
+app.get('/invoice/membership', (req, res) => {
   const access = verifyInvoiceAccessToken(req.query?.token);
   if (!access || access.scope !== 'membership_invoice' || !access.orderId || !Number.isInteger(access.userId)) {
     return res.status(400).send('Invalid or expired invoice link');
-  }
-  if (req.user.role !== 'admin' && Number(req.user.id) !== Number(access.userId)) {
-    return res.status(403).send('You are not allowed to view this invoice');
   }
 
   const order = db
@@ -7293,6 +7318,7 @@ app.get('/invoice/membership', requireAuth, (req, res) => {
               user_id AS userId,
               plan_id AS planId,
               people_count AS peopleCount,
+              original_amount_paise AS originalAmountPaise,
               amount_paise AS amountPaise,
               discount_amount_paise AS discountAmountPaise,
               coupon_code AS couponCode,
@@ -7308,9 +7334,6 @@ app.get('/invoice/membership', requireAuth, (req, res) => {
   if (!order || Number(order.userId) !== Number(access.userId)) {
     return res.status(404).send('Invoice not found');
   }
-  if (req.user.role !== 'admin' && Number(order.userId) !== Number(req.user.id)) {
-    return res.status(403).send('You are not allowed to view this invoice');
-  }
   if (String(order.status || '').trim().toLowerCase() !== 'paid') {
     return res.status(409).send('Invoice is available only for paid membership orders');
   }
@@ -7319,8 +7342,11 @@ app.get('/invoice/membership', requireAuth, (req, res) => {
   const invoiceNo = `MB-${escapeHtml(order.orderId)}`;
   const paidAtLabel = formatInvoiceDateTime(order.paidAt);
   const generatedAtLabel = formatInvoiceDateTime(new Date());
-  const amountInr = Math.round(Number(order.amountPaise || 0) / 100);
+  const originalAmountInr = Math.round(Number(order.originalAmountPaise || 0) / 100);
   const discountInr = Math.round(Number(order.discountAmountPaise || 0) / 100);
+  const taxableAmountInr = Math.max(0, originalAmountInr - discountInr);
+  const gstAmountInr = Math.max(0, Math.round((taxableAmountInr * GST_RATE_PERCENT) / 100));
+  const amountInr = taxableAmountInr + gstAmountInr;
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   return res.send(`<!doctype html>
@@ -7396,7 +7422,6 @@ app.get('/invoice/membership', requireAuth, (req, res) => {
         <h1 class="title">Membership Invoice</h1>
         <div class="muted">Invoice No: ${invoiceNo}</div>
         ${paidAtLabel ? `<div class="muted">Paid at: ${escapeHtml(paidAtLabel)}</div>` : ''}
-        <div class="muted gst"><strong>GSTIN:</strong> <span class="gst-space">${escapeHtml(BUSINESS_GSTIN || '-')}</span></div>
       </div>
       <div>
         <div class="muted"><strong>Customer</strong></div>
@@ -7418,11 +7443,19 @@ app.get('/invoice/membership', requireAuth, (req, res) => {
         <tr>
           <td>${escapeHtml(String(order.planId || 'Membership'))}</td>
           <td>${escapeHtml(String(order.peopleCount || 1))}</td>
-          <td class="right">Rs. ${Number(amountInr || 0).toLocaleString('en-IN')}</td>
+          <td class="right">Rs. ${Number(originalAmountInr || 0).toLocaleString('en-IN')}</td>
         </tr>
         ${discountInr > 0 ? `<tr><td colspan="2">Discount ${order.couponCode ? `(${escapeHtml(String(order.couponCode))})` : ''}</td><td class="right">- Rs. ${discountInr.toLocaleString('en-IN')}</td></tr>` : ''}
       </tbody>
       <tfoot>
+        <tr>
+          <td colspan="2" class="right">Subtotal</td>
+          <td class="right">Rs. ${Number(taxableAmountInr || 0).toLocaleString('en-IN')}</td>
+        </tr>
+        <tr>
+          <td colspan="2" class="right">GST ${GST_RATE_PERCENT}%</td>
+          <td class="right">Rs. ${Number(gstAmountInr || 0).toLocaleString('en-IN')}</td>
+        </tr>
         <tr>
           <td colspan="2" class="right total">Total</td>
           <td class="right total">Rs. ${Number(amountInr || 0).toLocaleString('en-IN')}</td>
@@ -8548,6 +8581,8 @@ function validateCouponForUser({ code, userId, appliesTo, subtotalAmountPaise, s
 }
 
 function serializeCouponPreview(result) {
+  const finalAmountPaise = Math.max(0, Math.round(Number(result?.finalAmountPaise || 0)));
+  const gstAmountPaise = Math.max(0, Math.round((finalAmountPaise * GST_RATE_PERCENT) / 100));
   return {
     code: result?.coupon?.code || result?.couponCode || '',
     description: result?.coupon?.description || '',
@@ -8555,7 +8590,8 @@ function serializeCouponPreview(result) {
     appliesTo: result?.coupon?.appliesTo || '',
     originalAmountInr: Math.round(Number(result?.originalAmountPaise || 0) / 100),
     discountAmountInr: Math.round(Number(result?.discountAmountPaise || 0) / 100),
-    payableAmountInr: Math.round(Number(result?.finalAmountPaise || 0) / 100),
+    gstAmountInr: Math.round(gstAmountPaise / 100),
+    payableAmountInr: Math.round((finalAmountPaise + gstAmountPaise) / 100),
   };
 }
 
@@ -8845,6 +8881,62 @@ function buildRazorpayReceipt(prefix, identifier = '') {
     .slice(-12);
   const stamp = Date.now().toString(36);
   return [safePrefix, safeIdentifier, stamp].filter(Boolean).join('_').slice(0, 40);
+}
+
+const GST_RATE_PERCENT = 18;
+
+function normalizeCurrencyAmountInr(amountInr) {
+  return Math.max(0, Math.round(Number(amountInr || 0)));
+}
+
+function getGstBreakdownForAmountInr(amountInr, { fromGross = false } = {}) {
+  const sourceAmountInr = normalizeCurrencyAmountInr(amountInr);
+  if (sourceAmountInr <= 0) {
+    return {
+      subtotalAmountInr: 0,
+      gstAmountInr: 0,
+      totalAmountInr: 0,
+      gstRatePercent: GST_RATE_PERCENT,
+    };
+  }
+
+  if (fromGross) {
+    const subtotalAmountInr = Math.max(0, Math.round(sourceAmountInr / (1 + GST_RATE_PERCENT / 100)));
+    const gstAmountInr = Math.max(0, sourceAmountInr - subtotalAmountInr);
+    return {
+      subtotalAmountInr,
+      gstAmountInr,
+      totalAmountInr: sourceAmountInr,
+      gstRatePercent: GST_RATE_PERCENT,
+    };
+  }
+
+  const subtotalAmountInr = sourceAmountInr;
+  const gstAmountInr = Math.max(0, Math.round((subtotalAmountInr * GST_RATE_PERCENT) / 100));
+  return {
+    subtotalAmountInr,
+    gstAmountInr,
+    totalAmountInr: subtotalAmountInr + gstAmountInr,
+    gstRatePercent: GST_RATE_PERCENT,
+  };
+}
+
+function finalizeSummaryWithGst(summary, options = {}) {
+  if (!summary) return summary;
+  if (summary.gstIncluded) return summary;
+
+  const sourceAmountInr = Number(summary.subtotalAmountInr ?? summary.totalAmountInr ?? summary.amountInr ?? 0);
+  const breakdown = getGstBreakdownForAmountInr(sourceAmountInr, options);
+  return {
+    ...summary,
+    subtotalAmountInr: breakdown.subtotalAmountInr,
+    gstAmountInr: breakdown.gstAmountInr,
+    gstRatePercent: breakdown.gstRatePercent,
+    totalAmountInr: breakdown.totalAmountInr,
+    payableAmountInr: breakdown.totalAmountInr,
+    amountInr: breakdown.totalAmountInr,
+    gstIncluded: true,
+  };
 }
 
 const GST_RATE_PERCENT = 18;
@@ -9922,42 +10014,12 @@ function getMemberHydrogenSingleSessionPriceInr(user) {
   return applyPhoneDiscount(amountInr, user?.mobile || '');
 }
 
-function buildPaidBookingInvoiceSummaryFromStoredAmounts(activeBookings) {
+function buildPaidBookingInvoiceSummaryFromStoredAmounts(activeBookings, user) {
   const paidBookings = (Array.isArray(activeBookings) ? activeBookings : []).filter(
     (entry) => String(entry?.paymentStatus || '').trim().toLowerCase() === 'paid'
   );
   if (!paidBookings.length || paidBookings.length !== activeBookings.length) return null;
-
-  const storedPaidAmountPaise = paidBookings.reduce(
-    (sum, entry) => sum + Math.max(0, Math.round(Number(entry?.paidAmountPaise || 0))),
-    0
-  );
-  if (storedPaidAmountPaise <= 0) return null;
-
-  const totalAmountInr = storedPaidAmountPaise / 100;
-  const invoiceItems = paidBookings.map((entry) => ({
-    serviceName: entry.serviceName || 'Booking',
-    bookingDate: entry.bookingDate || '',
-    bookingTime: entry.bookingTime || '',
-    amountInr: Math.max(0, Number(getHistoricalBookingAmountPaise(entry) || 0) / 100),
-  }));
-
-  let lineTotalPaise = invoiceItems.reduce((sum, item) => sum + Math.round(Number(item.amountInr || 0) * 100), 0);
-  if (lineTotalPaise !== storedPaidAmountPaise && invoiceItems.length) {
-    const adjustmentInr = (storedPaidAmountPaise - lineTotalPaise) / 100;
-    const adjustmentIndex = invoiceItems.findIndex((item) => Number(item.amountInr || 0) > 0);
-    const targetIndex = adjustmentIndex >= 0 ? adjustmentIndex : 0;
-    invoiceItems[targetIndex].amountInr = Math.max(0, Number(invoiceItems[targetIndex].amountInr || 0) + adjustmentInr);
-  }
-
-  return {
-    serviceName: paidBookings.length === 1 ? paidBookings[0].serviceName || 'Booking' : 'Booking',
-    totalAmountInr,
-    amountInr: totalAmountInr,
-    bookingCount: paidBookings.length,
-    invoiceItems: invoiceItems.filter((item) => Number(item.amountInr || 0) > 0),
-    paidAmountSource: 'stored',
-  };
+  return null;
 }
 
 function buildBookingInvoiceSummary(bookings, user) {
@@ -9967,8 +10029,34 @@ function buildBookingInvoiceSummary(bookings, user) {
   if (!activeBookings.length) {
     return { serviceName: 'Booking', totalAmountInr: 0, amountInr: 0, bookingCount: 0 };
   }
-  const storedPaidSummary = buildPaidBookingInvoiceSummaryFromStoredAmounts(activeBookings);
-  if (storedPaidSummary) return storedPaidSummary;
+
+  const storedPaidAmountPaise = activeBookings.reduce((sum, entry) => {
+    if (String(entry?.paymentStatus || '').trim().toLowerCase() !== 'paid') return sum;
+    return sum + Math.max(0, Math.round(Number(entry?.paidAmountPaise || 0)));
+  }, 0);
+  if (storedPaidAmountPaise > 0) {
+    const totalAmountInr = storedPaidAmountPaise / 100;
+    const breakdown = getGstBreakdownForAmountInr(totalAmountInr, { fromGross: true });
+    return {
+      serviceName: activeBookings[0]?.serviceName || 'Booking',
+      totalAmountInr,
+      payableAmountInr: totalAmountInr,
+      amountInr: totalAmountInr,
+      subtotalAmountInr: breakdown.subtotalAmountInr,
+      gstAmountInr: breakdown.gstAmountInr,
+      gstRatePercent: GST_RATE_PERCENT,
+      gstIncluded: true,
+      bookingCount: activeBookings.length,
+      invoiceItems: [
+        {
+          serviceName: activeBookings[0]?.serviceName || 'Booking',
+          bookingDate: activeBookings[0]?.bookingDate || '',
+          bookingTime: activeBookings[0]?.bookingTime || '',
+          amountInr: breakdown.subtotalAmountInr,
+        },
+      ],
+    };
+  }
 
   const hydrogenBookings = activeBookings.filter((entry) => {
     const service = getServiceByName(entry.serviceName);
@@ -10030,27 +10118,6 @@ function buildBookingInvoiceSummary(bookings, user) {
         },
         ...addOnItems,
       ].filter((item) => Number(item.amountInr || 0) > 0),
-    };
-  }
-
-  const storedPaidAmountPaise = activeBookings.reduce((sum, entry) => {
-    if (String(entry?.paymentStatus || '').trim().toLowerCase() !== 'paid') return sum;
-    return sum + Math.max(0, Math.round(Number(entry?.paidAmountPaise || 0)));
-  }, 0);
-  if (storedPaidAmountPaise > 0) {
-    return {
-      serviceName: activeBookings[0]?.serviceName || 'Booking',
-      totalAmountInr: storedPaidAmountPaise / 100,
-      amountInr: storedPaidAmountPaise / 100,
-      bookingCount: activeBookings.length,
-      invoiceItems: [
-        {
-          serviceName: activeBookings[0]?.serviceName || 'Booking',
-          bookingDate: activeBookings[0]?.bookingDate || '',
-          bookingTime: activeBookings[0]?.bookingTime || '',
-          amountInr: storedPaidAmountPaise / 100,
-        },
-      ],
     };
   }
 
