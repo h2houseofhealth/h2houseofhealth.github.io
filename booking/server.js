@@ -8847,6 +8847,61 @@ function buildRazorpayReceipt(prefix, identifier = '') {
   return [safePrefix, safeIdentifier, stamp].filter(Boolean).join('_').slice(0, 40);
 }
 
+const GST_RATE_PERCENT = 18;
+
+function normalizeCurrencyAmountInr(amountInr) {
+  return Math.max(0, Math.round(Number(amountInr || 0)));
+}
+
+function getGstBreakdownForAmountInr(amountInr, { fromGross = false } = {}) {
+  const sourceAmountInr = normalizeCurrencyAmountInr(amountInr);
+  if (sourceAmountInr <= 0) {
+    return {
+      subtotalAmountInr: 0,
+      gstAmountInr: 0,
+      totalAmountInr: 0,
+      gstRatePercent: GST_RATE_PERCENT,
+    };
+  }
+
+  if (fromGross) {
+    const subtotalAmountInr = Math.max(0, Math.round(sourceAmountInr / (1 + GST_RATE_PERCENT / 100)));
+    const gstAmountInr = Math.max(0, sourceAmountInr - subtotalAmountInr);
+    return {
+      subtotalAmountInr,
+      gstAmountInr,
+      totalAmountInr: sourceAmountInr,
+      gstRatePercent: GST_RATE_PERCENT,
+    };
+  }
+
+  const subtotalAmountInr = sourceAmountInr;
+  const gstAmountInr = Math.max(0, Math.round((subtotalAmountInr * GST_RATE_PERCENT) / 100));
+  return {
+    subtotalAmountInr,
+    gstAmountInr,
+    totalAmountInr: subtotalAmountInr + gstAmountInr,
+    gstRatePercent: GST_RATE_PERCENT,
+  };
+}
+
+function finalizeSummaryWithGst(summary, options = {}) {
+  if (!summary) return summary;
+  if (summary.gstIncluded) return summary;
+
+  const sourceAmountInr = Number(summary.subtotalAmountInr ?? summary.totalAmountInr ?? summary.amountInr ?? 0);
+  const breakdown = getGstBreakdownForAmountInr(sourceAmountInr, options);
+  return {
+    ...summary,
+    subtotalAmountInr: breakdown.subtotalAmountInr,
+    gstAmountInr: breakdown.gstAmountInr,
+    gstRatePercent: breakdown.gstRatePercent,
+    totalAmountInr: breakdown.totalAmountInr,
+    payableAmountInr: breakdown.totalAmountInr,
+    amountInr: breakdown.totalAmountInr,
+    gstIncluded: true,
+  };
+}
 function getCurrentSqliteTimestamp() {
   return new Date().toISOString().slice(0, 19).replace('T', ' ');
 }
