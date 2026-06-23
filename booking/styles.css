@@ -5655,15 +5655,6 @@ h1, h2, h3 {
   align-items: end;
   margin-bottom: 0.9rem;
 }
-
-.admin-coupon-actions {
-  grid-column: 1 / -1;
-  display: flex;
-  gap: 0.6rem;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
 .admin-coupon-expiry-field {
   grid-column: span 2;
 }
@@ -15495,17 +15486,12 @@ body.auth-mode .portal {
 }
 
 #adminCouponsSection .admin-discount-form {
-  grid-template-columns: repeat(4, minmax(170px, 1fr));
+  display: grid;
+  grid-template-columns: repeat(3, minmax(250px, 1fr));
+  gap: 1rem;
+  align-items: start;
 }
 
-#adminCouponsSection .admin-coupon-expiry-field,
-#adminCouponsSection .admin-coupon-actions {
-  grid-column: auto;
-}
-
-#adminCouponsSection .admin-coupon-actions {
-  align-self: end;
-}
 
 #adminCouponsSection .admin-discount-card {
   display: grid;
@@ -15761,11 +15747,6 @@ body.auth-mode .portal {
   min-height: 1.1em;
 }
 
-#adminCouponsSection .admin-coupon-expiry-field {
-  grid-column: span 2;
-  display: grid;
-  gap: 0.35rem;
-}
 
 #adminCouponsSection .admin-coupon-expiry-controls {
   grid-template-columns: minmax(150px, 1fr) minmax(130px, 0.75fr);
@@ -15787,11 +15768,12 @@ body.auth-mode .portal {
 }
 
 #adminCouponsSection .admin-coupon-actions {
-  grid-column: span 2;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(150px, 1fr));
-  align-self: end;
-  gap: 0.65rem;
+   display: grid;
+   grid-template-columns: repeat(2, minmax(150px, 220px));
+   justify-content: start;
+   gap: 0.65rem;
+
+   grid-column: 1 / -1;
 }
 
 #adminCouponsSection .admin-coupon-actions .btn {
@@ -15818,13 +15800,13 @@ body.auth-mode .portal {
   #userCartSection .dialog-actions,
   #adminRescheduledSection .admin-section-toolbar,
   #adminRescheduledSection .admin-reschedule-date-filter,
-  #adminCouponsSection .admin-coupon-actions {
-    grid-template-columns: 1fr;
-  }
 
-  #adminCouponsSection .admin-coupon-expiry-field,
-  #adminCouponsSection .admin-coupon-actions {
-    grid-column: auto;
+  #adminCouponsSection .admin-coupon-expiry-field {
+    grid-column: span 2;
+  }
+  #adminCouponsSection .admin-coupon-expiry-field small {
+    font-size: 0.7rem;
+    margin-top: 0.1rem;
   }
 }
 
