@@ -1260,8 +1260,8 @@
             <input id="adminCouponDescription" type="text" placeholder="Optional description" />
           </label>
           <label>
-            Discount 
-            <input id="adminCouponValue" type="number" min="1" max="100" step="1" placeholder="10" required />
+            Discount Amount (₹)
+            <input id="adminCouponValue" type="number" min="1" max="10000" step="1" placeholder="₹200" required />
           </label>
           <label class="admin-coupon-expiry-field">
             Expires At
@@ -1275,7 +1275,7 @@
                 <input id="adminCouponExpiryTime" type="time" aria-label="Coupon expiry time" />
               </span>
             </div>
-            <small>Leave blank for no expiry.</small>
+            <small>Optional</small>
             <input id="adminCouponExpiresAt" type="hidden" />
           </label>
           <div class="admin-coupon-actions">
