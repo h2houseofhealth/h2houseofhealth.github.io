@@ -2940,7 +2940,7 @@ async function loadGuestDashboardData() {
 
 function cacheServicesCatalog(services = []) {
   try {
-    localStorage.setItem('h2_services_catalog_cache', JSON.stringify(Array.isArray(services) ? services : []));
+    localStorage.setItem('h2_services_catalog_cache_v2', JSON.stringify(Array.isArray(services) ? services : []));
   } catch {
     // Ignore storage failures in private or embedded browsing contexts.
   }
@@ -2948,7 +2948,7 @@ function cacheServicesCatalog(services = []) {
 
 function loadCachedServicesCatalog() {
   try {
-    const raw = localStorage.getItem('h2_services_catalog_cache');
+    const raw = localStorage.getItem('h2_services_catalog_cache_v2');
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
