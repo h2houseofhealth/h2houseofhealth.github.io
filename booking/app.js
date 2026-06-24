@@ -102,7 +102,6 @@ const state = {
   showAuthCard: false,
   activeUserTab: 'services',
   servicesBackTargetTab: '',
-  comboSidebarOpen: false,
   userBookingsFilter: 'all',
   memberSessionDisplayCount: 0,
   adminActiveTab: 'calendar',
@@ -415,14 +414,15 @@ const elements = {
   adminEmailAnalyticsExportBtn: document.getElementById('adminEmailAnalyticsExportBtn'),
   memberChoiceGate: document.getElementById('memberChoiceGate'),
   userTabNav: document.getElementById('userTabNav'),
+  comboNotice: document.getElementById('comboNotice'),
+  comboNoticeClose: document.getElementById('comboNoticeClose'),
+  comboHowItWorksBtn: document.getElementById('comboHowItWorksBtn'),
+  comboHowItWorksModal: document.getElementById('comboHowItWorksModal'),
+  comboModalClose: document.getElementById('comboModalClose'),
   userTabServices: document.getElementById('userTabServices'),
   userTabMembership: document.getElementById('userTabMembership'),
   userTabBookings: document.getElementById('userTabBookings'),
   userTabCart: document.getElementById('userTabCart'),
-  comboSidebar: document.getElementById('comboSidebar'),
-  comboSidebarTab: document.getElementById('comboSidebarTab'),
-  comboSidebarPanel: document.getElementById('comboSidebarPanel'),
-  comboSidebarClose: document.getElementById('comboSidebarClose'),
   joinAsMemberBtn: document.getElementById('joinAsMemberBtn'),
   topExplorePlansBtn: document.getElementById('topExplorePlansBtn'),
   continueAsMemberBtn: document.getElementById('continueAsMemberBtn'),
@@ -849,25 +849,8 @@ function resetServicesUiStateForUserSwitch() {
   resetServiceBrowserState();
   state.expandedServiceCategories = {};
   state.serviceDetailSelections = {};
-  state.comboSidebarOpen = false;
 }
 
-function syncComboSidebarUi() {
-  const isDashboardView = Boolean(state.user) && state.user.role !== 'admin' && (state.activeUserTab || 'services') === 'membership';
-
-  if (elements.comboSidebar) {
-    elements.comboSidebar.hidden = !isDashboardView;
-    elements.comboSidebar.classList.toggle('is-open', isDashboardView && state.comboSidebarOpen);
-  }
-
-  if (elements.comboSidebarTab) {
-    elements.comboSidebarTab.setAttribute('aria-expanded', isDashboardView && state.comboSidebarOpen ? 'true' : 'false');
-  }
-
-  if (elements.comboSidebarPanel) {
-    elements.comboSidebarPanel.setAttribute('aria-hidden', isDashboardView && state.comboSidebarOpen ? 'false' : 'true');
-  }
-}
 
 function routeAfterAuthSuccess() {
   ensurePostLoginDashboardChoice();
@@ -1052,7 +1035,7 @@ function attachEvents() {
 
   elements.noticeDialogOkBtn?.addEventListener('click', closeNoticeDialog);
   elements.noticeDialogCloseBtn?.addEventListener('click', closeNoticeDialog);
-
+  
   elements.logoutBtn?.addEventListener('click', async () => {
     let logoutWarning = '';
     try {
@@ -1189,6 +1172,23 @@ function attachEvents() {
       }, 300);
     }
   };
+  elements.comboNoticeClose?.addEventListener('click', () => {
+    if (elements.comboNotice) {
+      elements.comboNotice.hidden = true;
+    }
+  });
+
+  elements.comboHowItWorksBtn?.addEventListener('click', () => {
+    elements.comboHowItWorksModal.hidden = false;
+  });
+  elements.comboModalClose?.addEventListener('click', () => {
+    elements.comboHowItWorksModal.hidden = true;
+  });
+  elements.comboHowItWorksModal?.addEventListener('click', (event) => {
+    if (event.target === elements.comboHowItWorksModal) {
+      elements.comboHowItWorksModal.hidden = true;
+    }
+  });
   elements.adminCustomerName?.addEventListener('input', updateAdminCustomerField('name'));
   elements.adminCustomerPhone?.addEventListener('input', updateAdminCustomerField('phone'));
   elements.adminCustomerEmail?.addEventListener('input', updateAdminCustomerField('email'));
@@ -1351,7 +1351,6 @@ function attachEvents() {
     state.selectedHydrogenFlow = 'topup';
     state.servicesBackTargetTab = '';
     state.activeUserTab = 'services';
-    state.comboSidebarOpen = false;
     window.location.hash = '#services';
     render();
   });
@@ -1608,21 +1607,11 @@ function attachEvents() {
   elements.servicesNextBtn?.addEventListener('click', () => {
     resetServiceBrowserState();
     state.activeUserTab = 'cart';
-    state.comboSidebarOpen = false;
     window.location.hash = '#cart';
     render();
     requestAnimationFrame(() => {
       elements.userCartSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
-  });
-  elements.comboSidebarTab?.addEventListener('click', () => {
-    if ((state.activeUserTab || 'services') !== 'membership') return;
-    state.comboSidebarOpen = !state.comboSidebarOpen;
-    render();
-  });
-  elements.comboSidebarClose?.addEventListener('click', () => {
-    state.comboSidebarOpen = false;
-    render();
   });
   elements.bookingsBackBtn?.addEventListener('click', () => {
     resetServiceBrowserState();
@@ -3710,7 +3699,6 @@ function resetServiceBrowserState() {
 function navigateToUserServices() {
   resetServiceBrowserState();
   state.activeUserTab = 'services';
-  state.comboSidebarOpen = false;
   window.location.hash = '#services';
   render();
   requestAnimationFrame(() => {
@@ -7347,6 +7335,9 @@ function render() {
   if (elements.userTabNav) {
     elements.userTabNav.hidden = isAdmin || needsPostLoginChoice;
   }
+  if (elements.comboNotice) {
+    elements.comboNotice.hidden = isAdmin || needsPostLoginChoice;
+  }
 
   if (needsPostLoginChoice) {
     document.querySelectorAll('.app-only').forEach((el) => {
@@ -7384,10 +7375,8 @@ function render() {
     if (elements.servicesSection) elements.servicesSection.hidden = activeTab !== 'services';
     if (elements.userBookingsSection) elements.userBookingsSection.hidden = activeTab !== 'bookings';
     if (elements.userCartSection) elements.userCartSection.hidden = activeTab !== 'cart';
-    if (activeTab !== 'membership') state.comboSidebarOpen = false;
   } else {
     if (elements.bookingFiltersSection) elements.bookingFiltersSection.hidden = false;
-    state.comboSidebarOpen = false;
   }
 
   renderStats(state.bookings);
@@ -7397,7 +7386,6 @@ function render() {
   renderMembershipCheckoutSummary();
   renderCartCouponPreview();
   renderGeneralCoupons();
-  syncComboSidebarUi();
 
   if (isAdmin) {
     let activeAdminTab = state.adminActiveTab || 'bookings';
