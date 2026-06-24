@@ -174,9 +174,9 @@ const SERVICE_CATALOG = [
   {
     category: 'HYDROGEN SESSION',
     name: 'H2 Single Session',
-    priceInr: 4800,
-    nonMemberPriceInr: 9500,
-    memberPriceInr: 4800,
+    priceInr: 4067.8,
+    nonMemberPriceInr: 8050.85,
+    memberPriceInr: 4067.8,
     includes: '1 Hydrogen Session',
     description:
       'Single hydrogen session for immediate recovery and cellular wellness support. Non-member pricing: Rs. 9,500.',
@@ -184,9 +184,9 @@ const SERVICE_CATALOG = [
   {
     category: 'HYDROGEN SESSION',
     name: 'H2 1 Week Program (4 Sessions)',
-    priceInr: 12000,
-    nonMemberPriceInr: 28000,
-    memberPriceInr: 12000,
+    priceInr: 10169.49,
+    nonMemberPriceInr: 23728.81,
+    memberPriceInr: 10169.49,
     includes: '4 Hydrogen Sessions in 1 week',
     description:
       'Structured weekly session plan designed for consistency and better recovery outcomes. Non-member pricing: Rs. 28,000.',
@@ -194,9 +194,9 @@ const SERVICE_CATALOG = [
   {
     category: 'HYDROGEN SESSION',
     name: 'H2 2 Week Program (8 Sessions)',
-    priceInr: 22000,
-    nonMemberPriceInr: 48000,
-    memberPriceInr: 22000,
+    priceInr: 18644.07,
+    nonMemberPriceInr: 40677.97,
+    memberPriceInr: 18644.07,
     includes: '8 Hydrogen Sessions in 2 weeks',
     description:
       'Enhanced two-week protocol to support sustained detox and energy optimization. Non-member pricing: Rs. 48,000.',
@@ -204,9 +204,9 @@ const SERVICE_CATALOG = [
   {
     category: 'HYDROGEN SESSION',
     name: 'H2 1 Month Program (16 Sessions)',
-    priceInr: 32000,
-    nonMemberPriceInr: 64000,
-    memberPriceInr: 32000,
+    priceInr: 27118.64,
+    nonMemberPriceInr: 54237.29,
+    memberPriceInr: 27118.64,
     includes: '16 Hydrogen Sessions in 1 month',
     description:
       'Monthly core plan for ongoing metabolic, inflammation, and vitality support. Non-member pricing: Rs. 64,000.',
@@ -214,9 +214,9 @@ const SERVICE_CATALOG = [
   {
     category: 'HYDROGEN SESSION',
     name: 'H2 2 Month Program (32 Sessions)',
-    priceInr: 64000,
-    nonMemberPriceInr: 128000,
-    memberPriceInr: 64000,
+    priceInr: 54237.29,
+    nonMemberPriceInr: 108474.58,
+    memberPriceInr: 54237.29,
     includes: '32 Hydrogen Sessions in 2 months',
     description:
       'Extended plan for sustained recovery and performance support with consistent hydrogen sessions. Non-member pricing: Rs. 1,28,000.',
@@ -224,9 +224,9 @@ const SERVICE_CATALOG = [
   {
     category: 'HYDROGEN SESSION',
     name: 'H2 Intensive 3 Month (90 Sessions)',
-    priceInr: 100000,
-    nonMemberPriceInr: 150000,
-    memberPriceInr: 100000,
+    priceInr: 84745.76,
+    nonMemberPriceInr: 127118.64,
+    memberPriceInr: 84745.76,
     includes: '90 Hydrogen Sessions in 3 months',
     description:
       'Long-cycle intensive plan built for deep and sustained wellness transformation. Non-member pricing: Rs. 1,50,000.',
@@ -258,7 +258,7 @@ const SERVICE_CATALOG = [
   {
     category: 'IV THERAPIES',
     name: 'Gym Hero',
-    priceInr: 4800,
+    priceInr: 4067.8,
     includes: 'Normal saline, B1, B2, B6, B12, Vitamin C, Magnesium, Glutathione',
     description:
       'Designed for fitness enthusiasts to support muscle recovery, hydration, energy production, and antioxidant support after intense workouts.',
@@ -266,7 +266,7 @@ const SERVICE_CATALOG = [
   {
     category: 'IV THERAPIES',
     name: 'Skin Luminosity',
-    priceInr: 5900,
+    priceInr: 5000,
     includes: 'B1, B2, B6, B12, Vitamin C, Biotin, Zinc, Glutathione',
     description:
       'Promotes brighter, clearer skin by supporting collagen production, antioxidant protection, and overall skin health.',
@@ -274,7 +274,7 @@ const SERVICE_CATALOG = [
   {
     category: 'IV THERAPIES',
     name: 'Ultimate Immunity',
-    priceInr: 6500,
+    priceInr: 5508.47,
     includes: 'Vitamin C, N-Acetyl Cysteine (NAC), Zinc, B1, B2, B6, B12, Alpha Lipoic Acid, Glutathione',
     description:
       'A powerful immune support blend that helps fight infections, reduce oxidative stress, and improve overall wellness.',
@@ -282,7 +282,7 @@ const SERVICE_CATALOG = [
   {
     category: 'IV THERAPIES',
     name: 'Hangover Cure',
-    priceInr: 4500,
+    priceInr: 3813.56,
     includes: 'Normal saline, B1, B2, B6, B12, Glutathione, Magnesium, Ketorol, Ondansetron',
     description:
       'Rehydrates the body, relieves nausea and headache, and restores energy levels after alcohol consumption.',
@@ -290,7 +290,7 @@ const SERVICE_CATALOG = [
   {
     category: 'IV THERAPIES',
     name: 'Migraine',
-    priceInr: 4500,
+    priceInr: 3813.56,
     includes: 'B1, B2, B6, B12, Magnesium, Ondansetron, Ketorol',
     description:
       'Helps reduce migraine intensity by easing pain, correcting deficiencies, and relieving nausea.',
@@ -298,7 +298,7 @@ const SERVICE_CATALOG = [
   {
     category: 'IV THERAPIES',
     name: 'Stress Buster',
-    priceInr: 4500,
+    priceInr: 3813.56,
     includes: 'B1, B2, B6, B12, Vitamin C, Magnesium, Zinc',
     description:
       'Supports nervous system balance, reduces fatigue, and helps manage physical and mental stress.',
@@ -306,7 +306,7 @@ const SERVICE_CATALOG = [
   {
     category: 'IV THERAPIES',
     name: 'The House Drip',
-    priceInr: 7500,
+    priceInr: 6355.93,
     includes:
       'B1, B2, B6, B12, Folic Acid, Vitamin C, Magnesium, Alpha Lipoic Acid, N-Acetyl Cysteine, Zinc, Biotin, L-Arginine, L-Carnitine',
     description:
@@ -315,56 +315,56 @@ const SERVICE_CATALOG = [
   {
     category: 'IV SHOTS',
     name: 'Recharge',
-    priceInr: 2300,
+    priceInr: 1949.15,
     includes: 'B1, B2, B6, B12, Vitamin C',
     description: 'Quick energy booster that helps reduce fatigue and improve daily performance.',
   },
   {
     category: 'IV SHOTS',
     name: 'Focus',
-    priceInr: 2900,
+    priceInr: 2457.63,
     includes: 'B1, B2, B6, B12, Glutathione',
     description: 'Supports mental clarity, concentration, and antioxidant protection.',
   },
   {
     category: 'IV SHOTS',
     name: 'Relax',
-    priceInr: 2400,
+    priceInr: 2033.9,
     includes: 'Magnesium, Zinc, B1, B2, B6',
     description: 'Helps calm the nervous system, ease muscle tension, and promote relaxation.',
   },
   {
     category: 'IV SHOTS',
     name: 'Beauty',
-    priceInr: 3800,
+    priceInr: 2966.1,
     includes: 'B1, B2, B3, B5, B6, Biotin, Vitamin C, Zinc, Glutathione',
     description: 'Enhances skin glow, supports hair and nail strength, and provides antioxidant benefits.',
   },
   {
     category: 'IV SHOTS',
     name: 'Gym Pump',
-    priceInr: 3300,
+    priceInr: 2796.61,
     includes: 'B1, B2, B6, Glutathione, L-Arginine, L-Carnitine',
     description: 'Improves blood flow, endurance, and workout performance.',
   },
   {
     category: 'IV SHOTS',
     name: 'Detox',
-    priceInr: 3800,
+    priceInr: 3220.34,
     includes: 'Vitamin C, N-Acetyl Cysteine, Zinc, Glutathione',
     description: 'Supports liver function, detoxification pathways, and cellular antioxidant defense.',
   },
   {
     category: 'IV SHOTS',
     name: 'Immunity Boost',
-    priceInr: 3900,
+    priceInr: 3305.08,
     includes: 'B1, B2, B6, Vitamin C, N-Acetyl Cysteine, Zinc, Glutathione',
     description: 'Strengthens immune response and helps protect against infections.',
   },
   {
     category: 'IV SHOTS',
     name: 'The House Push',
-    priceInr: 4800,
+    priceInr: 4067.8,
     includes: 'B1, B2, B6, B12, Vitamin C, Biotin, N-Acetyl Cysteine, Zinc, Glutathione',
     description: 'A premium wellness shot designed for full-body support, energy enhancement, and immune strengthening.',
   },
@@ -375,7 +375,7 @@ const MEMBERSHIP_PLANS = [
     id: 'h2_single',
     name: '1 Person Membership',
     peopleCount: 1,
-    priceInr: 84000,
+    priceInr: 71186.44,
     validityDays: 90,
     h2SessionsIncluded: 16,
     perks:
@@ -385,7 +385,7 @@ const MEMBERSHIP_PLANS = [
     id: 'h2_two',
     name: '2 Person Membership',
     peopleCount: 2,
-    priceInr: 160000,
+    priceInr: 135593.22,
     validityDays: 90,
     h2SessionsIncluded: 32,
     perks: '',
@@ -394,7 +394,7 @@ const MEMBERSHIP_PLANS = [
     id: 'h2_four',
     name: '4 Person Membership',
     peopleCount: 4,
-    priceInr: 288000,
+    priceInr: 244067.8,
     validityDays: 90,
     h2SessionsIncluded: 64,
     perks: '',
@@ -403,7 +403,7 @@ const MEMBERSHIP_PLANS = [
     id: 'h2_add_person',
     name: 'Add Person',
     peopleCount: 1,
-    priceInr: 78000,
+    priceInr: 66101.69,
     validityDays: 90,
     h2SessionsIncluded: 16,
     perks:
