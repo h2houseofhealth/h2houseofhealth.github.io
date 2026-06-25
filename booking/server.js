@@ -5415,7 +5415,9 @@ app.get('/api/bookings/:id/invoice-link', requireAuth, (req, res) => {
               booking_time AS bookingTime,
               status,
               payment_status AS paymentStatus,
+              payment_order_id AS paymentOrderId,
               payment_reference AS paymentReference,
+              is_topup_session AS isTopUpSession,
               paid_amount_paise AS paidAmountPaise
        FROM bookings
        WHERE id = ?`
@@ -5453,7 +5455,9 @@ app.get('/api/bookings/:id/invoice-link', requireAuth, (req, res) => {
                   booking_time AS bookingTime,
                   status,
                   payment_status AS paymentStatus,
+                  payment_order_id AS paymentOrderId,
                   payment_reference AS paymentReference,
+                  is_topup_session AS isTopUpSession,
                   paid_amount_paise AS paidAmountPaise
            FROM bookings
            WHERE booking_group_id = ?
@@ -7138,6 +7142,7 @@ async function sendInvoiceResponse(req, res, html, invoiceNo) {
     const pdfBuffer = await page.pdf({
       width: '240mm',
       height: '320mm',
+      preferCSSPageSize: true,
       printBackground: true,
       margin: { top: '0', right: '0', bottom: '0', left: '0' },
     });
@@ -7153,6 +7158,236 @@ async function sendInvoiceResponse(req, res, html, invoiceNo) {
       await browser.close().catch(() => {});
     }
   }
+}
+
+function formatInvoiceInr(amountInr) {
+  const amount = Number(amountInr || 0);
+  const safeAmount = Number.isFinite(amount) ? Math.max(0, amount) : 0;
+  return `Rs. ${safeAmount.toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function getInvoiceServiceLookupName(serviceName) {
+  return String(serviceName || '')
+    .replace(/\s*\([^)]*\)\s*$/g, '')
+    .trim();
+}
+
+function getInvoiceServiceCatalogEntry(serviceName) {
+  const rawName = String(serviceName || '').trim();
+  const lookupName = getInvoiceServiceLookupName(rawName).toLowerCase();
+  return (
+    SERVICE_CATALOG.find((service) => String(service.name || '').trim().toLowerCase() === lookupName) ||
+    SERVICE_CATALOG.find((service) => rawName.toLowerCase().startsWith(String(service.name || '').trim().toLowerCase())) ||
+    null
+  );
+}
+
+function getInvoiceItemQuantity(item) {
+  const explicitQuantity = Number(item?.quantity ?? item?.qty ?? item?.sessions ?? item?.sessionCount);
+  if (Number.isFinite(explicitQuantity) && explicitQuantity > 0) return Math.max(1, Math.round(explicitQuantity));
+  const label = String(item?.serviceName || '');
+  const sessionMatch = label.match(/\((\d+)\s+(?:paid\s+)?sessions?\)/i) || label.match(/(\d+)\s+(?:paid\s+)?sessions?/i);
+  if (sessionMatch) return Math.max(1, Number(sessionMatch[1] || 1));
+  return 1;
+}
+
+function normalizeInvoiceLineItems(rawItems, subtotalAmountInr) {
+  const items = (Array.isArray(rawItems) ? rawItems : []).filter((item) => Number(item?.amountInr || 0) > 0);
+  if (!items.length) return [];
+  const safeSubtotal = Math.max(0, Math.round(Number(subtotalAmountInr || 0)));
+  const rawTotal = items.reduce((sum, item) => sum + Math.max(0, Number(item.amountInr || 0)), 0);
+  let runningAmount = 0;
+
+  return items.map((item, index) => {
+    const quantity = getInvoiceItemQuantity(item);
+    let lineAmountInr;
+    if (items.length === 1) {
+      lineAmountInr = safeSubtotal;
+    } else if (rawTotal > 0) {
+      lineAmountInr =
+        index === items.length - 1
+          ? Math.max(0, safeSubtotal - runningAmount)
+          : Math.max(0, Math.round((Number(item.amountInr || 0) / rawTotal) * safeSubtotal));
+    } else {
+      lineAmountInr = 0;
+    }
+    runningAmount += lineAmountInr;
+    return {
+      ...item,
+      serviceName: String(item.serviceName || 'Booking').trim() || 'Booking',
+      quantity,
+      unitPriceInr: quantity > 0 ? Math.round(lineAmountInr / quantity) : lineAmountInr,
+      lineAmountInr,
+      catalogEntry: getInvoiceServiceCatalogEntry(item.serviceName),
+    };
+  });
+}
+
+function buildInvoiceRowsHtml(lineItems) {
+  return lineItems
+    .map((item, index) => `<tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(item.serviceName)}</td>
+          <td>${escapeHtml(String(item.quantity || 1))}</td>
+          <td class="right">${formatInvoiceInr(item.unitPriceInr)}</td>
+          <td class="right">${formatInvoiceInr(item.lineAmountInr)}</td>
+        </tr>`)
+    .join('');
+}
+
+function buildDiscountInvoiceRowHtml(discountAmountInr, couponCode = '') {
+  const amount = Math.max(0, Math.round(Number(discountAmountInr || 0)));
+  if (amount <= 0) return '';
+  const label = String(couponCode || '').trim() ? `Discount (${String(couponCode).trim()})` : 'Discount';
+  return `<tr>
+          <td></td>
+          <td>${escapeHtml(label)}</td>
+          <td></td>
+          <td class="right"></td>
+          <td class="right">- ${formatInvoiceInr(amount)}</td>
+        </tr>`;
+}
+
+function buildServiceDescriptionHtml(lineItems, fallbackLabel = 'Booking') {
+  const items = Array.isArray(lineItems) && lineItems.length ? lineItems : [{ serviceName: fallbackLabel }];
+  return items
+    .map((item) => {
+      const service = item.catalogEntry || getInvoiceServiceCatalogEntry(item.serviceName);
+      const description = service?.description || service?.includes || 'Booked service.';
+      return `<div class="invoice-service-summary">
+        <strong>${escapeHtml(item.serviceName || fallbackLabel)}</strong>
+        <span>${escapeHtml(description)}</span>
+      </div>`;
+    })
+    .join('');
+}
+
+function buildServiceDetailsHtml(lineItems, fallbackLabel = 'Booking') {
+  const items = Array.isArray(lineItems) && lineItems.length ? lineItems : [{ serviceName: fallbackLabel, quantity: 1 }];
+  return `<ul class="invoice-detail-list">${items
+    .map((item) => {
+      const service = item.catalogEntry || getInvoiceServiceCatalogEntry(item.serviceName);
+      const details = [
+        service?.category ? `Category: ${service.category}` : '',
+        service?.includes ? `Includes: ${service.includes}` : '',
+        item.bookingDate || item.bookingTime
+          ? `Scheduled: ${formatDateTimeWithComma(item.bookingDate || '', item.bookingTime || '')}`
+          : '',
+        `Quantity: ${item.quantity || 1}`,
+      ].filter(Boolean);
+      return `<li><strong>${escapeHtml(item.serviceName || fallbackLabel)}</strong>${details.length ? `<span>${escapeHtml(details.join(' | '))}</span>` : ''}</li>`;
+    })
+    .join('')}</ul>`;
+}
+
+function numberToIndianWords(value) {
+  const amount = Math.max(0, Math.round(Number(value || 0)));
+  if (amount === 0) return 'Zero';
+  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+  const belowHundred = (num) => (num < 20 ? ones[num] : [tens[Math.floor(num / 10)], ones[num % 10]].filter(Boolean).join(' '));
+  const belowThousand = (num) => {
+    const hundred = Math.floor(num / 100);
+    const rest = num % 100;
+    return [hundred ? `${ones[hundred]} Hundred` : '', rest ? belowHundred(rest) : ''].filter(Boolean).join(' ');
+  };
+  const parts = [];
+  const crore = Math.floor(amount / 10000000);
+  const lakh = Math.floor((amount % 10000000) / 100000);
+  const thousand = Math.floor((amount % 100000) / 1000);
+  const rest = amount % 1000;
+  if (crore) parts.push(`${belowThousand(crore)} Crore`);
+  if (lakh) parts.push(`${belowThousand(lakh)} Lakh`);
+  if (thousand) parts.push(`${belowThousand(thousand)} Thousand`);
+  if (rest) parts.push(belowThousand(rest));
+  return parts.join(' ');
+}
+
+function buildAmountInWordsHtml(amountInr) {
+  return `${numberToIndianWords(amountInr)} Only`;
+}
+
+function buildMembershipInvoiceModel(order) {
+  const plan = MEMBERSHIP_PLANS.find((item) => item.id === order.planId) || null;
+  const planName = plan?.name || String(order.planId || 'Membership');
+  const peopleCount = Math.max(1, Number(order.peopleCount || plan?.peopleCount || 1));
+  const originalAmountInr = Math.round(Number(order.originalAmountPaise || order.amountPaise || 0) / 100);
+  const discountInr = Math.round(Number(order.discountAmountPaise || 0) / 100);
+  const taxableAmountInr = Math.max(0, originalAmountInr - discountInr);
+  const gstAmountInr = Math.max(0, Math.round((taxableAmountInr * GST_RATE_PERCENT) / 100));
+  const amountInr = taxableAmountInr + gstAmountInr;
+  const unitPriceInr = Math.round(originalAmountInr / peopleCount);
+  const lineItem = {
+    serviceName: planName,
+    quantity: peopleCount,
+    unitPriceInr,
+    lineAmountInr: originalAmountInr,
+    catalogEntry: null,
+  };
+  return {
+    plan,
+    planName,
+    peopleCount,
+    originalAmountInr,
+    discountInr,
+    taxableAmountInr,
+    gstAmountInr,
+    amountInr,
+    lineItems: [lineItem],
+    rowsHtml: `<tr>
+          <td>1</td>
+          <td>${escapeHtml(planName)}</td>
+          <td>${peopleCount}</td>
+          <td class="right">${formatInvoiceInr(unitPriceInr)}</td>
+          <td class="right">${formatInvoiceInr(originalAmountInr)}</td>
+        </tr>${discountInr > 0 ? `<tr><td colspan="4">Discount${order.couponCode ? ` (${escapeHtml(String(order.couponCode))})` : ''}</td><td class="right">- ${formatInvoiceInr(discountInr)}</td></tr>` : ''}`,
+    descriptionHtml: `<div class="invoice-service-summary">
+        <strong>${escapeHtml(planName)}</strong>
+        <span>${escapeHtml(plan?.perks || `${peopleCount} member membership plan with H2 House of Health benefits.`)}</span>
+      </div>`,
+    detailsHtml: `<ul class="invoice-detail-list">
+        <li><strong>${escapeHtml(planName)}</strong><span>${escapeHtml(
+          [
+            `Members: ${peopleCount}`,
+            plan?.validityDays ? `Validity: ${plan.validityDays} days` : '',
+            plan?.h2SessionsIncluded ? `H2 sessions included: ${plan.h2SessionsIncluded}` : '',
+            order.couponCode ? `Coupon: ${order.couponCode}` : '',
+          ].filter(Boolean).join(' | ')
+        )}</span></li>
+      </ul>`,
+  };
+}
+
+function getPaidBookingDiscountMeta(bookings) {
+  const orderIds = Array.from(
+    new Set(
+      (Array.isArray(bookings) ? bookings : [])
+        .map((entry) => String(entry?.paymentOrderId || '').trim())
+        .filter(Boolean)
+    )
+  );
+  if (!orderIds.length || !hasTable('cart_payment_orders')) {
+    return { couponCode: '', discountAmountInr: 0 };
+  }
+  const placeholders = orderIds.map(() => '?').join(', ');
+  const row = db
+    .prepare(
+      `SELECT coupon_code AS couponCode,
+              SUM(COALESCE(discount_amount_paise, 0)) AS discountAmountPaise
+       FROM cart_payment_orders
+       WHERE order_id IN (${placeholders})
+       GROUP BY coupon_code
+       ORDER BY MAX(created_at) DESC
+       LIMIT 1`
+    )
+    .get(...orderIds);
+  return {
+    couponCode: String(row?.couponCode || '').trim(),
+    discountAmountInr: Math.max(0, Math.round(Number(row?.discountAmountPaise || 0) / 100)),
+  };
 }
 
 app.get('/invoice/booking', async (req, res) => {
@@ -7171,7 +7406,9 @@ app.get('/invoice/booking', async (req, res) => {
               booking_time AS bookingTime,
               status,
               payment_status AS paymentStatus,
+              payment_order_id AS paymentOrderId,
               payment_reference AS paymentReference,
+              is_topup_session AS isTopUpSession,
               paid_amount_paise AS paidAmountPaise,
               paid_at AS paidAt,
               created_at AS createdAt
@@ -7205,7 +7442,9 @@ app.get('/invoice/booking', async (req, res) => {
                   booking_time AS bookingTime,
                   status,
                   payment_status AS paymentStatus,
+                  payment_order_id AS paymentOrderId,
                   payment_reference AS paymentReference,
+                  is_topup_session AS isTopUpSession,
                   paid_amount_paise AS paidAmountPaise
            FROM bookings
            WHERE booking_group_id = ?
@@ -7237,36 +7476,32 @@ app.get('/invoice/booking', async (req, res) => {
             serviceName: invoiceSummary?.serviceName || booking.serviceName || 'Booking',
             bookingDate: booking.bookingDate,
             bookingTime: booking.bookingTime,
-          amountInr,
-        },
+            amountInr,
+          },
       ];
   const grossBreakdown = getGstBreakdownForAmountInr(amountInr, { fromGross: true });
   const explicitSubtotalAmountInr = Number(invoiceSummary?.subtotalAmountInr);
+  const explicitTaxableAmountInr = Number(invoiceSummary?.taxableAmountInr);
   const explicitGstAmountInr = Number(invoiceSummary?.gstAmountInr);
   const useExplicitSplit =
     Number.isFinite(explicitSubtotalAmountInr) &&
     Number.isFinite(explicitGstAmountInr) &&
     explicitSubtotalAmountInr > 0 &&
     explicitGstAmountInr > 0;
-  const subtotalAmountInr = useExplicitSplit ? explicitSubtotalAmountInr : grossBreakdown.subtotalAmountInr;
+  const taxableAmountInr =
+    Number.isFinite(explicitTaxableAmountInr) && explicitTaxableAmountInr > 0
+      ? explicitTaxableAmountInr
+      : useExplicitSplit
+        ? Math.max(0, explicitSubtotalAmountInr - Number(invoiceSummary?.discountAmountInr || 0))
+        : grossBreakdown.subtotalAmountInr;
+  const subtotalAmountInr = useExplicitSplit ? explicitSubtotalAmountInr : taxableAmountInr;
   const gstAmountInr = useExplicitSplit ? explicitGstAmountInr : grossBreakdown.gstAmountInr;
-  const invoiceRowsHtml = invoiceItems
-    .map((item, index) => {
-      const itemDateTime = formatDateTimeWithComma(item.bookingDate || booking.bookingDate, item.bookingTime || booking.bookingTime);
-      const rowAmountInr = invoiceItems.length === 1 ? subtotalAmountInr : Number(item.amountInr || 0);
-      return `<tr>
-          <td>${index + 1}</td>
-          <td>${escapeHtml(item.serviceName || 'Booking')}</td>
-          <td>1</td>
-          <td class="right">
-              Rs. ${Number(rowAmountInr || 0).toLocaleString('en-IN')}
-          </td>
-          <td class="right">
-              Rs. ${Number(rowAmountInr || 0).toLocaleString('en-IN')}
-          </td>
-        </tr>`;
-    })
-    .join('');
+  const invoiceLineItems = normalizeInvoiceLineItems(invoiceItems, subtotalAmountInr);
+  const discountRowsHtml = buildDiscountInvoiceRowHtml(invoiceSummary?.discountAmountInr, invoiceSummary?.couponCode);
+  const invoiceRowsHtml = `${buildInvoiceRowsHtml(invoiceLineItems)}${discountRowsHtml}`;
+  const serviceDescriptionHtml = buildServiceDescriptionHtml(invoiceLineItems, invoiceSummary?.serviceName || booking.serviceName || 'Booking');
+  const serviceDetailsHtml = buildServiceDetailsHtml(invoiceLineItems, invoiceSummary?.serviceName || booking.serviceName || 'Booking');
+  const amountInWordsHtml = buildAmountInWordsHtml(amountInr);
   const invoiceNo = `BK-${booking.id}`;
   const paidAtLabel = formatInvoiceDateTime(booking.paidAt);
   const generatedAtLabel = formatInvoiceDateTime(new Date());
@@ -7281,6 +7516,7 @@ app.get('/invoice/booking', async (req, res) => {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Billing Invoice ${escapeHtml(invoiceNo)}</title>
   <style>
+    @page{size:240mm 320mm;margin:0}
     :root{--ink:#111;--muted:#444;--line:#e8e8f0}
     html,body{min-height:100%;height:auto;overflow-y:auto}
     body{
@@ -7292,15 +7528,28 @@ app.get('/invoice/booking', async (req, res) => {
       print-color-adjust:exact;
     }
     .page{
+      position:relative;
       width:min(240mm, calc(100% - 24px));
-      min-height:320mm;
       margin:18px auto;
       box-sizing:border-box;
-      background:#fff url('/booking/assets/invoice-page.png') no-repeat top center;
-      background-size:100% 100%;
+      background:#fff;
       padding:46mm 18mm 18mm 18mm;
       box-shadow:0 10px 32px rgba(0,0,0,.10);
       overflow:visible;
+    }
+    .page::before{
+      content:"";
+      position:absolute;
+      inset:0 0 auto 0;
+      height:120mm;
+      background:url('/booking/assets/invoice-page.png') no-repeat top center;
+      background-size:100% auto;
+      pointer-events:none;
+      z-index:0;
+    }
+    .page > *{
+      position:relative;
+      z-index:1;
     }
     .row{display:flex;gap:16px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap}
     .title{font-size:18px;margin:0 0 4px;letter-spacing:.02em}
@@ -7421,6 +7670,29 @@ app.get('/invoice/booking', async (req, res) => {
       min-height:120px;
       line-height:1.8;
     }
+    .invoice-service-summary + .invoice-service-summary{
+      margin-top:14px;
+      padding-top:14px;
+      border-top:1px solid rgba(174,84,49,0.16);
+    }
+    .invoice-service-summary strong,
+    .invoice-detail-list strong{
+      display:block;
+      color:#AE5431;
+      line-height:1.35;
+    }
+    .invoice-service-summary span,
+    .invoice-detail-list span{
+      display:block;
+      line-height:1.55;
+    }
+    .invoice-detail-list{
+      margin:0;
+      padding-left:18px;
+    }
+    .invoice-detail-list li + li{
+      margin-top:10px;
+    }
     
     .gst{margin-top:6px}
     .gst-space{display:inline-block;min-width:240px;border-bottom:1px solid #777;transform:translateY(-2px)}
@@ -7428,21 +7700,41 @@ app.get('/invoice/booking', async (req, res) => {
     .invoice-service-table{width:100%;border-collapse:collapse;margin-top:24px;}
     .invoice-service-table th{background:#AE5431;color:#fff;border:1px solid rgba(174,84,49,.35);padding:12px;}
     .invoice-service-table td{border:1px solid rgba(174,84,49,.35);padding:14px;}
+    .invoice-service-table thead{display:table-header-group}
+    .invoice-service-table tr{break-inside:avoid;page-break-inside:avoid}
     th,td{border-bottom:1px solid var(--line);padding:10px 8px;text-align:left;font-size:14px;vertical-align:top}
     th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
     .right{text-align:right}
     .total{font-weight:700;font-size:16px}
     .footer{margin-top:14px}
+    .invoice-service-summary,
+    .invoice-detail-list li,
+    .summary-box{
+      break-inside:avoid;
+      page-break-inside:avoid;
+    }
+    .invoice-company-footer{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:24px;
+      margin-top:24px;
+      font-size:14px;
+      line-height:1.55;
+      color:#111;
+    }
+    .invoice-company-footer div:last-child{text-align:right}
     @media screen and (max-width:700px){
       html,body{height:auto;min-height:100%}
       body{background:#fff}
       .page{
         width:100%;
-        min-height:calc(100vw * 1448 / 1086);
         margin:0;
         padding:132px 16px 24px;
         box-shadow:none;
-        background-size:100% 100%;
+      }
+      .page::before{
+        height:180px;
+        background-size:100% auto;
       }
       .invoice-box{width:min(220px, 100%)}
       .customer-table{table-layout:auto}
@@ -7470,10 +7762,22 @@ app.get('/invoice/booking', async (req, res) => {
       th,td{padding:9px 5px;font-size:12px;overflow-wrap:anywhere}
       th{font-size:10px;letter-spacing:.03em}
       .total{font-size:14px}
+      .invoice-company-footer{grid-template-columns:1fr;margin-top:40px;gap:18px}
+      .invoice-company-footer div:last-child{text-align:left}
     }
     @media print{
       body{background:#fff}
-      .page{width:240mm;margin:0;box-shadow:none}
+      .page{
+        width:240mm;
+        margin:0;
+        box-shadow:none;
+        break-after:auto;
+      }
+      .service-info-card,
+      .invoice-bottom-section{
+        break-inside:auto;
+        page-break-inside:auto;
+      }
     }
   </style>
 </head>
@@ -7530,9 +7834,7 @@ app.get('/invoice/booking', async (req, res) => {
          </div>
 
          <div class="service-info-body">
-           <strong>Hydrogen Session</strong><br>
-           Personalized health consultation and
-           comprehensive wellness assessment.
+           ${serviceDescriptionHtml}
          </div>
       </div>
 
@@ -7541,11 +7843,7 @@ app.get('/invoice/booking', async (req, res) => {
             SERVICE DETAILS
         </div>
         <div class="service-info-body">
-
-            <li>One-on-one consultation</li>
-            <li>Health evaluation</li>
-            <li>Personalized wellness guidance</li>
-            <li>Post-session support</li>
+            ${serviceDetailsHtml}
         </div>
       </div>
 
@@ -7571,7 +7869,7 @@ app.get('/invoice/booking', async (req, res) => {
       <div class="invoice-bottom-left">
         <div class="amount-words">
           <strong>Amount in Words:</strong><br>
-          Nine Thousand Five Hundred Only
+          ${escapeHtml(amountInWordsHtml)}
         </div>
         <div class="invoice-notes">
            <strong>Notes:</strong>
@@ -7585,27 +7883,44 @@ app.get('/invoice/booking', async (req, res) => {
        <div class="summary-row">
          <span>Sub Total</span>
          <span>
-            Rs. ${Number((amountInr || 0) - (gstAmountInr || 0)).toLocaleString('en-IN')}
+            ${formatInvoiceInr(subtotalAmountInr)}
          </span>
        </div>
+       ${Number(invoiceSummary?.discountAmountInr || 0) > 0 ? `<div class="summary-row">
+         <span>Discount${invoiceSummary?.couponCode ? ` (${escapeHtml(String(invoiceSummary.couponCode))})` : ''}</span>
+         <span>
+           - ${formatInvoiceInr(invoiceSummary.discountAmountInr)}
+         </span>
+       </div>` : ''}
        <div class="summary-row">
          <span>CGST (9%)</span>
          <span>
-           Rs. ${Number((gstAmountInr || 0) / 2).toLocaleString('en-IN')}
+           ${formatInvoiceInr((gstAmountInr || 0) / 2)}
          </span>
        </div>
        <div class="summary-row">
          <span>SGST (9%)</span>
          <span>
-           Rs. ${Number((gstAmountInr || 0) / 2).toLocaleString('en-IN')}
+           ${formatInvoiceInr((gstAmountInr || 0) / 2)}
          </span>
        </div>
        <div class="summary-row summary-total">
          <span>TOTAL</span>
          <span>
-            Rs. ${Number(amountInr || 0).toLocaleString('en-IN')}
+            ${formatInvoiceInr(amountInr)}
          </span>
        </div>
+      </div>
+    </div>
+    <div class="invoice-company-footer">
+      <div>
+        P: 91000 56979, 91000 86979<br>
+        E: hello@h2houseofhealth.com
+      </div>
+      <div>
+        A: 47A, Journalist Colony, Road No:70,<br>
+        Jubilee Hills, Hyderabad - 500033<br>
+        W: www.h2houseofhealth.com
       </div>
     </div>
     
@@ -10356,12 +10671,172 @@ function getMemberHydrogenSingleSessionPriceInr(user) {
   return applyPhoneDiscount(amountInr, user?.mobile || '');
 }
 
+function groupInvoiceItemsByService(items) {
+  const byName = new Map();
+  for (const item of Array.isArray(items) ? items : []) {
+    const serviceName = String(item?.serviceName || '').trim();
+    const amountInr = Math.max(0, Number(item?.amountInr || 0));
+    if (!serviceName || amountInr <= 0) continue;
+    if (!byName.has(serviceName)) {
+      byName.set(serviceName, {
+        serviceName,
+        quantity: 0,
+        bookingDate: item.bookingDate || '',
+        bookingTime: item.bookingTime || '',
+        amountInr: 0,
+      });
+    }
+    const current = byName.get(serviceName);
+    current.quantity += Math.max(1, Number(item.quantity || 1));
+    current.amountInr += amountInr;
+    if (!current.bookingDate && item.bookingDate) current.bookingDate = item.bookingDate;
+    if (!current.bookingTime && item.bookingTime) current.bookingTime = item.bookingTime;
+  }
+  return Array.from(byName.values());
+}
+
+function buildStoredPaidInvoiceWeights(activeBookings, user) {
+  const bookings = Array.isArray(activeBookings) ? activeBookings.filter(Boolean) : [];
+  const hydrogenBookings = bookings.filter((entry) => {
+    const service = getServiceByName(entry.serviceName);
+    return String(service?.category || '').toUpperCase() === 'HYDROGEN SESSION';
+  });
+  const nonHydrogenBookings = bookings.filter((entry) => {
+    const service = getServiceByName(entry.serviceName);
+    return String(service?.category || '').toUpperCase() !== 'HYDROGEN SESSION';
+  });
+  const items = [];
+
+  if (hydrogenBookings.length) {
+    const baseBooking = hydrogenBookings[0];
+    const baseService = getServiceByName(baseBooking.serviceName);
+    const singleSessionService =
+      SERVICE_CATALOG.find(
+        (item) =>
+          String(item.category || '').toUpperCase() === 'HYDROGEN SESSION' &&
+          getHydrogenSessionCountFromServiceName(item.name) === 1
+      ) || baseService;
+    const packageSessions = Math.max(1, getHydrogenSessionCountFromServiceName(baseService?.name || baseBooking.serviceName));
+    const extraSessions = Math.max(0, hydrogenBookings.length - packageSessions);
+    const isTopUpGroup = hydrogenBookings.some((entry) => {
+      const reference = String(entry.paymentReference || '').trim().toLowerCase();
+      return reference === 'buy_extra' || Number(entry.isTopUpSession || 0) === 1;
+    });
+    const chargeableHydrogenBookings = hydrogenBookings.filter(
+      (entry) => String(entry.paymentReference || '').trim().toLowerCase() !== 'membership'
+    );
+    let hydrogenAmountInr = 0;
+    let hydrogenQuantity = hydrogenBookings.length;
+
+    if (isTopUpGroup) {
+      hydrogenAmountInr =
+        Number(getEffectiveServicePriceInr(singleSessionService, user) || 0) * Math.max(1, chargeableHydrogenBookings.length);
+      hydrogenQuantity = Math.max(1, chargeableHydrogenBookings.length);
+    } else if (isMembershipActiveForUser(user)) {
+      hydrogenAmountInr =
+        Number(getMemberHydrogenSingleSessionPriceInr(user) || 0) * Math.max(0, chargeableHydrogenBookings.length);
+      hydrogenQuantity = Math.max(1, chargeableHydrogenBookings.length);
+    } else {
+      hydrogenAmountInr =
+        Number(getEffectiveServicePriceInr(baseService, user) || 0) +
+        Number(getEffectiveServicePriceInr(singleSessionService, user) || 0) * extraSessions;
+    }
+
+    if (hydrogenAmountInr > 0) {
+      const paidSessionsLabel =
+        isMembershipActiveForUser(user) && chargeableHydrogenBookings.length !== hydrogenBookings.length
+          ? `${chargeableHydrogenBookings.length} paid sessions`
+          : `${hydrogenBookings.length} sessions`;
+      items.push({
+        serviceName:
+          hydrogenBookings.length > 1
+            ? `${baseService?.name || baseBooking.serviceName || 'Hydrogen Session'} (${paidSessionsLabel})`
+            : baseService?.name || baseBooking.serviceName || 'Hydrogen Session',
+        quantity: hydrogenQuantity,
+        bookingDate: chargeableHydrogenBookings[0]?.bookingDate || baseBooking.bookingDate || '',
+        bookingTime: chargeableHydrogenBookings[0]?.bookingTime || baseBooking.bookingTime || '',
+        amountInr: hydrogenAmountInr,
+      });
+    }
+  }
+
+  for (const booking of nonHydrogenBookings) {
+    const service = getServiceByName(booking.serviceName);
+    if (!service || service.membershipOnly) continue;
+    const paymentReference = String(booking.paymentReference || '').trim().toLowerCase();
+    if (paymentReference === 'membership') continue;
+    items.push({
+      serviceName: service.name || booking.serviceName,
+      quantity: 1,
+      bookingDate: booking.bookingDate || '',
+      bookingTime: booking.bookingTime || '',
+      amountInr: Number(getEffectiveServicePriceInr(service, user) || 0),
+    });
+  }
+
+  if (items.length) return groupInvoiceItemsByService(items);
+
+  return groupInvoiceItemsByService(
+    bookings.map((booking) => ({
+      serviceName: booking.serviceName || 'Booking',
+      quantity: 1,
+      bookingDate: booking.bookingDate || '',
+      bookingTime: booking.bookingTime || '',
+      amountInr: 1,
+    }))
+  );
+}
+
 function buildPaidBookingInvoiceSummaryFromStoredAmounts(activeBookings, user) {
   const paidBookings = (Array.isArray(activeBookings) ? activeBookings : []).filter(
     (entry) => String(entry?.paymentStatus || '').trim().toLowerCase() === 'paid'
   );
   if (!paidBookings.length || paidBookings.length !== activeBookings.length) return null;
-  return null;
+  const storedPaidAmountPaise = paidBookings.reduce(
+    (sum, entry) => sum + Math.max(0, Math.round(Number(entry?.paidAmountPaise || 0))),
+    0
+  );
+  if (storedPaidAmountPaise <= 0) return null;
+
+  const totalAmountInr = storedPaidAmountPaise / 100;
+  const breakdown = getGstBreakdownForAmountInr(totalAmountInr, { fromGross: true });
+  const discountMeta = getPaidBookingDiscountMeta(paidBookings);
+  const discountAmountInr = Math.max(0, Number(discountMeta.discountAmountInr || 0));
+  const taxableAmountInr = breakdown.subtotalAmountInr;
+  const subtotalAmountInr = taxableAmountInr + discountAmountInr;
+  const weightedItems = buildStoredPaidInvoiceWeights(paidBookings, user);
+  const weightTotal = weightedItems.reduce((sum, item) => sum + Math.max(0, Number(item.amountInr || 0)), 0);
+  let runningSubtotal = 0;
+  const invoiceItems = weightedItems.map((item, index) => {
+    const amountInr =
+      index === weightedItems.length - 1
+        ? Math.max(0, subtotalAmountInr - runningSubtotal)
+        : Math.max(0, Math.round((Math.max(0, Number(item.amountInr || 0)) / Math.max(1, weightTotal)) * subtotalAmountInr));
+    runningSubtotal += amountInr;
+    return {
+      serviceName: item.serviceName,
+      quantity: Math.max(1, Number(item.quantity || 1)),
+      bookingDate: item.bookingDate || '',
+      bookingTime: item.bookingTime || '',
+      amountInr,
+    };
+  }).filter((item) => Number(item.amountInr || 0) > 0);
+
+  return {
+    serviceName: invoiceItems.length === 1 ? invoiceItems[0].serviceName : 'Booking',
+    totalAmountInr,
+    payableAmountInr: totalAmountInr,
+    amountInr: totalAmountInr,
+    subtotalAmountInr,
+    taxableAmountInr,
+    gstAmountInr: breakdown.gstAmountInr,
+    gstRatePercent: GST_RATE_PERCENT,
+    gstIncluded: true,
+    bookingCount: paidBookings.length,
+    discountAmountInr,
+    couponCode: discountMeta.couponCode,
+    invoiceItems,
+  };
 }
 
 function buildBookingInvoiceSummary(bookings, user) {
@@ -10372,33 +10847,8 @@ function buildBookingInvoiceSummary(bookings, user) {
     return { serviceName: 'Booking', totalAmountInr: 0, amountInr: 0, bookingCount: 0 };
   }
 
-  const storedPaidAmountPaise = activeBookings.reduce((sum, entry) => {
-    if (String(entry?.paymentStatus || '').trim().toLowerCase() !== 'paid') return sum;
-    return sum + Math.max(0, Math.round(Number(entry?.paidAmountPaise || 0)));
-  }, 0);
-  if (storedPaidAmountPaise > 0) {
-    const totalAmountInr = storedPaidAmountPaise / 100;
-    const breakdown = getGstBreakdownForAmountInr(totalAmountInr, { fromGross: true });
-    return {
-      serviceName: activeBookings[0]?.serviceName || 'Booking',
-      totalAmountInr,
-      payableAmountInr: totalAmountInr,
-      amountInr: totalAmountInr,
-      subtotalAmountInr: breakdown.subtotalAmountInr,
-      gstAmountInr: breakdown.gstAmountInr,
-      gstRatePercent: GST_RATE_PERCENT,
-      gstIncluded: true,
-      bookingCount: activeBookings.length,
-      invoiceItems: [
-        {
-          serviceName: activeBookings[0]?.serviceName || 'Booking',
-          bookingDate: activeBookings[0]?.bookingDate || '',
-          bookingTime: activeBookings[0]?.bookingTime || '',
-          amountInr: breakdown.subtotalAmountInr,
-        },
-      ],
-    };
-  }
+  const storedPaidSummary = buildPaidBookingInvoiceSummaryFromStoredAmounts(activeBookings, user);
+  if (storedPaidSummary) return storedPaidSummary;
 
   const hydrogenBookings = activeBookings.filter((entry) => {
     const service = getServiceByName(entry.serviceName);
