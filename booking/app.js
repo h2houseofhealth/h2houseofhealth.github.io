@@ -4577,19 +4577,17 @@ function updateBookingSummary() {
     return;
   }
   if (isEditingExistingBooking && selectedAddOn) {
-    const gstBreakdown = getGstBreakdownInr(addOnPrice, { fromGross: true });
     elements.summaryContent.innerHTML = `
-      <div><span>Add-on: ${escapeHtml(selectedAddOn.name)}</span><span>Rs. ${gstBreakdown.subtotalAmountInr.toLocaleString('en-IN')}</span></div>
-      <div><span>GST ${GST_RATE_PERCENT}%</span><span>Rs. ${gstBreakdown.gstAmountInr.toLocaleString('en-IN')}</span></div>
-      <div class="summary-total"><span>Total Payable</span><span>Rs. ${gstBreakdown.totalAmountInr.toLocaleString('en-IN')}</span></div>
+      <div><span>Add-on: ${escapeHtml(selectedAddOn.name)}</span><span>Rs. ${addOnPrice.toLocaleString('en-IN')}</span></div>
+      <div class="summary-total"><span>Total Payable</span><span>Rs. ${addOnPrice.toLocaleString('en-IN')}</span></div>
+      <div class="summary-note"><small>All prices are inclusive of taxes</small></div>
     `;
-    elements.totalPayable.textContent = `Rs. ${gstBreakdown.totalAmountInr.toLocaleString('en-IN')}`;
+    elements.totalPayable.textContent = `Rs. ${addOnPrice.toLocaleString('en-IN')}`;
     elements.bookingSummary.hidden = false;
     return;
   }
   const totalPrice = basePrice + addOnPrice;
-  const gstBreakdown = getGstBreakdownInr(totalPrice, { fromGross: true });
-  const payableTotal = gstBreakdown.totalAmountInr;
+  const payableTotal = totalPrice;
 
   const summaryLines = [];
   summaryLines.push(
@@ -4600,8 +4598,8 @@ function updateBookingSummary() {
     summaryLines.push(`<div><span>Add-on: ${escapeHtml(selectedAddOn.name)}</span><span>Rs. ${addOnPrice.toLocaleString('en-IN')}</span></div>`);
   }
   if (totalPrice > 0) {
-    summaryLines.push(`<div><span>GST ${GST_RATE_PERCENT}% (incl.)</span><span>Rs. ${gstBreakdown.gstAmountInr.toLocaleString('en-IN')}</span></div>`);
     summaryLines.push(`<div class="summary-total"><span>Total Payable</span><span>Rs. ${payableTotal.toLocaleString('en-IN')}</span></div>`);
+    summaryLines.push(`<div class="summary-note"><small>All prices are inclusive of taxes</small></div>`);
   }
   
   elements.summaryContent.innerHTML = summaryLines.join('');
@@ -5577,8 +5575,7 @@ async function saveHydrogenPackBookings({ serviceName, extraSessions, slots, add
         : 'Chargeable hydrogen sessions: 0'
       : `Extra Hydrogen Sessions: ${Number(summary.extraSessions || 0)} x Rs. ${Number(summary.extraSessionPriceInr || 0).toLocaleString('en-IN')}`,
     addOn ? `IV Add-on: ${addOn.serviceName} - Rs. ${Number(addOn.amountInr || 0).toLocaleString('en-IN')}` : 'IV Add-on: None',
-    `GST ${GST_RATE_PERCENT}%: Rs. ${Number(payableBreakdown.gstAmountInr || 0).toLocaleString('en-IN')}`,
-    `Total Payable: Rs. ${Number(payableBreakdown.totalAmountInr || totalAmountInr || 0).toLocaleString('en-IN')}`,
+    `Total Payable: Rs. ${Number(payableBreakdown.totalAmountInr || totalAmountInr || 0).toLocaleString('en-IN')} (inclusive of all taxes)`,
     '',
     isAdmin ? 'Saved to All User Bookings.' : 'Saved to My Bookings.',
     isAdmin
@@ -5720,8 +5717,7 @@ async function updateHydrogenPackBookings({ bookingGroupId, serviceName, extraSe
     }
   }
   lines.push(addOn ? `IV Add-on: ${addOn.serviceName} - Rs. ${Number(addOn.amountInr || 0).toLocaleString('en-IN')}` : 'IV Add-on: None');
-  lines.push(`GST ${GST_RATE_PERCENT}%: Rs. ${Number(payableBreakdown.gstAmountInr || 0).toLocaleString('en-IN')}`);
-  lines.push(`Total Payable: Rs. ${Number(payableBreakdown.totalAmountInr || totalAmountInr || 0).toLocaleString('en-IN')}`);
+  lines.push(`Total Payable: Rs. ${Number(payableBreakdown.totalAmountInr || totalAmountInr || 0).toLocaleString('en-IN')} (inclusive of all taxes)`);
 
   resetHydrogenComposer();
   await loadDashboardData();
@@ -8858,10 +8854,10 @@ function renderHydrogenUnifiedComposer({ detailsContainer, services, category, i
     if (selectedAddOnService && selectedAddOnPriceInr > 0) {
       priceBreakdownHtml += `<div class="breakdown-item"><span>${escapeHtml(selectedAddOnService.name)}</span><span>₹${selectedAddOnPriceInr.toLocaleString('en-IN')}</span></div>`;
     }
-    const gstBreakdown = getGstBreakdownInr(selectedServicePrice + selectedAddOnPriceInr, { fromGross: true });
-    if ((selectedServicePrice + selectedAddOnPriceInr) > 0) {
-      priceBreakdownHtml += `<div class="breakdown-item"><span>GST ${GST_RATE_PERCENT}% (incl.)</span><span>₹${gstBreakdown.gstAmountInr.toLocaleString('en-IN')}</span></div>`;
-      priceBreakdownHtml += `<div class="breakdown-total"><span>Total</span><span>₹${gstBreakdown.totalAmountInr.toLocaleString('en-IN')}</span></div>`;
+    const totalServicePrice = selectedServicePrice + selectedAddOnPriceInr;
+    if (totalServicePrice > 0) {
+      priceBreakdownHtml += `<div class="breakdown-total"><span>Total</span><span>₹${totalServicePrice.toLocaleString('en-IN')}</span></div>`;
+      priceBreakdownHtml += `<div class="breakdown-item"><small>All prices are inclusive of taxes</small></div>`;
     }
     priceBreakdownHtml += `</div>`;
   }
@@ -11305,7 +11301,7 @@ function renderMembership() {
       <div class="membership-card-body">
         <div class="membership-card-price-block">
           <p class="membership-price">Rs. ${estimatedAmountInr.toLocaleString('en-IN')}</p>
-          <p class="membership-price-caption">1-year access • ${escapeHtml(plan.validityDays)} days • Includes GST ${GST_RATE_PERCENT}%</p>
+          <p class="membership-price-caption">1-year access • ${escapeHtml(plan.validityDays)} days • Inclusive of all taxes</p>
         </div>
         <p class="membership-includes-label">Includes:</p>
         <ul class="membership-feature-list">
@@ -11819,19 +11815,16 @@ function renderMembershipCheckoutSummary() {
     const original = Number(preview.originalAmountInr || estimatedAmountInr || 0);
     const discount = Number(preview.discountAmountInr || 0);
     const gst = Number(preview.gstAmountInr || 0);
-    const payable = Number(preview.payableAmountInr || Math.max(0, original - discount + gst));
+    const payable = Number(preview.payableAmountInr || Math.max(0, original - discount));
     elements.membershipPlanSummary.textContent =
       `Members: ${targetPeopleCount} • Estimated: Rs. ${original.toLocaleString('en-IN')}` +
       ` • Coupon: -Rs. ${discount.toLocaleString('en-IN')}` +
-      ` • GST ${GST_RATE_PERCENT}%: Rs. ${gst.toLocaleString('en-IN')}` +
-      ` • Payable: Rs. ${payable.toLocaleString('en-IN')}${addPersonValidityNote}`;
+      ` • Payable: Rs. ${payable.toLocaleString('en-IN')} (inclusive of all taxes)${addPersonValidityNote}`;
     return;
   }
 
   elements.membershipPlanSummary.textContent =
-    `Members: ${targetPeopleCount} • Estimated Amount: Rs. ${estimatedBreakdown.subtotalAmountInr.toLocaleString('en-IN')}` +
-    ` • GST ${GST_RATE_PERCENT}%: Rs. ${estimatedBreakdown.gstAmountInr.toLocaleString('en-IN')}` +
-    ` • Payable: Rs. ${estimatedBreakdown.totalAmountInr.toLocaleString('en-IN')}${addPersonValidityNote}`;
+    `Members: ${targetPeopleCount} • Payable: Rs. ${estimatedBreakdown.totalAmountInr.toLocaleString('en-IN')} (inclusive of all taxes)${addPersonValidityNote}`;
 }
 
 function renderCouponPreview(preview, target) {
@@ -11852,8 +11845,7 @@ function renderCouponPreview(preview, target) {
     <strong>${escapeHtml(preview.code || '')}</strong>
     ${description ? `<span>${escapeHtml(description)}</span>` : ''}
     <span>Discount: Rs. ${discount.toLocaleString('en-IN')} off</span>
-    <span>GST ${GST_RATE_PERCENT}%: Rs. ${gst.toLocaleString('en-IN')}</span>
-    <span>Payable: Rs. ${payable.toLocaleString('en-IN')} (was Rs. ${original.toLocaleString('en-IN')})</span>
+    <span>Payable: Rs. ${payable.toLocaleString('en-IN')} (was Rs. ${original.toLocaleString('en-IN')}) • inclusive of all taxes</span>
   `;
 }
 
@@ -12772,12 +12764,9 @@ function renderUserCheckoutSummary(bookings) {
     ${
       coupon
         ? `<span>Subtotal: Rs. ${Number(summary.subtotalAmountInr || summary.totalAmountInr || 0).toLocaleString('en-IN')}</span>
-           <span>GST ${GST_RATE_PERCENT}%: Rs. ${Number(summary.gstAmountInr || 0).toLocaleString('en-IN')}</span>
            <span>Coupon Savings: -Rs. ${discountAmountInr.toLocaleString('en-IN')}</span>
-           <span>Total payable: Rs. ${payableAmountInr.toLocaleString('en-IN')}</span>`
-        : `<span>Subtotal: Rs. ${Number(summary.subtotalAmountInr || summary.totalAmountInr || 0).toLocaleString('en-IN')}</span>
-           <span>GST ${GST_RATE_PERCENT}%: Rs. ${Number(summary.gstAmountInr || 0).toLocaleString('en-IN')}</span>
-           <span>Total payable: Rs. ${Number(summary.payableAmountInr || summary.totalAmountInr || 0).toLocaleString('en-IN')}</span>`
+           <span>Total payable: Rs. ${payableAmountInr.toLocaleString('en-IN')} (inclusive of all taxes)</span>`
+        : `<span>Total payable: Rs. ${Number(summary.payableAmountInr || summary.totalAmountInr || 0).toLocaleString('en-IN')} (inclusive of all taxes)</span>`
     }
     ${holdLine}
   `;
@@ -13017,9 +13006,7 @@ function buildUserBookingRows(bookings, allBookings = bookings) {
               {
                 title: 'Payment',
                 lines: [
-                  `Subtotal: Rs. ${Number(breakdown.subtotalAmountInr || 0).toLocaleString('en-IN')}`,
-                  `GST ${GST_RATE_PERCENT}%: Rs. ${Number(breakdown.gstAmountInr || 0).toLocaleString('en-IN')}`,
-                  `Total: Rs. ${Number(payableBreakdown.totalAmountInr || breakdown.totalAmountInr || 0).toLocaleString('en-IN')}`,
+                  `Total: Rs. ${Number(payableBreakdown.totalAmountInr || breakdown.totalAmountInr || 0).toLocaleString('en-IN')} (inclusive of all taxes)`,
                   ...(payableBreakdown.totalAmountInr > 0
                     ? [`Payable now: Rs. ${Number(payableBreakdown.totalAmountInr).toLocaleString('en-IN')}`]
                     : []),
@@ -14999,18 +14986,12 @@ function getGstBreakdownInr(amountInr, { fromGross = false } = {}) {
 
 function formatAmountWithGstLabel(amountInr) {
   const breakdown = getGstBreakdownInr(amountInr, { fromGross: true });
-  if (breakdown.gstAmountInr <= 0) {
-    return `Rs. ${breakdown.totalAmountInr.toLocaleString('en-IN')}`;
-  }
-  return `Rs. ${breakdown.totalAmountInr.toLocaleString('en-IN')} (incl. GST ${GST_RATE_PERCENT}%: Rs. ${breakdown.gstAmountInr.toLocaleString('en-IN')})`;
+  return `Rs. ${breakdown.totalAmountInr.toLocaleString('en-IN')}`;
 }
 
 function formatGrossAmountWithGstLabel(amountInr) {
   const breakdown = getGstBreakdownInr(amountInr, { fromGross: true });
-  if (breakdown.gstAmountInr <= 0) {
-    return `Rs. ${breakdown.totalAmountInr.toLocaleString('en-IN')}`;
-  }
-  return `Rs. ${breakdown.totalAmountInr.toLocaleString('en-IN')} (GST ${GST_RATE_PERCENT}%: Rs. ${breakdown.gstAmountInr.toLocaleString('en-IN')})`;
+  return `Rs. ${breakdown.totalAmountInr.toLocaleString('en-IN')}`;
 }
 
 function getBookingDisplayAmountInr(booking) {
