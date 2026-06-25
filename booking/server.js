@@ -31,6 +31,12 @@ const Mailgun = require('mailgun.js');
 const formData = require('form-data');
 const Razorpay = require('razorpay');
 const multer = require('multer');
+let puppeteer;
+try {
+  puppeteer = require('puppeteer');
+} catch {
+  puppeteer = null;
+}
 
 loadEnvFromFile(path.join(__dirname, '.env'));
 
@@ -2298,8 +2304,10 @@ app.get('/api/membership-orders/:orderId/invoice-link', requireAuth, (req, res) 
     userId: order.userId,
   });
 
+  const invoiceUrl = `${getRequestOrigin(req)}/invoice/membership?token=${encodeURIComponent(token)}`;
   return res.json({
-    invoiceUrl: `${getRequestOrigin(req)}/invoice/membership?token=${encodeURIComponent(token)}`,
+    invoiceUrl,
+    invoiceDownloadUrl: `${invoiceUrl}&format=pdf&download=1`,
   });
 });
 
@@ -5471,8 +5479,10 @@ app.get('/api/bookings/:id/invoice-link', requireAuth, (req, res) => {
     userId: booking.userId,
   });
 
+  const invoiceUrl = `${getRequestOrigin(req)}/invoice/booking?token=${encodeURIComponent(token)}`;
   return res.json({
-    invoiceUrl: `${getRequestOrigin(req)}/invoice/booking?token=${encodeURIComponent(token)}`,
+    invoiceUrl,
+    invoiceDownloadUrl: `${invoiceUrl}&format=pdf&download=1`,
   });
 });
 
@@ -7077,7 +7087,75 @@ app.post('/api/payments/create-order', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/invoice/booking', (req, res) => {
+function shouldDownloadInvoicePdf(req) {
+  const format = String(req.query?.format || '').trim().toLowerCase();
+  const download = String(req.query?.download || '').trim().toLowerCase();
+  return format === 'pdf' || ['1', 'true', 'yes'].includes(download);
+}
+
+function sanitizeInvoiceFilenamePart(value) {
+  return String(value || 'Invoice')
+    .replace(/[^a-z0-9_-]+/gi, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80) || 'Invoice';
+}
+
+function prepareInvoiceHtmlForPdf(html, req) {
+  const origin = getRequestOrigin(req).replace(/\/+$/, '');
+  return String(html || '')
+    .replace(/<head>/i, `<head><base href="${escapeHtml(origin)}/">`)
+    .replace(/url\('\/([^']+)'\)/g, `url('${origin}/$1')`)
+    .replace(/url\("\/([^"]+)"\)/g, `url("${origin}/$1")`)
+    .replace(/url\(\/([^)]+)\)/g, `url(${origin}/$1)`)
+    .replace(/\ssrc="\/([^"]+)"/g, ` src="${origin}/$1"`)
+    .replace(/\shref="\/([^"]+)"/g, ` href="${origin}/$1"`);
+}
+
+async function sendInvoiceResponse(req, res, html, invoiceNo) {
+  if (!shouldDownloadInvoicePdf(req)) {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(html);
+  }
+
+  if (!puppeteer) {
+    return res.status(503).json({
+      message: 'PDF invoice download requires Puppeteer. Install the minimal dependency with: npm install puppeteer',
+    });
+  }
+
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1200, height: 1600, deviceScaleFactor: 1 });
+    await page.setContent(prepareInvoiceHtmlForPdf(html, req), {
+      waitUntil: ['load', 'networkidle0'],
+    });
+    const pdfBuffer = await page.pdf({
+      width: '240mm',
+      height: '320mm',
+      printBackground: true,
+      margin: { top: '0', right: '0', bottom: '0', left: '0' },
+    });
+    const safeInvoiceNo = sanitizeInvoiceFilenamePart(invoiceNo);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=Invoice-${safeInvoiceNo}.pdf`);
+    return res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Invoice PDF generation failed:', error);
+    return res.status(500).json({ message: 'Unable to generate invoice PDF right now.' });
+  } finally {
+    if (browser) {
+      await browser.close().catch(() => {});
+    }
+  }
+}
+
+app.get('/invoice/booking', async (req, res) => {
   const access = verifyInvoiceAccessToken(req.query?.token);
   if (!access || access.scope !== 'booking_invoice' || !Number.isInteger(access.bookingId) || !Number.isInteger(access.userId)) {
     return res.status(400).send('Invalid or expired invoice link');
@@ -7173,13 +7251,19 @@ app.get('/invoice/booking', (req, res) => {
   const subtotalAmountInr = useExplicitSplit ? explicitSubtotalAmountInr : grossBreakdown.subtotalAmountInr;
   const gstAmountInr = useExplicitSplit ? explicitGstAmountInr : grossBreakdown.gstAmountInr;
   const invoiceRowsHtml = invoiceItems
-    .map((item) => {
+    .map((item, index) => {
       const itemDateTime = formatDateTimeWithComma(item.bookingDate || booking.bookingDate, item.bookingTime || booking.bookingTime);
       const rowAmountInr = invoiceItems.length === 1 ? subtotalAmountInr : Number(item.amountInr || 0);
       return `<tr>
+          <td>${index + 1}</td>
           <td>${escapeHtml(item.serviceName || 'Booking')}</td>
-          <td>${escapeHtml(itemDateTime)}</td>
-          <td class="right">Rs. ${Number(rowAmountInr || 0).toLocaleString('en-IN')}</td>
+          <td>1</td>
+          <td class="right">
+              Rs. ${Number(rowAmountInr || 0).toLocaleString('en-IN')}
+          </td>
+          <td class="right">
+              Rs. ${Number(rowAmountInr || 0).toLocaleString('en-IN')}
+          </td>
         </tr>`;
     })
     .join('');
@@ -7190,8 +7274,7 @@ app.get('/invoice/booking', (req, res) => {
   const customerEmail = bookingOwner?.email || '';
   const customerMobile = bookingOwner?.mobile || '';
 
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  return res.send(`<!doctype html>
+  const invoiceHtml = `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -7199,7 +7282,7 @@ app.get('/invoice/booking', (req, res) => {
   <title>Billing Invoice ${escapeHtml(invoiceNo)}</title>
   <style>
     :root{--ink:#111;--muted:#444;--line:#e8e8f0}
-    html,body{height:100%}
+    html,body{min-height:100%;height:auto;overflow-y:auto}
     body{
       font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
       margin:0;
@@ -7209,22 +7292,142 @@ app.get('/invoice/booking', (req, res) => {
       print-color-adjust:exact;
     }
     .page{
-      width:min(210mm, calc(100% - 24px));
-      min-height:297mm;
+      width:min(240mm, calc(100% - 24px));
+      min-height:320mm;
       margin:18px auto;
       box-sizing:border-box;
       background:#fff url('/booking/assets/invoice-page.png') no-repeat top center;
-      background-size:cover;
+      background-size:100% 100%;
       padding:46mm 18mm 18mm 18mm;
       box-shadow:0 10px 32px rgba(0,0,0,.10);
+      overflow:visible;
     }
     .row{display:flex;gap:16px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap}
     .title{font-size:18px;margin:0 0 4px;letter-spacing:.02em}
     .muted{color:var(--muted);font-size:13px;line-height:1.35}
     .block{margin-top:10px}
+    .invoice-box{
+       border:1px solid rgba(174,84,49,0.35);
+       margin-top:8px;
+       width:220px;
+       margin-left:auto;
+       margin-bottom:12px;
+    }
+    .invoice-box-label,
+    .invoice-section-title{
+
+       background:#AE5431;
+       color:#fff;
+       padding:12px;
+       font-weight:700;
+       text-align:center;
+    }
+    .invoice-box,
+    .invoice-to-card{
+      border:1px solid rgba(174,84,49,0.35);
+    }
+    .invoice-box div:last-child{
+       padding:10px;
+       text-align:center;
+    }
+    .invoice-to-card{
+      margin-top:24px;
+      border:1px solid rgba(174,84,49,0.35);
+    }
+    .invoice-to-body{
+      padding:14px 18px;
+    }
+    .invoice-section-title{
+      background:#AE5431;
+      padding:10px;
+      font-weight:700;
+      text-align:center;
+    }
+    .customer-table{
+       width:100%;
+       margin-top:24px;
+       border-collapse:collapse;
+       table-layout:fixed;
+    }
+
+    .customer-table th{
+       background:#AE5431;
+       color:#fff;
+       padding:12px;
+    }
+    .customer-table td{
+       padding:16px;
+       border:1px solid #d7b5a2;
+    }
+    .service-info-card{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      margin-top:24px;
+      margin-bottom:24px;
+      border:1px solid rgba(174,84,49,0.35);
+    }
+    .invoice-bottom-section{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      margin-top:24px;
+      gap:40px;
+    }
+     
+    .invoice-bottom-left{
+      flex:1;
+    }
+    .summary-box{
+       width:340px;
+       margin-left:auto;
+       margin-top:24px;
+       border:1px solid rgba(174,84,49,.35);
+    }
+    .invoice-bottom-section .summary-box{
+      margin-top:0;
+    }
+    .summary-row{
+       display:flex;
+       justify-content:space-between;
+       padding:12px 18px;
+       border-bottom:1px solid rgba(174,84,49,.15);
+    }
+
+    .summary-row:last-child{
+      border-bottom:none;
+    }
+
+    .summary-total{
+      background:#AE5431;
+      color:#fff;
+      font-weight:700;
+    
+    }
+    .service-info-col{
+      border-right:1px solid rgba(174,84,49,0.35);
+    }
+    .service-info-col:last-child{
+      border-right:none;
+    }
+    .service-info-title{
+      background:#AE5431;
+      color:#fff;
+      padding:12px;
+      font-weight:700;
+      text-align:center;
+    }
+    .service-info-body{
+      padding:18px;
+      min-height:120px;
+      line-height:1.8;
+    }
+    
     .gst{margin-top:6px}
     .gst-space{display:inline-block;min-width:240px;border-bottom:1px solid #777;transform:translateY(-2px)}
     table{width:100%;border-collapse:collapse;margin-top:18px}
+    .invoice-service-table{width:100%;border-collapse:collapse;margin-top:24px;}
+    .invoice-service-table th{background:#AE5431;color:#fff;border:1px solid rgba(174,84,49,.35);padding:12px;}
+    .invoice-service-table td{border:1px solid rgba(174,84,49,.35);padding:14px;}
     th,td{border-bottom:1px solid var(--line);padding:10px 8px;text-align:left;font-size:14px;vertical-align:top}
     th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
     .right{text-align:right}
@@ -7235,12 +7438,28 @@ app.get('/invoice/booking', (req, res) => {
       body{background:#fff}
       .page{
         width:100%;
-        min-height:100vh;
+        min-height:calc(100vw * 1448 / 1086);
         margin:0;
         padding:132px 16px 24px;
         box-shadow:none;
-        background-size:100% auto;
+        background-size:100% 100%;
       }
+      .invoice-box{width:min(220px, 100%)}
+      .customer-table{table-layout:auto}
+      .customer-table th,
+      .customer-table td{display:block;width:100%;text-align:left}
+      .customer-table colgroup,
+      .customer-table thead{display:none}
+      .customer-table td:nth-child(1)::before{content:"Invoice to: ";font-weight:700;color:#AE5431}
+      .customer-table td:nth-child(2)::before{content:"Email: ";font-weight:700;color:#AE5431}
+      .customer-table td:nth-child(3)::before{content:"Phone: ";font-weight:700;color:#AE5431}
+      .service-info-card{display:block}
+      .service-info-col{border-right:0;border-bottom:1px solid rgba(174,84,49,0.35)}
+      .service-info-col:last-child{border-bottom:0}
+      .service-info-body{min-height:auto}
+      .invoice-bottom-section{display:block}
+      .summary-box{width:100%;margin-left:0}
+      .invoice-bottom-section .summary-box{margin-top:16px}
       .row{display:block}
       .row > div{max-width:100%;overflow-wrap:anywhere}
       .row > div + div{margin-top:18px}
@@ -7254,59 +7473,150 @@ app.get('/invoice/booking', (req, res) => {
     }
     @media print{
       body{background:#fff}
-      .page{width:210mm;margin:0;box-shadow:none}
+      .page{width:240mm;margin:0;box-shadow:none}
     }
   </style>
 </head>
 <body>
   <div class="page">
-    <div class="row">
+    <div class="row invoice-header">
       <div>
-        <h1 class="title">Billing Invoice</h1>
-        <div class="muted">Invoice No: ${escapeHtml(invoiceNo)}</div>
-        ${paidAtLabel ? `<div class="muted">Paid at: ${escapeHtml(paidAtLabel)}</div>` : ''}
-      </div>
-      <div>
-        <div class="muted"><strong>Customer</strong></div>
-        <div>${escapeHtml(customerName)}</div>
-        <div class="muted">${escapeHtml(customerEmail)}</div>
-        <div class="muted">${escapeHtml(customerMobile)}</div>
+        <div style="font-weight:700;">
+           Vasporixus Apex Therapeutics LLP
+        </div>
+        <div class="muted">
+           GSTIN: 36ABBFV3058K1ZW
+        </div>
       </div>
     </div>
+    <div style="text-align:right;">
 
-    <table>
+      <div class="invoice-box">
+         <div class="invoice-box-label">INVOICE</div>
+         <div>${escapeHtml(invoiceNo)}</div>
+      </div>
+
+      <div class="invoice-box">
+         <div class="invoice-box-label">DATE</div>
+         <div>${escapeHtml(paidAtLabel || generatedAtLabel)}</div>
+      </div>
+    </div>
+    <table class="customer-table">
+      <colgroup>
+        <col style="width:33%">
+        <col style="width:34%">
+        <col style="width:33%">
+      </colgroup>
+      <thead>
+       <tr>
+         <th>INVOICE TO</th>
+         <th>EMAIL</th>
+         <th>PHONE</th>
+       </tr>
+      </thead>
+      <tbody>
+        <tr>
+           <td>${escapeHtml(customerName)}</td>
+           <td>${escapeHtml(customerEmail)}</td>
+           <td>${escapeHtml(customerMobile)}</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="service-info-card">
+
+      <div class="service-info-col">
+         <div class="service-info-title">
+            DESCRIPTION
+         </div>
+
+         <div class="service-info-body">
+           <strong>Hydrogen Session</strong><br>
+           Personalized health consultation and
+           comprehensive wellness assessment.
+         </div>
+      </div>
+
+      <div class="service-info-col">
+        <div class="service-info-title">
+            SERVICE DETAILS
+        </div>
+        <div class="service-info-body">
+
+            <li>One-on-one consultation</li>
+            <li>Health evaluation</li>
+            <li>Personalized wellness guidance</li>
+            <li>Post-session support</li>
+        </div>
+      </div>
+
+    </div>
+    
+
+    <table class="invoice-service-table">
       <thead>
         <tr>
-          <th>Service</th>
-          <th>Date & Time</th>
+          <th>S.N0</th>
+          <th>DESCRIPTION</th>
+          <th>QYT</th>
+          <th class="right">UNIT PRICE</th>
           <th class="right">Amount</th>
         </tr>
       </thead>
       <tbody>
         ${invoiceRowsHtml}
       </tbody>
-      <tfoot>
-        <tr>
-          <td colspan="2" class="right">GST ${GST_RATE_PERCENT}%</td>
-          <td class="right">Rs. ${Number(gstAmountInr || 0).toLocaleString('en-IN')}</td>
-        </tr>
-        <tr>
-          <td colspan="2" class="right total">Total</td>
-          <td class="right total">Rs. ${Number(amountInr || 0).toLocaleString('en-IN')}</td>
-        </tr>
-      </tfoot>
+      
     </table>
-
-    <div class="footer muted">
-      ${booking.paymentReference ? `<div>Payment ref: ${escapeHtml(String(booking.paymentReference))}</div>` : ''}
-      <div>Generated on ${escapeHtml(generatedAtLabel || '-')}</div>
+    <div class="invoice-bottom-section">
+      <div class="invoice-bottom-left">
+        <div class="amount-words">
+          <strong>Amount in Words:</strong><br>
+          Nine Thousand Five Hundred Only
+        </div>
+        <div class="invoice-notes">
+           <strong>Notes:</strong>
+             <ul>
+              <li>Payment to be made within 15 days from the date of invoice.</li>
+              <li>Please quote the invoice number while making the payment.</li>
+             </ul>
+        </div>
+      </div>
+      <div class="summary-box">
+       <div class="summary-row">
+         <span>Sub Total</span>
+         <span>
+            Rs. ${Number((amountInr || 0) - (gstAmountInr || 0)).toLocaleString('en-IN')}
+         </span>
+       </div>
+       <div class="summary-row">
+         <span>CGST (9%)</span>
+         <span>
+           Rs. ${Number((gstAmountInr || 0) / 2).toLocaleString('en-IN')}
+         </span>
+       </div>
+       <div class="summary-row">
+         <span>SGST (9%)</span>
+         <span>
+           Rs. ${Number((gstAmountInr || 0) / 2).toLocaleString('en-IN')}
+         </span>
+       </div>
+       <div class="summary-row summary-total">
+         <span>TOTAL</span>
+         <span>
+            Rs. ${Number(amountInr || 0).toLocaleString('en-IN')}
+         </span>
+       </div>
+      </div>
     </div>
+    
+    
   </div>
 </body>
-</html>`);
+</html>`;
+  return sendInvoiceResponse(req, res, invoiceHtml, invoiceNo);
 });
 
-app.get('/invoice/membership', (req, res) => {
+app.get('/invoice/membership', async (req, res) => {
   const access = verifyInvoiceAccessToken(req.query?.token);
   if (!access || access.scope !== 'membership_invoice' || !access.orderId || !Number.isInteger(access.userId)) {
     return res.status(400).send('Invalid or expired invoice link');
@@ -7348,8 +7658,7 @@ app.get('/invoice/membership', (req, res) => {
   const gstAmountInr = Math.max(0, Math.round((taxableAmountInr * GST_RATE_PERCENT) / 100));
   const amountInr = taxableAmountInr + gstAmountInr;
 
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  return res.send(`<!doctype html>
+  const invoiceHtml = `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -7357,7 +7666,7 @@ app.get('/invoice/membership', (req, res) => {
   <title>Membership Invoice ${invoiceNo}</title>
   <style>
     :root{--ink:#111;--muted:#444;--line:#e8e8f0}
-    html,body{height:100%}
+    html,body{min-height:100%;height:auto;overflow-y:auto}
     body{
       font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
       margin:0;
@@ -7367,14 +7676,15 @@ app.get('/invoice/membership', (req, res) => {
       print-color-adjust:exact;
     }
     .page{
-      width:min(210mm, calc(100% - 24px));
-      min-height:297mm;
+      width:min(240mm, calc(100% - 24px));
+      min-height:320mm;
       margin:18px auto;
       box-sizing:border-box;
       background:#fff url('/booking/assets/invoice-page.png') no-repeat top center;
-      background-size:cover;
+      background-size:100% 100%;
       padding:46mm 18mm 18mm 18mm;
       box-shadow:0 10px 32px rgba(0,0,0,.10);
+      overflow:visible;
     }
     .row{display:flex;gap:16px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap}
     .title{font-size:18px;margin:0 0 4px;letter-spacing:.02em}
@@ -7386,18 +7696,55 @@ app.get('/invoice/membership', (req, res) => {
     th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
     .right{text-align:right}
     .total{font-weight:700;font-size:16px}
-    .footer{margin-top:14px}
+    .summary-box{
+       width:320px;
+       margin-left:auto;
+       margin-top:20px;
+       border:1px solid #d7b5a2;
+       flex-shrink:0;
+      }
+    .summary-row{
+       display:flex;
+       justify-content:space-between;
+       padding:10px 16px;
+       border-bottom:1px solid #e5d4cb;
+    }
+    .summary-total{
+      background:#AE5431;
+      color:#fff;
+      font-weight:700;
+    }
+    .amount-words{margin-top:60px;font-size:16px;}
+    .amount-words strong{color:#AE5431;}
+    .amount-words{clear:both;margin-top:50px;}
+    .invoice-notes strong{color:#AE5431;}
+    .invoice-notes ol{margin-top:10px;padding-left:22px;}
+    .invoice-notes{margin-top:24px;margin-bottom:120px;}
+    .invoice-company-footer{
+        display:grid;
+        margin-top:180px;
+        padding-top:20px;
+        border-top:1px solid #d7b5a2;
+        clear:both;
+        gap:40px;
+        grid-template-columns:1fr 1fr;
+    }
+    .invoice-company-footer div{word-break:break-word;}
+    .footer{margin-top:24px}
     @media screen and (max-width:700px){
       html,body{height:auto;min-height:100%}
       body{background:#fff}
       .page{
         width:100%;
-        min-height:100vh;
+        min-height:calc(100vw * 1448 / 1086);
         margin:0;
         padding:132px 16px 24px;
         box-shadow:none;
-        background-size:100% auto;
+        background-size:100% 100%;
       }
+      .summary-box{width:100%;margin-left:0}
+      .invoice-company-footer{grid-template-columns:1fr;margin-top:72px;gap:18px}
+      .invoice-company-footer div{text-align:left !important}
       .row{display:block}
       .row > div{max-width:100%;overflow-wrap:anywhere}
       .row > div + div{margin-top:18px}
@@ -7411,7 +7758,7 @@ app.get('/invoice/membership', (req, res) => {
     }
     @media print{
       body{background:#fff}
-      .page{width:210mm;margin:0;box-shadow:none}
+      .page{width:240mm;margin:0;box-shadow:none}
     }
   </style>
 </head>
@@ -7447,29 +7794,77 @@ app.get('/invoice/membership', (req, res) => {
         </tr>
         ${discountInr > 0 ? `<tr><td colspan="2">Discount ${order.couponCode ? `(${escapeHtml(String(order.couponCode))})` : ''}</td><td class="right">- Rs. ${discountInr.toLocaleString('en-IN')}</td></tr>` : ''}
       </tbody>
-      <tfoot>
-        <tr>
-          <td colspan="2" class="right">Subtotal</td>
-          <td class="right">Rs. ${Number(taxableAmountInr || 0).toLocaleString('en-IN')}</td>
-        </tr>
-        <tr>
-          <td colspan="2" class="right">GST ${GST_RATE_PERCENT}%</td>
-          <td class="right">Rs. ${Number(gstAmountInr || 0).toLocaleString('en-IN')}</td>
-        </tr>
-        <tr>
-          <td colspan="2" class="right total">Total</td>
-          <td class="right total">Rs. ${Number(amountInr || 0).toLocaleString('en-IN')}</td>
-        </tr>
-      </tfoot>
     </table>
+    <div class="summary-box">
+      <div class="summary-row">
+        <span>Sub Total</span>
+        <span>
+           Rs. ${Number((amountInr || 0) - (gstAmountInr || 0)).toLocaleString('en-IN')}
+        </span>
+      </div>
 
-    <div class="footer muted">
-      ${order.paymentReference ? `<div>Payment ref: ${escapeHtml(String(order.paymentReference))}</div>` : ''}
-      <div>Generated on ${escapeHtml(generatedAtLabel || '-')}</div>
+      <div class="summary-row">
+         <span>CGST (9%)</span>
+         <span>
+            Rs. ${Number((gstAmountInr || 0)/2).toLocaleString('en-IN')}
+         </span>
+      </div>
+
+      <div class="summary-row">
+         <span>SGST (9%)</span>
+         <span>
+             Rs. ${Number((gstAmountInr || 0)/2).toLocaleString('en-IN')}
+          </span>
+      </div>
+
+      <div class="summary-row summary-total">
+         <span>Total</span>
+         <span>
+           Rs. ${Number(amountInr || 0).toLocaleString('en-IN')}
+         </span>
+       </div>
+    </div>
+    <div class="summary-box">
+      <div class="summary-row">
+        <span>Sub Total</span>
+        <span>
+           Rs. ${Number((amountInr || 0) - (gstAmountInr || 0)).toLocaleString('en-IN')}
+        </span>
+      </div>
+      <div class="summary-row">
+         <span>CGST (9%)</span>
+         <span>
+           Rs. ${Number((gstAmountInr || 0)/2).toLocaleString('en-IN')}
+         </span>
+      </div>
+      <div class="summary-row">
+       <span>SGST (9%)</span>
+       <span>
+         Rs. ${Number((gstAmountInr || 0)/2).toLocaleString('en-IN')}
+       </span>
+      </div>
+      <div class="summary-row summary-total">
+        <span>Total</span>
+        <span>
+          Rs. ${Number(amountInr || 0).toLocaleString('en-IN')}
+        </span>
+      </div>
+    </div>
+    <div class="invoice-company-footer">
+      <div>
+        <strong>P:</strong> 91000 56979, 91000 86979<br>
+        <strong>E:</strong> hello@h2houseofhealth.com
+      </div>
+      <div style="text-align:right;">
+          <strong>A:</strong> 47A Journalist Colony,<br>
+          Jubilee Hills, Hyderabad - 500033<br>
+          <strong>W:</strong> www.h2houseofhealth.com
+      </div>
     </div>
   </div>
 </body>
-</html>`);
+</html>`;
+  return sendInvoiceResponse(req, res, invoiceHtml, invoiceNo);
 });
 
 app.post('/api/payments/verify', requireAuth, async (req, res) => {
@@ -7886,9 +8281,11 @@ app.patch('/api/bookings/:id/mark-paid-cash', requireAuth, requireAdmin, (req, r
     userId: booking.userId,
   });
 
+  const invoiceUrl = `${getRequestOrigin(req)}/invoice/booking?token=${encodeURIComponent(token)}`;
   return res.json({
     paid: true,
-    invoiceUrl: `${getRequestOrigin(req)}/invoice/booking?token=${encodeURIComponent(token)}`,
+    invoiceUrl,
+    invoiceDownloadUrl: `${invoiceUrl}&format=pdf&download=1`,
   });
 });
 

@@ -12413,6 +12413,7 @@ function renderUserRows(bookings, membershipOrders = [], allBookings = bookings)
     const rescheduleEligibility = getUserRescheduleEligibility(row);
     if (canShowBookingInvoice(row)) {
       actions.append(createActionButton('Invoice', () => openBookingInvoice(row.booking?.id || row.id)));
+      actions.append(createActionButton('Download Invoice', () => downloadBookingInvoice(row.booking?.id || row.id)));
     }
     if (canEdit && row.isGroupedHydrogen) {
       const groupedRescheduleOptions = getGroupedHydrogenRescheduleOptions(row);
@@ -12484,6 +12485,7 @@ function renderUserRows(bookings, membershipOrders = [], allBookings = bookings)
     const actions = document.createElement('div');
     actions.className = 'action-row';
     actions.append(createActionButton('Invoice', () => openMembershipInvoice(order.orderId)));
+    actions.append(createActionButton('Download Invoice', () => downloadMembershipInvoice(order.orderId)));
     actionCell.appendChild(actions);
     tr.appendChild(actionCell);
 
@@ -13371,6 +13373,7 @@ function renderAdminRows(bookings) {
     }
     if (canShowBookingInvoice(booking)) {
       actions.append(createActionButton('Invoice', () => openBookingInvoice(booking.id)));
+      actions.append(createActionButton('Download Invoice', () => downloadBookingInvoice(booking.id)));
     }
     if (
       String(booking.paymentStatus || '').trim().toLowerCase() === 'paid' &&
@@ -13761,7 +13764,8 @@ function configureAdminMembershipDetailsFooter(order) {
   actions.classList.add('admin-membership-footer');
   actions.innerHTML = '';
   const invoiceBtn = createActionButton('View Invoice', () => openMembershipInvoice(order.orderId));
-  actions.appendChild(invoiceBtn);
+  const downloadInvoiceBtn = createActionButton('Download Invoice', () => downloadMembershipInvoice(order.orderId));
+  actions.append(invoiceBtn, downloadInvoiceBtn);
   if (elements.cancelMembershipBtn) {
     actions.appendChild(elements.cancelMembershipBtn);
   }
@@ -15395,6 +15399,7 @@ function renderAdminHistoryRows(bookings) {
 
     if (canShowBookingInvoice(booking)) {
       actions.append(createActionButton('Invoice', () => openBookingInvoice(booking.id)));
+      actions.append(createActionButton('Download Invoice', () => downloadBookingInvoice(booking.id)));
     }
 
     if (bookingBookableStatus && !bookingCompleted && !bookingCancelled && !bookingMissed) {
@@ -15487,6 +15492,7 @@ function renderAdminAllBookingRows(bookings) {
 
     if (canShowBookingInvoice(booking)) {
       actions.append(createActionButton('Invoice', () => openBookingInvoice(booking.id)));
+      actions.append(createActionButton('Download Invoice', () => downloadBookingInvoice(booking.id)));
     }
 
     if (bookingBookableStatus && !bookingCompleted && !bookingCancelled && !bookingMissed) {
@@ -15509,12 +15515,10 @@ function renderAdminAllBookingRows(bookings) {
   }
 }
 
-async function openBookingInvoice(bookingId) {
-  const id = Number(bookingId);
-  if (!Number.isInteger(id)) return;
+async function fetchInvoiceLink(url, fallbackLabel = 'Invoice') {
   let response = null;
   try {
-    response = await fetch(buildApiUrl(`/api/bookings/${encodeURIComponent(id)}/invoice-link`), withApiCredentials());
+    response = await fetch(buildApiUrl(url), withApiCredentials());
   } catch (error) {
     throw new Error(error?.message || 'Network error while generating invoice link.');
   }
@@ -15538,50 +15542,94 @@ async function openBookingInvoice(bookingId) {
     throw new Error(data?.message || `Invoice link request failed (HTTP ${response.status}).`);
   }
 
-  if (!data?.invoiceUrl) {
+  if (!data?.invoiceUrl && !data?.invoiceDownloadUrl) {
     throw new Error(`Invoice link missing in server response (HTTP ${response.status}).`);
   }
 
+  return {
+    invoiceUrl: data.invoiceUrl || '',
+    invoiceDownloadUrl: data.invoiceDownloadUrl || data.invoiceUrl || '',
+    fallbackLabel,
+  };
+}
+
+async function openBookingInvoice(bookingId) {
+  const id = Number(bookingId);
+  if (!Number.isInteger(id)) return;
+  const data = await fetchInvoiceLink(`/api/bookings/${encodeURIComponent(id)}/invoice-link`, `Booking-${id}`);
+  if (!data.invoiceUrl) {
+    throw new Error('Invoice view link missing in server response.');
+  }
   openPortalDocument(data.invoiceUrl);
 }
 
 async function openMembershipInvoice(orderId) {
   const normalizedOrderId = String(orderId || '').trim();
   if (!normalizedOrderId) return;
-  let response = null;
-  try {
-    response = await fetch(
-      buildApiUrl(`/api/membership-orders/${encodeURIComponent(normalizedOrderId)}/invoice-link`),
-      withApiCredentials()
-    );
-  } catch (error) {
-    throw new Error(error?.message || 'Network error while generating invoice link.');
+  const data = await fetchInvoiceLink(
+    `/api/membership-orders/${encodeURIComponent(normalizedOrderId)}/invoice-link`,
+    `Membership-${normalizedOrderId}`
+  );
+  if (!data.invoiceUrl) {
+    throw new Error('Invoice view link missing in server response.');
   }
-
-  let data = null;
-  const contentType = response.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
-    try {
-      data = await response.json();
-    } catch {
-      data = null;
-    }
-  } else {
-    const text = await response.text().catch(() => '');
-    throw new Error(
-      `Invoice link request returned non-JSON (HTTP ${response.status}). URL: ${response.url || 'unknown'}. ${text ? 'Check server/auth routing.' : ''}`.trim()
-    );
-  }
-
-  if (!response.ok) {
-    throw new Error(data?.message || `Invoice link request failed (HTTP ${response.status}).`);
-  }
-
-  if (!data?.invoiceUrl) {
-    throw new Error(`Invoice link missing in server response (HTTP ${response.status}).`);
-  }
-
   openPortalDocument(data.invoiceUrl);
+}
+
+async function downloadBookingInvoice(bookingId) {
+  const id = Number(bookingId);
+  if (!Number.isInteger(id)) return;
+  const data = await fetchInvoiceLink(`/api/bookings/${encodeURIComponent(id)}/invoice-link`, `Booking-${id}`);
+  await downloadPortalDocument(data.invoiceDownloadUrl, data.fallbackLabel);
+}
+
+async function downloadMembershipInvoice(orderId) {
+  const normalizedOrderId = String(orderId || '').trim();
+  if (!normalizedOrderId) return;
+  const data = await fetchInvoiceLink(
+    `/api/membership-orders/${encodeURIComponent(normalizedOrderId)}/invoice-link`,
+    `Membership-${normalizedOrderId}`
+  );
+  await downloadPortalDocument(data.invoiceDownloadUrl, data.fallbackLabel);
+}
+
+function getFilenameFromContentDisposition(headerValue, fallbackLabel = 'Invoice') {
+  const header = String(headerValue || '');
+  const utfMatch = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utfMatch) {
+    try {
+      return decodeURIComponent(utfMatch[1]);
+    } catch {}
+  }
+  const match = header.match(/filename="?([^";]+)"?/i);
+  if (match?.[1]) return match[1];
+  return `Invoice-${String(fallbackLabel || 'Invoice').replace(/[^a-z0-9_-]+/gi, '-')}.pdf`;
+}
+
+async function downloadPortalDocument(url, fallbackLabel = 'Invoice') {
+  const targetUrl = buildApiUrl(url);
+  const response = await fetch(targetUrl, { credentials: 'include' });
+  const contentType = response.headers.get('content-type') || '';
+  if (!response.ok) {
+    if (contentType.includes('application/json')) {
+      const error = await response.json().catch(() => null);
+      throw new Error(error?.message || `Invoice download failed (HTTP ${response.status}).`);
+    }
+    const text = await response.text().catch(() => '');
+    throw new Error(text || `Invoice download failed (HTTP ${response.status}).`);
+  }
+  if (!contentType.includes('application/pdf')) {
+    throw new Error('Invoice download did not return a PDF.');
+  }
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = getFilenameFromContentDisposition(response.headers.get('content-disposition'), fallbackLabel);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(objectUrl);
 }
 
 function getMembershipPlanDisplayName(planId) {
