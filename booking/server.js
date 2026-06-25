@@ -1712,8 +1712,8 @@ app.post('/api/membership/create-order', requireAuth, async (req, res) => {
     return res.status(400).json({ message: couponResult.error });
   }
   const taxableAmountPaise = Number(couponResult.finalAmountPaise || subtotalAmountPaise);
-  const amountInPaise = Math.max(100, Math.round(taxableAmountPaise * (1 + GST_RATE_PERCENT / 100)));
-  const gstAmountPaise = Math.max(0, amountInPaise - taxableAmountPaise);
+  const amountInPaise = Math.max(100, taxableAmountPaise);
+  const gstAmountPaise = Math.max(0, amountInPaise - Math.round(amountInPaise / (1 + GST_RATE_PERCENT / 100)));
 
   const memberDetailsResult = normalizeMembershipMembers(req.body?.memberDetails, targetPeopleCount);
   if (memberDetailsResult.error) {
@@ -6815,7 +6815,7 @@ app.post('/api/payments/create-cart-order', requireAuth, async (req, res) => {
     return res.status(400).json({ message: couponResult.error });
   }
   const taxableAmountPaise = Number(couponResult.finalAmountPaise || subtotalAmountPaise);
-  const amountInPaise = Math.max(100, Math.round(taxableAmountPaise * (1 + GST_RATE_PERCENT / 100)));
+  const amountInPaise = Math.max(100, taxableAmountPaise);
   paymentSummary = finalizeSummaryWithGst(paymentSummary);
 
   try {
@@ -7317,9 +7317,9 @@ function buildMembershipInvoiceModel(order) {
   const peopleCount = Math.max(1, Number(order.peopleCount || plan?.peopleCount || 1));
   const originalAmountInr = Math.round(Number(order.originalAmountPaise || order.amountPaise || 0) / 100);
   const discountInr = Math.round(Number(order.discountAmountPaise || 0) / 100);
-  const taxableAmountInr = Math.max(0, originalAmountInr - discountInr);
-  const gstAmountInr = Math.max(0, Math.round((taxableAmountInr * GST_RATE_PERCENT) / 100));
-  const amountInr = taxableAmountInr + gstAmountInr;
+  const amountInr = Math.max(0, originalAmountInr - discountInr);
+  const taxableAmountInr = Math.max(0, Math.round(amountInr / (1 + GST_RATE_PERCENT / 100)));
+  const gstAmountInr = Math.max(0, amountInr - taxableAmountInr);
   const unitPriceInr = Math.round(originalAmountInr / peopleCount);
   const lineItem = {
     serviceName: planName,
@@ -7970,9 +7970,9 @@ app.get('/invoice/membership', async (req, res) => {
   const generatedAtLabel = formatInvoiceDateTime(new Date());
   const originalAmountInr = Math.round(Number(order.originalAmountPaise || 0) / 100);
   const discountInr = Math.round(Number(order.discountAmountPaise || 0) / 100);
-  const taxableAmountInr = Math.max(0, originalAmountInr - discountInr);
-  const gstAmountInr = Math.max(0, Math.round((taxableAmountInr * GST_RATE_PERCENT) / 100));
-  const amountInr = taxableAmountInr + gstAmountInr;
+  const amountInr = Math.max(0, originalAmountInr - discountInr);
+  const taxableAmountInr = Math.max(0, Math.round(amountInr / (1 + GST_RATE_PERCENT / 100)));
+  const gstAmountInr = Math.max(0, amountInr - taxableAmountInr);
 
   const invoiceHtml = `<!doctype html>
 <html lang="en">
@@ -9296,7 +9296,7 @@ function validateCouponForUser({ code, userId, appliesTo, subtotalAmountPaise, s
 
 function serializeCouponPreview(result) {
   const finalAmountPaise = Math.max(0, Math.round(Number(result?.finalAmountPaise || 0)));
-  const gstAmountPaise = Math.max(0, Math.round((finalAmountPaise * GST_RATE_PERCENT) / 100));
+  const gstAmountPaise = Math.max(0, finalAmountPaise - Math.round(finalAmountPaise / (1 + GST_RATE_PERCENT / 100)));
   return {
     code: result?.coupon?.code || result?.couponCode || '',
     description: result?.coupon?.description || '',
@@ -9305,7 +9305,7 @@ function serializeCouponPreview(result) {
     originalAmountInr: Math.round(Number(result?.originalAmountPaise || 0) / 100),
     discountAmountInr: Math.round(Number(result?.discountAmountPaise || 0) / 100),
     gstAmountInr: Math.round(gstAmountPaise / 100),
-    payableAmountInr: Math.round((finalAmountPaise + gstAmountPaise) / 100),
+    payableAmountInr: Math.round(finalAmountPaise / 100),
   };
 }
 
@@ -9640,7 +9640,7 @@ function finalizeSummaryWithGst(summary, options = {}) {
   if (summary.gstIncluded) return summary;
 
   const sourceAmountInr = Number(summary.subtotalAmountInr ?? summary.totalAmountInr ?? summary.amountInr ?? 0);
-  const breakdown = getGstBreakdownForAmountInr(sourceAmountInr, options);
+  const breakdown = getGstBreakdownForAmountInr(sourceAmountInr, { fromGross: true, ...options });
   return {
     ...summary,
     subtotalAmountInr: breakdown.subtotalAmountInr,
