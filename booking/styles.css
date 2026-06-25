@@ -2873,9 +2873,9 @@ h1, h2, h3 {
 }
 
 .admin-tab-nav {
-  position: sticky;
-  top: 0.75rem;
-  z-index: 20;
+  position: static;
+  top: auto;
+  z-index: auto;
 }
 
 .admin-tab-grid {
@@ -16719,8 +16719,8 @@ body.app-booting .user-only {
     padding: 0 14px;
     font-size: 16px;
     line-height: 1.2;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow: visible;
+    text-overflow: clip;
   }
 
   .app-only.admin-only.panel .table-wrap {

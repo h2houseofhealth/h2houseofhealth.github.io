@@ -259,6 +259,25 @@ function enforceTenDigitMobileInput(input) {
   });
 }
 
+const adminRescheduleSearchPlaceholderQuery = window.matchMedia
+  ? window.matchMedia('(max-width: 600px)')
+  : null;
+
+function syncAdminRescheduleSearchPlaceholder() {
+  const input = elements.adminRescheduleSearch;
+  if (!input) return;
+
+  const desktopPlaceholder = String(input.dataset.placeholderDesktop || input.placeholder || '').trim();
+  const mobilePlaceholder = String(input.dataset.placeholderMobile || desktopPlaceholder).trim();
+  const nextPlaceholder = adminRescheduleSearchPlaceholderQuery?.matches
+    ? mobilePlaceholder
+    : desktopPlaceholder;
+
+  if (nextPlaceholder && input.placeholder !== nextPlaceholder) {
+    input.placeholder = nextPlaceholder;
+  }
+}
+
 function syncAdminCustomerFieldsToUi() {
   if (elements.adminCustomerName) elements.adminCustomerName.value = state.adminCustomerForm.name || '';
   if (elements.adminCustomerEmail) elements.adminCustomerEmail.value = state.adminCustomerForm.email || '';
@@ -894,6 +913,14 @@ async function bootstrap() {
   consumeOAuthTokenFromHash();
   if (initialTab) state.activeUserTab = initialTab;
   attachEvents();
+  syncAdminRescheduleSearchPlaceholder();
+  if (adminRescheduleSearchPlaceholderQuery) {
+    if (typeof adminRescheduleSearchPlaceholderQuery.addEventListener === 'function') {
+      adminRescheduleSearchPlaceholderQuery.addEventListener('change', syncAdminRescheduleSearchPlaceholder);
+    } else if (typeof adminRescheduleSearchPlaceholderQuery.addListener === 'function') {
+      adminRescheduleSearchPlaceholderQuery.addListener(syncAdminRescheduleSearchPlaceholder);
+    }
+  }
   populateTimeSlots();
   await loadCurrentUser();
   if (state.user) {
