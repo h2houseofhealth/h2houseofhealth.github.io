@@ -4577,9 +4577,9 @@ function updateBookingSummary() {
     return;
   }
   if (isEditingExistingBooking && selectedAddOn) {
-    const gstBreakdown = getGstBreakdownInr(addOnPrice);
+    const gstBreakdown = getGstBreakdownInr(addOnPrice, { fromGross: true });
     elements.summaryContent.innerHTML = `
-      <div><span>Add-on: ${escapeHtml(selectedAddOn.name)}</span><span>Rs. ${addOnPrice.toLocaleString('en-IN')}</span></div>
+      <div><span>Add-on: ${escapeHtml(selectedAddOn.name)}</span><span>Rs. ${gstBreakdown.subtotalAmountInr.toLocaleString('en-IN')}</span></div>
       <div><span>GST ${GST_RATE_PERCENT}%</span><span>Rs. ${gstBreakdown.gstAmountInr.toLocaleString('en-IN')}</span></div>
       <div class="summary-total"><span>Total Payable</span><span>Rs. ${gstBreakdown.totalAmountInr.toLocaleString('en-IN')}</span></div>
     `;
@@ -4588,7 +4588,7 @@ function updateBookingSummary() {
     return;
   }
   const totalPrice = basePrice + addOnPrice;
-  const gstBreakdown = getGstBreakdownInr(totalPrice);
+  const gstBreakdown = getGstBreakdownInr(totalPrice, { fromGross: true });
   const payableTotal = gstBreakdown.totalAmountInr;
 
   const summaryLines = [];
@@ -4600,7 +4600,7 @@ function updateBookingSummary() {
     summaryLines.push(`<div><span>Add-on: ${escapeHtml(selectedAddOn.name)}</span><span>Rs. ${addOnPrice.toLocaleString('en-IN')}</span></div>`);
   }
   if (totalPrice > 0) {
-    summaryLines.push(`<div><span>GST ${GST_RATE_PERCENT}%</span><span>Rs. ${gstBreakdown.gstAmountInr.toLocaleString('en-IN')}</span></div>`);
+    summaryLines.push(`<div><span>GST ${GST_RATE_PERCENT}% (incl.)</span><span>Rs. ${gstBreakdown.gstAmountInr.toLocaleString('en-IN')}</span></div>`);
     summaryLines.push(`<div class="summary-total"><span>Total Payable</span><span>Rs. ${payableTotal.toLocaleString('en-IN')}</span></div>`);
   }
   
@@ -5562,7 +5562,7 @@ async function saveHydrogenPackBookings({ serviceName, extraSessions, slots, add
   const payableBreakdown =
     totalAmountInr > subtotalAmountInr
       ? getGstBreakdownInr(totalAmountInr, { fromGross: true })
-      : getGstBreakdownInr(subtotalAmountInr);
+      : getGstBreakdownInr(subtotalAmountInr, { fromGross: true });
   const shouldRouteToCart = !isAdmin && totalAmountInr > 0;
   const lines = [
     `Service: ${serviceName}`,
@@ -5703,7 +5703,7 @@ async function updateHydrogenPackBookings({ bookingGroupId, serviceName, extraSe
   const payableBreakdown =
     totalAmountInr > subtotalAmountInr
       ? getGstBreakdownInr(totalAmountInr, { fromGross: true })
-      : getGstBreakdownInr(subtotalAmountInr);
+      : getGstBreakdownInr(subtotalAmountInr, { fromGross: true });
   const requiresPayment = Boolean(result.requiresPayment || summary.requiresPayment);
   const paymentBookingId = Number(result.paymentBookingId || 0);
   const lines = [`Service: ${serviceName}`];
@@ -8858,9 +8858,9 @@ function renderHydrogenUnifiedComposer({ detailsContainer, services, category, i
     if (selectedAddOnService && selectedAddOnPriceInr > 0) {
       priceBreakdownHtml += `<div class="breakdown-item"><span>${escapeHtml(selectedAddOnService.name)}</span><span>₹${selectedAddOnPriceInr.toLocaleString('en-IN')}</span></div>`;
     }
-    const gstBreakdown = getGstBreakdownInr(selectedServicePrice + selectedAddOnPriceInr);
+    const gstBreakdown = getGstBreakdownInr(selectedServicePrice + selectedAddOnPriceInr, { fromGross: true });
     if ((selectedServicePrice + selectedAddOnPriceInr) > 0) {
-      priceBreakdownHtml += `<div class="breakdown-item"><span>GST ${GST_RATE_PERCENT}%</span><span>₹${gstBreakdown.gstAmountInr.toLocaleString('en-IN')}</span></div>`;
+      priceBreakdownHtml += `<div class="breakdown-item"><span>GST ${GST_RATE_PERCENT}% (incl.)</span><span>₹${gstBreakdown.gstAmountInr.toLocaleString('en-IN')}</span></div>`;
       priceBreakdownHtml += `<div class="breakdown-total"><span>Total</span><span>₹${gstBreakdown.totalAmountInr.toLocaleString('en-IN')}</span></div>`;
     }
     priceBreakdownHtml += `</div>`;
@@ -11279,7 +11279,7 @@ function renderMembership() {
     if (canAddPerson) {
       state.membershipAdditions[plan.id] = additionalPeople;
     }
-    const estimatedAmountInr = getGstBreakdownInr(Number(plan.priceInr || 0) + additionalPeople * addPersonPriceInr).totalAmountInr;
+    const estimatedAmountInr = Number(plan.priceInr || 0) + additionalPeople * addPersonPriceInr;
     const showAddPersonPricing = additionalPeople > 0;
     const isCurrentBasePlan = active && String(current.plan || '') === String(plan.id);
     const theme = getMembershipPlanTheme(plan);
@@ -11410,7 +11410,7 @@ function openMembershipCheckoutDialog(plan, additionalPeople) {
   restoreMembershipCheckoutFooter();
   const targetPeopleCount = Number(plan.peopleCount || 1) + Number(additionalPeople || 0);
   const addPersonPriceInr = getMembershipAddPersonPriceInr();
-  const estimatedAmountInr = getGstBreakdownInr(Number(plan.priceInr || 0) + Number(additionalPeople || 0) * addPersonPriceInr).totalAmountInr;
+  const estimatedAmountInr = Number(plan.priceInr || 0) + Number(additionalPeople || 0) * addPersonPriceInr;
   const members = [];
   for (let i = 0; i < targetPeopleCount; i += 1) {
     members.push({
@@ -11643,7 +11643,7 @@ function openMembershipAddPersonUpgradeCheckoutDialog() {
     )
   );
   const targetPeopleCount = currentPeopleCount + 1;
-  const estimatedAmountInr = getGstBreakdownInr(Number(addPersonPlan.priceInr || 0)).totalAmountInr;
+  const estimatedAmountInr = Number(addPersonPlan.priceInr || 0);
 
   const buyerEmail = String(state.user?.email || '').trim().toLowerCase();
   const rosterMembers = Array.isArray(state.membershipRoster?.members) ? state.membershipRoster.members : [];
@@ -14998,11 +14998,11 @@ function getGstBreakdownInr(amountInr, { fromGross = false } = {}) {
 }
 
 function formatAmountWithGstLabel(amountInr) {
-  const breakdown = getGstBreakdownInr(amountInr);
+  const breakdown = getGstBreakdownInr(amountInr, { fromGross: true });
   if (breakdown.gstAmountInr <= 0) {
     return `Rs. ${breakdown.totalAmountInr.toLocaleString('en-IN')}`;
   }
-  return `Rs. ${breakdown.totalAmountInr.toLocaleString('en-IN')} (GST ${GST_RATE_PERCENT}%: Rs. ${breakdown.gstAmountInr.toLocaleString('en-IN')})`;
+  return `Rs. ${breakdown.totalAmountInr.toLocaleString('en-IN')} (incl. GST ${GST_RATE_PERCENT}%: Rs. ${breakdown.gstAmountInr.toLocaleString('en-IN')})`;
 }
 
 function formatGrossAmountWithGstLabel(amountInr) {
@@ -15016,9 +15016,9 @@ function formatGrossAmountWithGstLabel(amountInr) {
 function getBookingDisplayAmountInr(booking) {
   if (String(booking?.paymentReference || '').trim().toLowerCase() === 'membership') return 0;
   if (isBuyExtraHydrogenBooking(booking)) {
-    return getGstBreakdownInr(getHydrogenSingleSessionPriceInr()).totalAmountInr;
+    return getHydrogenSingleSessionPriceInr();
   }
-  return getGstBreakdownInr(getDisplayedServicePriceInr(booking?.serviceName || '')).totalAmountInr;
+  return getDisplayedServicePriceInr(booking?.serviceName || '');
 }
 
 function canShowBookingInvoice(booking) {
@@ -15227,7 +15227,7 @@ function getHydrogenGroupBreakdown(hydrogenEntries, addOnEntries) {
   });
 
   const subtotalAmountInr = hydrogenAmountInr + addOnParts.reduce((sum, item) => sum + Number(item.amountInr || 0), 0);
-  const gstBreakdown = getGstBreakdownInr(subtotalAmountInr);
+  const gstBreakdown = getGstBreakdownInr(subtotalAmountInr, { fromGross: true });
   const totalAmountInr = gstBreakdown.totalAmountInr;
 
   return {
