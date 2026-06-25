@@ -32,10 +32,12 @@ const formData = require('form-data');
 const Razorpay = require('razorpay');
 const multer = require('multer');
 let puppeteer;
+let puppeteerLoadError;
 try {
   puppeteer = require('puppeteer');
-} catch {
+} catch (error) {
   puppeteer = null;
+  puppeteerLoadError = error;
 }
 
 loadEnvFromFile(path.join(__dirname, '.env'));
@@ -7123,9 +7125,8 @@ async function sendInvoiceResponse(req, res, html, invoiceNo) {
   }
 
   if (!puppeteer) {
-    return res.status(503).json({
-      message: 'PDF invoice download requires Puppeteer. Install the minimal dependency with: npm install puppeteer',
-    });
+    console.error('Invoice PDF generation unavailable: Puppeteer could not be loaded.', puppeteerLoadError);
+    return res.status(503).json({ message: 'Unable to generate the invoice. Please try again later or contact support.' });
   }
 
   let browser;
@@ -7152,7 +7153,7 @@ async function sendInvoiceResponse(req, res, html, invoiceNo) {
     return res.send(pdfBuffer);
   } catch (error) {
     console.error('Invoice PDF generation failed:', error);
-    return res.status(500).json({ message: 'Unable to generate invoice PDF right now.' });
+    return res.status(500).json({ message: 'Unable to generate the invoice. Please try again later or contact support.' });
   } finally {
     if (browser) {
       await browser.close().catch(() => {});
