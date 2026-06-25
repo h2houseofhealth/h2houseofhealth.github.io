@@ -10983,8 +10983,29 @@ function renderMembership() {
       : '/session\nJoin membership to unlock lower pricing and premium benefits';
   }
   if (elements.membershipStatMembersDetails) {
-    elements.membershipStatMembersDetails.hidden = true;
+    elements.membershipStatMembersDetails.hidden = !active;
     elements.membershipStatMembersDetails.innerHTML = '';
+    if (active) {
+      const rosterPreview = getMembershipDashboardMembers(currentPeopleCount);
+      if (rosterPreview.members.length) {
+        rosterPreview.members.forEach((member, index) => {
+          const person = document.createElement('div');
+          person.className = 'membership-stat-member';
+          const name = member.name || `Member ${index + 1}`;
+          const detailParts = [member.place, member.contactNumber, member.email].filter(Boolean);
+          person.innerHTML = `
+            <span>${escapeHtml(name)}</span>
+            <small>${escapeHtml(detailParts.join(' • ') || 'Details pending')}</small>
+          `;
+          elements.membershipStatMembersDetails.appendChild(person);
+        });
+      } else {
+        const empty = document.createElement('div');
+        empty.className = 'membership-stat-member is-empty';
+        empty.textContent = 'Member details not added yet';
+        elements.membershipStatMembersDetails.appendChild(empty);
+      }
+    }
   }
   if (elements.membershipStatValidCard) {
     elements.membershipStatValidCard.title = active
@@ -11178,61 +11199,7 @@ function renderMembership() {
   renderMembershipCalendar(allBookings);
 
   if (elements.membershipPeopleCard && elements.membershipPeopleList && elements.membershipPeopleMeta) {
-    const planId = String(current.plan || '').trim();
-    const showPeopleCard = active && currentPeopleCount >= 2;
-    elements.membershipPeopleCard.hidden = !showPeopleCard;
-    if (showPeopleCard) {
-      const roster = state.membershipRoster;
-      const members = Array.isArray(roster?.members) ? roster.members : [];
-      const slotsRemaining = Number.isFinite(Number(roster?.slotsRemaining))
-        ? Number(roster.slotsRemaining)
-        : Math.max(0, currentPeopleCount - members.length);
-      const startedAtValue =
-        roster?.subscription?.startedAt || current.startedAt || state.user?.membershipStartedAt || null;
-      const expiresAtValue =
-        roster?.subscription?.expiresAt || current.expiresAt || state.user?.membershipExpiresAt || null;
-      const startedAt = startedAtValue ? new Date(startedAtValue) : null;
-      const expiresAt = expiresAtValue ? new Date(expiresAtValue) : null;
-
-      const validityLine =
-        startedAt && !Number.isNaN(startedAt.getTime())
-          ? `Validity starts from ${formatDateAsDayMonthYear(startedAt)}` +
-            (expiresAt && !Number.isNaN(expiresAt.getTime()) ? ` • ends on ${formatDateAsDayMonthYear(expiresAt)}` : '')
-          : '';
-      elements.membershipPeopleMeta.textContent = `${members.length} of ${currentPeopleCount} member${
-        currentPeopleCount === 1 ? '' : 's'
-      } added${validityLine ? ` • ${validityLine}` : ''}`;
-
-      elements.membershipPeopleList.innerHTML = '';
-      if (!members.length) {
-        elements.membershipPeopleList.innerHTML = '<p class="empty-state">No members added yet.</p>';
-      } else {
-        for (const member of members) {
-          const item = document.createElement('div');
-          item.className = 'membership-people-item';
-          const name = String(member?.name || '').trim() || 'Member';
-          const place = String(member?.place || '').trim();
-          const email = String(member?.email || '').trim();
-          item.innerHTML = `
-            <div>
-              <strong>${escapeHtml(name)}</strong>
-              ${place ? `<span>${escapeHtml(place)}</span>` : '<span>&nbsp;</span>'}
-            </div>
-            <div class="membership-people-email">${escapeHtml(email)}</div>
-          `;
-          elements.membershipPeopleList.appendChild(item);
-        }
-      }
-
-      const supportsDashboardAddPerson = planId === 'h2_two' || planId === 'h2_four';
-      if (elements.membershipAddPersonBtn) {
-        elements.membershipAddPersonBtn.hidden = !supportsDashboardAddPerson;
-        elements.membershipAddPersonBtn.disabled = !supportsDashboardAddPerson;
-      }
-    } else if (elements.membershipAddPersonBtn) {
-      elements.membershipAddPersonBtn.hidden = true;
-      elements.membershipAddPersonBtn.disabled = true;
-    }
+    elements.membershipPeopleCard.hidden = true;
   }
 
   const orderedPlanIds = ['h2_single', 'h2_two', 'h2_four'];
