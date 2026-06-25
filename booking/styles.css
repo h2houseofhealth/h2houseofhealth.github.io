@@ -8561,6 +8561,60 @@ table tbody td {
   appearance: none;
 }
 
+#adminUserSessionDialog .dialog-head,
+#membershipDialog .dialog-head {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+  width: 100%;
+  margin-bottom: 0.9rem;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+  background: var(--panel);
+}
+
+#adminUserSessionDialog .dialog-head > div,
+#membershipDialog .dialog-head > h2 {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+#adminUserSessionDialog .dialog-head > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+#adminUserSessionDialog .dialog-head h2,
+#membershipDialog .dialog-head h2 {
+  margin: 0;
+}
+
+#adminUserSessionCloseBtn,
+#closeMembershipDialogBtn {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+#adminUserSessionCloseBtn:focus-visible,
+#closeMembershipDialogBtn:focus-visible {
+  outline: 3px solid rgba(var(--brand-primary-rgb), 0.24);
+  outline-offset: 2px;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -8700,6 +8754,69 @@ table tbody td {
   #bookingDialog #addOnDateLabel,
   #bookingDialog #addOnTimeLabel {
     grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 900px) {
+  .booking-dialog .form-grid,
+  .hydrogen-layout,
+  .hydrogen-schedule-grid,
+  .hydrogen-editor-grid,
+  .hydrogen-addon-grid,
+  .hydrogen-addon-schedule-grid,
+  .booking-hydrogen-addon-session-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hydrogen-layout > *,
+  .hydrogen-sidebar,
+  .hydrogen-main,
+  .hydrogen-plan-controls,
+  .hydrogen-schedule-panel,
+  .hydrogen-schedule-row,
+  .hydrogen-addon-panel,
+  .hydrogen-addon-hydrogen-schedule,
+  .hydrogen-session-editor,
+  .booking-hydrogen-addon-scheduler,
+  .booking-hydrogen-addon-session,
+  .booking-summary,
+  .summary-content > div,
+  .summary-total {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .service-date-row label,
+  .hydrogen-plan-picker label,
+  .hydrogen-plan-controls label,
+  .hydrogen-schedule-grid label,
+  .hydrogen-editor-grid label,
+  .hydrogen-addon-grid label,
+  .hydrogen-addon-schedule-grid label,
+  .booking-hydrogen-addon-session-grid label {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .booking-dialog .form-grid input,
+  .booking-dialog .form-grid select,
+  .booking-dialog .form-grid textarea,
+  .hydrogen-plan-controls input,
+  .hydrogen-plan-controls select,
+  .hydrogen-schedule-grid input,
+  .hydrogen-schedule-grid select,
+  .hydrogen-editor-grid input,
+  .hydrogen-editor-grid select,
+  .hydrogen-addon-grid input,
+  .hydrogen-addon-grid select,
+  .hydrogen-addon-schedule-grid input,
+  .hydrogen-addon-schedule-grid select,
+  .booking-hydrogen-addon-session-grid input,
+  .booking-hydrogen-addon-session-grid select {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
   }
 }
 
@@ -13781,6 +13898,22 @@ img {
     align-items: flex-start;
   }
 
+  #adminUserSessionDialog .dialog-head,
+  #membershipDialog .dialog-head {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  #adminUserSessionDialog .dialog-head > div,
+  #membershipDialog .dialog-head > h2 {
+    min-width: 0;
+  }
+
+  #adminUserSessionCloseBtn,
+  #closeMembershipDialogBtn {
+    align-self: flex-start;
+  }
+
   .dialog-actions,
   .membership-dialog-actions {
     gap: 8px;
@@ -15995,23 +16128,27 @@ body.auth-mode .portal {
   .top-actions .profile-btn {
     grid-column: 1 / -1;
     width: 100%;
-    min-height: 54px;
+    min-height: 50px;
     height: auto;
     justify-content: flex-start;
-    gap: 12px;
-    padding: 8px 14px 8px 8px;
-    border-radius: 999px;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px 8px 10px;
+    border-radius: 18px;
+    border-color: rgba(var(--brand-primary-rgb), 0.12);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 244, 239, 0.96));
+    box-shadow: 0 10px 24px rgba(var(--brand-primary-rgb), 0.08);
   }
 
   .top-actions .profile-avatar {
-    width: 38px;
-    height: 38px;
-    flex: 0 0 38px;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
   }
 
   .top-actions .profile-meta {
     min-width: 0;
-    gap: 6px;
+    gap: 4px;
     line-height: 1.08;
   }
 
@@ -16020,17 +16157,20 @@ body.auth-mode .portal {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: 0.96rem;
   }
 
   .top-actions .profile-badges {
     min-width: 0;
-    gap: 10px;
+    gap: 6px;
   }
 
   .top-actions .role-chip,
   .top-actions .membership-badge {
     max-width: 100%;
     line-height: 1;
+    font-size: 0.6rem;
+    padding: 0.2rem 0.5rem;
   }
 
   .top-actions .cart-btn {
@@ -16044,10 +16184,16 @@ body.auth-mode .portal {
   .top-actions #logoutBtn {
     grid-column: 2;
     width: 100%;
-    min-height: 46px;
-    justify-content: flex-start;
-    padding: 0 18px;
-    border-radius: 999px;
+    min-height: 44px;
+    justify-content: center;
+    gap: 0.45rem;
+    padding: 0 14px;
+    border-radius: 14px;
+    border-color: rgba(var(--brand-primary-rgb), 0.18);
+    background: rgba(var(--brand-primary-rgb), 0.08);
+    color: var(--brand-primary);
+    box-shadow: 0 8px 18px rgba(var(--brand-primary-rgb), 0.08);
+    font-weight: 700;
   }
 
   #userTabNav.user-tab-nav {
@@ -16079,7 +16225,18 @@ body.auth-mode .portal {
   }
 
   .top-actions .profile-btn {
-    padding-right: 12px;
+    padding-left: 8px;
+    padding-right: 10px;
+  }
+
+  .top-actions .profile-meta strong {
+    font-size: 0.92rem;
+  }
+
+  .top-actions .role-chip,
+  .top-actions .membership-badge {
+    font-size: 0.58rem;
+    padding: 0.18rem 0.45rem;
   }
 
   #userTabNav.user-tab-nav {

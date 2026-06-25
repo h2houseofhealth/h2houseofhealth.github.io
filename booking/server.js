@@ -8389,6 +8389,7 @@ app.post('/api/payments/verify-cart', requireAuth, async (req, res) => {
   return res.json({
     paid: true,
     bookingCount: matchedBookings.length,
+    bookingIds: matchedBookings.map((booking) => Number(booking.id)).filter((id) => Number.isInteger(id) && id > 0),
     unitCount: Number(summary.unitCount || 0),
     totalAmountInr: Math.round(paidAmountPaise / 100),
     discountAmountInr: Math.round(Number(cartOrder.discountAmountPaise || 0) / 100),
