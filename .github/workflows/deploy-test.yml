@@ -1,9 +1,9 @@
-name: Deploy Dev Branch
+name: Deploy Test Branch
 
 on:
   push:
     branches:
-      - dev
+      - test
 
 permissions:
   id-token: write
@@ -24,7 +24,7 @@ jobs:
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids i-07aebb51afb24f8e2 \
             --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["export HOME=/root","cd /opt/h2house-dev && git fetch origin dev && git reset --hard origin/dev && npm install --production && sudo systemctl restart h2-booking-dev"]' \
+            --parameters 'commands=["export HOME=/root","cd /opt/h2house && git fetch origin test && git reset --hard origin/test && npm install --production && sudo systemctl restart h2-booking"]' \
             --query "Command.CommandId" \
             --output text)
           
