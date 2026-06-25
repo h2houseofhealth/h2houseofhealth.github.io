@@ -15635,18 +15635,23 @@ function getFilenameFromContentDisposition(headerValue, fallbackLabel = 'Invoice
 
 async function downloadPortalDocument(url, fallbackLabel = 'Invoice') {
   const targetUrl = buildApiUrl(url);
-  const response = await fetch(targetUrl, { credentials: 'include' });
+  let response;
+  try {
+    response = await fetch(targetUrl, { credentials: 'include' });
+  } catch {
+    throw new Error('Unable to generate the invoice. Please try again later or contact support.');
+  }
   const contentType = response.headers.get('content-type') || '';
   if (!response.ok) {
     if (contentType.includes('application/json')) {
-      const error = await response.json().catch(() => null);
-      throw new Error(error?.message || `Invoice download failed (HTTP ${response.status}).`);
+      await response.json().catch(() => null);
+      throw new Error('Unable to generate the invoice. Please try again later or contact support.');
     }
-    const text = await response.text().catch(() => '');
-    throw new Error(text || `Invoice download failed (HTTP ${response.status}).`);
+    await response.text().catch(() => '');
+    throw new Error('Unable to generate the invoice. Please try again later or contact support.');
   }
   if (!contentType.includes('application/pdf')) {
-    throw new Error('Invoice download did not return a PDF.');
+    throw new Error('Unable to generate the invoice. Please try again later or contact support.');
   }
   const blob = await response.blob();
   const objectUrl = URL.createObjectURL(blob);
