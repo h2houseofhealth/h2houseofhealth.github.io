@@ -12552,15 +12552,12 @@ img {
 
 @media (max-width: 1024px) {
   #memberChoiceGate .member-choice-topbar {
-    grid-template-columns: 1fr auto !important;
+    grid-template-columns: repeat(2, max-content) !important;
+    justify-content: flex-end !important;
     gap: 12px !important;
   }
 
   #memberChoiceGate .member-choice-nav {
-    display: none !important;
-  }
-
-  #memberChoiceGate .member-choice-book-session-btn {
     display: none !important;
   }
 
@@ -12862,7 +12859,8 @@ img {
   }
 
   #memberChoiceGate .member-choice-topbar {
-    grid-template-columns: 1fr auto !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    justify-content: stretch !important;
     gap: 12px !important;
     padding: 10px 0 14px !important;
     margin-bottom: 10px !important;
@@ -12873,8 +12871,10 @@ img {
   }
 
   #memberChoiceGate .member-choice-topbar-cta {
+    width: 100% !important;
     height: 42px !important;
-    padding: 0 14px !important;
+    min-height: 42px !important;
+    padding: 0 10px !important;
     font-size: 13px !important;
     border-radius: 10px !important;
   }
