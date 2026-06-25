@@ -10983,29 +10983,8 @@ function renderMembership() {
       : '/session\nJoin membership to unlock lower pricing and premium benefits';
   }
   if (elements.membershipStatMembersDetails) {
-    elements.membershipStatMembersDetails.hidden = !active;
+    elements.membershipStatMembersDetails.hidden = true;
     elements.membershipStatMembersDetails.innerHTML = '';
-    if (active) {
-      const rosterPreview = getMembershipDashboardMembers(currentPeopleCount);
-      if (rosterPreview.members.length) {
-        rosterPreview.members.forEach((member, index) => {
-          const person = document.createElement('div');
-          person.className = 'membership-stat-member';
-          const name = member.name || `Member ${index + 1}`;
-          const detailParts = [member.place, member.contactNumber, member.email].filter(Boolean);
-          person.innerHTML = `
-            <span>${escapeHtml(name)}</span>
-            <small>${escapeHtml(detailParts.join(' • ') || 'Details pending')}</small>
-          `;
-          elements.membershipStatMembersDetails.appendChild(person);
-        });
-      } else {
-        const empty = document.createElement('div');
-        empty.className = 'membership-stat-member is-empty';
-        empty.textContent = 'Member details not added yet';
-        elements.membershipStatMembersDetails.appendChild(empty);
-      }
-    }
   }
   if (elements.membershipStatValidCard) {
     elements.membershipStatValidCard.title = active
