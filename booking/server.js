@@ -174,7 +174,7 @@ async function sendMailgunEmail({ to, from, subject, text, html }) {
 const SERVICE_CATALOG = [
   {
     category: 'EXPERIENCE SESSION',
-    name: 'Experience Session',
+    name: 'Demo Session',
     priceInr: 4000,
     includes: '30 min consultation + hydrogen session',
     description: 'Demo hydrogen session for non-members with consultation.',
@@ -12104,8 +12104,8 @@ function getServiceByName(name) {
   const normalized = String(name || '').trim().toLowerCase();
   const directMatch = SERVICE_CATALOG.find((service) => service.name.toLowerCase() === normalized) || null;
   if (directMatch) return directMatch;
-  if (normalized === 'demo session' || normalized === 'demo hydrogen session') {
-    return SERVICE_CATALOG.find((service) => String(service.name || '').trim().toLowerCase() === 'experience session') || null;
+  if (normalized === 'experience session' || normalized === 'demo hydrogen session') {
+    return SERVICE_CATALOG.find((service) => String(service.name || '').trim().toLowerCase() === 'demo session') || null;
   }
   return null;
 }

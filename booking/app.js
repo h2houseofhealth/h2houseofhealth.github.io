@@ -7930,7 +7930,7 @@ function renderServices() {
     elements.experienceBookBtn.textContent = demoAlreadyUsed ? 'Already Booked' : 'Add to Cart';
   }
   if (elements.experienceCardPrice) {
-    const experienceService = getServiceCatalogEntry('Experience Session') || getServiceCatalogEntry('Demo Session');
+    const experienceService = getServiceCatalogEntry('Demo Session') || getServiceCatalogEntry('Experience Session');
     const priceInr = Number(experienceService?.effectivePriceInr ?? experienceService?.priceInr ?? 4000) || 4000;
     elements.experienceCardPrice.innerHTML = `<strong>Rs. ${priceInr.toLocaleString('en-IN')}</strong>`;
   }
@@ -14839,7 +14839,7 @@ function hasCurrentUserUsedExperienceSession() {
 
 function getBookingCategoryLabel(serviceName) {
   const category = getBookingCategory(serviceName);
-  if (category === 'EXPERIENCE SESSION') return 'Demo Hydrogen Session';
+  if (category === 'EXPERIENCE SESSION') return 'Demo Session';
   if (category === 'HYDROGEN SESSION') return 'Hydrogen Session';
   if (category === 'IV ADD-ON') {
     const service = getServiceCatalogEntry(serviceName);
@@ -14860,9 +14860,9 @@ function getServiceCatalogEntry(serviceName) {
   const normalized = String(serviceName || '').trim().toLowerCase();
   const direct = state.services.find((service) => String(service.name || '').trim().toLowerCase() === normalized) || null;
   if (direct) return direct;
-  if (normalized === 'demo session' || normalized === 'demo hydrogen session') {
+  if (normalized === 'experience session' || normalized === 'demo hydrogen session') {
     return (
-      state.services.find((service) => String(service.name || '').trim().toLowerCase() === 'experience session') || null
+      state.services.find((service) => String(service.name || '').trim().toLowerCase() === 'demo session') || null
     );
   }
   return null;
@@ -15877,7 +15877,7 @@ function getServiceDisplayName(serviceOrName) {
   const name = String(raw || '').trim();
   if (!name) return '';
   const normalized = name.toLowerCase();
-  if (normalized === 'experience session' || normalized === 'demo session') return 'Demo Hydrogen Session';
+  if (normalized === 'experience session' || normalized === 'demo session') return 'Demo Session';
   return name;
 }
 
