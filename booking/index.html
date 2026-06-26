@@ -151,8 +151,9 @@
             </div>
             <button id="authSubmitBtn" class="btn btn-primary" type="submit">Sign in</button>
           </form>
-          <div id="authDivider" class="auth-divider"><span>or</span></div>
-          <a id="googleAuthBtn" class="btn auth-google-btn" href="/auth/google">Continue with Google</a>
+          <!-- Google OAuth hidden until configured -->
+          <div id="authDivider" class="auth-divider" hidden><span>or</span></div>
+          <a id="googleAuthBtn" class="btn auth-google-btn" href="/auth/google" hidden>Continue with Google</a>
           <p id="authError" class="auth-error"></p>
           <p class="auth-forgot">
             <button type="button" id="forgotPasswordBtn" class="link-btn">Forgot password?</button>
@@ -1686,7 +1687,8 @@
           <p class="checkout-options-lead">Choose your preferred checkout method:</p>
           
           <div class="checkout-options-grid">
-            <button id="checkoutWithGoogle" class="checkout-option-btn" type="button">
+            <!-- Google OAuth hidden until configured -->
+            <button id="checkoutWithGoogle" class="checkout-option-btn" type="button" hidden>
               <span class="option-icon">🔐</span>
               <span class="option-title">Continue with Google</span>
               <span class="option-desc">Fast and secure with your Google account</span>
