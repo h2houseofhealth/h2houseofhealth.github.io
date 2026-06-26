@@ -2324,11 +2324,10 @@ function renderAuthMode(preserveMessage = false) {
   elements.forgotPasswordBtn.textContent = isForgotPasswordMode ? 'Back to sign in' : 'Forgot password?';
   elements.forgotPasswordBtn.hidden = isRegisterMode;
   if (elements.googleAuthBtn) {
-    elements.googleAuthBtn.hidden = !isLoginStep;
-    elements.googleAuthBtn.href = buildApiUrl('/auth/google');
+    elements.googleAuthBtn.hidden = true;
   }
   if (elements.authDivider) {
-    elements.authDivider.hidden = !isLoginStep;
+    elements.authDivider.hidden = true;
   }
 
   updateAuthOtpResendUI();
