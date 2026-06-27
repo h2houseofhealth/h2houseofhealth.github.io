@@ -8907,41 +8907,60 @@ app.post('/api/contact', async (req, res) => {
   }
 
   const CONTACT_TO_EMAIL = 'hello@h2houseofhealth.com';
-  const CONTACT_FROM_EMAIL = 'noreply@h2houseofhealth.com';
+  const CONTACT_FROM_EMAIL = MAIL_FROM || 'noreply@h2houseofhealth.com';
 
-  if (!SENDGRID_API_KEY) {
-    console.warn('Contact form submission received but SendGrid is not configured.');
-    return res.status(503).json({ message: 'Email service is not configured.' });
-  }
+  const subject = `New Contact Form Submission from ${name}`;
+  const text = [
+    `Name: ${name}`,
+    `Email: ${email}`,
+    `Phone: ${phone || 'Not provided'}`,
+    ``,
+    `Message:`,
+    message,
+  ].join('\n');
+  const html = `
+    <h2>New Contact Form Submission</h2>
+    <table style="border-collapse:collapse;font-family:sans-serif;font-size:14px;">
+      <tr><td style="padding:8px 12px;font-weight:bold;">Name</td><td style="padding:8px 12px;">${escapeHtml(name)}</td></tr>
+      <tr><td style="padding:8px 12px;font-weight:bold;">Email</td><td style="padding:8px 12px;"><a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a></td></tr>
+      <tr><td style="padding:8px 12px;font-weight:bold;">Phone</td><td style="padding:8px 12px;">${escapeHtml(phone || 'Not provided')}</td></tr>
+    </table>
+    <h3 style="margin-top:20px;">Message</h3>
+    <p style="white-space:pre-wrap;font-family:sans-serif;font-size:14px;">${escapeHtml(message)}</p>
+  `;
 
+  // Try Mailgun first, then SES API, then SMTP
   try {
-    await sgMail.send({
-      to: CONTACT_TO_EMAIL,
-      from: CONTACT_FROM_EMAIL,
-      replyTo: email,
-      subject: `New Contact Form Submission from ${name}`,
-      text: [
-        `Name: ${name}`,
-        `Email: ${email}`,
-        `Phone: ${phone || 'Not provided'}`,
-        ``,
-        `Message:`,
-        message,
-      ].join('\n'),
-      html: `
-        <h2>New Contact Form Submission</h2>
-        <table style="border-collapse:collapse;font-family:sans-serif;font-size:14px;">
-          <tr><td style="padding:8px 12px;font-weight:bold;">Name</td><td style="padding:8px 12px;">${name}</td></tr>
-          <tr><td style="padding:8px 12px;font-weight:bold;">Email</td><td style="padding:8px 12px;"><a href="mailto:${email}">${email}</a></td></tr>
-          <tr><td style="padding:8px 12px;font-weight:bold;">Phone</td><td style="padding:8px 12px;">${phone || 'Not provided'}</td></tr>
-        </table>
-        <h3 style="margin-top:20px;">Message</h3>
-        <p style="white-space:pre-wrap;font-family:sans-serif;font-size:14px;">${message.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>
-      `,
-    });
+    if (mg) {
+      await sendMailgunEmail({ to: CONTACT_TO_EMAIL, from: CONTACT_FROM_EMAIL, subject, text, html });
+    } else if (hasSesApiCredentials()) {
+      const sesResult = await sesApiRequest('POST', '/v2/email/outbound-emails', {
+        FromEmailAddress: CONTACT_FROM_EMAIL,
+        Destination: { ToAddresses: [CONTACT_TO_EMAIL] },
+        ReplyToAddresses: [email],
+        Content: {
+          Simple: {
+            Subject: { Data: subject },
+            Body: {
+              Text: { Data: text },
+              Html: { Data: html },
+            },
+          },
+        },
+      });
+      if (!sesResult.ok) {
+        throw new Error(sesResult.message || 'SES send failed');
+      }
+    } else {
+      const smtpTransporter = getTransporter();
+      if (!smtpTransporter) {
+        return res.status(503).json({ message: 'Email service is not configured.' });
+      }
+      await smtpTransporter.sendMail({ from: CONTACT_FROM_EMAIL, to: CONTACT_TO_EMAIL, replyTo: email, subject, text, html });
+    }
     return res.json({ ok: true, message: 'Your message has been sent successfully.' });
   } catch (error) {
-    console.error('Contact form email error:', error?.response?.body || error.message || error);
+    console.error('Contact form email error:', error?.message || error);
     return res.status(500).json({ message: 'Failed to send your message. Please try again later.' });
   }
 });
@@ -12949,22 +12968,6 @@ async function sendOtpEmail(toEmail, otp, purpose = 'signup') {
   const isBookingReschedule = normalizedPurpose === 'booking_reschedule';
   const flowLabel = isBookingReschedule ? 'booking reschedule' : isPasswordReset ? 'password reset' : 'signup';
 
-  if (!SENDGRID_API_KEY || !SENDGRID_OTP_FROM_EMAIL) {
-    if (ALLOW_DEV_OTP_FALLBACK) {
-      return {
-        ok: true,
-        delivery: 'development-ui',
-        message: `OTP generated for ${normalizedToEmail}. Use the development code shown below.`,
-      };
-    }
-
-    return {
-      ok: false,
-      statusCode: 500,
-      message: 'SendGrid is not configured. Please contact support.',
-    };
-  }
-
   const subject = isBookingReschedule
     ? 'Booking Reschedule Verification'
     : isPasswordReset
@@ -12990,48 +12993,50 @@ async function sendOtpEmail(toEmail, otp, purpose = 'signup') {
     </div>
   `;
 
-  if (!isValidEmail(SENDGRID_OTP_FROM_EMAIL)) {
-    return {
-      ok: false,
-      statusCode: 500,
-      message: 'SENDGRID_OTP_FROM_EMAIL is invalid.',
-    };
+  if (!isValidEmail(MAIL_FROM)) {
+    if (ALLOW_DEV_OTP_FALLBACK) {
+      return { ok: true, delivery: 'development-ui', message: `OTP generated for ${normalizedToEmail}. Use the development code shown below.` };
+    }
+    return { ok: false, statusCode: 500, message: 'MAIL_FROM is not configured.' };
   }
-  if (
-    SENDGRID_OTP_VERIFIED_SENDER &&
-    SENDGRID_OTP_FROM_EMAIL.toLowerCase() !== SENDGRID_OTP_VERIFIED_SENDER.toLowerCase()
-  ) {
-    return {
-      ok: false,
-      statusCode: 500,
-      message: 'SENDGRID_OTP_FROM_EMAIL does not match SENDGRID_OTP_VERIFIED_SENDER.',
-    };
+
+  if (!hasSesApiCredentials()) {
+    if (ALLOW_DEV_OTP_FALLBACK) {
+      return { ok: true, delivery: 'development-ui', message: `OTP generated for ${normalizedToEmail}. Use the development code shown below.` };
+    }
+    return { ok: false, statusCode: 500, message: 'Email service (SES) is not configured.' };
   }
 
   try {
-    await sendMailgunEmail({
-  to: normalizedToEmail,
-  from: MAIL_FROM,
-  subject,
-  text,
-  html,
+    const sesResult = await sesApiRequest('POST', '/v2/email/outbound-emails', {
+      FromEmailAddress: MAIL_FROM,
+      Destination: { ToAddresses: [normalizedToEmail] },
+      Content: {
+        Simple: {
+          Subject: { Data: subject },
+          Body: {
+            Text: { Data: text },
+            Html: { Data: html },
+          },
+        },
+      },
     });
+
+    if (!sesResult.ok) {
+      throw new Error(sesResult.message || 'SES send failed');
+    }
 
     return {
       ok: true,
-      delivery: 'mailgun',
+      delivery: 'ses',
       message: `${isBookingReschedule ? 'Booking reschedule' : isPasswordReset ? 'Password reset' : 'Signup'} OTP sent to ${normalizedToEmail}. It expires in ${OTP_TTL_MINUTES} minutes.`,
     };
   } catch (error) {
-    const sendGridError = extractSendGridErrorDetails(error);
-    console.error('Failed to send OTP email via SendGrid:', {
+    console.error('Failed to send OTP email via SES:', {
       to: normalizedToEmail,
-      from: SENDGRID_OTP_FROM_EMAIL,
-      statusCode: sendGridError.statusCode,
-      detail: sendGridError.detail,
-      responseBody: sendGridError.responseBody,
+      from: MAIL_FROM,
+      error: error?.message || error,
     });
-    const statusCode = sendGridError.statusCode;
     if (ALLOW_DEV_OTP_FALLBACK) {
       return {
         ok: true,
@@ -13039,16 +13044,11 @@ async function sendOtpEmail(toEmail, otp, purpose = 'signup') {
         message: `OTP generated for ${normalizedToEmail}. Use the development code shown below.`,
       };
     }
-    const isUnauthorized = statusCode === 401 || statusCode === 403;
 
     return {
       ok: false,
-      statusCode,
-      message: isUnauthorized
-        ? statusCode === 403
-          ? 'SendGrid rejected the sender identity. Verify the configured FROM email or authenticated domain.'
-          : 'SendGrid authentication failed. Please contact support.'
-        : 'Unable to send OTP email. Please try again.',
+      statusCode: 500,
+      message: 'Unable to send OTP email. Please try again.',
     };
   }
 }
