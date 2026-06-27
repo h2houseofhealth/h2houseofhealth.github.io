@@ -960,7 +960,11 @@ async function bootstrap() {
 function attachEvents() {
   const openMembershipPlansFromLanding = () => {
     if (!state.user) {
-      openAuthFromLanding('join-member');
+      // Scroll to the "Select Your Experience" pricing section on the landing page
+      const experienceSection = document.getElementById('member-choice-experience');
+      if (experienceSection) {
+        experienceSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
       return;
     }
     state.postLoginChoice = 'join-member';
