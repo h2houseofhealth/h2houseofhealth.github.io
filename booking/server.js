@@ -8895,6 +8895,57 @@ app.get(/.*/, (_req, res) => {
   res.sendFile(path.join(WEBSITE_ROOT, 'index.html'));
 });
 
+// ─── Contact Form Endpoint ───────────────────────────────────────────────────
+app.post('/api/contact', async (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const phone = String(req.body?.phone || '').trim();
+  const message = String(req.body?.message || '').trim();
+
+  if (!name || !email || !message) {
+    return res.status(400).json({ message: 'Name, email, and message are required.' });
+  }
+
+  const CONTACT_TO_EMAIL = 'hello@h2houseofhealth.com';
+  const CONTACT_FROM_EMAIL = 'noreply@h2houseofhealth.com';
+
+  if (!SENDGRID_API_KEY) {
+    console.warn('Contact form submission received but SendGrid is not configured.');
+    return res.status(503).json({ message: 'Email service is not configured.' });
+  }
+
+  try {
+    await sgMail.send({
+      to: CONTACT_TO_EMAIL,
+      from: CONTACT_FROM_EMAIL,
+      replyTo: email,
+      subject: `New Contact Form Submission from ${name}`,
+      text: [
+        `Name: ${name}`,
+        `Email: ${email}`,
+        `Phone: ${phone || 'Not provided'}`,
+        ``,
+        `Message:`,
+        message,
+      ].join('\n'),
+      html: `
+        <h2>New Contact Form Submission</h2>
+        <table style="border-collapse:collapse;font-family:sans-serif;font-size:14px;">
+          <tr><td style="padding:8px 12px;font-weight:bold;">Name</td><td style="padding:8px 12px;">${name}</td></tr>
+          <tr><td style="padding:8px 12px;font-weight:bold;">Email</td><td style="padding:8px 12px;"><a href="mailto:${email}">${email}</a></td></tr>
+          <tr><td style="padding:8px 12px;font-weight:bold;">Phone</td><td style="padding:8px 12px;">${phone || 'Not provided'}</td></tr>
+        </table>
+        <h3 style="margin-top:20px;">Message</h3>
+        <p style="white-space:pre-wrap;font-family:sans-serif;font-size:14px;">${message.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>
+      `,
+    });
+    return res.json({ ok: true, message: 'Your message has been sent successfully.' });
+  } catch (error) {
+    console.error('Contact form email error:', error?.response?.body || error.message || error);
+    return res.status(500).json({ message: 'Failed to send your message. Please try again later.' });
+  }
+});
+
 const HOST = normalizeEnvValue(process.env.HOST || (IS_PRODUCTION ? '0.0.0.0' : '127.0.0.1'));
 const BASE_PORT = Number(PORT) || 3000;
 const MAX_PORT_TRIES = 10;

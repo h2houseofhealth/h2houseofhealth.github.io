@@ -2189,10 +2189,40 @@
 </section>
 <script>
   document.addEventListener('submit', function (event) {
-    var form = event.target.closest('[data-static-form="contact"], [data-static-form="newsletter"]');
-    if (!form || form.action) return;
+    var form = event.target.closest('[data-static-form="contact"]');
+    if (!form) return;
     event.preventDefault();
-    alert('Thanks. Connect this form to your own endpoint before going live.');
+    var btn = form.querySelector('button[type="submit"]');
+    var originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+    var data = {
+      name: form.querySelector('[name="name"]').value,
+      email: form.querySelector('[name="email"]').value,
+      phone: form.querySelector('[name="phone"]').value || '',
+      message: form.querySelector('[name="message"]').value
+    };
+    fetch('/api/contact', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    .then(function(res) { return res.json().then(function(body) { return { ok: res.ok, body: body }; }); })
+    .then(function(result) {
+      if (result.ok) {
+        alert('Thank you! Your message has been sent successfully.');
+        form.reset();
+      } else {
+        alert(result.body.message || 'Something went wrong. Please try again.');
+      }
+    })
+    .catch(function() {
+      alert('Network error. Please check your connection and try again.');
+    })
+    .finally(function() {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    });
   });
 </script>
 
