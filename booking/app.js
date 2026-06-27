@@ -1117,6 +1117,8 @@ function attachEvents() {
     state.showAuthCard = false;
     state.activeUserTab = 'services';
     storeAuthToken('');
+    clearStoredGuestSessionToken();
+    clearGuestCart();
     clearTimeout(adminCustomerRefreshTimer);
     state.membership = { plans: [], active: false, current: null };
     state.membershipBrowseVisible = false;
