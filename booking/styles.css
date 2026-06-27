@@ -85,7 +85,7 @@
   width: 100%;
   max-width: 1440px;
   margin: 0 auto;
-  padding: 0 20px;
+  padding: 0;
 }
 
 .storefront-header {
@@ -243,7 +243,7 @@
 
 @media (min-width: 1100px) {
   .storefront-header-wrapper {
-    padding-inline: 50px;
+    padding-inline: 0;
   }
 }
 
@@ -335,8 +335,8 @@ a:focus-visible {
 
 
 .portal {
-  width: min(1440px, 100%);
-  max-width: 1440px;
+  width: 100%;
+  max-width: 100%;
   margin: 0 auto;
   padding: var(--sp-2xl);
   position: relative;
@@ -346,6 +346,13 @@ a:focus-visible {
   border-radius: 0;
   box-shadow: none;
   min-height: 100vh;
+}
+
+/* Remove portal padding when showing the public landing page */
+.portal:has(#memberChoiceGate:not([hidden])) {
+  padding: 0 !important;
+  max-width: 100% !important;
+  width: 100% !important;
 }
 
 body.auth-mode .portal {
@@ -1999,16 +2006,16 @@ h1, h2, h3 {
 }
 
 .member-choice-gate {
-  max-width: 1120px;
+  max-width: 100%;
   margin-inline: auto;
-  padding: clamp(1.5rem, 3vw, 2.4rem);
+  padding: 0;
   font-family: Inter, "Helvetica Neue", Arial, sans-serif;
   background: linear-gradient(
     180deg,
     #f7f3ef 0%,
     #efe7df 100%
   );
-  border-color: rgba(var(--brand-primary-rgb), 0.16);
+  border: none;
   overflow: hidden;
   position: relative;
 }
@@ -2296,7 +2303,7 @@ h1, h2, h3 {
     linear-gradient(180deg, rgba(255, 252, 249, 0.98), rgba(255, 247, 240, 0.96));
   box-shadow: 0 18px 38px rgba(54, 30, 15, 0.08);
   overflow: hidden;
-  padding:32px;
+  padding: 0;
   position: relative;
 }
 
@@ -2398,14 +2405,14 @@ h1, h2, h3 {
 
 /* Member Choice Landing Redesign */
 .member-choice-gate {
-  max-width: 1280px;
+  max-width: 100%;
   margin-inline: auto;
-  padding: clamp(1rem, 2.4vw, 1.8rem);
+  padding: 0;
   background:
     radial-gradient(circle at 0% 78%, rgba(var(--brand-primary-rgb), 0.1), transparent 18%),
     linear-gradient(180deg, #fffdfb 0%, #f8f0ea 100%);
-  border: 1px solid #ead8cc;
-  border-radius: 28px;
+  border: none;
+  border-radius: 0;
 }
 
 .member-choice-topbar {
@@ -10433,8 +10440,8 @@ table tbody td {
 
 @media (max-width: 900px) {
   .member-choice-gate {
-    padding: 0.8rem;
-    border-radius: 22px;
+    padding: 0;
+    border-radius: 0;
   }
 
   .member-choice-gate .member-choice-topbar {
@@ -10828,10 +10835,11 @@ table tbody td {
     radial-gradient(980px 560px at 50% 100%, rgba(196, 106, 60, 0.16), transparent 72%),
     linear-gradient(135deg, var(--lux-bg-1) 0%, var(--lux-bg-2) 32%, var(--lux-bg-3) 58%, var(--lux-bg-4) 84%, var(--lux-bg-5) 120%);
   background-blend-mode: multiply, normal, normal, normal, normal;
-  border: 1px solid var(--lux-border);
-  border-radius: 30px;
-  box-shadow: var(--lux-soft-shadow);
-  padding: clamp(1rem, 2.2vw, 1.8rem);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+  max-width: 100%;
 }
 
 #memberChoiceGate.member-choice-gate::before {
@@ -11089,8 +11097,8 @@ table tbody td {
 
 @media (max-width: 1024px) {
   #memberChoiceGate.member-choice-gate {
-    border-radius: 22px;
-    padding: 0.88rem;
+    border-radius: 0;
+    padding: 0;
   }
 
   #memberChoiceGate .member-choice-topbar {
@@ -11560,8 +11568,8 @@ h2, h3 {
 
 /* cmp-perfect-01: exact comparison section styling */
 #cmp-perfect-01.member-choice-comparison {
-  width: min(100%, 1380px);
-  margin: 1rem auto 0;
+  width: 100%;
+  margin: 1rem 0 0;
 }
 
 #cmp-perfect-01 .member-choice-comparison-body {
@@ -12061,18 +12069,49 @@ body {
 
 .container,
 #memberChoiceGate .container {
-  max-width: 1380px;
+  max-width: 1440px;
   margin: 0 auto;
-  padding: 0 24px;
+  padding: 0 5rem;
+}
+
+@media (min-width: 1100px) {
+  .container,
+  #memberChoiceGate .container {
+    padding: 0 5rem;
+  }
 }
 
 #memberChoiceGate .member-choice-hero.hero-inner,
 #memberChoiceGate .hero {
   min-height: auto;
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
   align-items: start;
   gap: 28px;
+  margin-right: -5rem;
+}
+
+@media (max-width: 1099px) {
+  #memberChoiceGate .member-choice-hero.hero-inner,
+  #memberChoiceGate .hero {
+    margin-right: -2rem;
+  }
+}
+
+@media (max-width: 900px) {
+  #memberChoiceGate .member-choice-hero.hero-inner,
+  #memberChoiceGate .hero {
+    margin-right: 0;
+  }
+
+  #memberChoiceGate .member-choice-hero-visual,
+  #memberChoiceGate .member-choice-hero-media {
+    border-radius: 18px;
+  }
+
+  #memberChoiceGate .member-choice-hero-img {
+    border-radius: 18px;
+  }
 }
 
 /* Header/topbar restore */
@@ -12164,15 +12203,17 @@ body {
   display: block;
   justify-content: initial;
   align-items: initial;
-  align-self: auto;
-  overflow: visible;
+  align-self: stretch;
+  overflow: hidden;
   padding: 0;
   background: var(--bg-main);
   border: 0;
   box-shadow: none;
   min-height: 0;
   line-height: 0;
-  padding-top: 18px;
+  padding-top: 0;
+  border-radius: 18px;
+  position: relative;
 }
 
 #memberChoiceGate .hero-image {
@@ -12231,11 +12272,10 @@ body {
   display: block;
   width: 100%;
   max-width: 100%;
-  height:550px;
-  max-height:200%;
-  object-fit: fill;
-  object-position: top left;
-  border-radius: 0;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  border-radius: 18px;
   box-shadow: none;
   margin: 0;
   background: transparent;
@@ -13086,12 +13126,12 @@ img {
   #memberChoiceGate .member-choice-hero-img {
     height: auto !important;
     max-height: none !important;
-    object-fit: contain !important;
-    object-position: center top !important;
+    object-fit: cover !important;
+    object-position: center !important;
   }
 
   #memberChoiceGate .member-choice-hero-img {
-    border-radius: 0 !important;
+    border-radius: 18px !important;
     box-shadow: none !important;
   }
 
@@ -16037,8 +16077,8 @@ body.auth-mode .portal {
   }
 
   #memberChoiceGate.member-choice-gate {
-    padding: 0.55rem !important;
-    border-radius: 16px !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
   }
 
   #memberChoiceGate .container {
@@ -17373,4 +17413,91 @@ body.app-booting .user-only {
   #adminCouponsSection .admin-coupon-actions .btn {
     white-space: normal !important;
   }
+}
+
+/* Force zero padding on portal and member-choice-gate when landing page is visible */
+.portal:has(#memberChoiceGate:not([hidden])),
+main.portal:has(#memberChoiceGate:not([hidden])) {
+  padding: 0 !important;
+  margin: 0 !important;
+  max-width: 100% !important;
+  width: 100% !important;
+}
+
+#memberChoiceGate.member-choice-gate {
+  padding: 0 !important;
+  margin: 0 !important;
+  max-width: 100% !important;
+  width: 100% !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+#memberChoiceGate > .container {
+  padding: 0 5rem !important;
+  margin: 0 !important;
+  max-width: 100% !important;
+  width: 100% !important;
+}
+
+@media (max-width: 1099px) {
+  #memberChoiceGate > .container {
+    padding: 0 2rem !important;
+  }
+}
+
+#memberChoiceGate .member-choice-topbar,
+#memberChoiceGate .member-choice-hero,
+#memberChoiceGate .member-choice-experience,
+#memberChoiceGate .member-choice-comparison {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  max-width: 100% !important;
+}
+
+#memberChoiceGate .member-choice-final-cta {
+  margin-left: 5rem !important;
+  margin-right: 5rem !important;
+  max-width: calc(100% - 10rem) !important;
+}
+
+@media (max-width: 1099px) {
+  #memberChoiceGate .member-choice-final-cta {
+    margin-left: 2rem !important;
+    margin-right: 2rem !important;
+    max-width: calc(100% - 4rem) !important;
+  }
+}
+
+#memberChoiceGate .member-choice-experience-grid {
+  max-width: 100% !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+#memberChoiceGate .member-choice-comparison {
+  max-width: 100% !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+#cmp-perfect-01.member-choice-comparison {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+#memberChoiceGate .member-choice-matrix-block,
+#memberChoiceGate .member-choice-pricing-block {
+  max-width: 100% !important;
+}
+
+#memberChoiceGate .cmp-pricing-card {
+  max-width: 100% !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
 }
