@@ -1685,11 +1685,6 @@ function attachEvents() {
     navigateToUserBookings();
   });
 
-  // Public Book Session Button
-  const handlePublicBookSession = async () => {
-    await enterGuestBookingMode({ scrollToServices: true });
-  };
-
   const publicBookSessionButtons = new Set([
     elements.publicBookSessionBtn,
     ...document.querySelectorAll('[data-public-book-session]'),
@@ -3017,16 +3012,56 @@ function loadStoredGuestCart() {
   if (!savedCart) return [];
   try {
     const parsed = JSON.parse(savedCart);
-    return Array.isArray(parsed)
+    const cart = Array.isArray(parsed)
       ? parsed.filter((booking) => {
           if (!booking || typeof booking !== 'object') return false;
           if (String(booking.status || '').trim().toLowerCase() === 'cancelled') return false;
           return String(booking.paymentStatus || 'unpaid').trim().toLowerCase() !== 'paid';
         })
       : [];
+    return normalizeGuestCartComboGroups(cart);
   } catch {
     return [];
   }
+}
+
+function normalizeGuestCartComboGroups(bookings = []) {
+  const items = Array.isArray(bookings) ? bookings.map((booking) => ({ ...booking })) : [];
+  const usedIds = new Set();
+  const nextGroupStamp = () => `guest_combo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  for (const booking of items) {
+    const bookingId = String(booking?.id || '');
+    if (!bookingId || usedIds.has(bookingId)) continue;
+    if (String(booking?.bookingGroupId || '').trim()) continue;
+
+    const scheduleKey = `${String(booking.bookingDate || '').trim()}|${normalizeSlotStartTime(String(booking.bookingTime || '').trim())}`;
+    if (!scheduleKey || scheduleKey.startsWith('|') || scheduleKey.endsWith('|')) continue;
+
+    const partner = items.find((candidate) => {
+      if (!candidate || candidate === booking) return false;
+      if (usedIds.has(String(candidate?.id || ''))) return false;
+      if (String(candidate?.bookingGroupId || '').trim()) return false;
+      const candidateKey = `${String(candidate.bookingDate || '').trim()}|${normalizeSlotStartTime(String(candidate.bookingTime || '').trim())}`;
+      if (candidateKey !== scheduleKey) return false;
+      const bookingCategory = getBookingCategory(booking.serviceName);
+      const candidateCategory = getBookingCategory(candidate.serviceName);
+      return (
+        (bookingCategory === 'HYDROGEN SESSION' && candidateCategory !== 'HYDROGEN SESSION') ||
+        (bookingCategory !== 'HYDROGEN SESSION' && candidateCategory === 'HYDROGEN SESSION')
+      );
+    });
+
+    if (!partner) continue;
+
+    const sharedGroupId = nextGroupStamp();
+    booking.bookingGroupId = sharedGroupId;
+    partner.bookingGroupId = sharedGroupId;
+    usedIds.add(bookingId);
+    usedIds.add(String(partner?.id || ''));
+  }
+
+  return items;
 }
 
 function getStoredGuestSessionToken() {
@@ -3143,10 +3178,12 @@ function createGuestCartBooking(payload = {}) {
   const bookingDate = String(payload.bookingDate || '').trim();
   const bookingTime = normalizeSlotStartTime(String(payload.bookingTime || '').trim());
   const addOnServiceName = String(payload.addOnServiceName || payload.addOnService || '').trim();
+  const bookingGroupId = String(payload.bookingGroupId || '').trim();
   const id = `guest_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
   return {
     id,
+    bookingGroupId,
     serviceName,
     bookingDate,
     bookingTime,
@@ -3160,6 +3197,89 @@ function createGuestCartBooking(payload = {}) {
   };
 }
 
+function buildGuestCartBookingsFromPayload(payload = {}) {
+  const serviceName = String(payload.serviceName || '').trim();
+  const bookingDate = String(payload.bookingDate || '').trim();
+  const bookingTime = normalizeSlotStartTime(String(payload.bookingTime || '').trim());
+  const addOnServiceName = String(payload.addOnServiceName || payload.addOnService || '').trim();
+  const bookingGroupId = String(payload.bookingGroupId || '').trim() || (addOnServiceName ? `guest_combo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` : '');
+  const bookings = [];
+
+  if (serviceName && bookingDate && bookingTime) {
+    bookings.push(
+      createGuestCartBooking({
+        ...payload,
+        bookingGroupId,
+        serviceName,
+        bookingDate,
+        bookingTime,
+        addOnServiceName: '',
+        addOnService: '',
+      })
+    );
+  }
+
+  if (!addOnServiceName) {
+    return bookings;
+  }
+
+  const addOnBookingGroupId = bookingGroupId || '';
+  const addOnService = getServiceCatalogEntry(addOnServiceName) || state.services.find((service) => service.name === addOnServiceName) || null;
+  const addOnCategory = String(addOnService?.category || '').trim().toUpperCase();
+  const isHydrogenAddOn = addOnCategory === 'HYDROGEN SESSION';
+
+  if (isHydrogenAddOn) {
+    const requestedSlots = Array.isArray(payload.addOnHydrogenSlots) ? payload.addOnHydrogenSlots : [];
+    const normalizedSlots = requestedSlots.length
+      ? requestedSlots
+          .map((slot) => ({
+            bookingDate: String(slot?.bookingDate || '').trim(),
+            bookingTime: normalizeSlotStartTime(String(slot?.bookingTime || '').trim()),
+          }))
+          .filter((slot) => slot.bookingDate && slot.bookingTime)
+      : [
+          {
+            bookingDate: String(payload.addOnBookingDate || bookingDate || '').trim(),
+            bookingTime: normalizeSlotStartTime(String(payload.addOnBookingTime || bookingTime || '').trim()),
+          },
+        ];
+    normalizedSlots.forEach((slot, index) => {
+      bookings.push(
+        createGuestCartBooking({
+          ...payload,
+          bookingGroupId: addOnBookingGroupId,
+          serviceName: addOnServiceName,
+          bookingDate: slot.bookingDate,
+          bookingTime: slot.bookingTime,
+          notes: `Hydrogen add-on for ${serviceName || addOnServiceName}${index >= 0 ? ` (Session ${index + 1})` : ''}`,
+          addOnServiceName: '',
+          addOnService: '',
+        })
+      );
+    });
+    return bookings;
+  }
+
+  const addOnBookingDate = String(payload.addOnBookingDate || bookingDate || '').trim();
+  const addOnBookingTime = normalizeSlotStartTime(String(payload.addOnBookingTime || bookingTime || '').trim());
+  if (addOnBookingDate && addOnBookingTime) {
+    bookings.push(
+      createGuestCartBooking({
+        ...payload,
+        bookingGroupId: addOnBookingGroupId,
+        serviceName: addOnServiceName,
+        bookingDate: addOnBookingDate,
+        bookingTime: addOnBookingTime,
+        notes: String(payload.notes || '').trim() ? `${String(payload.notes || '').trim()} - Add-on for ${serviceName}` : `Add-on for ${serviceName}`,
+        addOnServiceName: '',
+        addOnService: '',
+      })
+    );
+  }
+
+  return bookings;
+}
+
 function addGuestCartBookings(bookings = []) {
   const nextBookings = (Array.isArray(bookings) ? bookings : [bookings]).filter(
     (booking) => booking?.serviceName && booking?.bookingDate && booking?.bookingTime
@@ -3171,7 +3291,14 @@ function addGuestCartBookings(bookings = []) {
 
 function removeGuestCartBooking(bookingId = '') {
   const targetId = String(bookingId || '').trim();
-  state.cart = getGuestCartBookings().filter((booking) => String(booking?.id || '') !== targetId);
+  const targetBooking = getGuestCartBookings().find((booking) => String(booking?.id || '') === targetId);
+  const targetGroupId = String(targetBooking?.bookingGroupId || '').trim();
+  state.cart = getGuestCartBookings().filter((booking) => {
+    if (targetGroupId) {
+      return String(booking?.bookingGroupId || '').trim() !== targetGroupId;
+    }
+    return String(booking?.id || '') !== targetId;
+  });
   persistGuestCart();
 }
 
@@ -3840,6 +3967,20 @@ function navigateToUserBookings() {
   requestAnimationFrame(() => {
     elements.userBookingsSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
+}
+
+async function handlePublicBookSession() {
+  if (state.user) {
+    state.activeUserTab = 'services';
+    window.location.hash = '#services';
+    render();
+    requestAnimationFrame(() => {
+      elements.servicesSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    return;
+  }
+
+  await enterGuestBookingMode();
 }
 
 function validateGuestCheckout() {
@@ -6247,10 +6388,10 @@ async function saveSingleSessionServiceBooking(serviceName) {
     });
     return;
   }
-  if (getBookingCategory(serviceName) === 'IV ADD-ON' && hasHydrogenPackageAddOnOnDateClient(effectiveBookingDate)) {
+  if (getBookingCategory(serviceName) === 'IV ADD-ON' && hasHydrogenPackageAddOnOnDateClient(effectiveBookingDate, effectiveBookingTime)) {
     showNotice({
       title: 'Not allowed',
-      body: 'A hydrogen package on this date already includes an add-on. Separate Therapy/Shot bookings are not allowed on the same day.',
+      body: 'A hydrogen package already has an add-on at this time. Please choose a different slot time.',
     });
     return;
   }
@@ -8893,9 +9034,9 @@ function renderHydrogenUnifiedComposer({ detailsContainer, services, category, i
       const addOnSessionIndex = addOnServiceName ? Math.max(0, Number(state.selectedHydrogenAddOnSessionIndex || 0)) : null;
       if (addOnServiceName) {
         const addOnSlot = slots?.[Number(addOnSessionIndex || 0)];
-        if (addOnSlot && hasStandaloneIvOnDateClient(addOnSlot.bookingDate, state.hydrogenEditingGroupId)) {
+        if (addOnSlot && hasStandaloneIvOnDateClient(addOnSlot.bookingDate, addOnSlot.bookingTime, state.hydrogenEditingGroupId)) {
           setHydrogenComposerNotice(
-            'A separate Therapy/Shot is already booked on this date. Hydrogen packages with an add-on cannot be combined with separate Therapy/Shot bookings on the same day.',
+            'A separate Therapy/Shot is already booked at this time. Please choose a different slot time.',
             'error'
           );
           renderServices();
@@ -9020,6 +9161,9 @@ function renderIvUnifiedComposer({ detailsContainer, services, category }) {
       : 'Members only'
     : `₹${selectedServicePrice.toLocaleString('en-IN')}`;
   const totalPrice = selectedServicePrice + selectedAddOnPrice;
+  const totalPriceBreakdown = selectedServiceIsMembershipOnly && !selectedServiceHasMemberAccess
+    ? null
+    : getGstBreakdownInr(totalPrice);
 
   const layout = document.createElement('div');
   layout.className = 'hydrogen-layout hydrogen-unified-layout iv-unified-layout';
@@ -9062,7 +9206,7 @@ function renderIvUnifiedComposer({ detailsContainer, services, category }) {
       ${addOnHtml}
       <div class="iv-plan-summary-total">
         <strong>Total</strong>
-        <span>${selectedServiceIsMembershipOnly && !selectedServiceHasMemberAccess ? 'Members only' : `₹${totalPrice.toLocaleString('en-IN')}`}</span>
+        <span>${selectedServiceIsMembershipOnly && !selectedServiceHasMemberAccess ? 'Members only' : `₹${Number(totalPriceBreakdown?.totalAmountInr || totalPrice).toLocaleString('en-IN')}`}</span>
       </div>
     `;
   };
@@ -9451,7 +9595,7 @@ function renderIvUnifiedComposer({ detailsContainer, services, category }) {
     ? selectedServiceHasMemberAccess
       ? 'Included in Membership'
       : 'Members only'
-    : `₹${selectedServicePrice.toLocaleString('en-IN')}`;
+    : formatAmountWithGstLabel(totalPrice).replace('Rs.', '₹');
   const stickyPriceClass = /₹|Rs\./i.test(stickyPriceText) ? 'service-sticky-price' : '';
 
   const editingBookingId = String(state.ivSelections?.[selectedService.name]?.editingBookingId || '').trim();
@@ -9459,10 +9603,20 @@ function renderIvUnifiedComposer({ detailsContainer, services, category }) {
 
   const stickyWrap = document.createElement('div');
   stickyWrap.className = 'service-sticky-book';
+  const stickyPriceBreakdownHtml = !selectedServiceIsMembershipOnly || selectedServiceHasMemberAccess
+    ? `
+      <div class="sticky-price-breakdown">
+        <div class="breakdown-item"><span>${escapeHtml(selectedService.name)}</span><span>₹${selectedServicePrice.toLocaleString('en-IN')}</span></div>
+        ${selectedAddOnService ? `<div class="breakdown-item"><span>${escapeHtml(selectedAddOnService.name)}</span><span>₹${selectedAddOnPrice.toLocaleString('en-IN')}</span></div>` : ''}
+        ${totalPrice > 0 ? `<div class="breakdown-item"><span>GST ${GST_RATE_PERCENT}%</span><span>₹${Number(totalPriceBreakdown?.gstAmountInr || 0).toLocaleString('en-IN')}</span></div>` : ''}
+        ${totalPrice > 0 ? `<div class="breakdown-total"><span>Total</span><span>₹${Number(totalPriceBreakdown?.totalAmountInr || totalPrice).toLocaleString('en-IN')}</span></div>` : ''}
+      </div>
+    `
+    : '';
   stickyWrap.innerHTML = `
     <div class="service-sticky-meta">
       <strong>${escapeHtml(selectedService.name)}</strong>
-      <span class="${stickyPriceClass}">${escapeHtml(stickyPriceText)}</span>
+      ${stickyPriceBreakdownHtml || `<span class="${stickyPriceClass}">${escapeHtml(stickyPriceText)}</span>`}
     </div>
   `;
   const stickyButton = document.createElement('button');
@@ -9538,10 +9692,10 @@ async function saveIvUnifiedBookingToCart({
     return;
   }
 
-  if (getBookingCategory(serviceName) === 'IV ADD-ON' && hasHydrogenPackageAddOnOnDateClient(safeDate)) {
+  if (getBookingCategory(serviceName) === 'IV ADD-ON' && hasHydrogenPackageAddOnOnDateClient(safeDate, safeTime)) {
     showNotice({
       title: 'Not allowed',
-      body: 'A hydrogen package on this date already includes an add-on. Separate Therapy/Shot bookings are not allowed on the same day.',
+      body: 'A hydrogen package already has an add-on at this time. Please choose a different slot time.',
     });
     return;
   }
@@ -9580,10 +9734,18 @@ async function saveIvUnifiedBookingToCart({
     }),
   });
 
-  await loadDashboardData();
-  if (!isAdmin) {
+  const isGuest = Boolean(state.isGuestUser && !state.user);
+
+  if (isGuest) {
+    state.bookings = getGuestCartBookings();
     state.activeUserTab = 'cart';
     window.location.hash = '#cart';
+  } else {
+    await loadDashboardData();
+    if (!isAdmin) {
+      state.activeUserTab = 'cart';
+      window.location.hash = '#cart';
+    }
   }
   render();
   if (!isAdmin) {
@@ -9600,10 +9762,12 @@ async function saveIvUnifiedBookingToCart({
     return;
   }
 
-  const cartSummary = buildUserCartSummary(state.bookings || []);
+  const cartSummary = buildUserCartSummary(isGuest ? getGuestCartBookings() : state.bookings || []);
   showNotice({
     title: 'Added to cart',
-    body: `${serviceName} on ${formatDateTime(safeDate, safeTime)}\nCart items: ${Number(cartSummary.unitCount || 0)}`,
+    body: isGuest
+      ? `${serviceName} added in cart.`
+      : `${serviceName} on ${formatDateTime(safeDate, safeTime)}\nCart items: ${Number(cartSummary.unitCount || 0)}`,
   });
 }
 
@@ -10152,10 +10316,10 @@ function getHydrogenPlanOptions(services) {
         const submitSlots = getHydrogenSlotsForSubmit(requiredSlots);
         if (selectedAddOnService) {
           const addOnSlot = submitSlots[state.selectedHydrogenAddOnSessionIndex];
-          if (addOnSlot && hasStandaloneIvOnDateClient(addOnSlot.bookingDate, state.hydrogenEditingGroupId)) {
+          if (addOnSlot && hasStandaloneIvOnDateClient(addOnSlot.bookingDate, addOnSlot.bookingTime, state.hydrogenEditingGroupId)) {
             showNotice({
               title: 'Not allowed',
-              body: 'A separate Therapy/Shot is already booked on this date. Hydrogen packages with an add-on cannot be combined with separate Therapy/Shot bookings on the same day.',
+              body: 'A separate Therapy/Shot is already booked at this time. Please choose a different slot time.',
             });
             return;
           }
@@ -12640,8 +12804,8 @@ function renderUserRows(bookings, membershipOrders = [], allBookings = bookings)
 function cartAmountCell(row) {
   const td = document.createElement('td');
   td.dataset.label = 'Amount';
-  let amountInr = 0;
-  if (row.isGroupedHydrogen) {
+  let amountInr = Number.isFinite(Number(row?.amountInr)) ? Number(row.amountInr) : 0;
+  if (!amountInr && row.isGroupedHydrogen) {
     const payableHydrogenEntries = (row.hydrogenEntries || []).filter(
       (entry) => entry.status !== 'cancelled' && String(entry.paymentStatus || 'unpaid').toLowerCase() !== 'paid'
     );
@@ -12649,7 +12813,7 @@ function cartAmountCell(row) {
       (entry) => entry.status !== 'cancelled' && String(entry.paymentStatus || 'unpaid').toLowerCase() !== 'paid'
     );
     amountInr = Number(getHydrogenGroupBreakdown(payableHydrogenEntries, payableAddOnEntries).totalAmountInr || 0);
-  } else {
+  } else if (!amountInr) {
     amountInr = getBookingDisplayAmountInr(row.booking || { serviceName: row.serviceTitle });
   }
   td.textContent = amountInr > 0 ? formatGrossAmountWithGstLabel(amountInr) : 'Included';
@@ -12657,8 +12821,8 @@ function cartAmountCell(row) {
 }
 
 function getCartRowAmountLabel(row) {
-  let amountInr = 0;
-  if (row.isGroupedHydrogen) {
+  let amountInr = Number.isFinite(Number(row?.amountInr)) ? Number(row.amountInr) : 0;
+  if (!amountInr && row.isGroupedHydrogen) {
     const payableHydrogenEntries = (row.hydrogenEntries || []).filter(
       (entry) => entry.status !== 'cancelled' && String(entry.paymentStatus || 'unpaid').toLowerCase() !== 'paid'
     );
@@ -12666,7 +12830,7 @@ function getCartRowAmountLabel(row) {
       (entry) => entry.status !== 'cancelled' && String(entry.paymentStatus || 'unpaid').toLowerCase() !== 'paid'
     );
     amountInr = Number(getHydrogenGroupBreakdown(payableHydrogenEntries, payableAddOnEntries).totalAmountInr || 0);
-  } else {
+  } else if (!amountInr) {
     amountInr = getBookingDisplayAmountInr(row.booking || { serviceName: row.serviceTitle });
   }
   return amountInr > 0 ? formatGrossAmountWithGstLabel(amountInr) : 'Included';
@@ -12886,7 +13050,79 @@ function buildUserBookingRows(bookings, allBookings = bookings) {
     const hydrogenSequenceById = new Map(
       groupHydrogenEntries.map((entry, index) => [String(entry?.id || ''), index + 1])
     );
-    const isGroupedHydrogen = Boolean(groupKey.startsWith('hydrogen_') || (sortedEntries[0]?.bookingGroupId && hydrogenEntries.length));
+    const primaryEntry = sortedEntries[0] || includedEntries[0] || null;
+    const primaryEntryCategory = getBookingCategory(primaryEntry?.serviceName);
+    const isTherapyHydrogenComboGroup = Boolean(
+      primaryEntry?.bookingGroupId &&
+      hydrogenEntries.length &&
+      sortedEntries.length > hydrogenEntries.length &&
+      primaryEntryCategory !== 'HYDROGEN SESSION'
+    );
+    const isGroupedHydrogen = Boolean(
+      groupKey.startsWith('hydrogen_') ||
+      (primaryEntry?.bookingGroupId && hydrogenEntries.length && !isTherapyHydrogenComboGroup)
+    );
+
+    if (isTherapyHydrogenComboGroup) {
+      const comboEntries = includedEntries.length ? includedEntries : sortedEntries;
+      const primaryBooking =
+        comboEntries.find((entry) => getBookingCategory(entry.serviceName) !== 'HYDROGEN SESSION') ||
+        comboEntries[0] ||
+        sortedEntries[0];
+      const comboHydrogenEntries = comboEntries.filter((entry) => getBookingCategory(entry.serviceName) === 'HYDROGEN SESSION');
+      const comboNonHydrogenEntries = comboEntries.filter((entry) => getBookingCategory(entry.serviceName) !== 'HYDROGEN SESSION');
+      const comboAmountInr = comboEntries.reduce((sum, entry) => sum + Number(getBookingDisplayAmountInr(entry) || 0), 0);
+      const comboItemLines = comboEntries.map((entry) => {
+        const entryAmount = Number(getBookingDisplayAmountInr(entry) || 0);
+        const entryLabel = getBookingCategoryLabel(entry.serviceName);
+        const entryDateTime = formatDateTime(entry.bookingDate, entry.bookingTime);
+        return `${entryLabel}: ${getServiceDisplayName(entry.serviceName)}${entryDateTime !== '-' ? ` • ${entryDateTime}` : ''}${entryAmount > 0 ? ` • Rs. ${entryAmount.toLocaleString('en-IN')}` : ''}`;
+      });
+      const holdNotice = buildHoldNotice(comboEntries);
+      const rescheduleMissNotice = buildUserRescheduleMissNotice(primaryBooking);
+      const rescheduleHistory = getBookingRescheduleHistory(primaryBooking);
+      const comboRescheduleSection = buildRescheduleDetailSection({
+        heading: 'Session ↺ Rescheduled',
+        history: rescheduleHistory,
+      });
+      const latestIncludedEntry = [...comboEntries].sort(compareBookingsByScheduleDesc)[0] || primaryBooking;
+      const earliestIncludedEntry = comboEntries[0] || primaryBooking;
+      const rowSortEntry = activeBookingFilter === 'upcoming' ? earliestIncludedEntry : latestIncludedEntry;
+
+      rows.push({
+        id: primaryBooking.id,
+        booking: primaryBooking,
+        sortTime: getBookingStartTime(rowSortEntry),
+        bookingGroupId: primaryBooking.bookingGroupId || '',
+        comboEntries,
+        comboHydrogenEntries,
+        comboNonHydrogenEntries,
+        isComboBooking: true,
+        isGroupedHydrogen: false,
+        status: summarizeGroupStatus(comboEntries),
+        paymentStatus: summarizeGroupPaymentStatus(comboEntries),
+        amountInr: comboAmountInr,
+        serviceTitle: getServiceDisplayName(primaryBooking.serviceName) || 'Booking',
+        serviceMetaLines: [
+          `Combined booking: ${comboEntries.length} service${comboEntries.length === 1 ? '' : 's'}`,
+          ...(comboHydrogenEntries.length ? [`Hydrogen add-on: ${comboHydrogenEntries.map((entry) => getServiceDisplayName(entry.serviceName)).join(', ')}`] : []),
+          ...(comboNonHydrogenEntries.length ? [`Primary service: ${comboNonHydrogenEntries.map((entry) => getServiceDisplayName(entry.serviceName)).join(', ')}`] : []),
+          ...(holdNotice ? [holdNotice] : []),
+          ...(rescheduleMissNotice ? [rescheduleMissNotice] : []),
+        ],
+        scheduleLines: comboEntries.map((entry) => `${getServiceDisplayName(entry.serviceName)}: ${formatDateTime(entry.bookingDate, entry.bookingTime)}`),
+        detailSections: [
+          {
+            title: 'Services',
+            lines: comboItemLines,
+          },
+          ...(comboRescheduleSection ? [comboRescheduleSection] : []),
+        ],
+        serviceText: comboEntries.map((entry) => getServiceDisplayName(entry.serviceName)).join('\n'),
+        dateTimeText: comboEntries.map((entry) => formatDateTime(entry.bookingDate, entry.bookingTime)).join('\n'),
+      });
+      continue;
+    }
 
     if (!isGroupedHydrogen) {
       const booking = sortedEntries[0];
@@ -13102,11 +13338,7 @@ function buildUserCartSummary(bookings = state.bookings) {
   const rows = buildUserBookingRows(payableBookings, payableBookings);
   let totalAmountInr = 0;
   for (const row of rows) {
-    if (row.isGroupedHydrogen) {
-      totalAmountInr += Number(getHydrogenGroupBreakdown(row.hydrogenEntries || [], row.addOnEntries || []).totalAmountInr || 0);
-    } else {
-      totalAmountInr += getBookingDisplayAmountInr(row.booking || { serviceName: row.serviceTitle });
-    }
+    totalAmountInr += Number(getBookingRowAmountInr(row) || 0);
   }
   const payableBreakdown = getGstBreakdownInr(totalAmountInr, { fromGross: true });
 
@@ -15146,12 +15378,15 @@ function findMembershipExpiryConflictClient(slots = []) {
   return null;
 }
 
-function hasHydrogenPackageAddOnOnDateClient(bookingDate, excludeGroupId = '') {
+function hasHydrogenPackageAddOnOnDateClient(bookingDate, bookingTime = '', excludeGroupId = '') {
   const targetDate = String(bookingDate || '').trim();
+  const targetTime = normalizeSlotStartTime(String(bookingTime || '').trim());
   if (!targetDate) return false;
+  if (!targetTime) return false;
 
   return getCurrentContextBookings().some((booking) => {
     if (booking.bookingDate !== targetDate) return false;
+    if (normalizeSlotStartTime(String(booking.bookingTime || '').trim()) !== targetTime) return false;
     if (!booking.bookingGroupId) return false;
     if (excludeGroupId && booking.bookingGroupId === excludeGroupId) return false;
     if (['cancelled', 'schedule_later'].includes(String(booking.status || '').toLowerCase())) return false;
@@ -15160,12 +15395,15 @@ function hasHydrogenPackageAddOnOnDateClient(bookingDate, excludeGroupId = '') {
   });
 }
 
-function hasStandaloneIvOnDateClient(bookingDate, excludeGroupId = '') {
+function hasStandaloneIvOnDateClient(bookingDate, bookingTime = '', excludeGroupId = '') {
   const targetDate = String(bookingDate || '').trim();
+  const targetTime = normalizeSlotStartTime(String(bookingTime || '').trim());
   if (!targetDate) return false;
+  if (!targetTime) return false;
 
   return getCurrentContextBookings().some((booking) => {
     if (booking.bookingDate !== targetDate) return false;
+    if (normalizeSlotStartTime(String(booking.bookingTime || '').trim()) !== targetTime) return false;
     if (['cancelled', 'schedule_later'].includes(String(booking.status || '').toLowerCase())) return false;
     if (booking.holdExpired) return false;
     if (excludeGroupId && booking.bookingGroupId === excludeGroupId) return false;
@@ -15875,20 +16113,35 @@ async function api(url, options = {}) {
       url = normalizedUrl.replace('/api/services/availability', '/api/public/services/availability');
     } else if (method === 'POST' && normalizedUrl === '/api/bookings') {
       const payload = JSON.parse(String(options.body || '{}'));
-      const booking = createGuestCartBooking(payload);
-      addGuestCartBookings(booking);
-      return { booking, bookings: [booking] };
+      const bookings = buildGuestCartBookingsFromPayload(payload);
+      addGuestCartBookings(bookings);
+      return { booking: bookings[0] || null, bookings };
     } else if (method === 'POST' && normalizedUrl === '/api/hydrogen/book-pack') {
       const payload = JSON.parse(String(options.body || '{}'));
-      const bookings = (Array.isArray(payload.slots) ? payload.slots : []).map((slot) =>
+      const bookingGroupId = String(payload.bookingGroupId || '').trim() || `guest_combo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const baseBookings = (Array.isArray(payload.slots) ? payload.slots : []).map((slot) =>
         createGuestCartBooking({
           serviceName: payload.serviceName,
           bookingDate: slot.bookingDate,
           bookingTime: slot.bookingTime,
-          addOnServiceName: payload.addOnServiceName,
+          bookingGroupId,
           notes: payload.notes,
         })
       );
+      const addOnIndex = Number(payload.addOnSessionIndex || 0);
+      const addOnSlot = Array.isArray(payload.slots) ? payload.slots[addOnIndex] : null;
+      const addOnBookings = payload.addOnServiceName && addOnSlot
+        ? [
+            createGuestCartBooking({
+              serviceName: payload.addOnServiceName,
+              bookingDate: addOnSlot.bookingDate,
+              bookingTime: addOnSlot.bookingTime,
+              bookingGroupId,
+              notes: payload.notes ? `${String(payload.notes).trim()} - Add-on for ${payload.serviceName}` : `Add-on for ${payload.serviceName}`,
+            }),
+          ]
+        : [];
+      const bookings = [...baseBookings, ...addOnBookings];
       addGuestCartBookings(bookings);
       return { bookings };
     } else if (method === 'DELETE' && /^\/api\/bookings\/[^/]+$/.test(normalizedUrl)) {
