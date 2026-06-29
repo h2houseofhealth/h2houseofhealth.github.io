@@ -9164,7 +9164,11 @@ function renderIvUnifiedComposer({ detailsContainer, services, category }) {
   const totalPrice = selectedServicePrice + selectedAddOnPrice;
   const totalPriceBreakdown = selectedServiceIsMembershipOnly && !selectedServiceHasMemberAccess
     ? null
-    : getGstBreakdownInr(totalPrice);
+    : {
+        subtotalAmountInr: totalPrice,
+        gstAmountInr: 0,
+        totalAmountInr: totalPrice,
+      };
 
   const layout = document.createElement('div');
   layout.className = 'hydrogen-layout hydrogen-unified-layout iv-unified-layout';
@@ -9596,7 +9600,7 @@ function renderIvUnifiedComposer({ detailsContainer, services, category }) {
     ? selectedServiceHasMemberAccess
       ? 'Included in Membership'
       : 'Members only'
-    : formatAmountWithGstLabel(totalPrice).replace('Rs.', '₹');
+    : `₹${totalPrice.toLocaleString('en-IN')}`;
   const stickyPriceClass = /₹|Rs\./i.test(stickyPriceText) ? 'service-sticky-price' : '';
 
   const editingBookingId = String(state.ivSelections?.[selectedService.name]?.editingBookingId || '').trim();
@@ -9609,8 +9613,8 @@ function renderIvUnifiedComposer({ detailsContainer, services, category }) {
       <div class="sticky-price-breakdown">
         <div class="breakdown-item"><span>${escapeHtml(selectedService.name)}</span><span>₹${selectedServicePrice.toLocaleString('en-IN')}</span></div>
         ${selectedAddOnService ? `<div class="breakdown-item"><span>${escapeHtml(selectedAddOnService.name)}</span><span>₹${selectedAddOnPrice.toLocaleString('en-IN')}</span></div>` : ''}
-        ${totalPrice > 0 ? `<div class="breakdown-item"><span>GST ${GST_RATE_PERCENT}%</span><span>₹${Number(totalPriceBreakdown?.gstAmountInr || 0).toLocaleString('en-IN')}</span></div>` : ''}
         ${totalPrice > 0 ? `<div class="breakdown-total"><span>Total</span><span>₹${Number(totalPriceBreakdown?.totalAmountInr || totalPrice).toLocaleString('en-IN')}</span></div>` : ''}
+        ${totalPrice > 0 ? `<div class="breakdown-item"><small>All prices are inclusive of taxes</small></div>` : ''}
       </div>
     `
     : '';
