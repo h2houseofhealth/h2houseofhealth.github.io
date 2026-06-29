@@ -3305,9 +3305,9 @@ app.post('/api/hydrogen/create-order', requireAuth, async (req, res) => {
         if (!addOnSlot) {
           throw new Error('Invalid add-on session selection');
         }
-        if (hasStandaloneIvBookingOnDate(req.user.id, addOnSlot.bookingDate)) {
+        if (hasStandaloneIvBookingOnDate(req.user.id, addOnSlot.bookingDate, addOnSlot.bookingTime)) {
           throw new Error(
-            'A separate IV Therapy/IV Shot is already booked on this date. Hydrogen packages with an IV add-on cannot be combined with separate IV bookings on the same day.'
+            'A separate IV Therapy/IV Shot is already booked at this time. Please choose a different slot time.'
           );
         }
         if (hasConflictingAddOnBooking(req.user.id, addOnSlot.bookingDate, addOnSlot.bookingTime)) {
@@ -3535,9 +3535,9 @@ app.post('/api/hydrogen/book-pack', requireAuth, (req, res) => {
         if (!addOnSlot) {
           throw new Error('Invalid add-on session selection');
         }
-        if (hasStandaloneIvBookingOnDate(req.user.id, addOnSlot.bookingDate)) {
+        if (hasStandaloneIvBookingOnDate(req.user.id, addOnSlot.bookingDate, addOnSlot.bookingTime)) {
           throw new Error(
-            'A separate IV Therapy/IV Shot is already booked on this date. Hydrogen packages with an IV add-on cannot be combined with separate IV bookings on the same day.'
+            'A separate IV Therapy/IV Shot is already booked at this time. Please choose a different slot time.'
           );
         }
         if (hasConflictingAddOnBooking(req.user.id, addOnSlot.bookingDate, addOnSlot.bookingTime)) {
@@ -3770,9 +3770,9 @@ app.post('/api/admin/hydrogen/book-pack', requireAuth, requireAdmin, (req, res) 
         if (!addOnSlot) {
           throw new Error('Invalid add-on session selection');
         }
-        if (hasStandaloneIvBookingOnDate(targetUser.id, addOnSlot.bookingDate)) {
+        if (hasStandaloneIvBookingOnDate(targetUser.id, addOnSlot.bookingDate, addOnSlot.bookingTime)) {
           throw new Error(
-            'A separate IV Therapy/IV Shot is already booked on this date. Hydrogen packages with an IV add-on cannot be combined with separate IV bookings on the same day.'
+            'A separate IV Therapy/IV Shot is already booked at this time. Please choose a different slot time.'
           );
         }
         if (hasConflictingAddOnBooking(targetUser.id, addOnSlot.bookingDate, addOnSlot.bookingTime)) {
@@ -4076,10 +4076,10 @@ app.put('/api/hydrogen/packages/:groupId', requireAuth, (req, res) => {
         message: getIvCooldownResponseMessage(cooldownConflict),
       });
     }
-    if (hasStandaloneIvBookingOnDate(req.user.id, addOnSlot.bookingDate, excludeIds)) {
+    if (hasStandaloneIvBookingOnDate(req.user.id, addOnSlot.bookingDate, addOnSlot.bookingTime, excludeIds)) {
       return res.status(409).json({
         message:
-          'A separate IV Therapy/IV Shot is already booked on this date. Hydrogen packages with an IV add-on cannot be combined with separate IV bookings on the same day.',
+          'A separate IV Therapy/IV Shot is already booked at this time. Please choose a different slot time.',
       });
     }
     const addOnNames = SERVICE_CATALOG.filter((entry) => isAddOnService(entry)).map((entry) => entry.name);
@@ -4566,11 +4566,11 @@ app.put('/api/bookings/:id', requireAuth, (req, res) => {
     selectedService &&
     isAddOnService(selectedService) &&
     !existing.bookingGroupId &&
-    hasHydrogenPackageAddOnOnDate(req.user.id, payload.data.bookingDate, [bookingId])
+    hasHydrogenPackageAddOnOnDate(req.user.id, payload.data.bookingDate, payload.data.bookingTime, [bookingId])
   ) {
     return res.status(409).json({
       message:
-        'A hydrogen package on this date already includes an IV add-on. Separate IV Therapy/IV Shot bookings are not allowed on the same day.',
+        'A hydrogen package already has an IV add-on at this time. Please choose a different slot time.',
     });
   }
   if (selectedService && String(selectedService.category || '').toUpperCase() === 'HYDROGEN SESSION') {
@@ -4606,10 +4606,10 @@ app.put('/api/bookings/:id', requireAuth, (req, res) => {
         });
       }
     } else {
-      if (hasStandaloneIvBookingOnDate(existing.userId, effectiveAddOnBookingDate, excludeIds)) {
+      if (hasStandaloneIvBookingOnDate(existing.userId, effectiveAddOnBookingDate, effectiveAddOnBookingTime, excludeIds)) {
         return res.status(409).json({
           message:
-            'A separate IV Therapy/IV Shot is already booked on this date. Hydrogen packages with an IV add-on cannot be combined with separate IV bookings on the same day.',
+            'A separate IV Therapy/IV Shot is already booked at this time. Please choose a different slot time.',
         });
       }
       if (hasConflictingAddOnBooking(existing.userId, effectiveAddOnBookingDate, effectiveAddOnBookingTime, excludeAddOnBookingId)) {
@@ -6244,6 +6244,7 @@ app.post('/api/guest/checkout', async (req, res) => {
         errors.push(`Service not found: ${serviceName}`);
         continue;
       }
+      const bookingGroupId = String(booking.bookingGroupId || booking.booking_group_id || '').trim() || null;
 
       // Check slot availability
       const slotCheck = db
@@ -6270,7 +6271,7 @@ app.post('/api/guest/checkout', async (req, res) => {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         guestUserId,
-        null, // booking_group_id - will be set if group booking
+        bookingGroupId,
         guestName.trim(),
         guestEmail.trim(),
         guestPhone.trim(),
@@ -6291,7 +6292,7 @@ app.post('/api/guest/checkout', async (req, res) => {
       );
 
       const bookingId = Number(insertResult.lastInsertRowid);
-      createdBookings.push({ id: bookingId, serviceName, bookingDate, bookingTime });
+      createdBookings.push({ id: bookingId, bookingGroupId, serviceName, bookingDate, bookingTime });
     }
 
     if (errors.length > 0 && createdBookings.length === 0) {
@@ -6314,24 +6315,52 @@ app.post('/api/guest/checkout', async (req, res) => {
       return res.status(500).json({ message: 'Unable to prepare guest payment token' });
     }
 
-    // Calculate total amount (simplified - use first booking price for now)
-    const firstService = getServiceByName(createdBookings[0].serviceName);
-    const totalAmountInr = firstService ? Number(firstService.priceInr || 0) * createdBookings.length : 0;
+    const pricingBookings = db
+      .prepare(
+        `SELECT id,
+                user_id AS userId,
+                booking_group_id AS bookingGroupId,
+                service_name AS serviceName,
+                booking_date AS bookingDate,
+                booking_time AS bookingTime,
+                status,
+                payment_status AS paymentStatus,
+                payment_reference AS paymentReference,
+                is_topup_session AS isTopUpSession,
+                created_at AS createdAt
+         FROM bookings
+         WHERE id IN (${createdBookings.map(() => '?').join(', ')})
+         ORDER BY booking_date, booking_time, id`
+      )
+      .all(...createdBookings.map((b) => b.id));
+
+    const guestPricingUser = {
+      membershipStatus: 'inactive',
+      membershipExpiresAt: null,
+      membershipStartedAt: null,
+      mobile: guestPhone.trim(),
+    };
+    const pricingSummary = finalizeSummaryWithGst(buildAggregatePaymentSummary(pricingBookings, guestPricingUser));
 
     res.json({
       success: true,
       paymentToken,
       summary: {
-        totalAmountInr,
-        bookingCount: createdBookings.length,
+        totalAmountInr: Number(pricingSummary.totalAmountInr || 0),
+        subtotalAmountInr: Number(pricingSummary.subtotalAmountInr || 0),
+        gstAmountInr: Number(pricingSummary.gstAmountInr || 0),
+        bookingCount: Number(pricingSummary.bookingCount || createdBookings.length),
         guestName: guestName.trim(),
         guestEmail: guestEmail.trim(),
         guestPhone: guestPhone.trim(),
-        items: createdBookings.map(b => ({
-          serviceName: b.serviceName,
-          bookingDate: b.bookingDate,
-          bookingTime: b.bookingTime,
+        items: (Array.isArray(pricingSummary.units) ? pricingSummary.units : []).map((unit) => ({
+          serviceName: unit.label || 'Booking',
+          bookingDate: '',
+          bookingTime: '',
+          amountInr: Number(unit.amountInr || 0),
+          bookingCount: Number(unit.bookingCount || 0),
         })),
+        units: pricingSummary.units || [],
       },
     });
   } catch (error) {
@@ -9946,11 +9975,11 @@ function createSingleBookingResponse(req, res, { targetUser, defaultNotes = '', 
   if (
     selectedService &&
     isAddOnService(selectedService) &&
-    hasHydrogenPackageAddOnOnDate(targetUser.id, payload.data.bookingDate)
+    hasHydrogenPackageAddOnOnDate(targetUser.id, payload.data.bookingDate, payload.data.bookingTime)
   ) {
     return res.status(409).json({
       message:
-        'A hydrogen package on this date already includes an IV add-on. Separate IV Therapy/IV Shot bookings are not allowed on the same day.',
+        'A hydrogen package already has an IV add-on at this time. Please choose a different slot time.',
     });
   }
   if (!includeAdminMeta && selectedService && isAddOnService(selectedService)) {
@@ -10224,46 +10253,54 @@ function hasConflictingAddOnBooking(userId, bookingDate, bookingTime, excludeBoo
   return Number(row?.total || 0) > 0;
 }
 
-function hasHydrogenPackageAddOnOnDate(userId, bookingDate, excludeBookingIds = []) {
+function hasHydrogenPackageAddOnOnDate(userId, bookingDate, bookingTime, excludeBookingIds = []) {
   const addOnNames = getAddOnServiceNames();
   if (!addOnNames.length) return false;
 
   const placeholders = addOnNames.map(() => '?').join(', ');
   const exclusion = buildExcludedBookingIdsClause(excludeBookingIds);
+  const targetDate = String(bookingDate || '').trim();
+  const targetTime = normalizeSlotStartTime(String(bookingTime || '').trim());
+  if (!targetDate || !targetTime) return false;
   const row = db
     .prepare(
       `SELECT COUNT(*) AS total
        FROM bookings
        WHERE user_id = ?
          AND booking_date = ?
+         AND booking_time = ?
          AND booking_group_id IS NOT NULL
          AND ${activeBookingSql()}
          AND service_name IN (${placeholders})
          ${exclusion.clause}`
     )
-    .get(userId, bookingDate, ...addOnNames, ...exclusion.params);
+    .get(userId, targetDate, targetTime, ...addOnNames, ...exclusion.params);
 
   return Number(row?.total || 0) > 0;
 }
 
-function hasStandaloneIvBookingOnDate(userId, bookingDate, excludeBookingIds = []) {
+function hasStandaloneIvBookingOnDate(userId, bookingDate, bookingTime, excludeBookingIds = []) {
   const addOnNames = getAddOnServiceNames();
   if (!addOnNames.length) return false;
 
   const placeholders = addOnNames.map(() => '?').join(', ');
   const exclusion = buildExcludedBookingIdsClause(excludeBookingIds);
+  const targetDate = String(bookingDate || '').trim();
+  const targetTime = normalizeSlotStartTime(String(bookingTime || '').trim());
+  if (!targetDate || !targetTime) return false;
   const row = db
     .prepare(
       `SELECT COUNT(*) AS total
        FROM bookings
        WHERE user_id = ?
          AND booking_date = ?
+         AND booking_time = ?
          AND (booking_group_id IS NULL OR booking_group_id = '')
          AND ${activeBookingSql()}
          AND service_name IN (${placeholders})
          ${exclusion.clause}`
     )
-    .get(userId, bookingDate, ...addOnNames, ...exclusion.params);
+    .get(userId, targetDate, targetTime, ...addOnNames, ...exclusion.params);
 
   return Number(row?.total || 0) > 0;
 }
@@ -10933,7 +10970,14 @@ function buildBookingInvoiceSummary(bookings, user) {
       return String(service?.category || '').toUpperCase() !== 'HYDROGEN SESSION';
     });
     if (hasNonHydrogenBooking) {
-      return buildAddOnOnlyPaymentSummary(activeBookings, user);
+      const orderedBookings = [...activeBookings].sort((a, b) =>
+        `${a.bookingDate || ''}T${a.bookingTime || ''}`.localeCompare(`${b.bookingDate || ''}T${b.bookingTime || ''}`)
+      );
+      const primaryService = getServiceByName(orderedBookings[0]?.serviceName);
+      const primaryCategory = String(primaryService?.category || '').toUpperCase();
+      return primaryCategory === 'HYDROGEN SESSION'
+        ? buildHydrogenGroupPaymentSummary(orderedBookings, user)
+        : buildAddOnOnlyPaymentSummary(orderedBookings, user);
     }
 
     const hasMembershipPricingReference = hydrogenBookings.some((entry) => {
@@ -11048,6 +11092,11 @@ function buildAggregatePaymentSummary(bookings, user) {
   const units = [];
   let totalAmountInr = 0;
   for (const [groupKey, entries] of byKey.entries()) {
+    const orderedEntries = [...entries].sort((a, b) =>
+      `${a.bookingDate || ''}T${a.bookingTime || ''}`.localeCompare(`${b.bookingDate || ''}T${b.bookingTime || ''}`)
+    );
+    const primaryService = getServiceByName(orderedEntries[0]?.serviceName);
+    const primaryCategory = String(primaryService?.category || '').toUpperCase();
     const hydrogenEntries = entries.filter((entry) => {
       const service = getServiceByName(entry.serviceName);
       return String(service?.category || '').toUpperCase() === 'HYDROGEN SESSION';
@@ -11058,13 +11107,16 @@ function buildAggregatePaymentSummary(bookings, user) {
     });
 
     if (hydrogenEntries.length && hasNonHydrogenEntry) {
-      const summary = buildAddOnOnlyPaymentSummary(entries, user);
+      const summary =
+        primaryCategory === 'HYDROGEN SESSION'
+          ? buildHydrogenGroupPaymentSummary(orderedEntries, user)
+          : buildAddOnOnlyPaymentSummary(orderedEntries, user);
       units.push({
-        type: 'hydrogen_add_on',
+        type: primaryCategory === 'HYDROGEN SESSION' ? 'hydrogen_package' : 'hydrogen_add_on',
         key: groupKey,
         label: summary.serviceName,
         amountInr: Number(summary.totalAmountInr || 0),
-        bookingCount: Number(summary.bookingCount || entries.length),
+        bookingCount: Number(summary.bookingCount || orderedEntries.length),
       });
       totalAmountInr += Number(summary.totalAmountInr || 0);
       continue;
