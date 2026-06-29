@@ -46,9 +46,9 @@
   --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.12);
   
   /* Typography */
-  --font-body: 'Inter', sans-serif;
-  --font-heading: 'Playfair Display', serif;
-  --font-brand: 'Trakya Sans Alt', 'Trakya-Sans-Alt-500-Regular', 'Poppins', sans-serif;
+  --font-body: 'DM Sans', sans-serif;
+  --font-heading: 'DM Sans', sans-serif;
+  --font-brand: 'Roboto Mono', monospace;
   --font-size-sm: 12px;
   --font-size-base: 14px;
   --font-size-lg: 16px;
@@ -76,6 +76,42 @@
   font-weight: 500;
   font-display: swap;
   src: url("../cdn/fonts/roboto_mono/robotomono_n5.29a963c13062654edff960e0fc0769528bdca7e5.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "DM Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../cdn/fonts/dm_sans/dmsans_n4.ec80bd4dd7e1a334c969c265873491ae56018d72.woff2") format("woff2"),
+       url("../cdn/fonts/dm_sans/dmsans_n4.87bdd914d8a61247b911147ae68e754d695c58a6.woff") format("woff");
+}
+
+@font-face {
+  font-family: "DM Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../cdn/fonts/dm_sans/dmsans_n5.8a0f1984c77eb7186ceb87c4da2173ff65eb012e.woff2") format("woff2"),
+       url("../cdn/fonts/dm_sans/dmsans_n5.9ad2e755a89e15b3d6c53259daad5fc9609888e6.woff") format("woff");
+}
+
+@font-face {
+  font-family: "DM Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../cdn/fonts/dm_sans/dmsans_n7.97e21d81502002291ea1de8aefb79170c6946ce5.woff2") format("woff2"),
+       url("../cdn/fonts/dm_sans/dmsans_n7.af5c214f5116410ca1d53a2090665620e78e2e1b.woff") format("woff");
+}
+
+@font-face {
+  font-family: "DM Sans";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../cdn/fonts/dm_sans/dmsans_i4.b8fe05e69ee95d5a53155c346957d8cbf5081c1a.woff2") format("woff2"),
+       url("../cdn/fonts/dm_sans/dmsans_i4.403fe28ee2ea63e142575c0aa47684d65f8c23a0.woff") format("woff");
 }
 
 .storefront-header-wrapper {
@@ -17453,5 +17489,228 @@ body.app-booting #memberChoiceGate {
 
   #adminCouponsSection .admin-coupon-actions .btn {
     white-space: normal !important;
+  }
+}
+
+/* Brand alignment and mobile simplification */
+body,
+input,
+select,
+textarea,
+button {
+  font-family: var(--font-body);
+}
+
+.storefront-header .storefront-header__nav a,
+.storefront-header .storefront-header__nav a:visited,
+.storefront-header .storefront-header__drawer nav a,
+.storefront-header .storefront-header__drawer nav a:visited,
+.storefront-header__drawer summary {
+  font-family: var(--font-brand);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+#memberChoiceGate .auth-kicker,
+#memberChoiceGate .member-choice-experience-kicker,
+#memberChoiceGate .member-choice-brand small,
+#memberChoiceGate .role-chip,
+#memberChoiceGate .member-choice-topbar-cta,
+#memberChoiceGate .member-choice-trust-cta,
+#memberChoiceGate .member-choice-experience-badge {
+  font-family: var(--font-brand) !important;
+}
+
+#memberChoiceGate .member-choice-topbar-cta,
+#memberChoiceGate .member-choice-book-session-btn {
+  font-family: var(--font-body) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+
+#memberChoiceGate .member-choice-brand strong,
+#memberChoiceGate .member-choice-title,
+#memberChoiceGate .member-choice-experience-title,
+#memberChoiceGate .member-choice-card-plan,
+#memberChoiceGate .member-choice-card-price,
+#memberChoiceGate .member-choice-comparison-head h3,
+#memberChoiceGate .member-choice-final-cta h3,
+#cmp-perfect-01 .member-choice-matrix-side h3,
+#cmp-perfect-01 .cmp-pricing-headline h3,
+#cmp-perfect-01 .member-choice-matrix-head > div,
+#cmp-perfect-01 .member-choice-matrix-row > div:first-child {
+  font-family: var(--font-body) !important;
+}
+
+#memberChoiceGate .member-choice-title,
+#memberChoiceGate .member-choice-experience-title,
+#cmp-perfect-01 .member-choice-matrix-side h3,
+#cmp-perfect-01 .cmp-pricing-headline h3 {
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+#memberChoiceGate .member-choice-card-price {
+  font-weight: 700;
+}
+
+@media (max-width: 768px) {
+  #memberChoiceGate {
+    padding-top: 12px !important;
+    padding-bottom: 18px !important;
+  }
+
+  #memberChoiceGate .container {
+    padding: 0 12px !important;
+  }
+
+  #memberChoiceGate .member-choice-topbar {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+    padding: 8px 0 12px !important;
+    margin-bottom: 8px !important;
+  }
+
+  #memberChoiceGate .member-choice-nav {
+    display: none !important;
+  }
+
+#memberChoiceGate .member-choice-topbar-cta {
+    width: 100% !important;
+    height: 42px !important;
+    min-height: 42px !important;
+    padding: 0 12px !important;
+    font-size: 13px !important;
+    border-radius: 10px !important;
+  }
+
+  #memberChoiceGate .member-choice-hero.hero-inner,
+  #memberChoiceGate .member-choice-hero,
+  #memberChoiceGate .hero {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 14px !important;
+  }
+
+  #memberChoiceGate .member-choice-hero-media,
+  #memberChoiceGate .member-choice-hero-visual,
+  #memberChoiceGate .member-choice-photo-card,
+  #memberChoiceGate .member-choice-photo-badge,
+  #memberChoiceGate .member-choice-trust,
+  #memberChoiceGate .member-choice-final-cta,
+  #cmp-perfect-01.member-choice-comparison {
+    display: none !important;
+  }
+
+  #memberChoiceGate .member-choice-title {
+    font-size: clamp(30px, 8.2vw, 38px) !important;
+    line-height: 1.08 !important;
+    margin-bottom: 8px !important;
+  }
+
+  #memberChoiceGate .auth-kicker {
+    font-size: 11px !important;
+    margin-bottom: 10px !important;
+  }
+
+  #memberChoiceGate .member-choice-hero-copy .membership-copy {
+    max-width: 100% !important;
+    font-size: 15px !important;
+    line-height: 1.5 !important;
+    margin-bottom: 12px !important;
+  }
+
+  #memberChoiceGate .member-choice-benefits {
+    gap: 8px !important;
+    margin: 0.85rem 0 1rem !important;
+  }
+
+  #memberChoiceGate .member-choice-benefits p {
+    grid-template-columns: 32px 1fr !important;
+    gap: 8px !important;
+    font-size: 13px !important;
+    line-height: 1.4 !important;
+  }
+
+  #memberChoiceGate .member-choice-check {
+    width: 32px !important;
+    height: 32px !important;
+  }
+
+  #memberChoiceGate .member-choice-check svg {
+    width: 16px !important;
+    height: 16px !important;
+  }
+
+  #memberChoiceGate .member-choice-primary-row .btn,
+  #memberChoiceGate .member-choice-final-cta-btn {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
+  #memberChoiceGate .member-choice-experience {
+    margin-top: 12px !important;
+  }
+
+  #memberChoiceGate .member-choice-experience-kicker {
+    font-size: 11px !important;
+  }
+
+  #memberChoiceGate .member-choice-experience-title {
+    font-size: clamp(24px, 6.8vw, 30px) !important;
+    line-height: 1.12 !important;
+    margin: 0 0 12px !important;
+  }
+
+  #memberChoiceGate .member-choice-experience-grid,
+  #memberChoiceGate .cards {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+    max-width: 100% !important;
+    margin-top: 12px !important;
+  }
+
+  #memberChoiceGate .member-choice-experience-card {
+    min-height: auto !important;
+    padding: 16px !important;
+    gap: 10px !important;
+    border-radius: 18px !important;
+  }
+
+  #memberChoiceGate .member-choice-card-list {
+    display: none !important;
+  }
+
+  #memberChoiceGate .member-choice-card-plan {
+    font-size: 1.3rem !important;
+  }
+
+  #memberChoiceGate .member-choice-card-price {
+    font-size: clamp(2rem, 9vw, 2.5rem) !important;
+  }
+
+  #memberChoiceGate .member-choice-card-highlight {
+    padding: 0.5rem 0.65rem !important;
+    font-size: 0.78rem !important;
+  }
+
+  #memberChoiceGate .member-choice-card-cta {
+    min-height: 44px !important;
+    font-size: 14px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  #memberChoiceGate .container {
+    padding: 0 10px !important;
+  }
+
+  #memberChoiceGate .member-choice-title {
+    font-size: 28px !important;
+  }
+
+  #memberChoiceGate .member-choice-experience-card {
+    padding: 14px !important;
   }
 }

@@ -72,17 +72,14 @@
   src: url("cdn/fonts/dm_sans/dmsans_n4.ec80bd4dd7e1a334c969c265873491ae56018d72.woff2") format("woff2"),
        url("cdn/fonts/dm_sans/dmsans_n4.87bdd914d8a61247b911147ae68e754d695c58a6.woff") format("woff");
 }
-
-			Liquid error (layout/theme line 88): font_face can only be used with a font drop
 			@font-face {
   font-family: "Roboto Mono";
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-  src: url("cdn/fonts/roboto_mono/robotomono_n5.29a963c13062654edff960e0fc0769528bdca7e5.woff2") format("woff2"),
+  font-weight:500;
+  font-style:normal;
+  font-display:swap;
+  src:url("cdn/fonts/roboto_mono/robotomono_n5.29a963c13062654edff960e0fc0769528bdca7e5.woff2") format("woff2"),
        url("cdn/fonts/roboto_mono/robotomono_n5.ba11b9a58fc32158ddb2acccd36cc62c012f4109.woff") format("woff");
-}
-
+			}
 			@font-face {
   font-family: "Roboto Mono";
   font-weight: 500;
@@ -1892,8 +1889,7 @@
     <div
       id="menu-drawer"
       class="menu-drawer motion-reduce color-background-1"
-      tabind
-      ex="-1"
+      tabindex="-1"
     >
       <div class="menu-drawer__inner-container">
         <div class="menu-drawer__navigation-container"><nav class="menu-drawer__navigation">
@@ -1936,9 +1932,9 @@
                         href="/booking/"
                         class="menu-drawer__menu-item list-menu__item link link--text focus-inset"
                         
-                        aria-label="Booking House"
+                        aria-label="house bookings"
                       >
-                        Booking House
+                        house bookings
                       </a></li><li><a
                         href="pages/contact.html"
                         class="menu-drawer__menu-item list-menu__item link link--text focus-inset"
@@ -2057,10 +2053,10 @@
                   href="/booking/"
                   class="header__menu-item list-menu__item link focus-inset"
                   
-                  aria-label="Booking House"
+                  aria-label="house bookings"
                 >
-                  <span title="Booking House">
-                    Booking House
+                  <span title="house bookings">
+                    house bookings
                   </span>
                 </a>
               </li>
@@ -2145,11 +2141,7 @@
 		if (header) headerObserver.observe(header);
 	}
 
-	calcHeader();;
-						breadcrumbsObserver.observe(breadcrumbs);
-					}
-				};
-				calcBreadcrumbs();;
+	calcHeader();
 			</script>
 		</div>
 	
@@ -2259,14 +2251,7 @@
 									>
 										
 										
-										<div
-											class='
-												collections-list__image-wrapper 
-												  image-contained
-
-												"
-											'
-										>
+										<div class='collections-list__image-wrapper image-contained'>
 											
 
 											
@@ -2348,7 +2333,7 @@
 
 } }
 
-	 .section-template--18594170863734__newsletter-padding
+	 .section-template--18594170863734__newsletter-padding {
 
 	padding-top: 6.4rem;
 
@@ -2570,3 +2555,4 @@
 		</script><style> .testimonials__slide-review {color: #000; font-size: 18px !important;}  /* Hide cart icon */.header__icon--cart,cart-notification,#cart-icon-bubble {display: none !important;}  /* Hide account icon */.header__icon--account,account-icon {display: none !important;} .numbered-items-card__text {font-size: 16px;} .multicolumn-card__picture .medium {width: 30%; height: auto; border-radius: 6px;} .blockquote .blockquote-section-header .section-header__subtitle {margin-right: 1rem !important;} .image-with-text__content--image_left .section-header,.image-with-text__content--image_right .section-header,.image-with-text__content--image_left .image-with-text__text,.image-with-text__content--image_right .image-with-text__text {max-width: 100%;} .footer__content-bottom-container {display: none;} .list-menu--inline .list-menu-item {margin: 0px 18px;} .header__menu-item:hover {color: #af5431;} .rich-text__heading {max-width: 100% !important;} .footer__content-top {padding-block: 2em 8em;} .rich-text__wrapper--column .rich-text__text {max-width: 100% !important;} @media only screen and (max-width: 768px) {.image-banner__heading {left: 0; transform: none; margin: 0px 22px; }} </style>
 </body>
 </html>
+
