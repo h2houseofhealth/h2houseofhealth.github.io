@@ -769,7 +769,12 @@ app.use((req, res, next) => {
   return next();
 });
 app.use('/booking', express.static(path.join(__dirname)));
+app.use('/merch', express.static(path.join(WEBSITE_ROOT, 'merch')));
 app.use('/uploads', express.static(uploadsDir));
+
+// Mount Merch API routes
+const mountMerchApi = require('./merch-api');
+mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, JWT_SECRET, jwt });
 
 const upload = multer({
   storage: multer.diskStorage({
