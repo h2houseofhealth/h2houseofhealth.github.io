@@ -960,10 +960,10 @@ async function bootstrap() {
 function attachEvents() {
   const openMembershipPlansFromLanding = () => {
     if (!state.user) {
-      // Scroll to the "Select Your Experience" pricing section on the landing page
-      const experienceSection = document.getElementById('member-choice-experience');
-      if (experienceSection) {
-        experienceSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // Scroll to the membership plans pricing section on the landing page
+      const plansSection = document.getElementById('member-choice-plans');
+      if (plansSection) {
+        plansSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
       return;
     }

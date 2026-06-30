@@ -12655,6 +12655,54 @@ body {
   overflow: hidden;
 }
 
+#memberChoiceGate .member-choice-plans-section {
+  margin-top: clamp(1.8rem, 4vw, 2.7rem);
+  padding-left: clamp(1rem, 4vw, 3rem);
+  padding-right: clamp(1rem, 4vw, 3rem);
+  text-align: center;
+}
+
+#memberChoiceGate .member-choice-plans-section .member-choice-experience-kicker {
+  margin: 0;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #c8652d;
+}
+
+#memberChoiceGate .member-choice-plans-section .member-choice-experience-title {
+  margin-top: 0.35rem;
+  margin-bottom: 1.1rem;
+}
+
+#memberChoiceGate .member-choice-plans-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  text-align: left;
+}
+
+#memberChoiceGate .member-choice-plans-grid .membership-card-body {
+  background: linear-gradient(180deg, #fdf4ee, #f8ebe2);
+  border-radius: 18px;
+  padding: 1rem 1rem 1.1rem;
+  margin-top: 0.3rem;
+}
+
+@media (max-width: 900px) {
+  #memberChoiceGate .member-choice-plans-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  #memberChoiceGate .member-choice-plans-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 #memberChoiceGate .member-choice-final-cta {
   margin-top: 18px;
   background: linear-gradient(135deg, #c86434 0%, #b2502a 58%, #a34524 100%);
