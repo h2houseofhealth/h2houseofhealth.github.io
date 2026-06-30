@@ -64,6 +64,10 @@ function consumeOAuthTokenFromHash() {
   return true;
 }
 
+function isGuestServicesHash(hash = window.location.hash) {
+  return String(hash || '').replace(/^#/, '').trim().toLowerCase() === 'guest-services';
+}
+
 function withApiCredentials(options = {}) {
   const headers = new Headers(options.headers || {});
   const authToken = String(state.authToken || '').trim();
@@ -910,10 +914,13 @@ async function finishAuthSuccess(result) {
 }
 
 async function bootstrap() {
-  const initialTab = getUserTabFromHash(window.location.hash);
+  const shouldOpenGuestServices = isGuestServicesHash(window.location.hash);
+  const initialTab = shouldOpenGuestServices ? 'services' : getUserTabFromHash(window.location.hash);
   consumeOAuthTokenFromHash();
+  const params = new URLSearchParams(window.location.search);
+  const launchGuestBooking = params.get('entry') === 'guest';
   if (initialTab) state.activeUserTab = initialTab;
-  attachEvents();
+  attachEvents()
   syncAdminRescheduleSearchPlaceholder();
   if (adminRescheduleSearchPlaceholderQuery) {
     if (typeof adminRescheduleSearchPlaceholderQuery.addEventListener === 'function') {
@@ -924,18 +931,31 @@ async function bootstrap() {
   }
   populateTimeSlots();
   await loadCurrentUser();
+    if (!state.user && launchGuestBooking) {
+      await enterGuestBookingMode({ scrollToServices: true });
+      window.history.replaceState({}, '', '/booking/');
+      return;
+    }
   if (state.user) {
     resetMyBookingsViewState();
     resetServicesUiStateForUserSwitch();
     await loadProfile();
     await loadDashboardData();
     ensurePostLoginDashboardChoice();
+    if (shouldOpenGuestServices && state.user.role === 'user') {
+      state.postLoginChoice = state.postLoginChoice || (isCurrentUserMembershipActive() ? 'continue-member' : 'continue-non-member');
+      state.activeUserTab = 'services';
+      window.location.hash = '#services';
+    }
     if (state.user.role === 'user' && !initialTab) {
       state.membershipBrowseVisible = false;
       state.activeUserTab = 'membership';
       window.location.hash = '#membership';
     }
   } else {
+    if (shouldOpenGuestServices) {
+      await enterGuestBookingMode({ scrollToServices: false });
+    } else {
     const storedGuestToken = getStoredGuestSessionToken();
     const storedGuestCart = loadStoredGuestCart();
     if (storedGuestToken || storedGuestCart.length) {
@@ -943,6 +963,7 @@ async function bootstrap() {
       state.guestSessionToken = storedGuestToken || null;
     }
     await loadGuestDashboardData();
+    }
   }
   window.addEventListener('pageshow', (event) => {
     if (event?.persisted || state.activeUserTab === 'cart' || (state.isGuestUser && !state.user)) {
