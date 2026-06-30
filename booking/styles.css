@@ -2063,7 +2063,7 @@ h1, h2, h3 {
 
 .member-choice-title-em {
   color: #c56b3d;
-  font-style: italic;
+  font-style: solid;
   font-weight: 500;
 }
 
@@ -2532,7 +2532,7 @@ h1, h2, h3 {
 
 .member-choice-title span {
   color: #b45431;
-  font-style: italic;
+  font-style: solid;
   font-weight: 500;
 }
 
@@ -2693,7 +2693,7 @@ h1, h2, h3 {
 
 .member-choice-experience-title span {
   color: #B05A2B;
-  font-style: italic;
+  font-style: solid;
 }
 
 .member-choice-experience-grid {
@@ -10101,7 +10101,7 @@ table tbody td {
 }
 .member-choice-title span {
   color: #B05A2B;
-  font-style: italic;
+  font-style: solid;
 }
 .member-choice-plan-label {
   width: 100%;
@@ -11342,7 +11342,7 @@ h2, h3 {
 }
 
 .member-choice-title span {
-  font-style: italic;
+  font-style: solid;
   color: #B05A2B;
 }
 .price {
@@ -12186,13 +12186,13 @@ body {
   letter-spacing: -0.5px;
   margin-bottom: 14px;
   color: #1f1815;
-  max-width: 9.6ch;
+  max-width: 14.8ch;
 }
 
 #memberChoiceGate .hero-title span,
 #memberChoiceGate .member-choice-title .member-choice-title-em {
   color: #c8652d;
-  font-style: italic;
+  font-style:solid;
 }
 
 #memberChoiceGate .member-choice-hero-text .hero-text,
