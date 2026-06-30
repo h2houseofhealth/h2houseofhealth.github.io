@@ -17643,3 +17643,27 @@ main.portal:has(#memberChoiceGate:not([hidden])) {
   margin-left: 0 !important;
   margin-right: 0 !important;
 }
+.storefront-header__cta {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+
+.header-book-now-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 22px;
+  border-radius: 999px;
+  background: #ae5431;
+  color: #fff !important;
+  text-decoration: none;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background .2s ease;
+}
+
+.header-book-now-btn:hover {
+  background: #8d4326;
+  color: #fff !important;
+}
