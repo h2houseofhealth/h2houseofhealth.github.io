@@ -97,7 +97,8 @@
   width: 100%;
   max-width: 1440px;
   margin: 0 auto;
-  padding: 0;
+  padding-right: 2rem;
+  padding-left: 2rem;
 }
 
 .storefront-header {
@@ -105,7 +106,7 @@
   justify-content: space-between;
   min-height: 52px;
   margin-top: 16px;
-  padding: 0 20px;
+  padding: 0 24px;
   position: relative;
   background: #fff;
   border-radius: 6px;
@@ -117,12 +118,14 @@
   align-items: stretch;
   gap: 32px;
   min-width: 0;
+  width: 100%;
 }
 
 .storefront-header__logo {
   display: flex;
   align-items: center;
   max-width: 135px;
+  flex: 0 0 135px;
   margin-right: 32px;
   padding-block: 4px;
   color: inherit;
@@ -139,7 +142,11 @@
 
 .storefront-header__nav {
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  justify-content: space-between;
+  gap: clamp(10px, 1.4vw, 28px);
+  width: 100%;
+  min-width: 0;
   margin: 0;
 }
 
@@ -148,7 +155,7 @@
   position: relative;
   display: flex;
   align-items: center;
-  margin: 0 23px;
+  margin: 0;
   padding-block: 12px;
   overflow: visible;
   color: #3f3f3f;
@@ -184,14 +191,6 @@
 .storefront-header .storefront-header__nav a:hover::before,
 .storefront-header .storefront-header__nav a.is-active::before {
   background: #3f3f3f;
-}
-
-.storefront-header .storefront-header__nav a:first-child {
-  margin-left: 18px;
-}
-
-.storefront-header .storefront-header__nav a:last-child {
-  margin-right: 18px;
 }
 
 .storefront-header__drawer {
@@ -248,21 +247,27 @@
 }
 
 @media (min-width: 576px) {
-  .storefront-header {
-    padding-inline: 24px;
-  }
+  .storefront-header__cta{
+    margin-left:auto;
+    padding-left:0;
+}
 }
 
 @media (min-width: 1100px) {
   .storefront-header-wrapper {
-    padding-inline: 0;
+    padding-right: 5rem;
+    padding-left: 5rem;
   }
-}
 
-@media (min-width: 1360px) {
-  .storefront-header .storefront-header__nav a,
-  .storefront-header .storefront-header__nav a:visited {
-    margin-inline: 34px;
+  .storefront-header__left {
+    display: grid;
+    grid-template-columns: 135px minmax(0, 1fr);
+    align-items: center;
+    column-gap: clamp(28px, 3vw, 64px);
+  }
+
+  .storefront-header__logo {
+    margin-right: 0;
   }
 }
 
@@ -17578,8 +17583,8 @@ main.portal:has(#memberChoiceGate:not([hidden])) {
 
 #memberChoiceGate > .container {
   padding: 0 5rem !important;
-  margin: 0 !important;
-  max-width: 100% !important;
+  margin: 0 auto !important;
+  max-width: 1440px !important;
   width: 100% !important;
 }
 
@@ -17644,7 +17649,7 @@ main.portal:has(#memberChoiceGate:not([hidden])) {
   margin-right: 0 !important;
 }
 .storefront-header__cta {
-  margin-left: auto;
+  margin-left: 0;
   display: flex;
   align-items: center;
 }
@@ -17653,12 +17658,18 @@ main.portal:has(#memberChoiceGate:not([hidden])) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 10px 22px;
+  width: auto;
+  min-width: 115px;
+  height: 42px;
+  padding: 0 18px !important;
   border-radius: 999px;
   background: #ae5431;
   color: #fff !important;
   text-decoration: none;
-  font-weight: 600;
+  font-size: 16px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  text-transform: none !important;
   white-space: nowrap;
   transition: background .2s ease;
 }
@@ -17666,4 +17677,62 @@ main.portal:has(#memberChoiceGate:not([hidden])) {
 .header-book-now-btn:hover {
   background: #8d4326;
   color: #fff !important;
+}
+
+/* Shared storefront container: header and every booking portal view. */
+:root {
+  --storefront-container-max: 1440px;
+  --storefront-container-gutter: 5rem;
+}
+
+.storefront-header-wrapper,
+#memberChoiceGate > .container {
+  width: 100%;
+  max-width: var(--storefront-container-max) !important;
+  margin-right: auto !important;
+  margin-left: auto !important;
+  padding-right: var(--storefront-container-gutter) !important;
+  padding-left: var(--storefront-container-gutter) !important;
+}
+
+.storefront-header {
+  width: 100%;
+}
+
+@media (min-width: 1100px) {
+  .storefront-header__left {
+    grid-template-columns: 135px max-content;
+    column-gap: 28px;
+    width: max-content;
+    margin: 0 auto;
+  }
+
+  .storefront-header__nav {
+    justify-content: flex-start;
+    gap: 28px;
+    width: max-content;
+  }
+}
+
+/* Constrain all authenticated user and admin pages beneath the navbar. */
+body:not(.auth-mode) main.portal:not(:has(#memberChoiceGate:not([hidden]))) {
+  width: 100%;
+  max-width: var(--storefront-container-max);
+  margin-right: auto;
+  margin-left: auto;
+  padding-right: var(--storefront-container-gutter);
+  padding-left: var(--storefront-container-gutter);
+}
+
+body:not(.auth-mode) main.portal:not(:has(#memberChoiceGate:not([hidden]))) >
+  :is(.portal-header, .app-only, #appArea, #comboNotice) {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 1099px) {
+  :root {
+    --storefront-container-gutter: 2rem;
+  }
 }
