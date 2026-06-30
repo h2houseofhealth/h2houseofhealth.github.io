@@ -46,9 +46,9 @@
   --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.12);
   
   /* Typography */
-  --font-body: 'Inter', sans-serif;
-  --font-heading: 'Playfair Display', serif;
-  --font-brand: 'Trakya Sans Alt', 'Trakya-Sans-Alt-500-Regular', 'Poppins', sans-serif;
+  --font-body: 'Trakya-Sans', 'Trakya Sans', 'Trakya Sans Alt', 'Trakya-Sans-Alt-500-Regular', 'Poppins', sans-serif;
+  --font-heading: 'Trakya-Sans', 'Trakya Sans', 'Trakya Sans Alt', 'Trakya-Sans-Alt-500-Regular', 'Poppins', sans-serif;
+  --font-brand: 'Trakya-Sans', 'Trakya Sans', 'Trakya Sans Alt', 'Trakya-Sans-Alt-500-Regular', 'Poppins', sans-serif;
   --font-size-sm: 12px;
   --font-size-base: 14px;
   --font-size-lg: 16px;
@@ -70,6 +70,18 @@
 }
 
 /* Exact storefront navigation treatment used by the main site pages. */
+@font-face {
+  font-family: "Trakya-Sans";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src:
+    local("Trakya-Sans"),
+    local("Trakya Sans"),
+    local("Trakya Sans Alt"),
+    local("Trakya-Sans-Alt-500-Regular");
+}
+
 @font-face {
   font-family: "Roboto Mono";
   font-style: normal;
@@ -140,7 +152,7 @@
   padding-block: 12px;
   overflow: visible;
   color: #3f3f3f;
-  font-family: "Roboto Mono", monospace;
+  font-family: var(--font-brand);
   font-size: 12px;
   font-style: normal;
   font-weight: 500;
@@ -230,7 +242,7 @@
   min-height: 50px;
   padding: 8px 0;
   color: #3f3f3f;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-body);
   font-size: 18px;
   text-decoration: none;
 }
@@ -403,7 +415,7 @@ h3,
   font-family: var(--font-heading);
 }
 h1, h2, h3 {
-  font-family: 'Playfair Display', serif;
+  font-family: var(--font-brand);
   letter-spacing: -0.5px;
 }
 .user-tab-btn,
@@ -2009,7 +2021,7 @@ h1, h2, h3 {
   max-width: 100%;
   margin-inline: auto;
   padding: 0;
-  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-body);
   background: linear-gradient(
     180deg,
     #f7f3ef 0%,
@@ -2448,7 +2460,7 @@ h1, h2, h3 {
   line-height: 1;
   letter-spacing: 0.01em;
   text-transform: uppercase;
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
 }
 
 .member-choice-brand small {
@@ -2512,7 +2524,7 @@ h1, h2, h3 {
 
 .member-choice-title {
   margin: 0.65rem 0 0.75rem;
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: clamp(2.35rem, 4.8vw, 5.1rem);
   line-height: 0.95;
   letter-spacing: -0.015em;
@@ -2675,7 +2687,7 @@ h1, h2, h3 {
 .member-choice-experience-title {
   margin-top: 0.35rem;
   margin-bottom: 1.1rem;
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: clamp(1.85rem, 3vw, 2.7rem);
 }
 
@@ -2740,13 +2752,13 @@ h1, h2, h3 {
 }
 
 .member-choice-card-plan {
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: 2.7rem;
   line-height: 1;
 }
 
 .member-choice-card-price {
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: clamp(3rem, 5vw, 4rem);
 }
 
@@ -2769,7 +2781,7 @@ h1, h2, h3 {
 }
 
 .member-choice-comparison-head h3 {
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: 2rem;
 }
 
@@ -5154,7 +5166,7 @@ h1, h2, h3 {
   border: 1px solid rgba(0, 0, 0, 0.06);
   font-size: 16px;
   line-height: 1.5;
-  font-family: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--font-body);
 }
 
 .notice-dialog[data-type="error"] .notice-body {
@@ -10634,7 +10646,7 @@ table tbody td {
 
 .member-choice-matrix-side h3 {
   margin: 0;
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: 3rem;
   line-height: 0.95;
   color: #1C1C1C;
@@ -11010,12 +11022,12 @@ table tbody td {
 }
 
 #memberChoiceGate .member-choice-card-plan {
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: 2.15rem;
 }
 
 #memberChoiceGate .member-choice-card-price {
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: clamp(2.35rem, 4.2vw, 3.2rem);
 }
 
@@ -11414,7 +11426,7 @@ h2, h3 {
 #memberChoiceGate .member-choice-matrix-side h3 {
   margin: 0 0 1.25rem;
   color: var(--matrix-text);
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: clamp(3.02rem, 3.5vw, 3.62rem);
   font-weight: 400;
   line-height: 0.95;
@@ -11611,7 +11623,7 @@ h2, h3 {
 #cmp-perfect-01 .member-choice-matrix-side h3 {
   margin: 14px 0 0;
   color: #211a16;
-  font-family: "Playfair Display", "Cormorant Garamond", "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: clamp(2rem, 3.15vw, 2.7rem);
   font-weight: 400;
   line-height: 0.98;
@@ -11622,7 +11634,7 @@ h2, h3 {
   margin: 12px 0 0;
   max-width: 290px;
   color: #6a5b51;
-  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-brand);
   font-size: 14px;
   font-weight: 400;
   line-height: 1.5;
@@ -11631,7 +11643,7 @@ h2, h3 {
 #cmp-perfect-01 .member-choice-matrix-side a {
   margin: 10px 0 0;
   color: #c06032;
-  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-brand);
   font-size: 14px;
   font-weight: 600;
   line-height: 1.2;
@@ -11659,7 +11671,7 @@ h2, h3 {
   border-bottom: 1px solid #ead8ca;
   background: rgba(255, 251, 246, 0.9);
   color: #4d4038;
-  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-brand);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.6px;
@@ -11695,7 +11707,7 @@ h2, h3 {
 #cmp-perfect-01 .member-choice-matrix-row > div:first-child {
   justify-content: flex-start;
   padding-left: 18px;
-  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-brand);
   font-size: 14px;
   font-weight: 600;
   color: #231F1B;
@@ -11780,7 +11792,7 @@ h2, h3 {
 #cmp-perfect-01 .cmp-pricing-headline h3 {
   margin: 0;
   color: #211a16;
-  font-family: "Playfair Display", "Cormorant Garamond", "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: clamp(1.7rem, 2.7vw, 2.3rem);
   font-weight: 400;
   line-height: 1.02;
@@ -11790,7 +11802,7 @@ h2, h3 {
 #cmp-perfect-01 .cmp-pricing-headline p {
   margin: 8px 0 0;
   color: #6a5b51;
-  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-brand);
   font-size: 15px;
   font-weight: 400;
   line-height: 1.45;
@@ -11822,7 +11834,7 @@ h2, h3 {
   align-items: center;
   justify-content: center;
   text-align: center;
-  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-brand);
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.3px;
@@ -11857,7 +11869,7 @@ h2, h3 {
   justify-content: center;
   text-align: center;
   color: #2a241f;
-  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-brand);
   font-size: 0.95rem;
   font-weight: 500;
   background: rgba(255, 251, 246, 0.78);
@@ -12058,7 +12070,7 @@ h2, h3 {
 
 /* Clean final proportions + blend/overlap safety */
 body {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-brand);
   background: linear-gradient(180deg, #f7efe8 0%, #efe3d7 100%);
   color: #1e1e1e;
 }
@@ -12168,7 +12180,7 @@ body {
 #memberChoiceGate .member-choice-hero-text .member-choice-title,
 #memberChoiceGate .hero-title,
 #memberChoiceGate .member-choice-title {
-  font-family: 'Playfair Display', serif;
+  font-family: var(--font-brand);
   font-size: clamp(34px, 3.7vw, 56px);
   line-height: 1.08;
   letter-spacing: -0.5px;
@@ -14204,7 +14216,7 @@ img {
 }
 
 #userBookingsSection .panel-head h2 {
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: clamp(2rem, 3vw, 2.6rem);
   font-weight: 600;
   letter-spacing: -0.02em;
