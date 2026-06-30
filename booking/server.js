@@ -768,108 +768,6 @@ app.use((req, res, next) => {
   }
   return next();
 });
-
-function normalizeRequestPath(value) {
-  const pathname = String(value || '/').split('?')[0].split('#')[0] || '/';
-  return pathname.endsWith('/') && pathname !== '/' ? pathname.slice(0, -1) : pathname;
-}
-
-function isActiveNavPath(currentPath, itemPath) {
-  const normalizedCurrent = normalizeRequestPath(currentPath);
-  const normalizedItem = normalizeRequestPath(itemPath);
-  if (normalizedItem === '/') return normalizedCurrent === '/' || normalizedCurrent === '/index.html';
-  if (normalizedItem === '/booking') return normalizedCurrent === '/booking' || normalizedCurrent.startsWith('/booking/');
-  return normalizedCurrent === normalizedItem;
-}
-
-function renderSharedNavbar(currentPath = '/') {
-  const items = [
-    { href: '/', label: 'The House' },
-    { href: '/pages/about-us.html', label: 'About The House' },
-    { href: '/pages/by-the-house.html', label: 'By The House' },
-    { href: '/pages/with-the-house.html', label: 'With The House' },
-    { href: '/collections/all.html', label: 'House Merch' },
-    { href: '/booking/', label: 'House Bookings', cta: true },
-    { href: '/pages/contact.html', label: 'Contact' },
-  ];
-  const linkMarkup = (item, mobile = false) => {
-    const active = isActiveNavPath(currentPath, item.href);
-    const classes = [
-      'shared-site-navbar__link',
-      item.cta ? 'shared-site-navbar__link--cta' : '',
-      active ? 'is-active' : '',
-    ]
-      .filter(Boolean)
-      .join(' ');
-    const ariaCurrent = active ? ' aria-current="page"' : '';
-    const label = escapeHtml(item.label);
-    return `<a href="${item.href}" class="${classes}" aria-label="${label}"${ariaCurrent}>${mobile ? label : `<span title="${label}">${label}</span>`}</a>`;
-  };
-
-  return `<!-- Shared site navbar -->
-<link href="/shared/navbar.css?v=20260630-shared-navbar" rel="stylesheet" type="text/css" media="all" />
-<div id="shopify-section-shared-site-navbar" class="shared-site-navbar shopify-section-header">
-  <div class="shared-site-navbar__bar header-wrapper">
-    <div class="shared-site-navbar__left">
-      <details class="shared-site-navbar__drawer">
-        <summary aria-label="Menu">
-          <svg class="drawer-open-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <path d="M.65 5.85h16.7M.65 11.85h16.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-          </svg>
-          <svg class="drawer-close-icon" width="18" height="17" viewBox="0 0 18 17" fill="none" aria-hidden="true">
-            <path d="m1.3.9 15.4 15.4M16.7.9 1.3 16.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-          </svg>
-        </summary>
-        <nav class="shared-site-navbar__mobile-panel" aria-label="Mobile navigation">
-          ${items.map((item) => linkMarkup(item, true)).join('\n          ')}
-        </nav>
-      </details>
-      <a class="shared-site-navbar__logo" href="/" aria-label="House of Health">
-        <img src="/cdn/shop/files/H2_Logo9664.png?v=1767874858&amp;width=135" alt="House of Health" width="135" height="50" />
-      </a>
-      <nav class="shared-site-navbar__desktop header__inline-menu" aria-label="Main navigation">
-        ${items.map((item) => linkMarkup(item)).join('\n        ')}
-      </nav>
-    </div>
-  </div>
-</div>`;
-}
-
-function applySharedNavbar(html, currentPath) {
-  const sharedNavbar = renderSharedNavbar(currentPath);
-  let output = String(html || '');
-  output = output.replace(
-    /<!-- BEGIN sections: header-group -->[\s\S]*?<!-- END sections: header-group -->/,
-    sharedNavbar
-  );
-  output = output.replace(
-    /\s*<div class="storefront-header-wrapper">[\s\S]*?(?=\s*<div class="background-shape)/,
-    `\n    ${sharedNavbar}\n`
-  );
-  return output;
-}
-
-function sendHtmlWithSharedNavbar(req, res, filePath) {
-  fs.readFile(filePath, 'utf8', (error, html) => {
-    if (error) {
-      return res.status(error.code === 'ENOENT' ? 404 : 500).send(error.code === 'ENOENT' ? 'Not found' : 'Unable to load page');
-    }
-    res.type('html').send(applySharedNavbar(html, req.path));
-  });
-}
-
-function resolveWebsiteHtmlPath(requestPath) {
-  const normalizedPath = normalizeRequestPath(requestPath);
-  const relativePath = normalizedPath === '/' ? 'index.html' : normalizedPath.replace(/^\/+/, '');
-  if (!relativePath.endsWith('.html')) return null;
-  const resolvedPath = path.resolve(WEBSITE_ROOT, relativePath);
-  if (!resolvedPath.startsWith(`${WEBSITE_ROOT}${path.sep}`) && resolvedPath !== path.join(WEBSITE_ROOT, 'index.html')) return null;
-  return resolvedPath;
-}
-
-app.get(/^\/booking\/?(?:index\.html)?$/, (req, res) => {
-  sendHtmlWithSharedNavbar(req, res, path.join(__dirname, 'index.html'));
-});
 app.use('/booking', express.static(path.join(__dirname)));
 app.use('/uploads', express.static(uploadsDir));
 
@@ -9016,22 +8914,14 @@ app.delete('/api/bookings/:id', requireAuth, (req, res) => {
   res.status(204).send();
 });
 
-app.get(/^\/booking(?:\/.*)?$/, (req, res) => {
-  sendHtmlWithSharedNavbar(req, res, path.join(__dirname, 'index.html'));
-});
-
-app.use((req, res, next) => {
-  if (req.method !== 'GET') return next();
-  const htmlPath = resolveWebsiteHtmlPath(req.path);
-  if (!htmlPath) return next();
-  if (!fs.existsSync(htmlPath)) return next();
-  return sendHtmlWithSharedNavbar(req, res, htmlPath);
+app.get(/^\/booking(?:\/.*)?$/, (_req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 app.use(express.static(WEBSITE_ROOT));
 
-app.get(/.*/, (req, res) => {
-  sendHtmlWithSharedNavbar(req, res, path.join(WEBSITE_ROOT, 'index.html'));
+app.get(/.*/, (_req, res) => {
+  res.sendFile(path.join(WEBSITE_ROOT, 'index.html'));
 });
 
 // ─── Contact Form Endpoint ───────────────────────────────────────────────────
