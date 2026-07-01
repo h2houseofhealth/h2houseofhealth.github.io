@@ -6207,6 +6207,45 @@ app.get('/api/public/payments/booking', (req, res) => {
   });
 });
 
+app.get('/api/public/guest/bookings', (req, res) => {
+  const guestAccess = verifyGuestCheckoutAccessToken(req.query?.token);
+  if (!guestAccess) {
+    return res.status(400).json({ message: 'Invalid or expired guest session' });
+  }
+
+  const bookings = loadBookingsByIds(guestAccess.bookingIds);
+  if (!bookings.length || bookings.length !== guestAccess.bookingIds.length) {
+    return res.status(404).json({ message: 'booking not found' });
+  }
+
+  const sortedBookings = [...bookings].sort((a, b) => {
+    const aKey = `${String(a.bookingDate || '')}T${String(a.bookingTime || '')}`;
+    const bKey = `${String(b.bookingDate || '')}T${String(b.bookingTime || '')}`;
+    if (aKey !== bKey) return aKey.localeCompare(bKey);
+    return Number(a.id || 0) - Number(b.id || 0);
+  });
+
+  const responseBookings = sortedBookings.map((booking) => ({
+    ...booking,
+    bookingType: booking.bookingType || 'guest',
+    clientName: booking.guestName || guestAccess.guestName || '',
+    clientEmail: booking.guestEmail || guestAccess.guestEmail || '',
+    clientMobile: booking.guestPhone || guestAccess.guestPhone || '',
+    guestName: booking.guestName || guestAccess.guestName || '',
+    guestEmail: booking.guestEmail || guestAccess.guestEmail || '',
+    guestPhone: booking.guestPhone || guestAccess.guestPhone || '',
+  }));
+
+  return res.json({
+    bookings: responseBookings,
+    guest: {
+      name: guestAccess.guestName || responseBookings[0]?.guestName || '',
+      email: guestAccess.guestEmail || responseBookings[0]?.guestEmail || '',
+      phone: guestAccess.guestPhone || responseBookings[0]?.guestPhone || '',
+    },
+  });
+});
+
 // Guest Checkout Endpoint
 // Allows unauthenticated users to start checkout with basic info
 app.post('/api/guest/checkout', async (req, res) => {
