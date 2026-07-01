@@ -5406,7 +5406,7 @@ app.post('/api/bookings/:id/send-payment-link-sms', requireAuth, (req, res) => {
   });
 });
 
-app.get('/api/bookings/:id/invoice-link', requireAuth, (req, res) => {
+app.get('/api/bookings/:id/invoice-link',(req, res) => {
   const bookingId = Number(req.params.id);
   if (!Number.isInteger(bookingId)) {
     return res.status(400).json({ message: 'invalid booking id' });
@@ -5434,6 +5434,23 @@ app.get('/api/bookings/:id/invoice-link', requireAuth, (req, res) => {
   if (!booking) {
     return res.status(404).json({ message: 'booking not found' });
   }
+  const guestToken = String(req.query.token || '').trim();
+  if (guestToken) {
+    const access = verifyGuestCheckoutAccessToken(guestToken);
+    if (!access || !access.bookingIds.includes(booking.id)) {
+      return res.status(401).json({ message: 'unauthorized' });
+    }
+    req.user = {
+      role: 'guest',
+      id: booking.userId,
+    };
+  } else {
+    requireAuth(req, res, () => {});
+    if (!req.user) {
+      return;
+    }
+  }
+
   if (!canAccessBooking(req.user, booking.userId)) {
     return res.status(403).json({ message: 'forbidden' });
   }
