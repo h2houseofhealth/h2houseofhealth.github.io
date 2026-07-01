@@ -15855,7 +15855,14 @@ function renderAdminAllBookingRows(bookings) {
 async function fetchInvoiceLink(url, fallbackLabel = 'Invoice') {
   let response = null;
   try {
-    response = await fetch(buildApiUrl(url), withApiCredentials());
+    let requestUrl = url;
+    if (state.isGuestUser && !state.user) {
+      const token = String(state.guestSessionToken || getStoredGuestSessionToken() || '').trim();
+      if (token) {
+        requestUrl += `${requestUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
+      }
+    }
+    response = await fetch(buildApiUrl(requestUrl), withApiCredentials());
   } catch (error) {
     throw new Error(error?.message || 'Network error while generating invoice link.');
   }
