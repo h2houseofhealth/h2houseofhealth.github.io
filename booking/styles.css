@@ -1,4 +1,6 @@
 
+@import url("/site-background.css");
+
 :root {
   --bg-main: #f8f3ee;
   --bg-card: #f6efe8;
@@ -325,31 +327,6 @@ a:focus-visible {
   color: var(--brand-deep);
   text-decoration-color: rgba(var(--brand-primary-rgb), 0.75);
 }
-
-.background-shape {
-  position: fixed;
-  border-radius: 50%;
-  filter: blur(80px);
-  opacity: 0.4;
-  z-index: 0;
-}
-
-.shape-a {
-  width: 400px;
-  height: 400px;
-  background: #e8d8c8;
-  top: -100px;
-  right: -100px;
-}
-
-.shape-b {
-  width: 500px;
-  height: 500px;
-  background: #f1e6db;
-  bottom: -150px;
-  left: -150px;
-}
-
 
 .portal {
   width: 100%;
@@ -11226,31 +11203,6 @@ table tbody td {
 }
 
 /* ===== Premium polish layer ===== */
-body {
-  background: #F6EFEA;
-  position: relative;
-}
-
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 20% 30%, rgba(176,90,43,0.12), transparent 40%),
-    radial-gradient(circle at 80% 20%, rgba(176,90,43,0.08), transparent 40%);
-  z-index: 0;
-}
-
-.grain {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 1;
-  opacity: 0.04;
-  background-image: url("https://www.transparenttextures.com/patterns/noise.png");
-}
-
 .main-wrapper {
   max-width: 1120px;
   margin: 0 auto;
@@ -11261,31 +11213,6 @@ body::before {
   max-width: 1120px;
   margin: 0 auto;
   padding: 0 20px;
-}
-.leaf {
-  filter: blur(1px);
-}
-
-.leaf {
-  position: fixed;
-  width: 300px;
-  height: 300px;
-  background-size: contain;
-  background-repeat: no-repeat;
-  opacity: 0.08; 
-  pointer-events: none;
-  z-index: 0;
-}
-.leaf-top-right {
-  top: 0;
-  right: 0;
-  background-image: url("assets/leaf.png");
-}
-.leaf-bottom-left {
-  bottom: 0;
-  left: 0;
-  transform: rotate(180deg);
-  background-image: url("assets/leaf.png");
 }
 .panel {
   background: transparent !important;
@@ -12076,7 +12003,6 @@ h2, h3 {
 /* Clean final proportions + blend/overlap safety */
 body {
   font-family: var(--font-brand);
-  background: linear-gradient(180deg, #f7efe8 0%, #efe3d7 100%);
   color: #1e1e1e;
 }
 

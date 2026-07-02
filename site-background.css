@@ -1,0 +1,120 @@
+html {
+  min-height: 100%;
+}
+
+body,
+body.template-index,
+body.template-page,
+body.template-product,
+body.template-collection,
+body.template-cart {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  margin: 0;
+  overflow-x: hidden;
+  background-color: #f6efe8 !important;
+  background-image:
+    radial-gradient(circle at 20% 10%, rgba(176, 90, 43, 0.18), transparent 40%),
+    radial-gradient(circle at 80% 90%, rgba(176, 90, 43, 0.12), transparent 50%),
+    linear-gradient(180deg, #f7f3ef 0%, #efe7df 100%),
+    radial-gradient(rgba(255, 255, 255, 0.28) 0.7px, transparent 0.7px) !important;
+  background-size: auto, auto, auto, 4px 4px;
+  background-position: center;
+  background-attachment: fixed;
+}
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  width: 300px;
+  height: 300px;
+  pointer-events: none;
+  z-index: 0;
+  background: url("/booking/assets/leaf.png") center / contain no-repeat;
+  opacity: 0.08;
+  filter: blur(1px);
+}
+
+body.template-index::before,
+body.template-index::after,
+body.template-page::before,
+body.template-page::after,
+body.template-product::before,
+body.template-product::after,
+body.template-collection::before,
+body.template-collection::after,
+body.template-cart::before,
+body.template-cart::after {
+  display: block;
+}
+
+body::before {
+  top: 0;
+  right: 0;
+}
+
+body::after {
+  bottom: 0;
+  left: 0;
+  transform: rotate(180deg);
+}
+
+#MainContent,
+.portal {
+  position: relative;
+  z-index: 1;
+}
+
+body.template-index #MainContent,
+body.template-page #MainContent,
+body.template-product #MainContent,
+body.template-collection #MainContent,
+body.template-cart #MainContent,
+body.template-index .content-for-layout,
+body.template-page .content-for-layout,
+body.template-product .content-for-layout,
+body.template-collection .content-for-layout,
+body.template-cart .content-for-layout,
+body.template-index .background,
+body.template-page .background,
+body.template-product .background,
+body.template-collection .background,
+body.template-cart .background,
+body.template-index .shopify-section,
+body.template-page .shopify-section,
+body.template-product .shopify-section,
+body.template-collection .shopify-section,
+body.template-cart .shopify-section,
+body.template-index .spaced-section,
+body.template-page .spaced-section,
+body.template-product .spaced-section,
+body.template-collection .spaced-section,
+body.template-cart .spaced-section,
+body.template-index .footer,
+body.template-page .footer,
+body.template-product .footer,
+body.template-collection .footer,
+body.template-cart .footer,
+body.template-index .rich-text__wrapper,
+body.template-page .rich-text__wrapper,
+body.template-product .rich-text__wrapper,
+body.template-collection .rich-text__wrapper,
+body.template-cart .rich-text__wrapper,
+body.template-index .image-with-text__content,
+body.template-page .image-with-text__content,
+body.template-product .image-with-text__content,
+body.template-collection .image-with-text__content,
+body.template-cart .image-with-text__content {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+body > .background-shape,
+body > .leaf,
+body > .grain {
+  display: none !important;
+}
