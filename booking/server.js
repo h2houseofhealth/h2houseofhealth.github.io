@@ -7502,9 +7502,12 @@ app.get('/invoice/booking', async (req, res) => {
               is_topup_session AS isTopUpSession,
               paid_amount_paise AS paidAmountPaise,
               paid_at AS paidAt,
-              created_at AS createdAt
-       FROM bookings
-       WHERE id = ?`
+              created_at AS createdAt,
+              guest_name AS guestName,
+              guest_email AS guestEmail,
+              guest_phone AS guestPhone
+              FROM bookings
+              WHERE id = ?`
     )
     .get(access.bookingId);
   if (!booking || Number(booking.userId) !== access.userId) {
@@ -7596,9 +7599,11 @@ app.get('/invoice/booking', async (req, res) => {
   const invoiceNo = `BK-${booking.id}`;
   const paidAtLabel = formatInvoiceDateTime(booking.paidAt);
   const generatedAtLabel = formatInvoiceDateTime(new Date());
-  const customerName = bookingOwner?.name || '';
-  const customerEmail = bookingOwner?.email || '';
-  const customerMobile = bookingOwner?.mobile || '';
+  const customerName = bookingOwner?.name || booking.guestName || '';
+  const customerEmail = bookingOwner?.email || booking.guestEmail || '';
+  const customerMobile = bookingOwner?.mobile || booking.guestPhone || '';
+  console.log({bookingId: booking.id,bookingOwnerMobile: bookingOwner?.mobile,guestPhone: booking.guestPhone,customerMobile,});
+
 
   const invoiceHtml = `<!doctype html>
 <html lang="en">
