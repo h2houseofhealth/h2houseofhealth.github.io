@@ -4593,6 +4593,7 @@ h1, h2, h3 {
 .hydrogen-schedule-grid select {
   width: 100%;
   max-width: 100%;
+  box-sizing: border-box;
 }
 
 .hydrogen-sidebar .hydrogen-addon-grid {
@@ -4697,6 +4698,8 @@ h1, h2, h3 {
 .hydrogen-addon-schedule-grid select {
   width: 100%;
   min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .hydrogen-addon-session-date[disabled] {
@@ -6316,6 +6319,7 @@ textarea {
   padding: 0.55rem 0.65rem;
   font-size: 0.95rem;
   background: #FFFFFF;
+  box-sizing: border-box;
   transition: all var(--transition-fast);
 }
 
@@ -8734,6 +8738,8 @@ table tbody td {
 .booking-hydrogen-addon-session-grid select {
   width: 100%;
   min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .booking-hydrogen-addon-session-date[disabled] {
