@@ -1818,12 +1818,17 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 25rem;
+    width: fit-content;
+    min-width: min(100%, 27rem);
     min-height: 5.6rem;
-    padding: 0 2.6rem;
-    font-size: 2.1rem;
+    padding: 0 clamp(2rem, 2.8vw, 3rem);
+    font-size: clamp(1.6rem, 1.4vw, 2.1rem);
     font-weight: 700;
     letter-spacing: 0.03em;
+    line-height: 1.1;
+    white-space: nowrap;
+    text-align: center;
+    box-sizing: border-box;
     border: 1px solid rgba(174, 84, 49, 0.24);
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.1);
@@ -1860,11 +1865,13 @@
     }
 
     .template-index .slideshow .slideshow__button-wrapper .hero-book-now-btn {
-      min-width: 12.5rem;
+      width: fit-content;
+      min-width: 0;
+      max-width: calc(100vw - 3rem);
       min-height: 3.8rem;
-      padding: 0 1.7rem;
-      font-size: 1.05rem;
-      line-height: 1;
+      padding: 0 1.4rem;
+      font-size: 1rem;
+      line-height: 1.1;
     }
   }
 </style>
@@ -2153,7 +2160,8 @@
                   </span>
                 </a>
               </li></ul>
-      </nav></div><div class="header__icons">
+      </nav></div><div class="header__icons storefront-header__cta">
+    <a href="booking/?entry=guest" class="header-book-now-btn" aria-label="Book Now">Book Now</a>
   </div>
 
 	</header>
@@ -2370,7 +2378,7 @@
 								
 								
 									<div class="slideshow__button-wrapper  js-fade ">
-										<a href="booking/?entry=guest" class="header-book-now-btn hero-book-now-btn" aria-label="Book Now">Book Now</a>
+										<a href="booking/?entry=guest" class="header-book-now-btn hero-book-now-btn" aria-label="Book your Demo Session">Book your Demo Session</a>
 
 									</div>
 								
@@ -2427,7 +2435,7 @@
 								
 								
 									<div class="slideshow__button-wrapper  js-fade ">
-										<a href="booking/?entry=guest" class="header-book-now-btn hero-book-now-btn" aria-label="Book Now">Book Now</a>
+										<a href="booking/?entry=guest" class="header-book-now-btn hero-book-now-btn" aria-label="Book your Demo Session">Book your Demo Session</a>
 
 									</div>
 								
@@ -2484,7 +2492,7 @@
 								
 								
 									<div class="slideshow__button-wrapper  js-fade ">
-										<a href="booking/?entry=guest" class="header-book-now-btn hero-book-now-btn" aria-label="Book Now">Book Now</a>
+										<a href="booking/?entry=guest" class="header-book-now-btn hero-book-now-btn" aria-label="Book your Demo Session">Book your Demo Session</a>
 
 									</div>
 								
@@ -2541,7 +2549,7 @@
 								
 								
 									<div class="slideshow__button-wrapper  js-fade ">
-										<a href="booking/?entry=guest" class="header-book-now-btn hero-book-now-btn" aria-label="Book Now">Book Now</a>
+										<a href="booking/?entry=guest" class="header-book-now-btn hero-book-now-btn" aria-label="Book your Demo Session">Book your Demo Session</a>
 
 									</div>
 								
