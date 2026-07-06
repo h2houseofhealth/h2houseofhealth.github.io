@@ -1796,6 +1796,58 @@
 <style id="self-host-cleanup">
   .header__account, .header__cart, .menu-drawer__utility-links, .product-form, .product__buy-buttons, .pickup-availability { display: none !important; }
 </style>
+<style id="house-hero-book-now">
+  .template-index .header__icons-wrapper {
+    display: none !important;
+  }
+
+  .template-index .slideshow .slideshow__button-wrapper {
+    position: absolute;
+    left: 50%;
+    bottom: clamp(1.6rem, 4vw, 3rem);
+    transform: translateX(-50%);
+    z-index: 6;
+    margin: 0;
+    pointer-events: auto;
+    width: max-content;
+    display: flex;
+    justify-content: center;
+  }
+
+  .template-index .slideshow .slideshow__button-wrapper .hero-book-now-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 25rem;
+    min-height: 5.6rem;
+    padding: 0 2.6rem;
+    font-size: 2.1rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    border: 1px solid rgba(174, 84, 49, 0.24);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: rgb(174, 84, 49) !important;
+    text-decoration: none;
+    transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.1);
+  }
+
+  .template-index .slideshow .slideshow__button-wrapper .hero-book-now-btn:hover {
+    background: rgb(174, 84, 49);
+    border-color: rgb(174, 84, 49);
+    color: #fff !important;
+    transform: translateY(-1px);
+    box-shadow: 0 14px 28px rgba(174, 84, 49, 0.26);
+  }
+
+  .template-index .slideshow .slideshow__button-wrapper .hero-book-now-btn:focus-visible {
+    outline: 2px solid rgba(174, 84, 49, 0.5);
+    outline-offset: 3px;
+  }
+</style>
 		<link rel="stylesheet" href="/site-background.css" />
 </head>
 
@@ -1948,11 +2000,6 @@
                       >
                         Contact
                       </a></li></ul>
-					  <li>
-						<a  href="booking/?entry=guest"class="menu-drawer__menu-item list-menu__item link link--text focus-inset"aria-label="Book Now">
-							Book Now
-						</a>
-					  </li>
             </nav><ul class="list list-social list-unstyled" role="list"></ul>
           
 
@@ -2087,8 +2134,6 @@
                 </a>
               </li></ul>
       </nav></div><div class="header__icons">
-    
-<div class="header__icons-wrapper"><a href="booking/?entry=guest"class="header-book-now-btn" aria-label="Book Now">Book Now</a></div>
   </div>
 
 	</header>
@@ -2305,7 +2350,7 @@
 								
 								
 									<div class="slideshow__button-wrapper  js-fade ">
-										
+										<a href="booking/?entry=guest" class="header-book-now-btn hero-book-now-btn" aria-label="Book Now">Book Now</a>
 
 									</div>
 								
@@ -2362,7 +2407,7 @@
 								
 								
 									<div class="slideshow__button-wrapper  js-fade ">
-										
+										<a href="booking/?entry=guest" class="header-book-now-btn hero-book-now-btn" aria-label="Book Now">Book Now</a>
 
 									</div>
 								
@@ -2419,7 +2464,7 @@
 								
 								
 									<div class="slideshow__button-wrapper  js-fade ">
-										
+										<a href="booking/?entry=guest" class="header-book-now-btn hero-book-now-btn" aria-label="Book Now">Book Now</a>
 
 									</div>
 								
@@ -2476,7 +2521,7 @@
 								
 								
 									<div class="slideshow__button-wrapper  js-fade ">
-										
+										<a href="booking/?entry=guest" class="header-book-now-btn hero-book-now-btn" aria-label="Book Now">Book Now</a>
 
 									</div>
 								
