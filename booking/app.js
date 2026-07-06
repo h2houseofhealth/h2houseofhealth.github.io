@@ -12508,6 +12508,10 @@ function renderAdminUserCards() {
     const card = document.createElement('button');
     card.type = 'button';
     card.className = 'admin-user-card';
+    console.log({
+      name: user.name,
+      email: user.email
+    });
     card.innerHTML = `
       <div class="admin-user-card-top">
         <span class="admin-user-card-avatar">${escapeHtml(getInitials(user?.name || 'User'))}</span>
@@ -12516,7 +12520,7 @@ function renderAdminUserCards() {
       <div class="admin-user-card-main">
         <div class="admin-user-card-body">
           <h3>${escapeHtml(user?.name || 'Unnamed User')}</h3>
-          <p>${escapeHtml(user?.email || user?.mobile || 'No contact info')}</p>
+          <p class="admin-user-card-email" title="${escapeHtml(user?.email || user?.mobile || 'No contact info')}">${escapeHtml(user?.email || user?.mobile || 'No contact info')}</p>
           <p class="admin-user-plan-copy">${escapeHtml(
             membership.totalSessions
               ? `${membership.planLabel} - ${membership.perUserSessions} member sessions per user`
