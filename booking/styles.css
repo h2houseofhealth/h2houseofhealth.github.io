@@ -12631,6 +12631,15 @@ body {
   margin-top: 0.3rem;
 }
 
+#memberChoiceGate #compareBenefitsBtn {
+  text-decoration: none;
+  display: block;
+  width: min(100%, 280px);
+  margin: 18px auto 0;
+  box-sizing: border-box;
+  text-align: center;
+}
+
 @media (max-width: 900px) {
   #memberChoiceGate .member-choice-plans-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -12640,6 +12649,11 @@ body {
 @media (max-width: 600px) {
   #memberChoiceGate .member-choice-plans-grid {
     grid-template-columns: 1fr;
+  }
+
+  #memberChoiceGate #compareBenefitsBtn {
+    width: min(100%, 280px);
+    margin-top: 14px;
   }
 }
 
@@ -17690,4 +17704,26 @@ body:not(.auth-mode) main.portal:not(:has(#memberChoiceGate:not([hidden]))) >
   word-break: normal;
   overflow-wrap: normal;
   line-height: 1.4;
+}
+
+#memberChoiceGate #compareBenefitsBtn {
+  display: block !important;
+  width: min(100%, 280px) !important;
+  max-width: 280px !important;
+  margin: 18px auto 0 !important;
+  padding: 0 28px !important;
+  min-height: 56px !important;
+  font-size: 16px !important;
+  line-height: 1 !important;
+  text-align: center !important;
+}
+
+@media (max-width: 600px) {
+  #memberChoiceGate #compareBenefitsBtn {
+    width: min(100%, 280px) !important;
+    max-width: 280px !important;
+    margin-top: 14px !important;
+    min-height: 56px !important;
+    font-size: 16px !important;
+  }
 }

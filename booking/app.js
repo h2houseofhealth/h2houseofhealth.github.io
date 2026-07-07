@@ -451,6 +451,7 @@ const elements = {
   topExplorePlansBtn: document.getElementById('topExplorePlansBtn'),
   continueAsMemberBtn: document.getElementById('continueAsMemberBtn'),
   continueAsNonMemberBtn: document.getElementById('continueAsNonMemberBtn'),
+  compareBenefitsBtn: document.getElementById('compareBenefitsBtn'),
   membershipSection: document.getElementById('membershipSection'),
   servicesSection: document.getElementById('servicesSection'),
   bookingFiltersSection: document.getElementById('bookingFiltersSection'),
@@ -1385,27 +1386,18 @@ function attachEvents() {
     btn.addEventListener('click', openMembershipPlansFromLanding);
   });
   elements.continueAsMemberBtn?.addEventListener('click', () => {
-    if (!state.user) {
-      openAuthFromLanding('continue-member');
-      return;
+    const plansSection = document.getElementById('member-choice-plans');
+    if (plansSection) {
+      window.location.hash = '#member-choice-plans';
+      plansSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-    if (!isCurrentUserMembershipActive()) {
-      state.postLoginChoice = 'join-member';
-      state.activeUserTab = 'membership';
-      window.location.hash = '#membership';
-      render();
-      requestAnimationFrame(() => {
-        document.querySelector('[aria-label="Membership"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
-      return;
+  });
+  elements.compareBenefitsBtn?.addEventListener('click', () => {
+    const comparisonSection = document.getElementById('cmp-perfect-01');
+    if (comparisonSection) {
+      window.location.hash = '#cmp-perfect-01';
+      comparisonSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-    state.postLoginChoice = 'continue-member';
-    state.activeUserTab = 'services';
-    window.location.hash = '#services';
-    render();
-    requestAnimationFrame(() => {
-      document.querySelector('[aria-label="Services"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
   });
   elements.continueAsNonMemberBtn?.addEventListener('click', () => {
     if (!state.user) {
@@ -3996,17 +3988,7 @@ function navigateToUserBookings() {
 }
 
 async function handlePublicBookSession() {
-  if (state.user) {
-    state.activeUserTab = 'services';
-    window.location.hash = '#services';
-    render();
-    requestAnimationFrame(() => {
-      elements.servicesSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-    return;
-  }
-
-  await enterGuestBookingMode();
+  openAuthFromLanding('public-book-session');
 }
 
 function validateGuestCheckout() {
