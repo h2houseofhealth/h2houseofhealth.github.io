@@ -157,6 +157,9 @@ const mg =
         key: MAILGUN_API_KEY,
       })
     : null;
+console.log('MAILGUN_API_KEY:', !!MAILGUN_API_KEY);
+console.log('MAILGUN_DOMAIN:', MAILGUN_DOMAIN);
+console.log('MAILGUN_CLIENT_CREATED:', !!mg);
 
 async function sendMailgunEmail({ to, from, subject, text, html }) {
   if (!mg) {
@@ -12757,70 +12760,22 @@ async function sendCouponEmail({ toEmail, recipientName, code, discountValue, ap
     </div>
   `;
 
-  if (SENDGRID_API_KEY && SENDGRID_MARKETING_FROM_EMAIL) {
-    if (!isValidEmail(SENDGRID_MARKETING_FROM_EMAIL)) {
-      return { ok: false, statusCode: 500, message: 'SENDGRID_MARKETING_FROM_EMAIL is invalid.' };
-    }
-    if (
-      SENDGRID_MARKETING_VERIFIED_SENDER &&
-      SENDGRID_MARKETING_FROM_EMAIL.toLowerCase() !== SENDGRID_MARKETING_VERIFIED_SENDER.toLowerCase()
-    ) {
-      return {
-        ok: false,
-        statusCode: 500,
-        message: 'SENDGRID_MARKETING_FROM_EMAIL does not match SENDGRID_MARKETING_VERIFIED_SENDER.',
-      };
-    }
-    try {
-      await sgMail.send({
-        to: normalizedToEmail,
-        from: SENDGRID_MARKETING_FROM_EMAIL,
-        subject,
-        text,
-        html,
-        headers: buildMarketingHeaders(),
-      });
-      return { ok: true };
-    } catch (error) {
-      const sendGridError = extractSendGridErrorDetails(error);
-      console.error('Failed to send coupon email via SendGrid:', {
-        statusCode: sendGridError.statusCode,
-        detail: sendGridError.detail,
-        responseBody: sendGridError.responseBody,
-      });
-      return {
-        ok: false,
-        statusCode: sendGridError.statusCode || 500,
-        message:
-          sendGridError.statusCode === 403
-            ? 'SendGrid rejected the sender identity. Verify the configured FROM email or authenticated domain.'
-            : 'Unable to send coupon email. Please try again.',
-      };
-    }
-  }
-
-  const transporter = getTransporter();
-  const fromEmail = process.env.SMTP_MARKETING_FROM || SENDGRID_MARKETING_FROM_EMAIL || process.env.SMTP_FROM || process.env.SMTP_USER;
-  if (!transporter || !fromEmail) {
-    return {
-      ok: false,
-      statusCode: 500,
-      message: 'Email service is not configured. Please contact support.',
-    };
-  }
-
   try {
-    await transporter.sendMail({
-      from: fromEmail,
+    console.log('Coupon email about to use Mailgun', {
       to: normalizedToEmail,
+      from: MAIL_FROM,
+      subject,
+  });
+    await sendMailgunEmail({
+      to: normalizedToEmail,
+      from: MAIL_FROM,
       subject,
       text,
       html,
-      headers: buildMarketingHeaders(),
     });
     return { ok: true };
   } catch (error) {
-    console.error('Failed to send coupon email via SMTP:', error);
+    console.error('Failed to send coupon email via Mailgun:', error);
     return {
       ok: false,
       statusCode: 500,
