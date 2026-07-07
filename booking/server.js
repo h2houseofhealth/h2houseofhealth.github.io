@@ -2111,9 +2111,11 @@ app.post('/api/admin/services', requireAuth, requireAdmin, (req, res) => {
   const services = getVisibleServicesForUser(resolvedCustomer.user).map((service) =>
     toServiceResponse(service, resolvedCustomer.user)
   );
+  const sessionSummary = getAdminHydrogenSessionSummary(resolvedCustomer.user.id, resolvedCustomer.user);
   res.json({
     services,
     membershipActive: isMembershipActiveForUser(resolvedCustomer.user),
+    sessionSummary,
     resolvedCustomer: {
       id: resolvedCustomer.user.id ?? null,
       name: resolvedCustomer.user.name || '',
@@ -2121,8 +2123,10 @@ app.post('/api/admin/services', requireAuth, requireAdmin, (req, res) => {
       mobile: resolvedCustomer.user.mobile || '',
       discountPercent: getDiscountPercentForPhone(resolvedCustomer.user.mobile || ''),
       membershipStatus: resolvedCustomer.user.membershipStatus || 'inactive',
+      membershipStartedAt: resolvedCustomer.user.membershipStartedAt || null,
       membershipExpiresAt: resolvedCustomer.user.membershipExpiresAt || null,
       membershipPeopleCount: resolvedCustomer.user.membershipPeopleCount ?? null,
+      membershipRemainingHydrogenSessions: sessionSummary.membershipRemainingHydrogenSessions,
     },
   });
 });
@@ -9922,6 +9926,8 @@ function createSingleBookingResponse(req, res, { targetUser, defaultNotes = '', 
   const isHydrogenBase = selectedCategory === 'HYDROGEN SESSION';
   const isTherapyOrShotBase = selectedCategory === 'IV THERAPIES' || selectedCategory === 'IV SHOTS';
   const isExperienceSession = selectedCategory === 'EXPERIENCE SESSION';
+  const adminHydrogenSummary =
+    includeAdminMeta && isHydrogenBase ? getAdminHydrogenSessionSummary(targetUser.id, targetUser) : null;
   const selectedAddOnServiceName = String(req.body?.addOnServiceName || '').trim();
   const addOnBookingDate = String(req.body?.addOnBookingDate || payload.data.bookingDate || '').trim();
   const addOnBookingTime = normalizeSlotStartTime(
@@ -10027,9 +10033,24 @@ function createSingleBookingResponse(req, res, { targetUser, defaultNotes = '', 
     addOnAmountInr = Number(getEffectiveServicePriceInr(addOnService, targetUser) || 0);
     bookingGroupId = createBookingGroupId('booking');
   }
+  const hasAdminHydrogenBalance = Boolean(
+    includeAdminMeta &&
+      isHydrogenBase &&
+      adminHydrogenSummary &&
+      Number(adminHydrogenSummary.totalAvailableHydrogenSessions || 0) > 0
+  );
   let computedPaymentStatus = isExperienceSession || effectivePriceInr > 0 ? 'unpaid' : 'paid';
+  let computedPaymentReference = '';
+  let computedPaidAmountPaise = null;
+  if (hasAdminHydrogenBalance) {
+    computedPaymentStatus = 'paid';
+    computedPaymentReference = Number(adminHydrogenSummary.membershipRemainingHydrogenSessions || 0) > 0 ? 'membership' : 'buy_extra';
+    computedPaidAmountPaise = 0;
+  }
   if (addOnService && addOnAmountInr > 0) {
     computedPaymentStatus = 'unpaid';
+    computedPaymentReference = '';
+    computedPaidAmountPaise = null;
   }
   if (
     selectedService &&
@@ -10082,8 +10103,8 @@ function createSingleBookingResponse(req, res, { targetUser, defaultNotes = '', 
     .prepare(
       `INSERT INTO bookings (
         user_id, doctor_id, client_name, client_email, client_phone,
-        service_name, booking_date, booking_time, assigned_staff, status, payment_status, booking_group_id, notes, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`
+        service_name, booking_date, booking_time, assigned_staff, status, payment_status, payment_reference, paid_at, paid_amount_paise, booking_group_id, notes, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       targetUser.id,
@@ -10096,6 +10117,9 @@ function createSingleBookingResponse(req, res, { targetUser, defaultNotes = '', 
       payload.data.bookingTime,
       'H2 House Of Health',
       computedPaymentStatus,
+      computedPaymentReference || null,
+      computedPaymentStatus === 'paid' ? getCurrentSqliteTimestamp() : null,
+      computedPaidAmountPaise,
       bookingGroupId,
       payload.data.notes || defaultNotes,
       getCurrentSqliteTimestamp()
@@ -10189,6 +10213,7 @@ function createSingleBookingResponse(req, res, { targetUser, defaultNotes = '', 
       email: targetUser.email,
       mobile: targetUser.mobile || '',
       membershipStatus: targetUser.membershipStatus || 'inactive',
+      membershipStartedAt: targetUser.membershipStartedAt || null,
       membershipExpiresAt: targetUser.membershipExpiresAt || null,
       membershipPeopleCount: targetUser.membershipPeopleCount ?? null,
     },
@@ -12183,6 +12208,84 @@ function getHydrogenFreeSessionBalance(userId, user, { usedOverride } = {}) {
     active: true,
     used,
     remaining,
+  };
+}
+
+function getAdminHydrogenSessionSummary(userId, user) {
+  const normalizedUserId = Number(userId);
+  if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
+    return {
+      membershipActive: false,
+      membershipRemainingHydrogenSessions: 0,
+      topUpPurchasedHydrogenSessions: 0,
+      topUpCompletedHydrogenSessions: 0,
+      topUpRemainingHydrogenSessions: 0,
+      scheduledHydrogenSessions: 0,
+      completedHydrogenSessions: 0,
+      totalAvailableHydrogenSessions: 0,
+    };
+  }
+
+  const hydrogenServiceNames = SERVICE_CATALOG
+    .filter((service) => String(service.category || '').toUpperCase() === 'HYDROGEN SESSION')
+    .map((service) => service.name);
+  if (!hydrogenServiceNames.length) {
+    return {
+      membershipActive: isMembershipActiveForUser(user),
+      membershipRemainingHydrogenSessions: getHydrogenFreeSessionBalance(normalizedUserId, user).remaining,
+      topUpPurchasedHydrogenSessions: 0,
+      topUpCompletedHydrogenSessions: 0,
+      topUpRemainingHydrogenSessions: 0,
+      scheduledHydrogenSessions: 0,
+      completedHydrogenSessions: 0,
+      totalAvailableHydrogenSessions: getHydrogenFreeSessionBalance(normalizedUserId, user).remaining,
+    };
+  }
+
+  const placeholders = hydrogenServiceNames.map(() => '?').join(', ');
+  const rows = db
+    .prepare(
+      `SELECT id,
+              service_name AS serviceName,
+              booking_date AS bookingDate,
+              booking_time AS bookingTime,
+              status,
+              payment_status AS paymentStatus,
+              payment_reference AS paymentReference,
+              is_topup_session AS isTopUpSession,
+              created_at AS createdAt
+       FROM bookings
+       WHERE user_id = ?
+         AND service_name IN (${placeholders})
+       ORDER BY booking_date ASC, booking_time ASC, id ASC`
+    )
+    .all(normalizedUserId, ...hydrogenServiceNames);
+
+  const activeRows = rows.filter((booking) => {
+    const status = String(booking.status || '').trim().toLowerCase();
+    return status !== 'cancelled' && status !== 'schedule_later';
+  });
+  const completedRows = activeRows.filter((booking) => String(booking.status || '').trim().toLowerCase() === 'completed');
+  const scheduledRows = activeRows.filter((booking) => String(booking.status || '').trim().toLowerCase() !== 'completed');
+  const topUpRows = activeRows.filter((booking) => {
+    if (Number(booking.isTopUpSession || 0) === 1) return true;
+    const paymentReference = String(booking.paymentReference || '').trim().toLowerCase();
+    return paymentReference === 'buy_extra';
+  });
+  const topUpCompletedRows = topUpRows.filter((booking) => String(booking.status || '').trim().toLowerCase() === 'completed');
+  const membershipBalance = getHydrogenFreeSessionBalance(normalizedUserId, user);
+  const topUpPurchasedHydrogenSessions = topUpRows.length;
+  const topUpRemainingHydrogenSessions = Math.max(0, topUpPurchasedHydrogenSessions - topUpCompletedRows.length);
+
+  return {
+    membershipActive: Boolean(membershipBalance.active),
+    membershipRemainingHydrogenSessions: Number(membershipBalance.remaining || 0),
+    topUpPurchasedHydrogenSessions,
+    topUpCompletedHydrogenSessions: topUpCompletedRows.length,
+    topUpRemainingHydrogenSessions,
+    scheduledHydrogenSessions: scheduledRows.length,
+    completedHydrogenSessions: completedRows.length,
+    totalAvailableHydrogenSessions: Number(membershipBalance.remaining || 0) + topUpRemainingHydrogenSessions,
   };
 }
 

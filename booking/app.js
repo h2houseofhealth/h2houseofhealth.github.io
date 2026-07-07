@@ -97,6 +97,8 @@ const state = {
   adminSelectedUserId: null,
   adminUserSessionFilter: 'all',
   adminResolvedCustomer: null,
+  adminCustomerSessionSummary: null,
+  adminBookingMode: 'new',
   adminCustomerForm: {
     name: '',
     email: '',
@@ -231,6 +233,7 @@ const state = {
   adminCalendarMonth: '',
   adminCalendarMonthLoading: false,
   adminCalendarDayCache: {},
+  adminCalendarCustomerSearchQuery: '',
   filters: {
     search: '',
     status: 'all',
@@ -287,40 +290,6 @@ function syncAdminCustomerFieldsToUi() {
   if (elements.adminCustomerName) elements.adminCustomerName.value = state.adminCustomerForm.name || '';
   if (elements.adminCustomerEmail) elements.adminCustomerEmail.value = state.adminCustomerForm.email || '';
   if (elements.adminCustomerPhone) elements.adminCustomerPhone.value = state.adminCustomerForm.phone || '';
-  if (elements.adminCalendarCustomerName) elements.adminCalendarCustomerName.value = state.adminCustomerForm.name || '';
-  if (elements.adminCalendarCustomerEmail) elements.adminCalendarCustomerEmail.value = state.adminCustomerForm.email || '';
-  if (elements.adminCalendarCustomerPhone) elements.adminCalendarCustomerPhone.value = state.adminCustomerForm.phone || '';
-}
-
-function closeAdminCalendarCustomerDialog() {
-  pendingAdminCalendarBookingAction = null;
-  try {
-    elements.adminCalendarCustomerDialog?.close?.();
-  } catch {
-    elements.adminCalendarCustomerDialog?.removeAttribute?.('open');
-  }
-}
-
-function openAdminCalendarCustomerDialog(onConfirmBooking) {
-  if (!elements.adminCalendarCustomerDialog) {
-    showNotice({ title: 'Notice', body: 'Enter customer name, email, and contact number first.' });
-    return;
-  }
-  pendingAdminCalendarBookingAction = typeof onConfirmBooking === 'function' ? onConfirmBooking : null;
-  if (elements.adminCalendarModalCustomerName) {
-    elements.adminCalendarModalCustomerName.value = String(state.adminCustomerForm.name || '');
-  }
-  if (elements.adminCalendarModalCustomerEmail) {
-    elements.adminCalendarModalCustomerEmail.value = String(state.adminCustomerForm.email || '');
-  }
-  if (elements.adminCalendarModalCustomerPhone) {
-    elements.adminCalendarModalCustomerPhone.value = String(state.adminCustomerForm.phone || '');
-  }
-  if (typeof elements.adminCalendarCustomerDialog.showModal === 'function') {
-    elements.adminCalendarCustomerDialog.showModal();
-  } else {
-    elements.adminCalendarCustomerDialog.setAttribute('open', 'open');
-  }
 }
 
 function normalizeSlotStartTime(value) {
@@ -489,9 +458,6 @@ const elements = {
   adminCustomerName: document.getElementById('adminCustomerName'),
   adminCustomerEmail: document.getElementById('adminCustomerEmail'),
   adminCustomerPhone: document.getElementById('adminCustomerPhone'),
-  adminCalendarCustomerName: document.getElementById('adminCalendarCustomerName'),
-  adminCalendarCustomerEmail: document.getElementById('adminCalendarCustomerEmail'),
-  adminCalendarCustomerPhone: document.getElementById('adminCalendarCustomerPhone'),
   adminClientMeta: document.getElementById('adminClientMeta'),
   adminCustomerMessage: document.getElementById('adminCustomerMessage'),
   membershipPlans: document.getElementById('membershipPlans'),
@@ -562,14 +528,6 @@ const elements = {
   membershipRosterList: document.getElementById('membershipRosterList'),
   closeMembershipRosterDialogBtn: document.getElementById('closeMembershipRosterDialogBtn'),
   cancelMembershipRosterBtn: document.getElementById('cancelMembershipRosterBtn'),
-  adminCalendarCustomerDialog: document.getElementById('adminCalendarCustomerDialog'),
-  adminCalendarCustomerForm: document.getElementById('adminCalendarCustomerForm'),
-  adminCalendarModalCustomerName: document.getElementById('adminCalendarModalCustomerName'),
-  adminCalendarModalCustomerEmail: document.getElementById('adminCalendarModalCustomerEmail'),
-  adminCalendarModalCustomerPhone: document.getElementById('adminCalendarModalCustomerPhone'),
-  closeAdminCalendarCustomerDialogBtn: document.getElementById('closeAdminCalendarCustomerDialogBtn'),
-  cancelAdminCalendarCustomerDialogBtn: document.getElementById('cancelAdminCalendarCustomerDialogBtn'),
-  confirmAdminCalendarCustomerDialogBtn: document.getElementById('confirmAdminCalendarCustomerDialogBtn'),
   bookingNotesDialog: document.getElementById('bookingNotesDialog'),
   bookingNotesCloseBtn: document.getElementById('bookingNotesCloseBtn'),
   bookingNotesAddBtn: document.getElementById('bookingNotesAddBtn'),
@@ -590,6 +548,14 @@ const elements = {
   adminPaymentChoiceCashBtn: document.getElementById('adminPaymentChoiceCashBtn'),
   adminPaymentChoiceLinkBtn: document.getElementById('adminPaymentChoiceLinkBtn'),
   adminPaymentChoiceCloseBtn: document.getElementById('adminPaymentChoiceCloseBtn'),
+  adminCalendarCustomerSearchDialog: document.getElementById('adminCalendarCustomerSearchDialog'),
+  adminCalendarCustomerSearchForm: document.getElementById('adminCalendarCustomerSearchForm'),
+  adminCalendarCustomerSearchInput: document.getElementById('adminCalendarCustomerSearchInput'),
+  adminCalendarCustomerSearchResults: document.getElementById('adminCalendarCustomerSearchResults'),
+  adminCalendarCustomerSearchEmpty: document.getElementById('adminCalendarCustomerSearchEmpty'),
+  adminCalendarCustomerSearchCloseBtn: document.getElementById('adminCalendarCustomerSearchCloseBtn'),
+  adminCalendarCustomerSearchCancelBtn: document.getElementById('adminCalendarCustomerSearchCancelBtn'),
+  adminCustomerSessionSummary: document.getElementById('adminCustomerSessionSummary'),
 
   noticeDialog: document.getElementById('noticeDialog'),
   noticeDialogTitle: document.getElementById('noticeDialogTitle'),
@@ -1131,6 +1097,7 @@ function attachEvents() {
     state.adminCoupons = [];
     state.adminSelectedUserId = null;
     state.adminResolvedCustomer = null;
+    state.adminCustomerSessionSummary = null;
     state.adminCustomerForm = { name: '', email: '', phone: '' };
     state.postLoginChoice = '';
     resetMyBookingsViewState();
@@ -1142,6 +1109,7 @@ function attachEvents() {
     clearStoredGuestSessionToken();
     clearGuestCart();
     clearTimeout(adminCustomerRefreshTimer);
+    closeAdminCalendarCustomerSearchDialog();
     state.membership = { plans: [], active: false, current: null };
     state.membershipBrowseVisible = false;
     state.membershipAdditions = {};
@@ -1270,9 +1238,6 @@ function attachEvents() {
   elements.adminCustomerName?.addEventListener('input', updateAdminCustomerField('name'));
   elements.adminCustomerPhone?.addEventListener('input', updateAdminCustomerField('phone'));
   elements.adminCustomerEmail?.addEventListener('input', updateAdminCustomerField('email'));
-  elements.adminCalendarCustomerName?.addEventListener('input', updateAdminCustomerField('name'));
-  elements.adminCalendarCustomerPhone?.addEventListener('input', updateAdminCustomerField('phone'));
-  elements.adminCalendarCustomerEmail?.addEventListener('input', updateAdminCustomerField('email'));
   elements.adminCustomerName?.addEventListener('change', async () => {
     await refreshAdminCustomerContext().catch(() => {});
   });
@@ -1282,73 +1247,12 @@ function attachEvents() {
   elements.adminCustomerPhone?.addEventListener('change', async () => {
     await refreshAdminCustomerContext().catch(() => {});
   });
-  elements.adminCalendarCustomerName?.addEventListener('change', async () => {
-    await refreshAdminCustomerContext().catch(() => {});
-  });
-  elements.adminCalendarCustomerEmail?.addEventListener('change', async () => {
-    await refreshAdminCustomerContext().catch(() => {});
-  });
-  elements.adminCalendarCustomerPhone?.addEventListener('change', async () => {
-    await refreshAdminCustomerContext().catch(() => {});
-  });
 
   elements.profileBtn?.addEventListener('click', openProfileDialog);
   enforceTenDigitMobileInput(elements.profileMobile);
   enforceTenDigitMobileInput(elements.adminDiscountPhone);
   enforceTenDigitMobileInput(elements.adminCustomerPhone);
-  enforceTenDigitMobileInput(elements.adminCalendarCustomerPhone);
   enforceTenDigitMobileInput(elements.membershipAddPersonContact);
-  enforceTenDigitMobileInput(elements.adminCalendarModalCustomerPhone);
-  const syncAdminCustomerFromModal = () => {
-    const nextName = String(elements.adminCalendarModalCustomerName?.value || '').trim().slice(0, 80);
-    const nextEmail = String(elements.adminCalendarModalCustomerEmail?.value || '').trim();
-    const nextPhone = normalizeTenDigitMobile(elements.adminCalendarModalCustomerPhone?.value || '');
-    state.adminCustomerForm = {
-      ...state.adminCustomerForm,
-      name: nextName,
-      email: nextEmail,
-      phone: nextPhone,
-    };
-    if (elements.adminCalendarModalCustomerName && elements.adminCalendarModalCustomerName.value !== nextName) {
-      elements.adminCalendarModalCustomerName.value = nextName;
-    }
-    if (elements.adminCalendarModalCustomerPhone && elements.adminCalendarModalCustomerPhone.value !== nextPhone) {
-      elements.adminCalendarModalCustomerPhone.value = nextPhone;
-    }
-    syncAdminCustomerFieldsToUi();
-  };
-  elements.adminCalendarModalCustomerName?.addEventListener('input', syncAdminCustomerFromModal);
-  elements.adminCalendarModalCustomerEmail?.addEventListener('input', syncAdminCustomerFromModal);
-  elements.adminCalendarModalCustomerPhone?.addEventListener('input', syncAdminCustomerFromModal);
-  elements.closeAdminCalendarCustomerDialogBtn?.addEventListener('click', closeAdminCalendarCustomerDialog);
-  elements.cancelAdminCalendarCustomerDialogBtn?.addEventListener('click', closeAdminCalendarCustomerDialog);
-  elements.adminCalendarCustomerDialog?.addEventListener('cancel', (event) => {
-    event.preventDefault();
-    closeAdminCalendarCustomerDialog();
-  });
-  elements.adminCalendarCustomerForm?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    syncAdminCustomerFromModal();
-    const name = String(state.adminCustomerForm.name || '').trim();
-    const email = String(state.adminCustomerForm.email || '').trim();
-    const phone = String(state.adminCustomerForm.phone || '').trim();
-    if (!name || !email || !phone) {
-      showNotice({ title: 'Notice', body: 'Please fill customer name, email, and contact number.' });
-      return;
-    }
-    if (!isValidEmail(email)) {
-      showNotice({ title: 'Notice', body: 'Please enter a valid email address.' });
-      return;
-    }
-    if (phone.length !== 10) {
-      showNotice({ title: 'Notice', body: 'Contact number must be 10 digits.' });
-      return;
-    }
-    await refreshAdminCustomerContext().catch(() => {});
-    const pendingAction = pendingAdminCalendarBookingAction;
-    closeAdminCalendarCustomerDialog();
-    if (typeof pendingAction === 'function') pendingAction();
-  });
   elements.membershipMembersGrid?.addEventListener('input', (event) => {
     const target = event?.target;
     if (!target || !(target instanceof HTMLInputElement)) return;
@@ -2205,10 +2109,26 @@ function attachEvents() {
     await loadAdminCalendarAvailability({ force: true });
   });
   elements.adminCalendarBookConsultationBtn?.addEventListener('click', () => {
+    state.adminBookingMode = 'new';
     openAdminConsultationBookingFromCalendar();
   });
   elements.adminCalendarClearDetailsBtn?.addEventListener('click', async () => {
     await clearAdminCalendarCustomerDetails();
+  });
+  elements.adminCalendarCustomerSearchInput?.addEventListener('input', (event) => {
+    state.adminCalendarCustomerSearchQuery = String(event.target.value || '').trim();
+    renderAdminCalendarCustomerSearchDialog();
+  });
+  elements.adminCalendarCustomerSearchForm?.addEventListener('submit', (event) => {
+    event.preventDefault();
+  });
+  elements.adminCalendarCustomerSearchCloseBtn?.addEventListener('click', closeAdminCalendarCustomerSearchDialog);
+  elements.adminCalendarCustomerSearchCancelBtn?.addEventListener('click', closeAdminCalendarCustomerSearchDialog);
+  elements.adminCalendarCustomerSearchDialog?.addEventListener('close', () => {
+    pendingAdminCalendarBookingAction = null;
+    state.adminCalendarCustomerSearchQuery = '';
+    if (elements.adminCalendarCustomerSearchInput) elements.adminCalendarCustomerSearchInput.value = '';
+    renderAdminCalendarCustomerSearchDialog();
   });
 
   elements.adminStatTotal?.addEventListener('click', () => {
@@ -2701,15 +2621,9 @@ function setBookingCustomerInlineMessage(message = '') {
 
 function syncBookingModalCustomerGate() {
   const isAdmin = state.user?.role === 'admin';
-  const isValid = isAdminCustomerFormValid();
   if (elements.bookingCustomerStep) elements.bookingCustomerStep.hidden = !isAdmin;
-  if (elements.bookingSchedulerSection) elements.bookingSchedulerSection.hidden = isAdmin && !isValid;
-  if (elements.bookingSummary) elements.bookingSummary.hidden = isAdmin && !isValid ? true : elements.bookingSummary.hidden;
-  if (isAdmin) {
-    setBookingCustomerInlineMessage(isValid ? '' : getAdminCustomerValidationMessage());
-  } else {
-    setBookingCustomerInlineMessage('');
-  }
+  if (elements.bookingSchedulerSection) elements.bookingSchedulerSection.hidden = false;
+  setBookingCustomerInlineMessage('');
 }
 
 function syncAdminCustomerFromBookingModal() {
@@ -2727,9 +2641,6 @@ function syncAdminCustomerFromBookingModal() {
   };
   if (elements.bookingCustomerName && elements.bookingCustomerName.value !== nextName) elements.bookingCustomerName.value = nextName;
   if (elements.bookingCustomerPhone && elements.bookingCustomerPhone.value !== nextPhone) elements.bookingCustomerPhone.value = nextPhone;
-  if (elements.adminCalendarCustomerName) elements.adminCalendarCustomerName.value = nextName;
-  if (elements.adminCalendarCustomerEmail) elements.adminCalendarCustomerEmail.value = nextEmail;
-  if (elements.adminCalendarCustomerPhone) elements.adminCalendarCustomerPhone.value = nextPhone;
   syncBookingModalCustomerGate();
   const detailsChanged = prevName !== nextName || prevEmail !== nextEmail || prevPhone !== nextPhone;
   if (detailsChanged && isAdminCustomerFormValid()) {
@@ -2774,9 +2685,6 @@ async function clearAdminCalendarCustomerDetails() {
   if (elements.adminCustomerName) elements.adminCustomerName.value = '';
   if (elements.adminCustomerEmail) elements.adminCustomerEmail.value = '';
   if (elements.adminCustomerPhone) elements.adminCustomerPhone.value = '';
-  if (elements.adminCalendarCustomerName) elements.adminCalendarCustomerName.value = '';
-  if (elements.adminCalendarCustomerEmail) elements.adminCalendarCustomerEmail.value = '';
-  if (elements.adminCalendarCustomerPhone) elements.adminCalendarCustomerPhone.value = '';
 
   await refreshAdminCustomerContext();
 }
@@ -2784,20 +2692,38 @@ async function clearAdminCalendarCustomerDetails() {
 async function refreshAdminCustomerContext() {
   if (state.user?.role !== 'admin') return;
   clearTimeout(adminCustomerRefreshTimer);
-    state.ivSelections = {};
-    state.selectedSingleSessionServiceName = '';
-    state.singleSessionEditingBookingId = '';
-    resetHydrogenComposer();
+  state.ivSelections = {};
+  state.selectedSingleSessionServiceName = '';
+  state.singleSessionEditingBookingId = '';
+  resetHydrogenComposer();
   state.selectedServiceDate = getTodayIsoDate();
   state.slotAvailability = {};
   state.slotCapacityByService = {};
   state.slotAvailabilityLoading = false;
   state.slotAutoShiftedNotice = '';
+
+  if (!isAdminCustomerFormReady()) {
+    state.adminResolvedCustomer = null;
+    state.adminCustomerSessionSummary = null;
+    setAdminCustomerMessage('Booking page is ready. Enter customer details before saving the booking.');
+    render();
+    return;
+  }
+
   try {
-    await loadDashboardData();
-    if (!isAdminCustomerFormReady()) {
-      setAdminCustomerMessage('Booking page is ready. Enter customer details before saving the booking.');
-    } else if (Number(state.adminResolvedCustomer?.discountPercent || 0) > 0) {
+    const servicesResult = await api('/api/admin/services', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customerName: state.adminCustomerForm.name,
+        customerEmail: state.adminCustomerForm.email,
+        customerPhone: state.adminCustomerForm.phone,
+      }),
+    });
+    state.services = servicesResult.services || state.services;
+    state.adminResolvedCustomer = servicesResult.resolvedCustomer || null;
+    state.adminCustomerSessionSummary = servicesResult.sessionSummary || null;
+    if (Number(state.adminResolvedCustomer?.discountPercent || 0) > 0) {
       setAdminCustomerMessage(
         `Customer details loaded. A ${Number(state.adminResolvedCustomer.discountPercent)}% service discount will apply for this phone number.`
       );
@@ -2807,6 +2733,8 @@ async function refreshAdminCustomerContext() {
       setAdminCustomerMessage('Customer details loaded. Standard booking flow is ready.');
     }
   } catch (error) {
+    state.adminResolvedCustomer = null;
+    state.adminCustomerSessionSummary = null;
     setAdminCustomerMessage(error.message || 'Unable to refresh customer-specific pricing. Standard booking flow is still available.');
   }
   render();
@@ -2840,7 +2768,7 @@ async function loadPublicCoupons() {
   console.info('Public coupons payload (membership):', membershipCouponsResult?.raw || null);
 }
 
-async function loadDashboardData() {
+async function loadDashboardData({ skipAdminUsers = false } = {}) {
   if (state.isGuestUser && !state.user) {
     await loadGuestDashboardData();
     return;
@@ -2864,7 +2792,7 @@ async function loadDashboardData() {
       api('/api/admin/discount-phones'),
       api('/api/admin/coupons'),
       api('/api/services'),
-      api('/api/admin/users'),
+      skipAdminUsers ? Promise.resolve({ users: state.adminUsers || [] }) : api('/api/admin/users'),
       api(analyticsUrl),
     ]);
     state.bookings = bookingsResult.bookings || [];
@@ -2880,6 +2808,7 @@ async function loadDashboardData() {
     state.membershipBrowseVisible = false;
     state.services = genericServicesResult.services || [];
     state.adminResolvedCustomer = null;
+    state.adminCustomerSessionSummary = null;
 
     if (isAdminCustomerFormReady()) {
       try {
@@ -2894,8 +2823,10 @@ async function loadDashboardData() {
         });
         state.services = servicesResult.services || state.services;
         state.adminResolvedCustomer = servicesResult.resolvedCustomer || null;
+        state.adminCustomerSessionSummary = servicesResult.sessionSummary || null;
       } catch {
         state.adminResolvedCustomer = null;
+        state.adminCustomerSessionSummary = null;
       }
     }
     initializeAdminCalendarState();
@@ -2930,6 +2861,7 @@ async function loadDashboardData() {
     state.adminDiscountPhones = [];
     state.adminCoupons = [];
     state.adminResolvedCustomer = null;
+    state.adminCustomerSessionSummary = null;
     state.adminPaymentLinkAnalytics = null;
     state.adminPaymentLinkAnalyticsRows = [];
     state.adminCustomerForm = { name: '', email: '', phone: '' };
@@ -3516,6 +3448,131 @@ function getAdminCalendarSelectedServiceName() {
   return serviceNames[0] || '';
 }
 
+function getAdminCalendarCustomerSearchResults() {
+  const users = Array.isArray(state.adminUsers) ? state.adminUsers : [];
+  const query = String(state.adminCalendarCustomerSearchQuery || '').trim().toLowerCase();
+  const queryDigits = query.replace(/\D/g, '');
+
+  const sortedUsers = [...users].sort((a, b) =>
+    String(a?.name || '').localeCompare(String(b?.name || ''), undefined, { sensitivity: 'base' })
+  );
+
+  if (!query) return sortedUsers;
+
+  return sortedUsers.filter((user) => {
+    const name = String(user?.name || '').trim().toLowerCase();
+    const email = String(user?.email || '').trim().toLowerCase();
+    const mobile = String(user?.mobile || user?.phone || '').trim();
+    const mobileDigits = normalizeTenDigitMobile(mobile);
+    const mobileFallbackDigits = String(mobile || '').replace(/\D/g, '');
+    const haystack = `${name} ${email}`;
+    return (
+      haystack.includes(query) ||
+      Boolean(queryDigits && (mobileDigits.includes(queryDigits) || mobileFallbackDigits.includes(queryDigits))) ||
+      String(mobile || '').toLowerCase().includes(query)
+    );
+  });
+}
+
+function closeAdminCalendarCustomerSearchDialog() {
+  if (elements.adminCalendarCustomerSearchDialog?.open) {
+    elements.adminCalendarCustomerSearchDialog.close();
+  }
+  pendingAdminCalendarBookingAction = null;
+  state.adminCalendarCustomerSearchQuery = '';
+  if (elements.adminCalendarCustomerSearchInput) elements.adminCalendarCustomerSearchInput.value = '';
+}
+
+function renderAdminCalendarCustomerSearchDialog() {
+  const dialog = elements.adminCalendarCustomerSearchDialog;
+  const input = elements.adminCalendarCustomerSearchInput;
+  const resultsContainer = elements.adminCalendarCustomerSearchResults;
+  const emptyState = elements.adminCalendarCustomerSearchEmpty;
+  if (!dialog || !input || !resultsContainer || !emptyState) return;
+
+  if (dialog.open && document.activeElement !== input) {
+    const nextValue = String(state.adminCalendarCustomerSearchQuery || '');
+    if (input.value !== nextValue) input.value = nextValue;
+  }
+
+  const results = getAdminCalendarCustomerSearchResults();
+  resultsContainer.innerHTML = '';
+
+  emptyState.hidden = results.length > 0;
+  if (!results.length) {
+    emptyState.textContent = String(state.adminCalendarCustomerSearchQuery || '').trim()
+      ? 'No customers matched your search.'
+      : 'No customers available.';
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  results.forEach((user) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'admin-calendar-customer-result';
+    item.innerHTML = `
+      <strong>${escapeHtml(String(user?.name || 'Customer').trim() || 'Customer')}</strong>
+      <span>${escapeHtml(String(user?.email || '-').trim() || '-')}</span>
+      <small>${escapeHtml(String(user?.mobile || user?.phone || '-').trim() || '-')}</small>
+    `;
+    item.addEventListener('click', async () => {
+      const action = pendingAdminCalendarBookingAction;
+      const selectedServiceName = String(action?.serviceName || '').trim();
+      const selectedSlot = String(action?.slot || '').trim();
+      const selectedCustomer = user || null;
+      if (!selectedServiceName) {
+        closeAdminCalendarCustomerSearchDialog();
+        return;
+      }
+      state.adminBookingMode = 'existing';
+      state.adminResolvedCustomer = selectedCustomer;
+      state.adminCustomerForm = {
+        name: String(selectedCustomer?.name || '').trim(),
+        email: String(selectedCustomer?.email || '').trim(),
+        phone: normalizeTenDigitMobile(selectedCustomer?.mobile || selectedCustomer?.phone || ''),
+      };
+      if (elements.bookingCustomerName) elements.bookingCustomerName.value = state.adminCustomerForm.name || '';
+      if (elements.bookingCustomerEmail) elements.bookingCustomerEmail.value = state.adminCustomerForm.email || '';
+      if (elements.bookingCustomerPhone) elements.bookingCustomerPhone.value = state.adminCustomerForm.phone || '';
+      try {
+        await refreshAdminCustomerContext();
+      } catch (error) {
+        console.error(error);
+      }
+      if (!state.adminResolvedCustomer?.id) {
+        state.adminResolvedCustomer = selectedCustomer;
+      }
+      closeAdminCalendarCustomerSearchDialog();
+      openAdminCalendarBooking(selectedServiceName, selectedSlot);
+    });
+    fragment.appendChild(item);
+  });
+
+  resultsContainer.appendChild(fragment);
+}
+
+function openAdminCalendarCustomerSearchDialog(serviceName, bookingTime = '') {
+  const normalizedService = String(serviceName || '').trim();
+  if (!normalizedService) {
+    showNotice({ title: 'Notice', body: 'Select a service first.' });
+    return;
+  }
+  pendingAdminCalendarBookingAction = {
+    serviceName: normalizedService,
+    slot: String(bookingTime || '').trim(),
+  };
+  state.adminBookingMode = 'existing';
+  state.adminCalendarCustomerSearchQuery = '';
+  if (elements.adminCalendarCustomerSearchInput) elements.adminCalendarCustomerSearchInput.value = '';
+  renderAdminCalendarCustomerSearchDialog();
+  elements.adminCalendarCustomerSearchDialog?.showModal();
+  requestAnimationFrame(() => {
+    elements.adminCalendarCustomerSearchInput?.focus();
+    elements.adminCalendarCustomerSearchInput?.select?.();
+  });
+}
+
 function openAdminCalendarBooking(serviceName, bookingTime = '') {
   const normalizedService = String(serviceName || '').trim();
   if (!normalizedService) {
@@ -3537,7 +3594,7 @@ function openAdminCalendarBooking(serviceName, bookingTime = '') {
   continueBooking();
 }
 
-function openAdminConsultationBookingFromCalendar() {
+async function openAdminConsultationBookingFromCalendar() {
   const services = Array.isArray(state.services) ? state.services : [];
   if (!services.length) {
     showNotice({ title: 'Error', type: 'error', body: 'Services are not loaded yet. Please refresh and try again.' });
@@ -3753,10 +3810,6 @@ function renderAdminCalendar() {
   const selectedServiceName = getAdminCalendarSelectedServiceName();
   state.adminCalendarServiceName = selectedServiceName;
 
-  if (elements.adminCalendarCustomerName) elements.adminCalendarCustomerName.value = state.adminCustomerForm.name || '';
-  if (elements.adminCalendarCustomerEmail) elements.adminCalendarCustomerEmail.value = state.adminCustomerForm.email || '';
-  if (elements.adminCalendarCustomerPhone) elements.adminCalendarCustomerPhone.value = state.adminCustomerForm.phone || '';
-
   elements.adminCalendarDate.removeAttribute('min');
   elements.adminCalendarDate.max = getMaxBookingIsoDate();
   elements.adminCalendarDate.value = selectedDate;
@@ -3917,7 +3970,7 @@ function renderAdminCalendar() {
       actionBtn.className = 'btn btn-secondary admin-calendar-slot-btn';
       actionBtn.textContent = 'Book Slot';
       actionBtn.addEventListener('click', () => {
-        openAdminCalendarBooking(selectedServiceName, slot.value);
+        openAdminCalendarCustomerSearchDialog(selectedServiceName, slot.value);
       });
       row.appendChild(actionBtn);
       slotList.appendChild(row);
@@ -4704,13 +4757,22 @@ function updateBookingSummary() {
   const forceMembershipPricing = Boolean(state.bookingDialogContext?.membershipEdit);
   const hasMembership = hasMembershipInBookingContext();
   const customerHydrogenRemaining = Number(selectedService?.membershipRemainingHydrogenSessions);
+  const adminHydrogenSummary = state.adminCustomerSessionSummary || null;
+  const adminTotalAvailableHydrogenSessions = Number(adminHydrogenSummary?.totalAvailableHydrogenSessions || 0);
   const hydrogenFreeRemaining =
     category === 'HYDROGEN SESSION' && hasMembership
       ? Number.isFinite(customerHydrogenRemaining)
         ? Math.max(0, customerHydrogenRemaining)
         : getHydrogenFreeSessionsRemainingClient()
       : 0;
-  const isHydrogenFree = forceMembershipPricing || (category === 'HYDROGEN SESSION' && hasMembership && hydrogenFreeRemaining > 0);
+  const adminHydrogenFreeRemaining =
+    state.user?.role === 'admin' && category === 'HYDROGEN SESSION'
+      ? Math.max(0, adminTotalAvailableHydrogenSessions)
+      : 0;
+  const isHydrogenFree =
+    forceMembershipPricing ||
+    (state.user?.role === 'admin' && category === 'HYDROGEN SESSION' && adminHydrogenFreeRemaining > 0) ||
+    (category === 'HYDROGEN SESSION' && hasMembership && hydrogenFreeRemaining > 0);
   const basePrice = isHydrogenFree ? 0 : Number(selectedService.effectivePriceInr ?? selectedService.priceInr ?? 0);
   const isAdmin = state.user?.role === 'admin';
   const selectedAddOnName = isAdmin || elements.addOnServiceLabel.hidden ? '' : elements.addOnService.value;
@@ -4740,7 +4802,13 @@ function updateBookingSummary() {
 
   const summaryLines = [];
   summaryLines.push(
-    `<div><span>${escapeHtml(getServiceDisplayName(selectedService))}${isHydrogenFree ? ` <small>(Included in Membership • ${hydrogenFreeRemaining} left)</small>` : ''}</span><span>Rs. ${basePrice.toLocaleString('en-IN')}</span></div>`
+    `<div><span>${escapeHtml(getServiceDisplayName(selectedService))}${
+      isHydrogenFree
+        ? state.user?.role === 'admin'
+          ? ` <small>(Included in existing sessions • ${adminHydrogenFreeRemaining} available)</small>`
+          : ` <small>(Included in Membership • ${hydrogenFreeRemaining} left)</small>`
+        : ''
+    }</span><span>${basePrice > 0 ? `Rs. ${basePrice.toLocaleString('en-IN')}` : 'Rs. 0'}</span></div>`
   );
   
   if (selectedAddOn) {
@@ -4836,6 +4904,7 @@ function openDialog(booking = null) {
     if (elements.bookingCustomerEmail) elements.bookingCustomerEmail.value = String(state.adminCustomerForm.email || '');
     if (elements.bookingCustomerPhone) elements.bookingCustomerPhone.value = String(state.adminCustomerForm.phone || '');
     syncAdminCustomerFromBookingModal();
+    renderServicePanelContext();
   } else {
     syncBookingModalCustomerGate();
   }
@@ -5082,11 +5151,34 @@ async function upsertBooking() {
   
   const isAdmin = state.user?.role === 'admin';
   if (isAdmin) {
+    syncAdminCustomerFromBookingModal();
     if (!isAdminCustomerFormValid()) {
       setBookingCustomerInlineMessage(getAdminCustomerValidationMessage());
       syncBookingModalCustomerGate();
       return;
     }
+    if (state.adminBookingMode === 'new') {
+      try {
+        const userResult = await api('/api/admin/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+             name: state.adminCustomerForm.name,
+             email: state.adminCustomerForm.email,
+             mobile: state.adminCustomerForm.phone,
+            }),
+        });
+        state.adminResolvedCustomer = userResult?.user || state.adminResolvedCustomer;
+      } catch (error) {
+        setBookingCustomerInlineMessage(error.message || 'Unable to create customer account.');
+        return;
+      }
+    } else {
+      if (!state.adminResolvedCustomer?.id) {
+        setBookingCustomerInlineMessage('Please search and select an existing customer.');
+        return;
+      }
+    }  
     payload.customerName = state.adminCustomerForm.name;
     payload.customerEmail = state.adminCustomerForm.email;
     payload.customerPhone = state.adminCustomerForm.phone;
@@ -5102,7 +5194,10 @@ async function upsertBooking() {
       body: JSON.stringify(payload),
     });
 
-    await loadDashboardData();
+    await loadDashboardData({ skipAdminUsers: isAdmin && state.adminBookingMode === 'existing' });
+    if (isAdmin && state.adminBookingMode === 'existing') {
+      await refreshAdminCustomerContext().catch(() => {});
+    }
     if (isAdmin && (state.adminActiveTab || '') === 'calendar') {
       await refreshAdminCalendarCacheForDate(payload.bookingDate);
     }
@@ -7716,6 +7811,7 @@ function render() {
       renderAdminAllBookingRows(getFilteredAdminAllBookings(state.bookings));
     }
     renderAdminCalendar();
+    renderAdminCalendarCustomerSearchDialog();
     renderAdminUserSessionDialog();
     renderAdminMembershipOrders();
     renderAdminRescheduleQueue();
@@ -7809,6 +7905,52 @@ function renderServicePanelContext() {
       <div class="admin-client-chip">
         <strong>Discount</strong>
         <span>${activeDiscount > 0 ? `${activeDiscount}%` : '-'}</span>
+      </div>
+    `;
+  }
+
+  if (elements.adminCustomerSessionSummary) {
+    const summary = state.adminCustomerSessionSummary;
+    const shouldRenderSummary = state.user?.role === 'admin' && isAdminCustomerFormReady() && summary;
+    if (!shouldRenderSummary) {
+      elements.adminCustomerSessionSummary.hidden = true;
+      elements.adminCustomerSessionSummary.innerHTML = '';
+      elements.adminCustomerSessionSummary.classList.add('is-empty');
+      return;
+    }
+
+    const membershipRemaining = Math.max(0, Number(summary.membershipRemainingHydrogenSessions || 0));
+    const topUpRemaining = Math.max(0, Number(summary.topUpRemainingHydrogenSessions || 0));
+    const totalAvailable = Math.max(0, Number(summary.totalAvailableHydrogenSessions || 0));
+    const scheduled = Math.max(0, Number(summary.scheduledHydrogenSessions || 0));
+    const completed = Math.max(0, Number(summary.completedHydrogenSessions || 0));
+    const membershipStatusLabel = summary.membershipActive ? 'Active' : String(state.adminResolvedCustomer?.membershipStatus || 'Inactive');
+    elements.adminCustomerSessionSummary.hidden = false;
+    elements.adminCustomerSessionSummary.classList.remove('is-empty');
+    elements.adminCustomerSessionSummary.innerHTML = `
+      <div class="admin-client-chip">
+        <strong>Membership Status</strong>
+        <span>${escapeHtml(membershipStatusLabel)}</span>
+      </div>
+      <div class="admin-client-chip">
+        <strong>Remaining Membership Sessions</strong>
+        <span>${escapeHtml(String(membershipRemaining))}</span>
+      </div>
+      <div class="admin-client-chip">
+        <strong>Remaining Purchased Sessions</strong>
+        <span>${escapeHtml(String(topUpRemaining))}</span>
+      </div>
+      <div class="admin-client-chip">
+        <strong>Total Available Sessions</strong>
+        <span>${escapeHtml(String(totalAvailable))}</span>
+      </div>
+      <div class="admin-client-chip">
+        <strong>Scheduled Sessions</strong>
+        <span>${escapeHtml(String(scheduled))}</span>
+      </div>
+      <div class="admin-client-chip">
+        <strong>Completed Sessions</strong>
+        <span>${escapeHtml(String(completed))}</span>
       </div>
     `;
   }
