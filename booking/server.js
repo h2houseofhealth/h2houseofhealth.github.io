@@ -769,7 +769,12 @@ app.use((req, res, next) => {
   return next();
 });
 app.use('/booking', express.static(path.join(__dirname)));
+app.use('/merch', express.static(path.join(WEBSITE_ROOT, 'merch')));
 app.use('/uploads', express.static(uploadsDir));
+
+// Mount Merch API routes
+const mountMerchApi = require('./merch-api');
+mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, JWT_SECRET, jwt });
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -5401,7 +5406,7 @@ app.post('/api/bookings/:id/send-payment-link-sms', requireAuth, (req, res) => {
   });
 });
 
-app.get('/api/bookings/:id/invoice-link', requireAuth, (req, res) => {
+app.get('/api/bookings/:id/invoice-link',(req, res) => {
   const bookingId = Number(req.params.id);
   if (!Number.isInteger(bookingId)) {
     return res.status(400).json({ message: 'invalid booking id' });
@@ -5429,6 +5434,23 @@ app.get('/api/bookings/:id/invoice-link', requireAuth, (req, res) => {
   if (!booking) {
     return res.status(404).json({ message: 'booking not found' });
   }
+  const guestToken = String(req.query.token || '').trim();
+  if (guestToken) {
+    const access = verifyGuestCheckoutAccessToken(guestToken);
+    if (!access || !access.bookingIds.includes(booking.id)) {
+      return res.status(401).json({ message: 'unauthorized' });
+    }
+    req.user = {
+      role: 'guest',
+      id: booking.userId,
+    };
+  } else {
+    requireAuth(req, res, () => {});
+    if (!req.user) {
+      return;
+    }
+  }
+
   if (!canAccessBooking(req.user, booking.userId)) {
     return res.status(403).json({ message: 'forbidden' });
   }
@@ -6199,6 +6221,45 @@ app.get('/api/public/payments/booking', (req, res) => {
       holdMinutes: BOOKING_HOLD_MINUTES,
     },
     keyId: RAZORPAY_KEY_ID,
+  });
+});
+
+app.get('/api/public/guest/bookings', (req, res) => {
+  const guestAccess = verifyGuestCheckoutAccessToken(req.query?.token);
+  if (!guestAccess) {
+    return res.status(400).json({ message: 'Invalid or expired guest session' });
+  }
+
+  const bookings = loadBookingsByIds(guestAccess.bookingIds);
+  if (!bookings.length || bookings.length !== guestAccess.bookingIds.length) {
+    return res.status(404).json({ message: 'booking not found' });
+  }
+
+  const sortedBookings = [...bookings].sort((a, b) => {
+    const aKey = `${String(a.bookingDate || '')}T${String(a.bookingTime || '')}`;
+    const bKey = `${String(b.bookingDate || '')}T${String(b.bookingTime || '')}`;
+    if (aKey !== bKey) return aKey.localeCompare(bKey);
+    return Number(a.id || 0) - Number(b.id || 0);
+  });
+
+  const responseBookings = sortedBookings.map((booking) => ({
+    ...booking,
+    bookingType: booking.bookingType || 'guest',
+    clientName: booking.guestName || guestAccess.guestName || '',
+    clientEmail: booking.guestEmail || guestAccess.guestEmail || '',
+    clientMobile: booking.guestPhone || guestAccess.guestPhone || '',
+    guestName: booking.guestName || guestAccess.guestName || '',
+    guestEmail: booking.guestEmail || guestAccess.guestEmail || '',
+    guestPhone: booking.guestPhone || guestAccess.guestPhone || '',
+  }));
+
+  return res.json({
+    bookings: responseBookings,
+    guest: {
+      name: guestAccess.guestName || responseBookings[0]?.guestName || '',
+      email: guestAccess.guestEmail || responseBookings[0]?.guestEmail || '',
+      phone: guestAccess.guestPhone || responseBookings[0]?.guestPhone || '',
+    },
   });
 });
 
@@ -7441,9 +7502,12 @@ app.get('/invoice/booking', async (req, res) => {
               is_topup_session AS isTopUpSession,
               paid_amount_paise AS paidAmountPaise,
               paid_at AS paidAt,
-              created_at AS createdAt
-       FROM bookings
-       WHERE id = ?`
+              created_at AS createdAt,
+              guest_name AS guestName,
+              guest_email AS guestEmail,
+              guest_phone AS guestPhone
+              FROM bookings
+              WHERE id = ?`
     )
     .get(access.bookingId);
   if (!booking || Number(booking.userId) !== access.userId) {
@@ -7535,9 +7599,11 @@ app.get('/invoice/booking', async (req, res) => {
   const invoiceNo = `BK-${booking.id}`;
   const paidAtLabel = formatInvoiceDateTime(booking.paidAt);
   const generatedAtLabel = formatInvoiceDateTime(new Date());
-  const customerName = bookingOwner?.name || '';
-  const customerEmail = bookingOwner?.email || '';
-  const customerMobile = bookingOwner?.mobile || '';
+  const customerName = bookingOwner?.name || booking.guestName || '';
+  const customerEmail = bookingOwner?.email || booking.guestEmail || '';
+  const customerMobile = bookingOwner?.mobile || booking.guestPhone || '';
+  console.log({bookingId: booking.id,bookingOwnerMobile: bookingOwner?.mobile,guestPhone: booking.guestPhone,customerMobile,});
+
 
   const invoiceHtml = `<!doctype html>
 <html lang="en">

@@ -64,6 +64,10 @@ function consumeOAuthTokenFromHash() {
   return true;
 }
 
+function isGuestServicesHash(hash = window.location.hash) {
+  return String(hash || '').replace(/^#/, '').trim().toLowerCase() === 'guest-services';
+}
+
 function withApiCredentials(options = {}) {
   const headers = new Headers(options.headers || {});
   const authToken = String(state.authToken || '').trim();
@@ -910,10 +914,13 @@ async function finishAuthSuccess(result) {
 }
 
 async function bootstrap() {
-  const initialTab = getUserTabFromHash(window.location.hash);
+  const shouldOpenGuestServices = isGuestServicesHash(window.location.hash);
+  const initialTab = shouldOpenGuestServices ? 'services' : getUserTabFromHash(window.location.hash);
   consumeOAuthTokenFromHash();
+  const params = new URLSearchParams(window.location.search);
+  const launchGuestBooking = params.get('entry') === 'guest';
   if (initialTab) state.activeUserTab = initialTab;
-  attachEvents();
+  attachEvents()
   syncAdminRescheduleSearchPlaceholder();
   if (adminRescheduleSearchPlaceholderQuery) {
     if (typeof adminRescheduleSearchPlaceholderQuery.addEventListener === 'function') {
@@ -924,18 +931,31 @@ async function bootstrap() {
   }
   populateTimeSlots();
   await loadCurrentUser();
+    if (!state.user && launchGuestBooking) {
+      await enterGuestBookingMode({ scrollToServices: true });
+      window.history.replaceState({}, '', '/booking/');
+      return;
+    }
   if (state.user) {
     resetMyBookingsViewState();
     resetServicesUiStateForUserSwitch();
     await loadProfile();
     await loadDashboardData();
     ensurePostLoginDashboardChoice();
+    if (shouldOpenGuestServices && state.user.role === 'user') {
+      state.postLoginChoice = state.postLoginChoice || (isCurrentUserMembershipActive() ? 'continue-member' : 'continue-non-member');
+      state.activeUserTab = 'services';
+      window.location.hash = '#services';
+    }
     if (state.user.role === 'user' && !initialTab) {
       state.membershipBrowseVisible = false;
       state.activeUserTab = 'membership';
       window.location.hash = '#membership';
     }
   } else {
+    if (shouldOpenGuestServices) {
+      await enterGuestBookingMode({ scrollToServices: false });
+    } else {
     const storedGuestToken = getStoredGuestSessionToken();
     const storedGuestCart = loadStoredGuestCart();
     if (storedGuestToken || storedGuestCart.length) {
@@ -943,6 +963,7 @@ async function bootstrap() {
       state.guestSessionToken = storedGuestToken || null;
     }
     await loadGuestDashboardData();
+    }
   }
   window.addEventListener('pageshow', (event) => {
     if (event?.persisted || state.activeUserTab === 'cart' || (state.isGuestUser && !state.user)) {
@@ -960,10 +981,10 @@ async function bootstrap() {
 function attachEvents() {
   const openMembershipPlansFromLanding = () => {
     if (!state.user) {
-      // Scroll to the "Select Your Experience" pricing section on the landing page
-      const experienceSection = document.getElementById('member-choice-experience');
-      if (experienceSection) {
-        experienceSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // Scroll to the membership plans pricing section on the landing page
+      const plansSection = document.getElementById('member-choice-plans');
+      if (plansSection) {
+        plansSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
       return;
     }
@@ -12487,6 +12508,10 @@ function renderAdminUserCards() {
     const card = document.createElement('button');
     card.type = 'button';
     card.className = 'admin-user-card';
+    console.log({
+      name: user.name,
+      email: user.email
+    });
     card.innerHTML = `
       <div class="admin-user-card-top">
         <span class="admin-user-card-avatar">${escapeHtml(getInitials(user?.name || 'User'))}</span>
@@ -12495,7 +12520,7 @@ function renderAdminUserCards() {
       <div class="admin-user-card-main">
         <div class="admin-user-card-body">
           <h3>${escapeHtml(user?.name || 'Unnamed User')}</h3>
-          <p>${escapeHtml(user?.email || user?.mobile || 'No contact info')}</p>
+          <p class="admin-user-card-email" title="${escapeHtml(user?.email || user?.mobile || 'No contact info')}">${escapeHtml(user?.email || user?.mobile || 'No contact info')}</p>
           <p class="admin-user-plan-copy">${escapeHtml(
             membership.totalSessions
               ? `${membership.planLabel} - ${membership.perUserSessions} member sessions per user`
@@ -15834,7 +15859,14 @@ function renderAdminAllBookingRows(bookings) {
 async function fetchInvoiceLink(url, fallbackLabel = 'Invoice') {
   let response = null;
   try {
-    response = await fetch(buildApiUrl(url), withApiCredentials());
+    let requestUrl = url;
+    if (state.isGuestUser && !state.user) {
+      const token = String(state.guestSessionToken || getStoredGuestSessionToken() || '').trim();
+      if (token) {
+        requestUrl += `${requestUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
+      }
+    }
+    response = await fetch(buildApiUrl(requestUrl), withApiCredentials());
   } catch (error) {
     throw new Error(error?.message || 'Network error while generating invoice link.');
   }

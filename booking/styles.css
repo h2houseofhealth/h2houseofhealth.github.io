@@ -1,4 +1,6 @@
 
+@import url("/site-background.css");
+
 :root {
   --bg-main: #f8f3ee;
   --bg-card: #f6efe8;
@@ -46,9 +48,9 @@
   --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.12);
   
   /* Typography */
-  --font-body: 'Inter', sans-serif;
-  --font-heading: 'Playfair Display', serif;
-  --font-brand: 'Trakya Sans Alt', 'Trakya-Sans-Alt-500-Regular', 'Poppins', sans-serif;
+  --font-body: 'Trakya-Sans', 'Trakya Sans', 'Trakya Sans Alt', 'Trakya-Sans-Alt-500-Regular', 'Poppins', sans-serif;
+  --font-heading: 'Trakya-Sans', 'Trakya Sans', 'Trakya Sans Alt', 'Trakya-Sans-Alt-500-Regular', 'Poppins', sans-serif;
+  --font-brand: 'Trakya-Sans', 'Trakya Sans', 'Trakya Sans Alt', 'Trakya-Sans-Alt-500-Regular', 'Poppins', sans-serif;
   --font-size-sm: 12px;
   --font-size-base: 14px;
   --font-size-lg: 16px;
@@ -71,6 +73,18 @@
 
 /* Exact storefront navigation treatment used by the main site pages. */
 @font-face {
+  font-family: "Trakya-Sans";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src:
+    local("Trakya-Sans"),
+    local("Trakya Sans"),
+    local("Trakya Sans Alt"),
+    local("Trakya-Sans-Alt-500-Regular");
+}
+
+@font-face {
   font-family: "Roboto Mono";
   font-style: normal;
   font-weight: 500;
@@ -85,7 +99,8 @@
   width: 100%;
   max-width: 1440px;
   margin: 0 auto;
-  padding: 0;
+  padding-right: 2rem;
+  padding-left: 2rem;
 }
 
 .storefront-header {
@@ -93,7 +108,7 @@
   justify-content: space-between;
   min-height: 52px;
   margin-top: 16px;
-  padding: 0 20px;
+  padding: 0 24px;
   position: relative;
   background: #fff;
   border-radius: 6px;
@@ -105,12 +120,14 @@
   align-items: stretch;
   gap: 32px;
   min-width: 0;
+  width: 100%;
 }
 
 .storefront-header__logo {
   display: flex;
   align-items: center;
   max-width: 135px;
+  flex: 0 0 135px;
   margin-right: 32px;
   padding-block: 4px;
   color: inherit;
@@ -127,7 +144,11 @@
 
 .storefront-header__nav {
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  justify-content: space-between;
+  gap: clamp(10px, 1.4vw, 28px);
+  width: 100%;
+  min-width: 0;
   margin: 0;
 }
 
@@ -136,11 +157,11 @@
   position: relative;
   display: flex;
   align-items: center;
-  margin: 0 23px;
+  margin: 0;
   padding-block: 12px;
   overflow: visible;
   color: #3f3f3f;
-  font-family: "Roboto Mono", monospace;
+  font-family: var(--font-brand);
   font-size: 12px;
   font-style: normal;
   font-weight: 500;
@@ -172,14 +193,6 @@
 .storefront-header .storefront-header__nav a:hover::before,
 .storefront-header .storefront-header__nav a.is-active::before {
   background: #3f3f3f;
-}
-
-.storefront-header .storefront-header__nav a:first-child {
-  margin-left: 18px;
-}
-
-.storefront-header .storefront-header__nav a:last-child {
-  margin-right: 18px;
 }
 
 .storefront-header__drawer {
@@ -230,27 +243,33 @@
   min-height: 50px;
   padding: 8px 0;
   color: #3f3f3f;
-  font-family: "DM Sans", sans-serif;
+  font-family: var(--font-body);
   font-size: 18px;
   text-decoration: none;
 }
 
 @media (min-width: 576px) {
-  .storefront-header {
-    padding-inline: 24px;
-  }
+  .storefront-header__cta{
+    margin-left:auto;
+    padding-left:0;
+}
 }
 
 @media (min-width: 1100px) {
   .storefront-header-wrapper {
-    padding-inline: 0;
+    padding-right: 5rem;
+    padding-left: 5rem;
   }
-}
 
-@media (min-width: 1360px) {
-  .storefront-header .storefront-header__nav a,
-  .storefront-header .storefront-header__nav a:visited {
-    margin-inline: 34px;
+  .storefront-header__left {
+    display: grid;
+    grid-template-columns: 135px minmax(0, 1fr);
+    align-items: center;
+    column-gap: clamp(28px, 3vw, 64px);
+  }
+
+  .storefront-header__logo {
+    margin-right: 0;
   }
 }
 
@@ -308,31 +327,6 @@ a:focus-visible {
   color: var(--brand-deep);
   text-decoration-color: rgba(var(--brand-primary-rgb), 0.75);
 }
-
-.background-shape {
-  position: fixed;
-  border-radius: 50%;
-  filter: blur(80px);
-  opacity: 0.4;
-  z-index: 0;
-}
-
-.shape-a {
-  width: 400px;
-  height: 400px;
-  background: #e8d8c8;
-  top: -100px;
-  right: -100px;
-}
-
-.shape-b {
-  width: 500px;
-  height: 500px;
-  background: #f1e6db;
-  bottom: -150px;
-  left: -150px;
-}
-
 
 .portal {
   width: 100%;
@@ -403,7 +397,7 @@ h3,
   font-family: var(--font-heading);
 }
 h1, h2, h3 {
-  font-family: 'Playfair Display', serif;
+  font-family: var(--font-brand);
   letter-spacing: -0.5px;
 }
 .user-tab-btn,
@@ -2009,7 +2003,7 @@ h1, h2, h3 {
   max-width: 100%;
   margin-inline: auto;
   padding: 0;
-  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-body);
   background: linear-gradient(
     180deg,
     #f7f3ef 0%,
@@ -2051,7 +2045,7 @@ h1, h2, h3 {
 
 .member-choice-title-em {
   color: #c56b3d;
-  font-style: italic;
+  font-style: solid;
   font-weight: 500;
 }
 
@@ -2448,7 +2442,7 @@ h1, h2, h3 {
   line-height: 1;
   letter-spacing: 0.01em;
   text-transform: uppercase;
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
 }
 
 .member-choice-brand small {
@@ -2512,7 +2506,7 @@ h1, h2, h3 {
 
 .member-choice-title {
   margin: 0.65rem 0 0.75rem;
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: clamp(2.35rem, 4.8vw, 5.1rem);
   line-height: 0.95;
   letter-spacing: -0.015em;
@@ -2520,7 +2514,7 @@ h1, h2, h3 {
 
 .member-choice-title span {
   color: #b45431;
-  font-style: italic;
+  font-style: solid;
   font-weight: 500;
 }
 
@@ -2675,13 +2669,13 @@ h1, h2, h3 {
 .member-choice-experience-title {
   margin-top: 0.35rem;
   margin-bottom: 1.1rem;
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: clamp(1.85rem, 3vw, 2.7rem);
 }
 
 .member-choice-experience-title span {
   color: #B05A2B;
-  font-style: italic;
+  font-style: solid;
 }
 
 .member-choice-experience-grid {
@@ -2740,13 +2734,13 @@ h1, h2, h3 {
 }
 
 .member-choice-card-plan {
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: 2.7rem;
   line-height: 1;
 }
 
 .member-choice-card-price {
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: clamp(3rem, 5vw, 4rem);
 }
 
@@ -2769,7 +2763,7 @@ h1, h2, h3 {
 }
 
 .member-choice-comparison-head h3 {
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: 2rem;
 }
 
@@ -4599,6 +4593,7 @@ h1, h2, h3 {
 .hydrogen-schedule-grid select {
   width: 100%;
   max-width: 100%;
+  box-sizing: border-box;
 }
 
 .hydrogen-sidebar .hydrogen-addon-grid {
@@ -4703,6 +4698,8 @@ h1, h2, h3 {
 .hydrogen-addon-schedule-grid select {
   width: 100%;
   min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .hydrogen-addon-session-date[disabled] {
@@ -5154,7 +5151,7 @@ h1, h2, h3 {
   border: 1px solid rgba(0, 0, 0, 0.06);
   font-size: 16px;
   line-height: 1.5;
-  font-family: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--font-body);
 }
 
 .notice-dialog[data-type="error"] .notice-body {
@@ -5365,6 +5362,7 @@ h1, h2, h3 {
 
 .admin-user-card-body {
   padding-left: 0.2rem;
+  min-width: 0;
 }
 
 .admin-user-card-body h3 {
@@ -5384,6 +5382,7 @@ h1, h2, h3 {
   color: var(--brand-primary);
   font-size: 0.78rem;
   line-height: 1.45;
+
 }
 
 .admin-user-card-footer {
@@ -5407,13 +5406,13 @@ h1, h2, h3 {
   display: grid;
   justify-items: center;
   gap: 0.32rem;
-  min-width: 78px;
+  min-width: 68px;
 }
 
 .admin-user-donut {
   --donut-angle: 0%;
-  width: 72px;
-  height: 72px;
+  width: 64px;
+  height: 64px;
   border-radius: 50%;
   display: grid;
   place-items: center;
@@ -5424,7 +5423,7 @@ h1, h2, h3 {
 }
 
 .admin-user-donut span {
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   font-weight: 700;
   color: var(--brand-deep);
 }
@@ -6322,6 +6321,7 @@ textarea {
   padding: 0.55rem 0.65rem;
   font-size: 0.95rem;
   background: #FFFFFF;
+  box-sizing: border-box;
   transition: all var(--transition-fast);
 }
 
@@ -8740,6 +8740,8 @@ table tbody td {
 .booking-hydrogen-addon-session-grid select {
   width: 100%;
   min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .booking-hydrogen-addon-session-date[disabled] {
@@ -8824,6 +8826,7 @@ table tbody td {
     width: 100%;
     min-width: 0;
     max-width: 100%;
+    font-size: 16px;
   }
 }
 
@@ -10089,7 +10092,7 @@ table tbody td {
 }
 .member-choice-title span {
   color: #B05A2B;
-  font-style: italic;
+  font-style: solid;
 }
 .member-choice-plan-label {
   width: 100%;
@@ -10634,7 +10637,7 @@ table tbody td {
 
 .member-choice-matrix-side h3 {
   margin: 0;
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: 3rem;
   line-height: 0.95;
   color: #1C1C1C;
@@ -11010,12 +11013,12 @@ table tbody td {
 }
 
 #memberChoiceGate .member-choice-card-plan {
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: 2.15rem;
 }
 
 #memberChoiceGate .member-choice-card-price {
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: clamp(2.35rem, 4.2vw, 3.2rem);
 }
 
@@ -11209,31 +11212,6 @@ table tbody td {
 }
 
 /* ===== Premium polish layer ===== */
-body {
-  background: #F6EFEA;
-  position: relative;
-}
-
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 20% 30%, rgba(176,90,43,0.12), transparent 40%),
-    radial-gradient(circle at 80% 20%, rgba(176,90,43,0.08), transparent 40%);
-  z-index: 0;
-}
-
-.grain {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 1;
-  opacity: 0.04;
-  background-image: url("https://www.transparenttextures.com/patterns/noise.png");
-}
-
 .main-wrapper {
   max-width: 1120px;
   margin: 0 auto;
@@ -11244,31 +11222,6 @@ body::before {
   max-width: 1120px;
   margin: 0 auto;
   padding: 0 20px;
-}
-.leaf {
-  filter: blur(1px);
-}
-
-.leaf {
-  position: fixed;
-  width: 300px;
-  height: 300px;
-  background-size: contain;
-  background-repeat: no-repeat;
-  opacity: 0.08; 
-  pointer-events: none;
-  z-index: 0;
-}
-.leaf-top-right {
-  top: 0;
-  right: 0;
-  background-image: url("assets/leaf.png");
-}
-.leaf-bottom-left {
-  bottom: 0;
-  left: 0;
-  transform: rotate(180deg);
-  background-image: url("assets/leaf.png");
 }
 .panel {
   background: transparent !important;
@@ -11330,7 +11283,7 @@ h2, h3 {
 }
 
 .member-choice-title span {
-  font-style: italic;
+  font-style: solid;
   color: #B05A2B;
 }
 .price {
@@ -11414,7 +11367,7 @@ h2, h3 {
 #memberChoiceGate .member-choice-matrix-side h3 {
   margin: 0 0 1.25rem;
   color: var(--matrix-text);
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: clamp(3.02rem, 3.5vw, 3.62rem);
   font-weight: 400;
   line-height: 0.95;
@@ -11611,7 +11564,7 @@ h2, h3 {
 #cmp-perfect-01 .member-choice-matrix-side h3 {
   margin: 14px 0 0;
   color: #211a16;
-  font-family: "Playfair Display", "Cormorant Garamond", "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: clamp(2rem, 3.15vw, 2.7rem);
   font-weight: 400;
   line-height: 0.98;
@@ -11622,7 +11575,7 @@ h2, h3 {
   margin: 12px 0 0;
   max-width: 290px;
   color: #6a5b51;
-  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-brand);
   font-size: 14px;
   font-weight: 400;
   line-height: 1.5;
@@ -11631,7 +11584,7 @@ h2, h3 {
 #cmp-perfect-01 .member-choice-matrix-side a {
   margin: 10px 0 0;
   color: #c06032;
-  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-brand);
   font-size: 14px;
   font-weight: 600;
   line-height: 1.2;
@@ -11659,7 +11612,7 @@ h2, h3 {
   border-bottom: 1px solid #ead8ca;
   background: rgba(255, 251, 246, 0.9);
   color: #4d4038;
-  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-brand);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.6px;
@@ -11695,7 +11648,7 @@ h2, h3 {
 #cmp-perfect-01 .member-choice-matrix-row > div:first-child {
   justify-content: flex-start;
   padding-left: 18px;
-  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-brand);
   font-size: 14px;
   font-weight: 600;
   color: #231F1B;
@@ -11780,7 +11733,7 @@ h2, h3 {
 #cmp-perfect-01 .cmp-pricing-headline h3 {
   margin: 0;
   color: #211a16;
-  font-family: "Playfair Display", "Cormorant Garamond", "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: clamp(1.7rem, 2.7vw, 2.3rem);
   font-weight: 400;
   line-height: 1.02;
@@ -11790,7 +11743,7 @@ h2, h3 {
 #cmp-perfect-01 .cmp-pricing-headline p {
   margin: 8px 0 0;
   color: #6a5b51;
-  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-brand);
   font-size: 15px;
   font-weight: 400;
   line-height: 1.45;
@@ -11822,7 +11775,7 @@ h2, h3 {
   align-items: center;
   justify-content: center;
   text-align: center;
-  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-brand);
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.3px;
@@ -11857,7 +11810,7 @@ h2, h3 {
   justify-content: center;
   text-align: center;
   color: #2a241f;
-  font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-brand);
   font-size: 0.95rem;
   font-weight: 500;
   background: rgba(255, 251, 246, 0.78);
@@ -12058,8 +12011,7 @@ h2, h3 {
 
 /* Clean final proportions + blend/overlap safety */
 body {
-  font-family: 'Inter', sans-serif;
-  background: linear-gradient(180deg, #f7efe8 0%, #efe3d7 100%);
+  font-family: var(--font-brand);
   color: #1e1e1e;
 }
 
@@ -12168,19 +12120,19 @@ body {
 #memberChoiceGate .member-choice-hero-text .member-choice-title,
 #memberChoiceGate .hero-title,
 #memberChoiceGate .member-choice-title {
-  font-family: 'Playfair Display', serif;
+  font-family: var(--font-brand);
   font-size: clamp(34px, 3.7vw, 56px);
   line-height: 1.08;
   letter-spacing: -0.5px;
   margin-bottom: 14px;
   color: #1f1815;
-  max-width: 9.6ch;
+  max-width: 14.8ch;
 }
 
 #memberChoiceGate .hero-title span,
 #memberChoiceGate .member-choice-title .member-choice-title-em {
   color: #c8652d;
-  font-style: italic;
+  font-style:solid;
 }
 
 #memberChoiceGate .member-choice-hero-text .hero-text,
@@ -12641,6 +12593,54 @@ body {
 
 #cmp-perfect-01 .cmp-pricing-table-wrap {
   overflow: hidden;
+}
+
+#memberChoiceGate .member-choice-plans-section {
+  margin-top: clamp(1.8rem, 4vw, 2.7rem);
+  padding-left: clamp(1rem, 4vw, 3rem);
+  padding-right: clamp(1rem, 4vw, 3rem);
+  text-align: center;
+}
+
+#memberChoiceGate .member-choice-plans-section .member-choice-experience-kicker {
+  margin: 0;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #c8652d;
+}
+
+#memberChoiceGate .member-choice-plans-section .member-choice-experience-title {
+  margin-top: 0.35rem;
+  margin-bottom: 1.1rem;
+}
+
+#memberChoiceGate .member-choice-plans-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  text-align: left;
+}
+
+#memberChoiceGate .member-choice-plans-grid .membership-card-body {
+  background: linear-gradient(180deg, #fdf4ee, #f8ebe2);
+  border-radius: 18px;
+  padding: 1rem 1rem 1.1rem;
+  margin-top: 0.3rem;
+}
+
+@media (max-width: 900px) {
+  #memberChoiceGate .member-choice-plans-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  #memberChoiceGate .member-choice-plans-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 #memberChoiceGate .member-choice-final-cta {
@@ -14204,7 +14204,7 @@ img {
 }
 
 #userBookingsSection .panel-head h2 {
-  font-family: "Times New Roman", Georgia, serif;
+  font-family: var(--font-brand);
   font-size: clamp(2rem, 3vw, 2.6rem);
   font-weight: 600;
   letter-spacing: -0.02em;
@@ -17518,8 +17518,8 @@ main.portal:has(#memberChoiceGate:not([hidden])) {
 
 #memberChoiceGate > .container {
   padding: 0 5rem !important;
-  margin: 0 !important;
-  max-width: 100% !important;
+  margin: 0 auto !important;
+  max-width: 1440px !important;
   width: 100% !important;
 }
 
@@ -17582,4 +17582,112 @@ main.portal:has(#memberChoiceGate:not([hidden])) {
   max-width: 100% !important;
   margin-left: 0 !important;
   margin-right: 0 !important;
+}
+.storefront-header__cta {
+  margin-left: 0;
+  display: flex;
+  align-items: center;
+}
+
+.header-book-now-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 115px;
+  height: 42px;
+  padding: 0 18px !important;
+  border-radius: 999px;
+  background: #ae5431;
+  color: #fff !important;
+  text-decoration: none;
+  font-size: 16px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  text-transform: none !important;
+  white-space: nowrap;
+  transition: background .2s ease;
+}
+
+.header-book-now-btn:hover {
+  background: #8d4326;
+  color: #fff !important;
+}
+
+/* Shared storefront container: header and every booking portal view. */
+:root {
+  --storefront-container-max: 1440px;
+  --storefront-container-gutter: 5rem;
+}
+
+.storefront-header-wrapper,
+#memberChoiceGate > .container {
+  width: 100%;
+  max-width: var(--storefront-container-max) !important;
+  margin-right: auto !important;
+  margin-left: auto !important;
+  padding-right: var(--storefront-container-gutter) !important;
+  padding-left: var(--storefront-container-gutter) !important;
+}
+
+.storefront-header {
+  width: 100%;
+}
+
+@media (min-width: 1100px) {
+  .storefront-header__left {
+    grid-template-columns: 135px max-content;
+    column-gap: 28px;
+    width: max-content;
+    margin: 0 auto;
+  }
+
+  .storefront-header__nav {
+    justify-content: flex-start;
+    gap: 28px;
+    width: max-content;
+  }
+}
+
+/* Constrain all authenticated user and admin pages beneath the navbar. */
+body:not(.auth-mode) main.portal:not(:has(#memberChoiceGate:not([hidden]))) {
+  width: 100%;
+  max-width: var(--storefront-container-max);
+  margin-right: auto;
+  margin-left: auto;
+  padding-right: var(--storefront-container-gutter);
+  padding-left: var(--storefront-container-gutter);
+}
+
+body:not(.auth-mode) main.portal:not(:has(#memberChoiceGate:not([hidden]))) >
+  :is(.portal-header, .app-only, #appArea, #comboNotice) {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 1099px) {
+  :root {
+    --storefront-container-gutter: 2rem;
+  }
+}
+.admin-user-card-body p,
+.admin-user-session-row p {
+  margin: 0.24rem 0 0;
+  color: rgba(var(--ink-rgb), 0.74);
+  font-size: 0.84rem;
+}
+.admin-user-card-email {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: normal;
+  line-height: 1.4;
 }
