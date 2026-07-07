@@ -7199,6 +7199,89 @@ th {
   overflow-y: auto;
 }
 
+.admin-calendar-customer-search-dialog {
+  width: min(680px, 94vw);
+}
+
+.admin-calendar-customer-search-dialog form {
+  padding: 1rem;
+}
+
+.admin-calendar-customer-search-body {
+  display: grid;
+  gap: 14px;
+  padding: 0.9rem 0 0.25rem;
+}
+
+.admin-calendar-customer-search-field {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-calendar-customer-search-field input {
+  width: 100%;
+}
+
+.admin-calendar-customer-search-results {
+  display: grid;
+  gap: 10px;
+  max-height: min(50vh, 460px);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.admin-calendar-customer-result {
+  appearance: none;
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid rgba(176, 90, 43, 0.14);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--brand-deep);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.04);
+}
+
+.admin-calendar-customer-result:hover {
+  border-color: rgba(176, 90, 43, 0.24);
+  box-shadow: 0 12px 24px rgba(176, 90, 43, 0.12);
+}
+
+.admin-calendar-customer-result strong {
+  font-size: 0.98rem;
+}
+
+.admin-calendar-customer-result span,
+.admin-calendar-customer-result small {
+  color: var(--ink-secondary);
+  font-size: 0.85rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.admin-customer-session-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 1rem 1rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid rgba(176, 90, 43, 0.14);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.admin-customer-session-summary.is-empty {
+  display: none;
+}
+
+.admin-customer-session-summary .admin-client-chip {
+  padding: 0.75rem 0.85rem;
+}
+
 .profile-dialog {
   width: min(560px, 94vw);
   max-height: 92vh;
@@ -12631,6 +12714,15 @@ body {
   margin-top: 0.3rem;
 }
 
+#memberChoiceGate #compareBenefitsBtn {
+  text-decoration: none;
+  display: block;
+  width: min(100%, 280px);
+  margin: 18px auto 0;
+  box-sizing: border-box;
+  text-align: center;
+}
+
 @media (max-width: 900px) {
   #memberChoiceGate .member-choice-plans-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -12640,6 +12732,11 @@ body {
 @media (max-width: 600px) {
   #memberChoiceGate .member-choice-plans-grid {
     grid-template-columns: 1fr;
+  }
+
+  #memberChoiceGate #compareBenefitsBtn {
+    width: min(100%, 280px);
+    margin-top: 14px;
   }
 }
 
@@ -17690,4 +17787,26 @@ body:not(.auth-mode) main.portal:not(:has(#memberChoiceGate:not([hidden]))) >
   word-break: normal;
   overflow-wrap: normal;
   line-height: 1.4;
+}
+
+#memberChoiceGate #compareBenefitsBtn {
+  display: block !important;
+  width: min(100%, 280px) !important;
+  max-width: 280px !important;
+  margin: 18px auto 0 !important;
+  padding: 0 28px !important;
+  min-height: 56px !important;
+  font-size: 16px !important;
+  line-height: 1 !important;
+  text-align: center !important;
+}
+
+@media (max-width: 600px) {
+  #memberChoiceGate #compareBenefitsBtn {
+    width: min(100%, 280px) !important;
+    max-width: 280px !important;
+    margin-top: 14px !important;
+    min-height: 56px !important;
+    font-size: 16px !important;
+  }
 }

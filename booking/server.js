@@ -157,6 +157,9 @@ const mg =
         key: MAILGUN_API_KEY,
       })
     : null;
+console.log('MAILGUN_API_KEY:', !!MAILGUN_API_KEY);
+console.log('MAILGUN_DOMAIN:', MAILGUN_DOMAIN);
+console.log('MAILGUN_CLIENT_CREATED:', !!mg);
 
 async function sendMailgunEmail({ to, from, subject, text, html }) {
   if (!mg) {
@@ -2108,9 +2111,11 @@ app.post('/api/admin/services', requireAuth, requireAdmin, (req, res) => {
   const services = getVisibleServicesForUser(resolvedCustomer.user).map((service) =>
     toServiceResponse(service, resolvedCustomer.user)
   );
+  const sessionSummary = getAdminHydrogenSessionSummary(resolvedCustomer.user.id, resolvedCustomer.user);
   res.json({
     services,
     membershipActive: isMembershipActiveForUser(resolvedCustomer.user),
+    sessionSummary,
     resolvedCustomer: {
       id: resolvedCustomer.user.id ?? null,
       name: resolvedCustomer.user.name || '',
@@ -2118,8 +2123,10 @@ app.post('/api/admin/services', requireAuth, requireAdmin, (req, res) => {
       mobile: resolvedCustomer.user.mobile || '',
       discountPercent: getDiscountPercentForPhone(resolvedCustomer.user.mobile || ''),
       membershipStatus: resolvedCustomer.user.membershipStatus || 'inactive',
+      membershipStartedAt: resolvedCustomer.user.membershipStartedAt || null,
       membershipExpiresAt: resolvedCustomer.user.membershipExpiresAt || null,
       membershipPeopleCount: resolvedCustomer.user.membershipPeopleCount ?? null,
+      membershipRemainingHydrogenSessions: sessionSummary.membershipRemainingHydrogenSessions,
     },
   });
 });
@@ -9919,6 +9926,8 @@ function createSingleBookingResponse(req, res, { targetUser, defaultNotes = '', 
   const isHydrogenBase = selectedCategory === 'HYDROGEN SESSION';
   const isTherapyOrShotBase = selectedCategory === 'IV THERAPIES' || selectedCategory === 'IV SHOTS';
   const isExperienceSession = selectedCategory === 'EXPERIENCE SESSION';
+  const adminHydrogenSummary =
+    includeAdminMeta && isHydrogenBase ? getAdminHydrogenSessionSummary(targetUser.id, targetUser) : null;
   const selectedAddOnServiceName = String(req.body?.addOnServiceName || '').trim();
   const addOnBookingDate = String(req.body?.addOnBookingDate || payload.data.bookingDate || '').trim();
   const addOnBookingTime = normalizeSlotStartTime(
@@ -10024,9 +10033,24 @@ function createSingleBookingResponse(req, res, { targetUser, defaultNotes = '', 
     addOnAmountInr = Number(getEffectiveServicePriceInr(addOnService, targetUser) || 0);
     bookingGroupId = createBookingGroupId('booking');
   }
+  const hasAdminHydrogenBalance = Boolean(
+    includeAdminMeta &&
+      isHydrogenBase &&
+      adminHydrogenSummary &&
+      Number(adminHydrogenSummary.totalAvailableHydrogenSessions || 0) > 0
+  );
   let computedPaymentStatus = isExperienceSession || effectivePriceInr > 0 ? 'unpaid' : 'paid';
+  let computedPaymentReference = '';
+  let computedPaidAmountPaise = null;
+  if (hasAdminHydrogenBalance) {
+    computedPaymentStatus = 'paid';
+    computedPaymentReference = Number(adminHydrogenSummary.membershipRemainingHydrogenSessions || 0) > 0 ? 'membership' : 'buy_extra';
+    computedPaidAmountPaise = 0;
+  }
   if (addOnService && addOnAmountInr > 0) {
     computedPaymentStatus = 'unpaid';
+    computedPaymentReference = '';
+    computedPaidAmountPaise = null;
   }
   if (
     selectedService &&
@@ -10079,8 +10103,8 @@ function createSingleBookingResponse(req, res, { targetUser, defaultNotes = '', 
     .prepare(
       `INSERT INTO bookings (
         user_id, doctor_id, client_name, client_email, client_phone,
-        service_name, booking_date, booking_time, assigned_staff, status, payment_status, booking_group_id, notes, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`
+        service_name, booking_date, booking_time, assigned_staff, status, payment_status, payment_reference, paid_at, paid_amount_paise, booking_group_id, notes, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       targetUser.id,
@@ -10093,6 +10117,9 @@ function createSingleBookingResponse(req, res, { targetUser, defaultNotes = '', 
       payload.data.bookingTime,
       'H2 House Of Health',
       computedPaymentStatus,
+      computedPaymentReference || null,
+      computedPaymentStatus === 'paid' ? getCurrentSqliteTimestamp() : null,
+      computedPaidAmountPaise,
       bookingGroupId,
       payload.data.notes || defaultNotes,
       getCurrentSqliteTimestamp()
@@ -10186,6 +10213,7 @@ function createSingleBookingResponse(req, res, { targetUser, defaultNotes = '', 
       email: targetUser.email,
       mobile: targetUser.mobile || '',
       membershipStatus: targetUser.membershipStatus || 'inactive',
+      membershipStartedAt: targetUser.membershipStartedAt || null,
       membershipExpiresAt: targetUser.membershipExpiresAt || null,
       membershipPeopleCount: targetUser.membershipPeopleCount ?? null,
     },
@@ -12183,6 +12211,84 @@ function getHydrogenFreeSessionBalance(userId, user, { usedOverride } = {}) {
   };
 }
 
+function getAdminHydrogenSessionSummary(userId, user) {
+  const normalizedUserId = Number(userId);
+  if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
+    return {
+      membershipActive: false,
+      membershipRemainingHydrogenSessions: 0,
+      topUpPurchasedHydrogenSessions: 0,
+      topUpCompletedHydrogenSessions: 0,
+      topUpRemainingHydrogenSessions: 0,
+      scheduledHydrogenSessions: 0,
+      completedHydrogenSessions: 0,
+      totalAvailableHydrogenSessions: 0,
+    };
+  }
+
+  const hydrogenServiceNames = SERVICE_CATALOG
+    .filter((service) => String(service.category || '').toUpperCase() === 'HYDROGEN SESSION')
+    .map((service) => service.name);
+  if (!hydrogenServiceNames.length) {
+    return {
+      membershipActive: isMembershipActiveForUser(user),
+      membershipRemainingHydrogenSessions: getHydrogenFreeSessionBalance(normalizedUserId, user).remaining,
+      topUpPurchasedHydrogenSessions: 0,
+      topUpCompletedHydrogenSessions: 0,
+      topUpRemainingHydrogenSessions: 0,
+      scheduledHydrogenSessions: 0,
+      completedHydrogenSessions: 0,
+      totalAvailableHydrogenSessions: getHydrogenFreeSessionBalance(normalizedUserId, user).remaining,
+    };
+  }
+
+  const placeholders = hydrogenServiceNames.map(() => '?').join(', ');
+  const rows = db
+    .prepare(
+      `SELECT id,
+              service_name AS serviceName,
+              booking_date AS bookingDate,
+              booking_time AS bookingTime,
+              status,
+              payment_status AS paymentStatus,
+              payment_reference AS paymentReference,
+              is_topup_session AS isTopUpSession,
+              created_at AS createdAt
+       FROM bookings
+       WHERE user_id = ?
+         AND service_name IN (${placeholders})
+       ORDER BY booking_date ASC, booking_time ASC, id ASC`
+    )
+    .all(normalizedUserId, ...hydrogenServiceNames);
+
+  const activeRows = rows.filter((booking) => {
+    const status = String(booking.status || '').trim().toLowerCase();
+    return status !== 'cancelled' && status !== 'schedule_later';
+  });
+  const completedRows = activeRows.filter((booking) => String(booking.status || '').trim().toLowerCase() === 'completed');
+  const scheduledRows = activeRows.filter((booking) => String(booking.status || '').trim().toLowerCase() !== 'completed');
+  const topUpRows = activeRows.filter((booking) => {
+    if (Number(booking.isTopUpSession || 0) === 1) return true;
+    const paymentReference = String(booking.paymentReference || '').trim().toLowerCase();
+    return paymentReference === 'buy_extra';
+  });
+  const topUpCompletedRows = topUpRows.filter((booking) => String(booking.status || '').trim().toLowerCase() === 'completed');
+  const membershipBalance = getHydrogenFreeSessionBalance(normalizedUserId, user);
+  const topUpPurchasedHydrogenSessions = topUpRows.length;
+  const topUpRemainingHydrogenSessions = Math.max(0, topUpPurchasedHydrogenSessions - topUpCompletedRows.length);
+
+  return {
+    membershipActive: Boolean(membershipBalance.active),
+    membershipRemainingHydrogenSessions: Number(membershipBalance.remaining || 0),
+    topUpPurchasedHydrogenSessions,
+    topUpCompletedHydrogenSessions: topUpCompletedRows.length,
+    topUpRemainingHydrogenSessions,
+    scheduledHydrogenSessions: scheduledRows.length,
+    completedHydrogenSessions: completedRows.length,
+    totalAvailableHydrogenSessions: Number(membershipBalance.remaining || 0) + topUpRemainingHydrogenSessions,
+  };
+}
+
 function syncMembershipCoveredHydrogenBookings(userId, user) {
   const balance = getHydrogenFreeSessionBalance(userId, user);
   if (!balance.active || balance.remaining <= 0) return;
@@ -12757,70 +12863,22 @@ async function sendCouponEmail({ toEmail, recipientName, code, discountValue, ap
     </div>
   `;
 
-  if (SENDGRID_API_KEY && SENDGRID_MARKETING_FROM_EMAIL) {
-    if (!isValidEmail(SENDGRID_MARKETING_FROM_EMAIL)) {
-      return { ok: false, statusCode: 500, message: 'SENDGRID_MARKETING_FROM_EMAIL is invalid.' };
-    }
-    if (
-      SENDGRID_MARKETING_VERIFIED_SENDER &&
-      SENDGRID_MARKETING_FROM_EMAIL.toLowerCase() !== SENDGRID_MARKETING_VERIFIED_SENDER.toLowerCase()
-    ) {
-      return {
-        ok: false,
-        statusCode: 500,
-        message: 'SENDGRID_MARKETING_FROM_EMAIL does not match SENDGRID_MARKETING_VERIFIED_SENDER.',
-      };
-    }
-    try {
-      await sgMail.send({
-        to: normalizedToEmail,
-        from: SENDGRID_MARKETING_FROM_EMAIL,
-        subject,
-        text,
-        html,
-        headers: buildMarketingHeaders(),
-      });
-      return { ok: true };
-    } catch (error) {
-      const sendGridError = extractSendGridErrorDetails(error);
-      console.error('Failed to send coupon email via SendGrid:', {
-        statusCode: sendGridError.statusCode,
-        detail: sendGridError.detail,
-        responseBody: sendGridError.responseBody,
-      });
-      return {
-        ok: false,
-        statusCode: sendGridError.statusCode || 500,
-        message:
-          sendGridError.statusCode === 403
-            ? 'SendGrid rejected the sender identity. Verify the configured FROM email or authenticated domain.'
-            : 'Unable to send coupon email. Please try again.',
-      };
-    }
-  }
-
-  const transporter = getTransporter();
-  const fromEmail = process.env.SMTP_MARKETING_FROM || SENDGRID_MARKETING_FROM_EMAIL || process.env.SMTP_FROM || process.env.SMTP_USER;
-  if (!transporter || !fromEmail) {
-    return {
-      ok: false,
-      statusCode: 500,
-      message: 'Email service is not configured. Please contact support.',
-    };
-  }
-
   try {
-    await transporter.sendMail({
-      from: fromEmail,
+    console.log('Coupon email about to use Mailgun', {
       to: normalizedToEmail,
+      from: MAIL_FROM,
+      subject,
+  });
+    await sendMailgunEmail({
+      to: normalizedToEmail,
+      from: MAIL_FROM,
       subject,
       text,
       html,
-      headers: buildMarketingHeaders(),
     });
     return { ok: true };
   } catch (error) {
-    console.error('Failed to send coupon email via SMTP:', error);
+    console.error('Failed to send coupon email via Mailgun:', error);
     return {
       ok: false,
       statusCode: 500,
