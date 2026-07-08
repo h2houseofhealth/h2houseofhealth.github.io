@@ -234,6 +234,7 @@ const state = {
   adminCalendarMonthLoading: false,
   adminCalendarDayCache: {},
   adminCalendarCustomerSearchQuery: '',
+  adminSlotBookingsContext: null,
   filters: {
     search: '',
     status: 'all',
@@ -556,6 +557,12 @@ const elements = {
   adminCalendarCustomerSearchCloseBtn: document.getElementById('adminCalendarCustomerSearchCloseBtn'),
   adminCalendarCustomerSearchCancelBtn: document.getElementById('adminCalendarCustomerSearchCancelBtn'),
   adminCustomerSessionSummary: document.getElementById('adminCustomerSessionSummary'),
+  adminSlotBookingsDialog: document.getElementById('adminSlotBookingsDialog'),
+  adminSlotBookingsCloseBtn: document.getElementById('adminSlotBookingsCloseBtn'),
+  adminSlotBookingsCancelBtn: document.getElementById('adminSlotBookingsCancelBtn'),
+  adminSlotBookingsSummary: document.getElementById('adminSlotBookingsSummary'),
+  adminSlotBookingsList: document.getElementById('adminSlotBookingsList'),
+  adminSlotBookingsEmpty: document.getElementById('adminSlotBookingsEmpty'),
 
   noticeDialog: document.getElementById('noticeDialog'),
   noticeDialogTitle: document.getElementById('noticeDialogTitle'),
@@ -2130,6 +2137,12 @@ function attachEvents() {
     if (elements.adminCalendarCustomerSearchInput) elements.adminCalendarCustomerSearchInput.value = '';
     renderAdminCalendarCustomerSearchDialog();
   });
+  elements.adminSlotBookingsCloseBtn?.addEventListener('click', closeAdminSlotBookingsDialog);
+  elements.adminSlotBookingsCancelBtn?.addEventListener('click', closeAdminSlotBookingsDialog);
+  elements.adminSlotBookingsDialog?.addEventListener('close', () => {
+    state.adminSlotBookingsContext = null;
+    renderAdminSlotBookingsDialog();
+  });
 
   elements.adminStatTotal?.addEventListener('click', () => {
     state.adminActiveTab = 'bookings';
@@ -3435,9 +3448,30 @@ function getAdminCalendarTrackedUser() {
   return users.find((user) => String(user?.email || '').trim().toLowerCase() === email) || null;
 }
 
+function getAdminCalendarRecordServiceNames() {
+  const selectedCategory = String(state.adminCalendarCategory || 'HYDROGEN SESSION').trim().toUpperCase();
+  const names = new Set();
+  for (const booking of Array.isArray(state.bookings) ? state.bookings : []) {
+    const serviceName = String(booking?.serviceName || '').trim();
+    if (!serviceName) continue;
+    if (String(booking?.status || '').trim().toLowerCase() === 'cancelled') continue;
+    if (selectedCategory && getBookingCategory(serviceName) !== selectedCategory) continue;
+    names.add(serviceName);
+  }
+  return Array.from(names);
+}
 function getAdminCalendarServiceNames() {
-  return Object.keys(state.adminCalendarAvailability || {}).sort((a, b) =>
-    getServiceDisplayName({ name: a }).localeCompare(getServiceDisplayName({ name: b }), undefined, { sensitivity: 'base' })
+  const names = new Set([
+    ...Object.keys(state.adminCalendarAvailability || {}),
+    ...getAdminCalendarRecordServiceNames(),
+  ]);
+
+  return Array.from(names).sort((a, b) =>
+    getServiceDisplayName({ name: a }).localeCompare(
+      getServiceDisplayName({ name: b }),
+      undefined,
+      { sensitivity: 'base' }
+    )
   );
 }
 
@@ -3681,41 +3715,40 @@ function getAdminCalendarDayData(dateKey) {
   return state.adminCalendarDayCache?.[getAdminCalendarCacheKey(dateKey)] || null;
 }
 
-function isAdminCalendarCountedBooking(booking) {
-  const status = String(booking?.status || '').trim().toLowerCase();
-  if (status === 'cancelled') return false;
-  if (['booked', 'confirmed', 'completed'].includes(status)) return true;
-  return status === 'pending' && normalizePaymentStatusKey(booking?.paymentStatus) === 'paid';
+function getAdminCalendarScopeServiceName() {
+  return getAdminCalendarSelectedServiceName() || String(state.adminCalendarServiceName || '').trim();
 }
 
-function isAdminCalendarBookingInScope(booking, serviceName = '') {
-  const selectedCategory = String(state.adminCalendarCategory || 'HYDROGEN SESSION').trim().toUpperCase();
-  const bookingCategory = getBookingCategory(booking?.serviceName || '');
-  if (selectedCategory === 'HYDROGEN SESSION') {
-    return bookingCategory === 'HYDROGEN SESSION';
-  }
+function isAdminCalendarRecordBookingMatch(booking, { dateKey = '', bookingTime = '', serviceName = '' } = {}) {
+  const normalizedDate = String(dateKey || '').trim();
+  const normalizedSlot = normalizeSlotStartTime(String(bookingTime || '').trim());
+  const normalizedService = String(serviceName || '').trim().toLowerCase();
+  if (!normalizedDate) return false;
+  if (String(booking?.status || '').trim().toLowerCase() === 'cancelled') return false;
+  if (String(booking?.bookingDate || '').trim() !== normalizedDate) return false;
+  if (normalizedSlot && normalizeSlotStartTime(String(booking?.bookingTime || '').trim()) !== normalizedSlot) return false;
+  if (normalizedService && String(booking?.serviceName || '').trim().toLowerCase() !== normalizedService) return false;
+  return Boolean(normalizeSlotStartTime(booking?.bookingTime));
+}
 
-  const targetServiceName = String(serviceName || '').trim().toLowerCase();
-  const bookingServiceName = String(booking?.serviceName || '').trim().toLowerCase();
-  if (targetServiceName) return bookingServiceName === targetServiceName;
-  return bookingCategory === selectedCategory;
+function getAdminCalendarSlotBookingsForDate(dateKey, serviceName = '', bookings = state.bookings) {
+
+  return (Array.isArray(bookings) ? bookings : []).filter((booking) =>
+    isAdminCalendarRecordBookingMatch(booking, { dateKey, serviceName })
+  );
 }
 
 function getAdminCalendarBookingCounts(dateKey, serviceName = '') {
-  const normalizedDate = String(dateKey || '').trim();
   const countsBySlot = {};
   let bookedSeatCount = 0;
   let bookedSlotCount = 0;
 
-  if (!normalizedDate) {
+  const bookingsForDate = getAdminCalendarSlotBookingsForDate(dateKey, serviceName);
+  if (!bookingsForDate.length) {
     return { countsBySlot, bookedSeatCount, bookedSlotCount };
   }
 
-  for (const booking of Array.isArray(state.bookings) ? state.bookings : []) {
-    if (String(booking?.bookingDate || '').trim() !== normalizedDate) continue;
-    if (!isAdminCalendarCountedBooking(booking)) continue;
-    if (!isAdminCalendarBookingInScope(booking, serviceName)) continue;
-
+  for (const booking of bookingsForDate) {
     const slot = normalizeSlotStartTime(booking.bookingTime || '');
     if (!slot) continue;
     countsBySlot[slot] = Number(countsBySlot[slot] || 0) + 1;
@@ -3730,10 +3763,130 @@ function getAdminCalendarBookingCounts(dateKey, serviceName = '') {
   return { countsBySlot, bookedSeatCount, bookedSlotCount };
 }
 
+function getAdminCalendarSlotBookings(dateKey, serviceName = '', bookingTime = '') {
+  const normalizedDate = String(dateKey || '').trim();
+  const normalizedService = String(serviceName || '').trim();
+  const normalizedSlot = normalizeSlotStartTime(String(bookingTime || '').trim());
+  if (!normalizedDate || !normalizedService || !normalizedSlot) return [];
+
+  return (Array.isArray(state.bookings) ? state.bookings : [])
+    .filter((booking) =>
+      isAdminCalendarRecordBookingMatch(booking, {
+        dateKey: normalizedDate,
+        bookingTime: normalizedSlot,
+        serviceName: normalizedService,
+      })
+    )
+    .sort((a, b) => {
+      const aCreated = String(a?.createdAt || a?.created_at || '');
+      const bCreated = String(b?.createdAt || b?.created_at || '');
+      if (aCreated && bCreated && aCreated !== bCreated) return aCreated.localeCompare(bCreated);
+      return Number(a?.id || 0) - Number(b?.id || 0);
+    });
+}
+
+function openAdminSlotBookingsDialog(dateKey, bookingTime, serviceName) {
+  const normalizedDate = String(dateKey || '').trim();
+  const normalizedSlot = normalizeSlotStartTime(String(bookingTime || '').trim());
+  const normalizedService = String(serviceName || '').trim();
+  if (!normalizedDate || !normalizedSlot || !normalizedService) return;
+
+  state.adminSlotBookingsContext = {
+    dateKey: normalizedDate,
+    bookingTime: normalizedSlot,
+    serviceName: normalizedService,
+  };
+  renderAdminSlotBookingsDialog();
+  elements.adminSlotBookingsDialog?.showModal();
+}
+
+function closeAdminSlotBookingsDialog() {
+  if (elements.adminSlotBookingsDialog?.open) {
+    elements.adminSlotBookingsDialog.close();
+  }
+  state.adminSlotBookingsContext = null;
+  renderAdminSlotBookingsDialog();
+}
+
+function renderAdminSlotBookingsDialog() {
+  const dialog = elements.adminSlotBookingsDialog;
+  const summary = elements.adminSlotBookingsSummary;
+  const list = elements.adminSlotBookingsList;
+  const empty = elements.adminSlotBookingsEmpty;
+  const context = state.adminSlotBookingsContext;
+  if (!dialog || !summary || !list || !empty) return;
+
+  if (!context) {
+    if (!dialog.open) {
+      summary.textContent = '';
+      list.innerHTML = '';
+      empty.hidden = true;
+    }
+    return;
+  }
+
+  const bookings = getAdminCalendarSlotBookings(context.dateKey, context.serviceName, context.bookingTime);
+  const dateLabel = formatBookingDateLabel(context.dateKey);
+  const timeLabel = formatBookingTimeLabel(context.bookingTime);
+  summary.textContent = `${bookings.length} booking${bookings.length === 1 ? '' : 's'} for ${dateLabel} at ${timeLabel} • ${getServiceDisplayName({ name: context.serviceName })}`;
+
+  list.innerHTML = '';
+  empty.hidden = bookings.length > 0;
+  empty.textContent = 'No bookings for this slot.';
+  if (!bookings.length) return;
+
+  const fragment = document.createDocumentFragment();
+  bookings.forEach((booking) => {
+    const card = document.createElement('article');
+    card.className = 'admin-slot-booking-card';
+    const derivedStatus = getDerivedBookingStatus(booking);
+
+    const badges = [];
+    const paymentStatus = String(booking?.paymentStatus || 'unpaid').trim();
+    const paymentReference = String(booking?.paymentReference || '').trim().toLowerCase();
+    const membershipLabel =
+      paymentReference === 'membership'
+        ? 'Membership'
+        : paymentReference === 'buy_extra' || Number(booking?.isTopUpSession || 0) === 1
+          ? 'Top-up'
+          : '';
+    if (membershipLabel) {
+      badges.push(`<span class="status-chip admin-slot-booking-chip">${escapeHtml(membershipLabel)}</span>`);
+    }
+    if (paymentStatus) {
+      badges.push(
+        `<span class="status-chip payment-${escapeHtml(normalizePaymentStatusKey(paymentStatus))}">${escapeHtml(
+          formatPaymentDisplayLabel(booking)
+        )}</span>`
+      );
+    }
+
+    card.innerHTML = `
+      <div class="admin-slot-booking-head">
+        <strong>${escapeHtml(String(booking?.clientName || booking?.name || 'Customer').trim() || 'Customer')}</strong>
+        <span class="status-chip status-${escapeHtml(derivedStatus)}">${escapeHtml(
+          formatBookingStatusLabel(derivedStatus)
+        )}</span>
+      </div>
+      <div class="admin-slot-booking-meta">
+        <span>${escapeHtml(String(booking?.serviceName || context.serviceName || '-'))}</span>
+        <span>${escapeHtml(formatDateTime(booking?.bookingDate || context.dateKey, booking?.bookingTime || context.bookingTime))}</span>
+      </div>
+      <div class="admin-slot-booking-badges">
+        ${badges.join('')}
+      </div>
+    `;
+
+    fragment.appendChild(card);
+  });
+
+  list.appendChild(fragment);
+}
+
 function getAdminCalendarDaySummary(dateKey, serviceName) {
   const dayData = getAdminCalendarDayData(dateKey);
+  const bookingCounts = getAdminCalendarBookingCounts(dateKey, serviceName);
   if (!dayData) {
-    const bookingCounts = getAdminCalendarBookingCounts(dateKey, serviceName);
     return {
       hasData: bookingCounts.bookedSeatCount > 0,
       openSeatCount: 0,
@@ -3749,39 +3902,32 @@ function getAdminCalendarDaySummary(dateKey, serviceName) {
   const targetServiceName = String(serviceName || '').trim();
   const servicesToCheck = targetServiceName && availabilityByService[targetServiceName] ? [targetServiceName] : Object.keys(availabilityByService);
   const enforceHydrogenCapacity = isHydrogenCategory(state.adminCalendarCategory);
-  const bookingCounts = getAdminCalendarBookingCounts(dateKey, serviceName);
-  const slotsWithBookingCounts = Object.keys(bookingCounts.countsBySlot || {}).filter((slot) => Number(bookingCounts.countsBySlot[slot] || 0) > 0);
 
   let openSeatCount = 0;
-  let bookedSeatCount = 0;
-  let bookedSlotCount = 0;
   for (const candidateServiceName of servicesToCheck) {
     const serviceAvailability = availabilityByService[candidateServiceName] || {};
     const serviceHolds = holdsByService[candidateServiceName] || {};
+    const candidateBookingCounts = getAdminCalendarBookingCounts(dateKey, candidateServiceName);
     const capacityRaw = Math.max(1, Number(dayData.slotCapacityByService?.[candidateServiceName] || 8));
     const capacity = enforceHydrogenCapacity ? Math.max(capacityRaw, HYDROGEN_SLOT_CAPACITY_PER_TIME_SLOT) : capacityRaw;
     for (const slot of SLOT_OPTIONS) {
-      const booked = Math.max(Number(serviceAvailability?.[slot.value] || 0), Number(bookingCounts.countsBySlot[slot.value] || 0));
+      const booked = Math.max(
+        Number(serviceAvailability?.[slot.value] || 0),
+        Number(candidateBookingCounts.countsBySlot?.[slot.value] || 0)
+      );
       const held = Number(serviceHolds?.[slot.value] || 0);
-      bookedSeatCount += booked;
-      if (booked > 0) bookedSlotCount += 1;
       if (isBookingSlotInPast(dateKey, slot.value)) continue;
       openSeatCount += Math.max(0, capacity - booked - held);
     }
   }
 
-  if (!servicesToCheck.length && slotsWithBookingCounts.length) {
-    bookedSeatCount = bookingCounts.bookedSeatCount;
-    bookedSlotCount = bookingCounts.bookedSlotCount;
-  }
-
   return {
-    hasData: true,
+    hasData: Boolean(dayData) || bookingCounts.bookedSeatCount > 0,
     openSeatCount,
-    bookedSeatCount: Math.max(bookedSeatCount, bookingCounts.bookedSeatCount),
-    bookedSlotCount: Math.max(bookedSlotCount, bookingCounts.bookedSlotCount),
+    bookedSeatCount: bookingCounts.bookedSeatCount,
+    bookedSlotCount: bookingCounts.bookedSlotCount,
     hasAnyOpen: openSeatCount > 0,
-    hasAnyBooked: Math.max(bookedSeatCount, bookingCounts.bookedSeatCount) > 0,
+    hasAnyBooked: bookingCounts.bookedSeatCount > 0,
   };
 }
 
@@ -3939,40 +4085,77 @@ function renderAdminCalendar() {
         row.innerHTML = `
           <div class="admin-calendar-slot-time">
             <strong>${escapeHtml(slot.label)}</strong>
-            <span>${booked} seats booked</span>
+            <span>${booked > 0 ? 'Bookings available to view' : 'No bookings'}</span>
           </div>
           <div class="admin-calendar-slot-meta">
-            <span>${booked > 0 ? 'Booked slot' : 'No bookings'}</span>
             <span>${booked}/${slotCapacity} capacity</span>
           </div>
         `;
+        const bookedCountBtn = document.createElement('button');
+        bookedCountBtn.type = 'button';
+        bookedCountBtn.className = 'admin-calendar-slot-count-btn';
+        bookedCountBtn.textContent = `${booked}/${slotCapacity} booked`;
+        bookedCountBtn.title = 'View bookings for this slot';
+        bookedCountBtn.setAttribute(
+          'aria-label',
+          `View ${booked} booking${booked === 1 ? '' : 's'} for ${slot.label} on ${selectedDate}`
+        );
+        bookedCountBtn.addEventListener('click', () => {
+          openAdminSlotBookingsDialog(selectedDate, slot.value, selectedServiceName);
+        });
+        row.querySelector('.admin-calendar-slot-meta')?.prepend(bookedCountBtn);
         slotList.appendChild(row);
         return;
       }
 
-      if (isPast || openSeats <= 0) return;
-
       availableSlotCount += 1;
       const row = document.createElement('article');
-      row.className = 'admin-calendar-slot-row is-open';
+      row.className = isPast
+        ? booked > 0
+          ? 'admin-calendar-slot-row is-history is-booked'
+          : 'admin-calendar-slot-row is-history'
+        : openSeats <= 0
+          ? 'admin-calendar-slot-row is-full'
+          : 'admin-calendar-slot-row is-open';
+      const slotStatusLabel = isPast
+        ? booked > 0
+          ? 'Bookings available to view'
+          : 'Slot time passed'
+        : openSeats <= 0
+          ? 'No seats open'
+          : `${openSeats} seats open`;
       row.innerHTML = `
         <div class="admin-calendar-slot-time">
           <strong>${escapeHtml(slot.label)}</strong>
-          <span>${openSeats} seats open</span>
+          <span>${escapeHtml(slotStatusLabel)}</span>
         </div>
         <div class="admin-calendar-slot-meta">
-          <span>${booked}/${slotCapacity} booked</span>
           <span>${holdCount} on hold</span>
         </div>
       `;
-      const actionBtn = document.createElement('button');
-      actionBtn.type = 'button';
-      actionBtn.className = 'btn btn-secondary admin-calendar-slot-btn';
-      actionBtn.textContent = 'Book Slot';
-      actionBtn.addEventListener('click', () => {
-        openAdminCalendarCustomerSearchDialog(selectedServiceName, slot.value);
+      const bookedCountBtn = document.createElement('button');
+      bookedCountBtn.type = 'button';
+      bookedCountBtn.className = 'admin-calendar-slot-count-btn';
+      bookedCountBtn.textContent = `${booked}/${slotCapacity} booked`;
+      bookedCountBtn.title = 'View bookings for this slot';
+      bookedCountBtn.setAttribute(
+        'aria-label',
+        `View ${booked} booking${booked === 1 ? '' : 's'} for ${slot.label} on ${selectedDate}`
+      );
+      bookedCountBtn.addEventListener('click', () => {
+        openAdminSlotBookingsDialog(selectedDate, slot.value, selectedServiceName);
       });
-      row.appendChild(actionBtn);
+      row.querySelector('.admin-calendar-slot-meta')?.prepend(bookedCountBtn);
+      if (!isPast && openSeats > 0) {
+        const actionBtn = document.createElement('button');
+        actionBtn.type = 'button';
+        actionBtn.className = 'btn btn-secondary admin-calendar-slot-btn';
+        actionBtn.textContent = 'Book Slot';
+        actionBtn.addEventListener('click', () => {
+          openAdminCalendarCustomerSearchDialog(selectedServiceName, slot.value);
+        });
+        row.appendChild(actionBtn);
+      }
       slotList.appendChild(row);
     });
 
@@ -5198,7 +5381,7 @@ async function upsertBooking() {
     if (isAdmin && state.adminBookingMode === 'existing') {
       await refreshAdminCustomerContext().catch(() => {});
     }
-    if (isAdmin && (state.adminActiveTab || '') === 'calendar') {
+    if (isAdmin && payload.bookingDate) {
       await refreshAdminCalendarCacheForDate(payload.bookingDate);
     }
      
@@ -5471,7 +5654,7 @@ async function changeStatus(id, status) {
     body: JSON.stringify({ status: normalizedStatus }),
   });
   await loadDashboardData();
-  if (state.user?.role === 'admin' && (state.adminActiveTab || '') === 'calendar' && bookingDate) {
+  if (state.user?.role === 'admin' && bookingDate) {
     await refreshAdminCalendarCacheForDate(bookingDate);
   }
   if (normalizedStatus === 'schedule_later' && state.user?.role !== 'admin') {
@@ -7271,14 +7454,14 @@ function getAdminAllBookingSlotCounts(bookings = state.bookings) {
   const mode = String(state.adminAllBookingViewMode || 'history').trim().toLowerCase();
   const selectedDate = mode === 'today' ? getTodayIsoDate() : String(state.adminAllBookingSlotFilters?.date || '').trim();
   if (!selectedDate) return new Map();
+  const selectedServiceName = getAdminCalendarScopeServiceName();
   const counts = new Map();
-  getAdminAllBookingBaseBookings(bookings)
-    .filter((booking) => String(booking?.bookingDate || '').trim() === selectedDate)
-    .forEach((booking) => {
-      const slot = normalizeSlotStartTime(booking?.bookingTime);
-      if (!slot) return;
-      counts.set(slot, (counts.get(slot) || 0) + 1);
-  });
+  const scopedBookings = getAdminCalendarSlotBookingsForDate(selectedDate, selectedServiceName, bookings);
+  for (const booking of scopedBookings) {
+    const slot = normalizeSlotStartTime(booking?.bookingTime);
+    if (!slot) continue;
+    counts.set(slot, (counts.get(slot) || 0) + 1);
+  }
   return counts;
 }
 
@@ -7811,6 +7994,7 @@ function render() {
       renderAdminAllBookingRows(getFilteredAdminAllBookings(state.bookings));
     }
     renderAdminCalendar();
+    renderAdminSlotBookingsDialog();
     renderAdminCalendarCustomerSearchDialog();
     renderAdminUserSessionDialog();
     renderAdminMembershipOrders();
