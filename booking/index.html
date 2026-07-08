@@ -1685,6 +1685,23 @@
       </form>
     </dialog>
 
+    <dialog id="adminSlotBookingsDialog" class="booking-dialog admin-slot-bookings-dialog">
+      <div class="admin-slot-bookings-shell">
+        <div class="dialog-head">
+          <div>
+            <h2>View Slot Bookings</h2>
+            <p id="adminSlotBookingsSummary" class="membership-copy"></p>
+          </div>
+          <button id="adminSlotBookingsCloseBtn" class="icon-btn" type="button" aria-label="Close">&times;</button>
+        </div>
+        <div id="adminSlotBookingsList" class="admin-slot-bookings-list"></div>
+        <p id="adminSlotBookingsEmpty" class="empty-state" hidden>No bookings for this slot.</p>
+        <div class="dialog-actions">
+          <button id="adminSlotBookingsCancelBtn" class="btn btn-secondary" type="button">Close</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="noticeDialog" class="notice-dialog">
       <div class="notice-shell">
         <div class="dialog-head">
