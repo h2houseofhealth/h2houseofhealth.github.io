@@ -15983,6 +15983,41 @@ body.auth-mode .portal {
     margin: 0;
     line-height: 1.4;
   }
+
+  #membershipSection .membership-head {
+    align-items: center;
+    text-align: center;
+  }
+
+  #membershipSection .membership-head > div {
+    justify-items: center;
+    width: 100%;
+  }
+
+  #membershipSection .membership-status {
+    text-align: center;
+    max-width: none;
+  }
+
+  #membershipSection .membership-dashboard-head {
+    align-items: center;
+  }
+
+  #membershipSection .membership-dashboard-head .dashboard-left {
+    width: 100%;
+    max-width: none;
+    text-align: center;
+  }
+
+  #membershipSection .membership-dashboard-head .membership-copy {
+    max-width: none;
+  }
+
+  #membershipSection .membership-dashboard-head .dashboard-actions,
+  #membershipSection .membership-dashboard-head .membership-quick-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 
 #userCartSection .dialog-actions {
