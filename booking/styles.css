@@ -3927,12 +3927,14 @@ h1, h2, h3 {
   padding: 0.55rem;
   background: rgba(255, 255, 255, 0.84);
   min-height: 220px;
+  overflow-x: auto;
 }
 
 .admin-calendar-slot-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.42rem;
+  width: max(100%, 680px);
 }
 
 .admin-calendar-slot-row {
@@ -3987,6 +3989,23 @@ h1, h2, h3 {
   gap: 0.28rem;
   font-size: 0.66rem;
   color: rgba(var(--ink-rgb), 0.72);
+}
+
+.admin-calendar-slot-count-btn {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(var(--brand-primary-rgb), 0.12);
+  color: var(--brand-deep);
+  padding: 0.18rem 0.42rem;
+  font: inherit;
+  font-size: 0.66rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.admin-calendar-slot-count-btn:hover {
+  background: rgba(var(--brand-primary-rgb), 0.18);
 }
 
 .admin-calendar-slot-meta span {
@@ -7401,6 +7420,75 @@ th {
 
 .admin-payment-choice-actions .btn {
   flex: 1 1 220px;
+}
+
+.admin-slot-bookings-dialog {
+  width: min(760px, 94vw);
+}
+
+.admin-slot-bookings-shell {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.admin-slot-bookings-summary {
+  margin: 0;
+}
+
+.admin-slot-bookings-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.admin-slot-booking-card {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid rgba(var(--brand-primary-rgb), 0.14);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.04);
+}
+
+.admin-slot-booking-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  justify-content: space-between;
+}
+
+.admin-slot-booking-head strong {
+  font-size: 1rem;
+  color: var(--ink);
+}
+
+.admin-slot-booking-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  color: rgba(var(--ink-rgb), 0.75);
+  font-size: 0.88rem;
+}
+
+.admin-slot-booking-meta span {
+  white-space: nowrap;
+}
+
+.admin-slot-booking-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.admin-slot-booking-chip {
+  background: rgba(var(--brand-primary-rgb), 0.1);
+  color: var(--brand-deep);
+}
+
+.admin-slot-bookings-dialog .empty-state {
+  margin: 0;
 }
 
 .booking-summary {
@@ -13898,6 +13986,11 @@ img {
   .admin-customer-form {
     min-width: 0;
     width: 100%;
+  }
+
+  .admin-calendar-slot-list {
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+    width: max(100%, 680px);
   }
 
   .my-bookings-session-card,
