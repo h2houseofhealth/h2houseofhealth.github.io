@@ -5288,6 +5288,7 @@ function setProfilePreview(src) {
 }
 
 async function upsertBooking() {
+  console.log("🔥 UPSERT BOOKING STARTED");
   const payload = {
     serviceName: elements.serviceName.value,
     bookingDate: elements.bookingDate.value,
@@ -5333,13 +5334,16 @@ async function upsertBooking() {
     : 0;
   
   const isAdmin = state.user?.role === 'admin';
+  console.log("MODE:", state.adminBookingMode);
   if (isAdmin) {
+   if (state.adminBookingMode === 'new') {
     syncAdminCustomerFromBookingModal();
     if (!isAdminCustomerFormValid()) {
       setBookingCustomerInlineMessage(getAdminCustomerValidationMessage());
       syncBookingModalCustomerGate();
       return;
     }
+  }
     if (state.adminBookingMode === 'new') {
       try {
         const userResult = await api('/api/admin/users', {
@@ -13986,9 +13990,11 @@ function renderAdminRows(bookings) {
     const deliveryStatus = String(booking.paymentLinkDeliveryStatus || '').trim().toLowerCase();
     const deliveryDetail = String(booking.paymentLinkDeliveryDetail || '').trim();
     const deliveryEventAt = booking.paymentLinkEmailEventAt ? formatDateOnly(booking.paymentLinkEmailEventAt) : '';
+    const providerMatch = deliveryDetail.match(/provider:\s*([a-z0-9_-]+)/i);
+    const providerLabel = providerMatch?.[1]?.toUpperCase() || '';
     let emailCellText = 'Not sent';
     if (emailStatus === 'sent') {
-      const finalLabel = deliveryStatus ? `SENT • ${deliveryStatus.toUpperCase()}` : 'SENT';
+      const finalLabel = deliveryStatus ? `SENT • ${providerLabel || deliveryStatus.toUpperCase()}` : 'SENT';
       emailCellText =
         `${finalLabel}` +
         `${emailRecipient ? `\n${emailRecipient}` : ''}` +
@@ -16006,9 +16012,11 @@ function renderAdminHistoryRows(bookings) {
     const deliveryStatus = String(booking.paymentLinkDeliveryStatus || '').trim().toLowerCase();
     const deliveryDetail = String(booking.paymentLinkDeliveryDetail || '').trim();
     const deliveryEventAt = booking.paymentLinkEmailEventAt ? formatDateOnly(booking.paymentLinkEmailEventAt) : '';
+    const providerMatch = deliveryDetail.match(/provider:\s*([a-z0-9_-]+)/i);
+    const providerLabel = providerMatch?.[1]?.toUpperCase() || '';
     let emailCellText = 'Not sent';
     if (emailStatus === 'sent') {
-      const finalLabel = deliveryStatus ? `SENT • ${deliveryStatus.toUpperCase()}` : 'SENT';
+      const finalLabel = deliveryStatus ? `SENT • ${providerLabel || deliveryStatus.toUpperCase()}` : 'SENT';
       emailCellText =
         `${finalLabel}` +
         `${emailRecipient ? `\n${emailRecipient}` : ''}` +
@@ -16100,9 +16108,11 @@ function renderAdminAllBookingRows(bookings) {
     const deliveryStatus = String(booking.paymentLinkDeliveryStatus || '').trim().toLowerCase();
     const deliveryDetail = String(booking.paymentLinkDeliveryDetail || '').trim();
     const deliveryEventAt = booking.paymentLinkEmailEventAt ? formatDateOnly(booking.paymentLinkEmailEventAt) : '';
+    const providerMatch = deliveryDetail.match(/provider:\s*([a-z0-9_-]+)/i);
+    const providerLabel = providerMatch?.[1]?.toUpperCase() || '';
     let emailCellText = 'Not sent';
     if (emailStatus === 'sent') {
-      const finalLabel = deliveryStatus ? `SENT • ${deliveryStatus.toUpperCase()}` : 'SENT';
+      const finalLabel = deliveryStatus ? `SENT • ${providerLabel || deliveryStatus.toUpperCase()}` : 'SENT';
       emailCellText =
         `${finalLabel}` +
         `${emailRecipient ? `\n${emailRecipient}` : ''}` +

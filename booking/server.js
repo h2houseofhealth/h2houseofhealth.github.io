@@ -5148,7 +5148,9 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
      SET payment_link_recipient_email = ?,
          payment_link_emailed_at = CASE WHEN ? = 'sent' THEN datetime('now') ELSE payment_link_emailed_at END,
          payment_link_email_status = ?,
-         payment_link_email_error = ?
+         payment_link_email_error = ?,
+         payment_link_delivery_status = ?,
+         payment_link_delivery_detail = ?
      WHERE id = ?`
   );
   const insertBookingEmailEvent = db.prepare(
@@ -5170,16 +5172,22 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
   });
 
   if (!emailResult.ok) {
+    const providerLabel = String(emailResult.provider || emailResult.delivery || 'unknown').toUpperCase();
+    const detail = [
+      providerLabel ? `Provider: ${providerLabel}` : '',
+      String(emailResult.message || 'Unable to send payment link email.').slice(0, 1000),
+    ].filter(Boolean).join(' | ');
     markEmailDelivery.run(
       recipientEmail,
       'failed',
       'failed',
-      String(emailResult.message || 'Unable to send payment link email.').slice(0, 500),
+      detail.slice(0, 500),
+      'failed',
+      detail.slice(0, 1000),
       bookingId
     );
     const eventAt = new Date().toISOString();
     const messageId = String(emailResult.messageId || '');
-    const detail = String(emailResult.message || 'Unable to send payment link email.').slice(0, 1000);
     const dedupeKey = buildPaymentLinkEventDedupeKey({
       bookingId,
       eventName: 'request_failed',
@@ -5194,8 +5202,9 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
   }
 
   if (Number(emailResult.statusCode || 0) !== 202) {
-    const detail = `Email provider did not confirm 202 acceptance (status: ${Number(emailResult.statusCode || 0) || 'unknown'}).`;
-    markEmailDelivery.run(recipientEmail, 'failed', 'failed', detail, bookingId);
+    const providerLabel = String(emailResult.provider || emailResult.delivery || 'unknown').toUpperCase();
+    const detail = [providerLabel ? `Provider: ${providerLabel}` : '', `Email provider did not confirm 202 acceptance (status: ${Number(emailResult.statusCode || 0) || 'unknown'}).`].filter(Boolean).join(' | ');
+    markEmailDelivery.run(recipientEmail, 'failed', 'failed', detail.slice(0, 500), 'failed', detail.slice(0, 1000), bookingId);
     const eventAt = new Date().toISOString();
     const messageId = String(emailResult.messageId || '');
     const dedupeKey = buildPaymentLinkEventDedupeKey({
@@ -5211,10 +5220,11 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
     return res.status(502).json({ message: detail });
   }
 
-  markEmailDelivery.run(recipientEmail, 'sent', 'sent', null, bookingId);
+  const providerLabel = String(emailResult.provider || emailResult.delivery || 'unknown').toUpperCase();
+  const acceptedDetail = [providerLabel ? `Provider: ${providerLabel}` : '', 'Send request accepted by email provider (202).'].filter(Boolean).join(' | ');
+  markEmailDelivery.run(recipientEmail, 'sent', 'sent', null, 'accepted', acceptedDetail.slice(0, 1000), bookingId);
   const acceptedAt = new Date().toISOString();
   const acceptedMessageId = String(emailResult.messageId || '');
-  const acceptedDetail = 'Send request accepted by email provider (202).';
   const acceptedDedupeKey = buildPaymentLinkEventDedupeKey({
     bookingId,
     eventName: 'request_accepted',
@@ -5243,7 +5253,7 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
     message:
       emailResult.delivery === 'console'
         ? `Payment link generated for ${recipientEmail}. Email service is not configured, so the link was logged on server.`
-        : `Email request accepted for ${recipientEmail}.`,
+        : `Email request accepted for ${recipientEmail} via ${providerLabel.toLowerCase()}.`,
   });
 });
 
@@ -5783,7 +5793,9 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
      SET payment_link_recipient_email = ?,
          payment_link_emailed_at = CASE WHEN ? = 'sent' THEN datetime('now') ELSE payment_link_emailed_at END,
          payment_link_email_status = ?,
-         payment_link_email_error = ?
+         payment_link_email_error = ?,
+         payment_link_delivery_status = ?,
+         payment_link_delivery_detail = ?
      WHERE id = ?`
   );
   const insertBookingEmailEvent = db.prepare(
@@ -5805,16 +5817,22 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
   });
 
   if (!emailResult.ok) {
+    const providerLabel = String(emailResult.provider || emailResult.delivery || 'unknown').toUpperCase();
+    const detail = [
+      providerLabel ? `Provider: ${providerLabel}` : '',
+      String(emailResult.message || 'Unable to send payment link email.').slice(0, 1000),
+    ].filter(Boolean).join(' | ');
     markEmailDelivery.run(
       recipientEmail,
       'failed',
       'failed',
-      String(emailResult.message || 'Unable to send payment link email.').slice(0, 500),
+      detail.slice(0, 500),
+      'failed',
+      detail.slice(0, 1000),
       bookingId
     );
     const eventAt = new Date().toISOString();
     const messageId = String(emailResult.messageId || '');
-    const detail = String(emailResult.message || 'Unable to send payment link email.').slice(0, 1000);
     const dedupeKey = buildPaymentLinkEventDedupeKey({
       bookingId,
       eventName: 'request_failed',
@@ -5829,8 +5847,9 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
   }
 
   if (Number(emailResult.statusCode || 0) !== 202) {
-    const detail = `Email provider did not confirm 202 acceptance (status: ${Number(emailResult.statusCode || 0) || 'unknown'}).`;
-    markEmailDelivery.run(recipientEmail, 'failed', 'failed', detail, bookingId);
+    const providerLabel = String(emailResult.provider || emailResult.delivery || 'unknown').toUpperCase();
+    const detail = [providerLabel ? `Provider: ${providerLabel}` : '', `Email provider did not confirm 202 acceptance (status: ${Number(emailResult.statusCode || 0) || 'unknown'}).`].filter(Boolean).join(' | ');
+    markEmailDelivery.run(recipientEmail, 'failed', 'failed', detail.slice(0, 500), 'failed', detail.slice(0, 1000), bookingId);
     const eventAt = new Date().toISOString();
     const messageId = String(emailResult.messageId || '');
     const dedupeKey = buildPaymentLinkEventDedupeKey({
@@ -5846,10 +5865,11 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
     return res.status(502).json({ message: detail });
   }
 
-  markEmailDelivery.run(recipientEmail, 'sent', 'sent', null, bookingId);
+  const providerLabel = String(emailResult.provider || emailResult.delivery || 'unknown').toUpperCase();
+  const acceptedDetail = [providerLabel ? `Provider: ${providerLabel}` : '', 'Send request accepted by email provider (202).'].filter(Boolean).join(' | ');
+  markEmailDelivery.run(recipientEmail, 'sent', 'sent', null, 'accepted', acceptedDetail.slice(0, 1000), bookingId);
   const acceptedAt = new Date().toISOString();
   const acceptedMessageId = String(emailResult.messageId || '');
-  const acceptedDetail = 'Send request accepted by email provider (202).';
   const acceptedDedupeKey = buildPaymentLinkEventDedupeKey({
     bookingId,
     eventName: 'request_accepted',
@@ -5878,7 +5898,7 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
     message:
       emailResult.delivery === 'console'
         ? `Payment link generated for ${recipientEmail}. Email service is not configured, so the link was logged on server.`
-        : `Email request accepted for ${recipientEmail}.`,
+        : `Email request accepted for ${recipientEmail} via ${providerLabel.toLowerCase()}.`,
   });
 });
 
@@ -13010,130 +13030,171 @@ async function sendBookingPaymentLinkEmail({
     </div>
   `;
 
-  if (SENDGRID_API_KEY) {
-    const senderCandidates = getSendGridBookingSenderCandidates();
-    if (!senderCandidates.length) {
-      return { ok: false, statusCode: 500, message: 'SendGrid booking sender email is not configured.' };
-    }
+  const transporter = getTransporter();
+  const smtpFromEmail = process.env.SMTP_BOOKING_FROM || SENDGRID_BOOKING_FROM_EMAIL || process.env.SMTP_FROM || process.env.SMTP_USER;
+  const mailgunFromEmail = normalizeEnvValue(process.env.MAIL_FROM || smtpFromEmail || SENDGRID_BOOKING_FROM_EMAIL || '');
+  const providerAttempts = [];
 
-    let lastSendGridError = null;
-    for (const fromEmail of senderCandidates) {
-      try {
-        const [sendGridResponse] = await sgMail.send({
+  if (MAILGUN_API_KEY && MAILGUN_DOMAIN) {
+    providerAttempts.push({
+      name: 'mailgun',
+      run: async () => {
+        const result = await sendMailgunEmail({
           to: normalizedToEmail,
-          from: fromEmail,
+          from: mailgunFromEmail || MAIL_FROM,
           subject,
           text,
           html,
-          customArgs: {
-            context: 'booking_payment_link',
-            bookingId: String(bookingId || ''),
-            userId: String(userId || ''),
-          },
-          categories: ['booking_payment_link'],
         });
-        const statusCode = Number(sendGridResponse?.statusCode || 0);
-        const headers = sendGridResponse?.headers || {};
-        const messageId = String(
-          (typeof headers.get === 'function' ? headers.get('x-message-id') : headers['x-message-id'] || headers['X-Message-Id']) || ''
-        ).trim();
-
-        console.log('Payment link email send attempt result (SendGrid):', {
+        const messageId = String(result?.id || '').trim();
+        console.log('Payment link email send attempt result (Mailgun):', {
           to: normalizedToEmail,
-          from: fromEmail,
+          from: mailgunFromEmail || MAIL_FROM,
           subject,
-          statusCode,
+          statusCode: 202,
           messageId,
         });
-
-        if (statusCode !== 202) {
-          lastSendGridError = {
-            statusCode: statusCode || 502,
-            detail: `SendGrid did not return 202 accepted. Received ${statusCode || 'unknown'}.`,
-          };
-          continue;
-        }
-
-        return { ok: true, delivery: 'sendgrid', statusCode, messageId };
-      } catch (error) {
-        const sendGridError = extractSendGridErrorDetails(error);
-        lastSendGridError = sendGridError;
-        console.error('Failed to send booking payment link email via SendGrid:', {
-          to: normalizedToEmail,
-          from: fromEmail,
-          subject,
-          statusCode: sendGridError.statusCode,
-          detail: sendGridError.detail,
-          responseBody: sendGridError.responseBody,
-        });
-        if (![401, 403].includes(Number(sendGridError.statusCode || 0))) {
-          break;
-        }
-      }
-    }
-
-    return {
-      ok: false,
-      statusCode: lastSendGridError?.statusCode || 500,
-      message:
-        Number(lastSendGridError?.statusCode || 0) === 403
-          ? 'SendGrid rejected all configured sender identities. Verify SENDGRID_BOOKING_FROM_EMAIL or authenticate the sender domain.'
-          : 'Unable to send payment link email. Please try again.',
-    };
+        return { ok: true, delivery: 'mailgun', provider: 'mailgun', statusCode: 202, messageId };
+      },
+    });
   }
 
-  const transporter = getTransporter();
-  const fromEmail = process.env.SMTP_BOOKING_FROM || SENDGRID_BOOKING_FROM_EMAIL || process.env.SMTP_FROM || process.env.SMTP_USER;
-  if (!transporter || !fromEmail) {
-    if (ALLOW_DEV_OTP_FALLBACK) {
-      const messageId = `dev-console-${Date.now()}`;
-      console.warn(`[DEV MAIL FALLBACK] Payment link for ${normalizedToEmail}: ${safeLink}`);
-      console.log('Payment link email send attempt result (DEV console):', {
-        to: normalizedToEmail,
-        from: 'console',
-        subject,
-        statusCode: 202,
-        messageId,
+  if (SENDGRID_API_KEY) {
+    const senderCandidates = getSendGridBookingSenderCandidates();
+    if (senderCandidates.length) {
+      providerAttempts.push({
+        name: 'sendgrid',
+        run: async () => {
+          let lastSendGridError = null;
+          for (const fromEmail of senderCandidates) {
+            try {
+              const [sendGridResponse] = await sgMail.send({
+                to: normalizedToEmail,
+                from: fromEmail,
+                subject,
+                text,
+                html,
+                customArgs: {
+                  context: 'booking_payment_link',
+                  bookingId: String(bookingId || ''),
+                  userId: String(userId || ''),
+                },
+                categories: ['booking_payment_link'],
+              });
+              const statusCode = Number(sendGridResponse?.statusCode || 0);
+              const headers = sendGridResponse?.headers || {};
+              const messageId = String(
+                (typeof headers.get === 'function' ? headers.get('x-message-id') : headers['x-message-id'] || headers['X-Message-Id']) || ''
+              ).trim();
+
+              console.log('Payment link email send attempt result (SendGrid):', {
+                to: normalizedToEmail,
+                from: fromEmail,
+                subject,
+                statusCode,
+                messageId,
+              });
+
+              if (statusCode !== 202) {
+                lastSendGridError = {
+                  statusCode: statusCode || 502,
+                  detail: `SendGrid did not return 202 accepted. Received ${statusCode || 'unknown'}.`,
+                };
+                continue;
+              }
+
+              return { ok: true, delivery: 'sendgrid', provider: 'sendgrid', statusCode, messageId };
+            } catch (error) {
+              const sendGridError = extractSendGridErrorDetails(error);
+              lastSendGridError = sendGridError;
+              console.error('Failed to send booking payment link email via SendGrid:', {
+                to: normalizedToEmail,
+                from: fromEmail,
+                subject,
+                statusCode: sendGridError.statusCode,
+                detail: sendGridError.detail,
+                responseBody: sendGridError.responseBody,
+              });
+              if (![401, 403].includes(Number(sendGridError.statusCode || 0))) {
+                break;
+              }
+            }
+          }
+
+          return {
+            ok: false,
+            statusCode: lastSendGridError?.statusCode || 500,
+            message:
+              Number(lastSendGridError?.statusCode || 0) === 403
+                ? 'SendGrid rejected all configured sender identities. Verify SENDGRID_BOOKING_FROM_EMAIL or authenticate the sender domain.'
+                : 'Unable to send payment link email. Please try again.',
+          };
+        },
       });
-      return { ok: true, delivery: 'console', statusCode: 202, messageId };
     }
+  }
+
+  if (transporter && smtpFromEmail) {
+    providerAttempts.push({
+      name: 'smtp',
+      run: async () => {
+        const info = await transporter.sendMail({
+          from: smtpFromEmail,
+          to: normalizedToEmail,
+          subject,
+          text,
+          html,
+        });
+        const messageId = String(info?.messageId || '').trim();
+        console.log('Payment link email send attempt result (SMTP):', {
+          to: normalizedToEmail,
+          from: smtpFromEmail,
+          subject,
+          statusCode: 202,
+          messageId,
+        });
+        return { ok: true, delivery: 'smtp', provider: 'smtp', statusCode: 202, messageId };
+      },
+    });
+  }
+
+  if (!providerAttempts.length) {
     return {
       ok: false,
-      statusCode: 500,
+      statusCode: 503,
       message: 'Email service is not configured. Please contact support.',
     };
   }
 
-  try {
-    const info = await transporter.sendMail({
-      from: fromEmail,
-      to: normalizedToEmail,
-      subject,
-      text,
-      html,
-    });
-    const messageId = String(info?.messageId || '').trim();
-    console.log('Payment link email send attempt result (SMTP):', {
-      to: normalizedToEmail,
-      from: fromEmail,
-      subject,
-      statusCode: 202,
-      messageId,
-    });
-    return { ok: true, delivery: 'smtp', statusCode: 202, messageId };
-  } catch (error) {
-    console.error('Failed to send booking payment link email via SMTP:', {
-      to: normalizedToEmail,
-      from: fromEmail,
-      subject,
-      error: String(error?.message || error),
-    });
-    return {
-      ok: false,
-      statusCode: 500,
-      message: 'Unable to send payment link email. Please try again.',
-    };
+  let lastFailure = null;
+  for (const provider of providerAttempts) {
+    try {
+      const outcome = await provider.run();
+      if (outcome.ok) {
+        return outcome;
+      }
+      lastFailure = outcome;
+    } catch (error) {
+      const detail = String(error?.message || error);
+      console.error(`Failed to send booking payment link email via ${provider.name}:`, {
+        to: normalizedToEmail,
+        subject,
+        error: detail,
+      });
+      lastFailure = {
+        ok: false,
+        statusCode: 500,
+        message: 'Unable to send payment link email. Please try again.',
+        detail,
+      };
+    }
   }
+
+  return {
+    ok: false,
+    statusCode: lastFailure?.statusCode || 500,
+    message: lastFailure?.message || 'Unable to send payment link email. Please try again.',
+  };
 }
 
 async function sendOtpEmail(toEmail, otp, purpose = 'signup') {
