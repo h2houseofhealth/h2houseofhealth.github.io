@@ -5250,14 +5250,7 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
     sent: true,
     paymentLinkUrl,
     messageId: String(emailResult.messageId || ''),
-<<<<<<< Updated upstream
-    message:
-      emailResult.delivery === 'console'
-        ? `Payment link generated for ${recipientEmail}. Email service is not configured, so the link was logged on server.`
-        : `Email request accepted for ${recipientEmail} via ${providerLabel.toLowerCase()}.`,
-=======
     message: 'Payment email sent successfully.',
->>>>>>> Stashed changes
   });
 });
 
@@ -5899,14 +5892,7 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
     sent: true,
     paymentLinkUrl,
     messageId: String(emailResult.messageId || ''),
-<<<<<<< Updated upstream
-    message:
-      emailResult.delivery === 'console'
-        ? `Payment link generated for ${recipientEmail}. Email service is not configured, so the link was logged on server.`
-        : `Email request accepted for ${recipientEmail} via ${providerLabel.toLowerCase()}.`,
-=======
     message: 'Payment email sent successfully.',
->>>>>>> Stashed changes
   });
 });
 
@@ -13038,7 +13024,6 @@ async function sendBookingPaymentLinkEmail({
     </div>
   `;
 
-<<<<<<< Updated upstream
   const transporter = getTransporter();
   const smtpFromEmail = process.env.SMTP_BOOKING_FROM || SENDGRID_BOOKING_FROM_EMAIL || process.env.SMTP_FROM || process.env.SMTP_USER;
   const mailgunFromEmail = normalizeEnvValue(process.env.MAIL_FROM || smtpFromEmail || SENDGRID_BOOKING_FROM_EMAIL || '');
@@ -13067,7 +13052,7 @@ async function sendBookingPaymentLinkEmail({
       },
     });
   }
-=======
+
   try {
     await sendMailgunEmail({
       to: normalizedToEmail,
@@ -13082,13 +13067,12 @@ async function sendBookingPaymentLinkEmail({
       subject,
       statusCode: 202,
     });
-
-   return {
-    ok: true,
-    delivery: 'mailgun',
-    statusCode: 202,
-   };
-   } catch (error) {
+    return {
+      ok: true,
+      delivery: 'mailgun',
+      statusCode: 202,
+    };
+  } catch (error) {
     console.error('Failed to send booking payment link email via Mailgun:', {
       to: normalizedToEmail,
       from: MAIL_FROM || 'noreply@h2houseofhealth.com',
@@ -13099,84 +13083,9 @@ async function sendBookingPaymentLinkEmail({
       ok: false,
       statusCode: 500,
       message: error?.message || 'Unable to send payment link email.',
-  };
-}
->>>>>>> Stashed changes
-
-  if (SENDGRID_API_KEY) {
-    const senderCandidates = getSendGridBookingSenderCandidates();
-    if (senderCandidates.length) {
-      providerAttempts.push({
-        name: 'sendgrid',
-        run: async () => {
-          let lastSendGridError = null;
-          for (const fromEmail of senderCandidates) {
-            try {
-              const [sendGridResponse] = await sgMail.send({
-                to: normalizedToEmail,
-                from: fromEmail,
-                subject,
-                text,
-                html,
-                customArgs: {
-                  context: 'booking_payment_link',
-                  bookingId: String(bookingId || ''),
-                  userId: String(userId || ''),
-                },
-                categories: ['booking_payment_link'],
-              });
-              const statusCode = Number(sendGridResponse?.statusCode || 0);
-              const headers = sendGridResponse?.headers || {};
-              const messageId = String(
-                (typeof headers.get === 'function' ? headers.get('x-message-id') : headers['x-message-id'] || headers['X-Message-Id']) || ''
-              ).trim();
-
-              console.log('Payment link email send attempt result (SendGrid):', {
-                to: normalizedToEmail,
-                from: fromEmail,
-                subject,
-                statusCode,
-                messageId,
-              });
-
-              if (statusCode !== 202) {
-                lastSendGridError = {
-                  statusCode: statusCode || 502,
-                  detail: `SendGrid did not return 202 accepted. Received ${statusCode || 'unknown'}.`,
-                };
-                continue;
-              }
-
-              return { ok: true, delivery: 'sendgrid', provider: 'sendgrid', statusCode, messageId };
-            } catch (error) {
-              const sendGridError = extractSendGridErrorDetails(error);
-              lastSendGridError = sendGridError;
-              console.error('Failed to send booking payment link email via SendGrid:', {
-                to: normalizedToEmail,
-                from: fromEmail,
-                subject,
-                statusCode: sendGridError.statusCode,
-                detail: sendGridError.detail,
-                responseBody: sendGridError.responseBody,
-              });
-              if (![401, 403].includes(Number(sendGridError.statusCode || 0))) {
-                break;
-              }
-            }
-          }
-
-          return {
-            ok: false,
-            statusCode: lastSendGridError?.statusCode || 500,
-            message:
-              Number(lastSendGridError?.statusCode || 0) === 403
-                ? 'SendGrid rejected all configured sender identities. Verify SENDGRID_BOOKING_FROM_EMAIL or authenticate the sender domain.'
-                : 'Unable to send payment link email. Please try again.',
-          };
-        },
-      });
-    }
+    };
   }
+
 
   if (transporter && smtpFromEmail) {
     providerAttempts.push({
