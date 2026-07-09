@@ -12252,7 +12252,7 @@ body {
 /* Header/topbar restore */
 #memberChoiceGate .member-choice-topbar {
   display: grid !important;
-  grid-template-columns: minmax(0, 1fr) auto auto !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
   align-items: center !important;
   column-gap: 28px !important;
   padding: 18px 0 18px !important;
@@ -12292,6 +12292,11 @@ body {
   font-size: 18px !important;
   font-weight: 600 !important;
   box-shadow: 0 10px 22px rgba(200, 101, 45, 0.22) !important;
+}
+
+/* Keep the secondary Book Now CTA mobile-only. */
+#memberChoiceGate .member-choice-book-session-btn {
+  display: none !important;
 }
 
 #memberChoiceGate .auth-kicker {
@@ -13251,6 +13256,10 @@ img {
     padding: 0 10px !important;
     font-size: 13px !important;
     border-radius: 10px !important;
+  }
+
+  #memberChoiceGate .member-choice-book-session-btn {
+    display: inline-flex !important;
   }
 
   #memberChoiceGate .member-choice-hero.hero-inner,

@@ -1615,11 +1615,9 @@ function attachEvents() {
     navigateToUserBookings();
   });
 
-  const publicBookSessionButtons = new Set([
-    elements.publicBookSessionBtn,
-    ...document.querySelectorAll('[data-public-book-session]'),
-  ]);
-  publicBookSessionButtons.forEach((button) => {
+  elements.publicBookSessionBtn?.addEventListener('click', handlePublicBookSession);
+  document.querySelectorAll('[data-public-book-session]').forEach((button) => {
+    if (button === elements.publicBookSessionBtn) return;
     button?.addEventListener('click', handlePublicBookSession);
   });
 
@@ -4224,6 +4222,10 @@ function navigateToUserBookings() {
 }
 
 async function handlePublicBookSession() {
+  if (this === elements.publicBookSessionBtn) {
+    window.location.href = '/booking/?entry=guest';
+    return;
+  }
   openAuthFromLanding('public-book-session');
 }
 
