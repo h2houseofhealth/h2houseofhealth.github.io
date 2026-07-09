@@ -12645,6 +12645,49 @@ function getAdminSessionKindLabel(booking) {
   return getBookingCategoryLabel(booking?.serviceName || 'Session');
 }
 
+function getAdminUserMembershipSessionSummary(user) {
+  const allowance = getMembershipPlanSessionAllowance(user);
+  const totalSessions = Number(allowance.totalSessions || 0);
+  const startedAtMs = user?.membershipStartedAt ? new Date(user.membershipStartedAt).getTime() : NaN;
+  const expiresAt = getEffectiveMembershipExpiryDate(user?.membershipStartedAt, user?.membershipExpiresAt);
+  const expiresAtMs = expiresAt && !Number.isNaN(expiresAt.getTime()) ? expiresAt.getTime() : NaN;
+  const hasMembershipWindow = Number.isFinite(startedAtMs) || Number.isFinite(expiresAtMs);
+  const active = Boolean(totalSessions) && hasMembershipWindow && (!Number.isFinite(expiresAtMs) || expiresAtMs >= Date.now());
+
+  if (!active) {
+    return {
+      active: false,
+      totalSessions: 0,
+      usedSessions: 0,
+      completedSessions: 0,
+      missedSessions: 0,
+      remainingSessions: 0,
+    };
+  }
+  const bookings = getAdminUserBookings(user?.id);
+
+  const membershipBookings = bookings.filter((booking) => {
+    if (!isAdminMemberSessionBooking(booking)) return false;
+    const bookingMs = getBookingStartTime(booking);
+    if (Number.isFinite(startedAtMs) && Number.isFinite(bookingMs) && bookingMs < startedAtMs) return false;
+    if (Number.isFinite(expiresAtMs) && Number.isFinite(bookingMs) && bookingMs > expiresAtMs) return false;
+    return true;
+  });
+
+  const usedSessions = membershipBookings.length;
+  const completedSessions = membershipBookings.filter((booking) => String(booking?.status || '').toLowerCase() === 'completed').length;
+  const missedSessions = membershipBookings.filter(isBookingMissed).length;
+
+  return {
+    active: true,
+    totalSessions,
+    usedSessions,
+    completedSessions,
+    missedSessions,
+    remainingSessions: Math.max(0, totalSessions - usedSessions),
+  };
+}
+
 function getAdminUserSessionsByFilter(bookings, filter = state.adminUserSessionFilter) {
   const normalizedFilter = String(filter || 'all').trim().toLowerCase();
   const source = Array.isArray(bookings) ? bookings : [];
@@ -12763,10 +12806,13 @@ function buildAdminUserSessionSummary(user) {
   const activeBookings = bookings.filter((booking) => String(booking?.status || '').toLowerCase() !== 'cancelled');
   const completed = activeBookings.filter((booking) => String(booking?.status || '').toLowerCase() === 'completed').length;
   const missed = activeBookings.filter(isBookingMissed).length;
-  const remaining = activeBookings.filter((booking) => {
-    const status = String(booking?.status || '').toLowerCase();
-    return status !== 'completed' && !isBookingMissed(booking);
-  }).length;
+  const membershipSummary = getAdminUserMembershipSessionSummary(user);
+  const remaining = membershipSummary.active
+    ? membershipSummary.remainingSessions
+    : activeBookings.filter((booking) => {
+        const status = String(booking?.status || '').toLowerCase();
+        return status !== 'completed' && !isBookingMissed(booking);
+      }).length;
 
   return {
     bookings,
@@ -12776,6 +12822,10 @@ function buildAdminUserSessionSummary(user) {
     missed,
     memberSessions: activeBookings.filter(isAdminMemberSessionBooking).length,
     topUpSessions: activeBookings.filter(isAdminTopUpSessionBooking).length,
+    membershipTotalSessions: membershipSummary.totalSessions,
+    membershipUsedSessions: membershipSummary.usedSessions,
+    membershipCompletedSessions: membershipSummary.completedSessions,
+    membershipMissedSessions: membershipSummary.missedSessions,
   };
 }
 
@@ -12936,6 +12986,11 @@ function renderAdminUserSessionDialog() {
     .forEach((booking) => {
       const derivedStatus = getDerivedBookingStatus(booking);
       const sessionKind = getAdminSessionKindLabel(booking);
+      const sessionKindChip = sessionKind === 'Paid'
+        ? ''
+        : `<span class="status-chip session-${escapeHtml(String(sessionKind).toLowerCase().replace(/[^a-z0-9]+/g, '-'))}">${escapeHtml(
+            sessionKind
+          )}</span>`;
       const row = document.createElement('article');
       row.className = 'admin-user-session-row';
       row.innerHTML = `
@@ -12944,9 +12999,7 @@ function renderAdminUserSessionDialog() {
           <p>${escapeHtml(formatAdminBookingDateTime(booking?.bookingDate, booking?.bookingTime).replace(/\n/g, ' • '))}</p>
         </div>
         <div class="admin-user-session-badges">
-          <span class="status-chip session-${escapeHtml(String(sessionKind).toLowerCase().replace(/[^a-z0-9]+/g, '-'))}">${escapeHtml(
-            sessionKind
-          )}</span>
+          ${sessionKindChip}
           <span class="status-chip status-${escapeHtml(derivedStatus)}">${escapeHtml(derivedStatus)}</span>
           <span class="status-chip payment-${escapeHtml(normalizePaymentStatusKey(booking?.paymentStatus))}">${escapeHtml(
             formatPaymentStatusLabel(booking?.paymentStatus)
