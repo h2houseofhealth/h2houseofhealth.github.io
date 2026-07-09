@@ -5198,7 +5198,7 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
       detail,
     });
     insertBookingEmailEvent.run(bookingId, 'request_failed', recipientEmail, messageId, '', dedupeKey, detail, eventAt, null);
-    return res.status(emailResult.statusCode || 500).json({ message: emailResult.message || 'Unable to send payment link email.' });
+    return res.status(emailResult.statusCode || 500).json({ message: 'Unable to send payment link email. Please try again.' });
   }
 
   if (Number(emailResult.statusCode || 0) !== 202) {
@@ -5217,7 +5217,7 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
       detail,
     });
     insertBookingEmailEvent.run(bookingId, 'request_failed', recipientEmail, messageId, '', dedupeKey, detail, eventAt, null);
-    return res.status(502).json({ message: detail });
+    return res.status(502).json({ message: 'Unable to send payment link email. Please try again.' });
   }
 
   const providerLabel = String(emailResult.provider || emailResult.delivery || 'unknown').toUpperCase();
@@ -5250,10 +5250,14 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
     sent: true,
     paymentLinkUrl,
     messageId: String(emailResult.messageId || ''),
+<<<<<<< Updated upstream
     message:
       emailResult.delivery === 'console'
         ? `Payment link generated for ${recipientEmail}. Email service is not configured, so the link was logged on server.`
         : `Email request accepted for ${recipientEmail} via ${providerLabel.toLowerCase()}.`,
+=======
+    message: 'Payment email sent successfully.',
+>>>>>>> Stashed changes
   });
 });
 
@@ -5843,7 +5847,7 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
       detail,
     });
     insertBookingEmailEvent.run(bookingId, 'request_failed', recipientEmail, messageId, '', dedupeKey, detail, eventAt, null);
-    return res.status(emailResult.statusCode || 500).json({ message: emailResult.message || 'Unable to send payment link email.' });
+    return res.status(emailResult.statusCode || 500).json({ message: 'Unable to send payment link email. Please try again.' });
   }
 
   if (Number(emailResult.statusCode || 0) !== 202) {
@@ -5862,7 +5866,7 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
       detail,
     });
     insertBookingEmailEvent.run(bookingId, 'request_failed', recipientEmail, messageId, '', dedupeKey, detail, eventAt, null);
-    return res.status(502).json({ message: detail });
+    return res.status(502).json({ message: 'Unable to send payment link email. Please try again.' });
   }
 
   const providerLabel = String(emailResult.provider || emailResult.delivery || 'unknown').toUpperCase();
@@ -5895,10 +5899,14 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
     sent: true,
     paymentLinkUrl,
     messageId: String(emailResult.messageId || ''),
+<<<<<<< Updated upstream
     message:
       emailResult.delivery === 'console'
         ? `Payment link generated for ${recipientEmail}. Email service is not configured, so the link was logged on server.`
         : `Email request accepted for ${recipientEmail} via ${providerLabel.toLowerCase()}.`,
+=======
+    message: 'Payment email sent successfully.',
+>>>>>>> Stashed changes
   });
 });
 
@@ -13030,6 +13038,7 @@ async function sendBookingPaymentLinkEmail({
     </div>
   `;
 
+<<<<<<< Updated upstream
   const transporter = getTransporter();
   const smtpFromEmail = process.env.SMTP_BOOKING_FROM || SENDGRID_BOOKING_FROM_EMAIL || process.env.SMTP_FROM || process.env.SMTP_USER;
   const mailgunFromEmail = normalizeEnvValue(process.env.MAIL_FROM || smtpFromEmail || SENDGRID_BOOKING_FROM_EMAIL || '');
@@ -13058,6 +13067,41 @@ async function sendBookingPaymentLinkEmail({
       },
     });
   }
+=======
+  try {
+    await sendMailgunEmail({
+      to: normalizedToEmail,
+      from: MAIL_FROM || 'noreply@h2houseofhealth.com',
+      subject,
+      text,
+      html,
+    });
+    console.log('Payment link email send attempt result (Mailgun):', {
+      to: normalizedToEmail,
+      from: MAIL_FROM || 'noreply@h2houseofhealth.com',
+      subject,
+      statusCode: 202,
+    });
+
+   return {
+    ok: true,
+    delivery: 'mailgun',
+    statusCode: 202,
+   };
+   } catch (error) {
+    console.error('Failed to send booking payment link email via Mailgun:', {
+      to: normalizedToEmail,
+      from: MAIL_FROM || 'noreply@h2houseofhealth.com',
+      subject,
+      error: error?.message,
+    });
+    return {
+      ok: false,
+      statusCode: 500,
+      message: error?.message || 'Unable to send payment link email.',
+  };
+}
+>>>>>>> Stashed changes
 
   if (SENDGRID_API_KEY) {
     const senderCandidates = getSendGridBookingSenderCandidates();

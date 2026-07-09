@@ -5341,8 +5341,18 @@ async function upsertBooking() {
    if (state.adminBookingMode === 'new') {
     syncAdminCustomerFromBookingModal();
     if (!isAdminCustomerFormValid()) {
-      setBookingCustomerInlineMessage(getAdminCustomerValidationMessage());
+      const msg = getAdminCustomerValidationMessage();
+      setBookingCustomerInlineMessage(msg);
       syncBookingModalCustomerGate();
+      showNotice({ title: 'Missing contact', body: msg, type: 'error' });
+      render();
+      // focus first missing field
+      const name = String(state.adminCustomerForm.name || '').trim();
+      const email = String(state.adminCustomerForm.email || '').trim();
+      const phone = normalizeTenDigitMobile(state.adminCustomerForm.phone || '');
+      if (!name && elements.bookingCustomerName) elements.bookingCustomerName.focus();
+      else if ((!email || !isValidEmail(email)) && elements.bookingCustomerEmail) elements.bookingCustomerEmail.focus();
+      else if ((!phone || phone.length !== 10) && elements.bookingCustomerPhone) elements.bookingCustomerPhone.focus();
       return;
     }
   }
@@ -5371,6 +5381,30 @@ async function upsertBooking() {
     payload.customerName = state.adminCustomerForm.name;
     payload.customerEmail = state.adminCustomerForm.email;
     payload.customerPhone = state.adminCustomerForm.phone;
+  }
+
+  // For non-admin users require at least one contact (email or phone)
+  if (!isAdmin) {
+    const email = String(elements.bookingCustomerEmail?.value || '').trim();
+    const phone = normalizeTenDigitMobile(String(elements.bookingCustomerPhone?.value || ''));
+    if (!email && !phone) {
+      showNotice({ title: 'Missing contact', body: 'Please provide an email or contact number to confirm booking.' });
+      if (elements.bookingCustomerEmail) elements.bookingCustomerEmail.focus();
+      return;
+    }
+    if (email && !isValidEmail(email)) {
+      showNotice({ title: 'Invalid email', body: 'Please enter a valid email address.' });
+      elements.bookingCustomerEmail?.focus();
+      return;
+    }
+    if (phone && phone.length !== 10) {
+      showNotice({ title: 'Invalid phone', body: 'Please enter a valid 10-digit contact number.' });
+      elements.bookingCustomerPhone?.focus();
+      return;
+    }
+    payload.customerName = String(elements.bookingCustomerName?.value || '').trim();
+    payload.customerEmail = email;
+    payload.customerPhone = phone;
   }
 
   const id = elements.bookingId.value;
@@ -5621,18 +5655,12 @@ async function sendPaymentLinkViaEmail(bookingId, email, paymentLink = '', phone
     render();
 
     const link = String(result?.paymentLinkUrl || '').trim();
-    const messageId = String(result?.messageId || '').trim();
     if (link) copyTextToClipboard(link);
 
     showNotice({
-      title: 'Email queued',
+      title: 'Email sent',
       type: 'success',
-      body: [
-        `To: ${email}`,
-        result?.message || 'Email provider accepted the request.',
-        messageId ? `Message ID: ${messageId}` : '',
-        link ? `Payment Link:\n${link}\n\nLink copied.` : '',
-      ].filter(Boolean),
+      body: 'Payment email sent successfully.',
     });
   } catch (error) {
     await loadDashboardData();
