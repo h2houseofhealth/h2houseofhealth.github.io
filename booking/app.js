@@ -512,6 +512,7 @@ const elements = {
   membershipPeopleMeta: document.getElementById('membershipPeopleMeta'),
   membershipPeopleList: document.getElementById('membershipPeopleList'),
   membershipAddPersonDialog: document.getElementById('membershipAddPersonDialog'),
+  membershipAddPersonDialogTitle: document.getElementById('membershipAddPersonDialogTitle'),
   membershipAddPersonForm: document.getElementById('membershipAddPersonForm'),
   closeMembershipAddPersonDialogBtn: document.getElementById('closeMembershipAddPersonDialogBtn'),
   cancelMembershipAddPersonBtn: document.getElementById('cancelMembershipAddPersonBtn'),
@@ -1502,13 +1503,7 @@ function attachEvents() {
     });
   });
   elements.membershipQuickAddPersonBtn?.addEventListener('click', () => {
-    state.activeUserTab = 'membership';
-    state.membershipBrowseVisible = true;
-    window.location.hash = '#membership';
-    render();
-    requestAnimationFrame(() => {
-      elements.membershipBrowsePanel?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
+    openMembershipAddPersonDialog();
   });
   elements.membershipQuickHistoryBtn?.addEventListener('click', () => {
     resetServiceBrowserState();
@@ -1545,13 +1540,7 @@ function attachEvents() {
     });
   });
   elements.membershipAddPersonBtn?.addEventListener('click', () => {
-    const rosterLoaded = Boolean(state.membershipRoster && typeof state.membershipRoster === 'object');
-    const slotsRemaining = rosterLoaded ? Number(state.membershipRoster?.slotsRemaining) : Number.NaN;
-    if (!rosterLoaded || (Number.isFinite(slotsRemaining) && slotsRemaining > 0)) {
-      openMembershipAddPersonDialog();
-      return;
-    }
-    openMembershipAddPersonUpgradeCheckoutDialog();
+    openMembershipAddPersonDialog();
   });
   elements.servicesBackBtn?.addEventListener('click', () => {
     resetServiceBrowserState();
@@ -1719,7 +1708,7 @@ function attachEvents() {
       }
       if (submitBtn) {
         submitBtn.disabled = true;
-        submitBtn.textContent = 'Saving...';
+        submitBtn.textContent = 'Starting payment...';
       }
       await submitMembershipAddPerson();
     } catch (error) {
@@ -12004,31 +11993,13 @@ async function openMembershipRosterDialog() {
     members.length
   );
   const visibleMembers = members.slice(0, resolvedPeopleCount || members.length);
-  const startedAtValue =
-    roster?.subscription?.startedAt ||
-    state.membership.current?.startedAt ||
-    state.user?.membershipStartedAt ||
-    null;
-  const expiresAtValue =
-    roster?.subscription?.expiresAt ||
-    state.membership.current?.expiresAt ||
-    state.user?.membershipExpiresAt ||
-    null;
-  const startedAt = startedAtValue ? new Date(startedAtValue) : null;
-  const expiresAt = expiresAtValue ? new Date(expiresAtValue) : null;
-  const validityText =
-    startedAt && !Number.isNaN(startedAt.getTime())
-      ? `Membership validity starts ${formatDateAsDayMonthYear(startedAt)}`
-      : 'Membership validity is active';
-  const endText = expiresAt && !Number.isNaN(expiresAt.getTime()) ? ` and ends ${formatDateAsDayMonthYear(expiresAt)}` : '';
-
   if (elements.membershipRosterDialogTitle) {
     elements.membershipRosterDialogTitle.textContent = 'Covered Members';
   }
   const summaryCount = resolvedPeopleCount || visibleMembers.length;
   elements.membershipRosterSummary.textContent =
     `${visibleMembers.length} of ${summaryCount} covered member${summaryCount === 1 ? '' : 's'}. ` +
-    `${validityText}${endText}.`;
+    `Each member shows their own validity window below.`;
 
   elements.membershipRosterList.innerHTML = '';
   if (!visibleMembers.length) {
@@ -12044,12 +12015,21 @@ async function openMembershipRosterDialog() {
       const place = String(member?.place || '').trim();
       const email = String(member?.email || '').trim() || '-';
       const contactNumber = String(member?.contactNumber || '').trim() || '-';
+      const memberStartedAt = member?.startedAt ? new Date(member.startedAt) : null;
+      const memberExpiresAt = member?.expiresAt ? new Date(member.expiresAt) : null;
+      const memberValidityText =
+        memberStartedAt && !Number.isNaN(memberStartedAt.getTime())
+          ? `Valid from ${formatDateAsDayMonthYear(memberStartedAt)}`
+          : 'Validity pending';
+      const memberValidityEndText =
+        memberExpiresAt && !Number.isNaN(memberExpiresAt.getTime()) ? ` to ${formatDateAsDayMonthYear(memberExpiresAt)}` : '';
       item.innerHTML = `
         <div><strong>Person ${index + 1}</strong></div>
         <div><strong>Name:</strong> ${escapeHtml(name)}</div>
         ${place ? `<div><strong>Place:</strong> ${escapeHtml(place)}</div>` : ''}
         <div><strong>Email:</strong> ${escapeHtml(email)}</div>
         <div><strong>Contact:</strong> ${escapeHtml(contactNumber)}</div>
+        <div><strong>Validity:</strong> ${escapeHtml(memberValidityText + memberValidityEndText)}</div>
       `;
       elements.membershipRosterList.appendChild(item);
     });
@@ -12074,17 +12054,12 @@ function openMembershipAddPersonDialog() {
     showNotice({ title: 'Members only', body: 'Active membership is required to add a person.' });
     return;
   }
-  const startedAtValue =
-    state.membershipRoster?.subscription?.startedAt ||
-    state.membership.current?.startedAt ||
-    state.user?.membershipStartedAt ||
-    null;
-  const startedAt = startedAtValue ? new Date(startedAtValue) : null;
+  if (elements.membershipAddPersonDialogTitle) {
+    elements.membershipAddPersonDialogTitle.textContent = 'Add Person Membership • Rs. 78,000';
+  }
   if (elements.membershipAddPersonValidityNote) {
     elements.membershipAddPersonValidityNote.textContent =
-      startedAt && !Number.isNaN(startedAt.getTime())
-        ? `Validity for this person starts from your payment date: ${formatDateAsDayMonthYear(startedAt)}.`
-        : 'Validity for this person starts from your membership payment date.';
+      'Validity for this person starts on the successful payment date and runs for one year.';
   }
   if (elements.membershipAddPersonName) elements.membershipAddPersonName.value = '';
   if (elements.membershipAddPersonPlace) elements.membershipAddPersonPlace.value = '';
@@ -12234,15 +12209,85 @@ async function submitMembershipAddPerson() {
     throw new Error('Contact number must be 10 digits.');
   }
 
-  const response = await api('/api/membership/members', {
+  const memberDetails = [{ name, place, email, contactNumber }];
+  await activateMembershipAddPersonWithPayment(memberDetails);
+}
+
+async function activateMembershipAddPersonWithPayment(memberDetails = []) {
+  const addPersonPlan = (state.membership.plans || []).find((plan) => String(plan.id) === 'h2_add_person') || null;
+  if (!addPersonPlan) {
+    throw new Error('Add Person plan is not configured.');
+  }
+
+  const order = await api('/api/membership/create-order', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, place, email, contactNumber }),
+    body: JSON.stringify({
+      planId: addPersonPlan.id,
+      additionalPeople: 0,
+      memberDetails,
+      couponCode: '',
+    }),
   });
 
-  state.membershipRoster = response || null;
+  if (!window.Razorpay) {
+    throw new Error('Razorpay SDK not loaded');
+  }
+
   closeMembershipAddPersonDialog();
-  renderMembership();
+
+  const options = {
+    key: order.keyId,
+    amount: order.amount,
+    currency: order.currency || 'INR',
+    name: 'H2 House Of Health',
+    description: `Membership: ${order.plan?.name || addPersonPlan.name}`,
+    order_id: order.orderId,
+    prefill: {
+      name: order.user?.name || state.user?.name || '',
+      email: order.user?.email || state.user?.email || '',
+    },
+    theme: {
+      color: '#8b5e3c',
+    },
+    handler: async (response) => {
+      try {
+        const result = await api('/api/membership/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            planId: addPersonPlan.id,
+            razorpay_order_id: response.razorpay_order_id,
+            razorpay_payment_id: response.razorpay_payment_id,
+            razorpay_signature: response.razorpay_signature,
+          }),
+        });
+        state.user = { ...state.user, ...(result.profile || {}) };
+        await loadDashboardData();
+        state.membershipCouponPreview = null;
+        if (elements.membershipCouponCode) elements.membershipCouponCode.value = '';
+        renderMembershipCouponPreview();
+        renderMembershipCheckoutSummary();
+        state.activeUserTab = 'membership';
+        window.location.hash = '#membership';
+        render();
+        showNotice({
+          title: 'Success',
+          body: [result.message || 'Additional member added successfully.', ...buildAppliedCouponSuccessLines(result.coupon || order.coupon)],
+        });
+      } catch (error) {
+        showNotice({ title: 'Error', body: getCheckoutPaymentErrorMessage(error, 'Membership payment verification failed.') });
+      }
+    },
+    modal: {
+      ondismiss: () => {
+        showNotice({ title: 'Notice', body: 'Membership payment was canceled.' });
+      },
+    },
+  };
+
+  const checkout = new window.Razorpay(options);
+  checkout.open();
 }
 
 function collectMembershipMemberDetails() {
