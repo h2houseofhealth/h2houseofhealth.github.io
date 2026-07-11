@@ -5250,14 +5250,11 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
     sent: true,
     paymentLinkUrl,
     messageId: String(emailResult.messageId || ''),
-<<<<<<< Updated upstream
     message:
       emailResult.delivery === 'console'
         ? `Payment link generated for ${recipientEmail}. Email service is not configured, so the link was logged on server.`
         : `Email request accepted for ${recipientEmail} via ${providerLabel.toLowerCase()}.`,
-=======
     message: 'Payment email sent successfully.',
->>>>>>> Stashed changes
   });
 });
 
@@ -5899,14 +5896,11 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
     sent: true,
     paymentLinkUrl,
     messageId: String(emailResult.messageId || ''),
-<<<<<<< Updated upstream
     message:
       emailResult.delivery === 'console'
         ? `Payment link generated for ${recipientEmail}. Email service is not configured, so the link was logged on server.`
         : `Email request accepted for ${recipientEmail} via ${providerLabel.toLowerCase()}.`,
-=======
     message: 'Payment email sent successfully.',
->>>>>>> Stashed changes
   });
 });
 
@@ -13038,7 +13032,6 @@ async function sendBookingPaymentLinkEmail({
     </div>
   `;
 
-<<<<<<< Updated upstream
   const transporter = getTransporter();
   const smtpFromEmail = process.env.SMTP_BOOKING_FROM || SENDGRID_BOOKING_FROM_EMAIL || process.env.SMTP_FROM || process.env.SMTP_USER;
   const mailgunFromEmail = normalizeEnvValue(process.env.MAIL_FROM || smtpFromEmail || SENDGRID_BOOKING_FROM_EMAIL || '');
@@ -13067,7 +13060,6 @@ async function sendBookingPaymentLinkEmail({
       },
     });
   }
-=======
   try {
     await sendMailgunEmail({
       to: normalizedToEmail,
@@ -13101,7 +13093,6 @@ async function sendBookingPaymentLinkEmail({
       message: error?.message || 'Unable to send payment link email.',
   };
 }
->>>>>>> Stashed changes
 
   if (SENDGRID_API_KEY) {
     const senderCandidates = getSendGridBookingSenderCandidates();
