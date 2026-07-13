@@ -16,11 +16,36 @@
   }
 
   const API_URL = resolveApiUrl();
-  const AUTH_TOKEN_KEY = 'merch_auth_token';
 
   function buildApiUrl(path) {
     const base = API_URL || window.location.origin;
     return `${base}${path}`;
+  }
+
+  async function api(path, options = {}) {
+    const response = await fetch(buildApiUrl(path), {
+      credentials: 'include',
+      ...options,
+      headers: {
+        ...(options.headers || {}),
+      },
+    });
+
+    let data = null;
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+
+    if (!response.ok) {
+      const error = new Error(String(data?.message || data?.error || 'Request failed'));
+      error.status = response.status;
+      error.data = data || {};
+      throw error;
+    }
+
+    return data || {};
   }
 
   // ─── State ───
@@ -34,7 +59,15 @@
     selectedProduct: null,
     selectedVariant: null,
     quantity: 1,
-    authToken: localStorage.getItem(AUTH_TOKEN_KEY) || '',
+    authResolved: false,
+    currentUser: null,
+    merchProfile: null,
+    merchOrders: [],
+    merchAddresses: [],
+    merchWishlistItems: [],
+    merchCartItems: [],
+    accountDrawerOpen: false,
+    accountDrawerTrigger: null,
   };
 
   // ─── Product Data (Static catalog until API is built) ───
@@ -152,6 +185,40 @@
     return div.innerHTML;
   }
 
+  function getInitials(name) {
+    const parts = String(name || '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2);
+    if (!parts.length) return 'H2';
+    return parts.map((part) => part[0]?.toUpperCase() || '').join('');
+  }
+
+  function formatDateLabel(value) {
+    if (!value) return 'Recently';
+    const parsed = new Date(String(value).replace(' ', 'T'));
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    return new Intl.DateTimeFormat('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }).format(parsed);
+  }
+
+  function formatOrderStatus(status) {
+    const label = String(status || 'pending').replace(/_/g, ' ');
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  }
+
+  function formatCustomerPhone(phone) {
+    return String(phone || '').trim() || 'Not added yet';
+  }
+
+  function setBodyAuthLoading(isLoading) {
+    document.body.classList.toggle('is-auth-loading', Boolean(isLoading));
+  }
+
   // ─── Elements ───
   const els = {
     productGrid: document.getElementById('productGrid'),
@@ -180,6 +247,11 @@
     cartBadge: document.getElementById('cartBadge'),
     cartShopBtn: document.getElementById('cartShopBtn'),
     checkoutBtn: document.getElementById('checkoutBtn'),
+    merchAuthCta: document.getElementById('merchAuthCta'),
+    accountDrawer: document.getElementById('accountDrawer'),
+    accountDrawerOverlay: document.getElementById('accountDrawerOverlay'),
+    accountDrawerCloseBtn: document.getElementById('accountDrawerCloseBtn'),
+    accountDrawerContent: document.getElementById('accountDrawerContent'),
   };
 
   // ─── Cart (localStorage for now) ───
@@ -297,6 +369,250 @@
       els.cartDrawer.hidden = true;
       els.cartOverlay.hidden = true;
     }, 300);
+  }
+
+  function getMerchantProfile() {
+    const profile = state.merchProfile || {};
+    const user = state.currentUser || {};
+    return {
+      fullName: String(profile.fullName || user.name || 'House of Health Customer').trim(),
+      email: String(profile.email || user.email || '').trim(),
+      mobile: String(profile.mobile || user.mobile || '').trim(),
+      avatarUrl: String(profile.avatarUrl || user.avatarUrl || '').trim(),
+    };
+  }
+
+  function renderAccountTrigger() {
+    if (!els.merchAuthCta) return;
+
+    if (!state.authResolved) {
+      els.merchAuthCta.innerHTML = '';
+      return;
+    }
+
+    const profile = getMerchantProfile();
+    const initials = escapeHtml(getInitials(profile.fullName));
+    const avatarStyle = profile.avatarUrl
+      ? ` style="background-image:url('${escapeHtml(profile.avatarUrl)}')"`
+      : '';
+
+    if (!state.currentUser) {
+      els.merchAuthCta.innerHTML = `
+        <a href="/merch/auth.html?returnTo=%2Fmerch%2F" class="header-book-now-btn">
+          Sign Up / Login
+        </a>
+      `;
+      return;
+    }
+
+    els.merchAuthCta.innerHTML = `
+      <button
+        id="merchAccountBtn"
+        class="profile-btn merch-account-btn"
+        type="button"
+        aria-expanded="false"
+        aria-controls="accountDrawer"
+      >
+        <span class="profile-avatar${profile.avatarUrl ? ' has-image' : ''}"${avatarStyle}>${initials}</span>
+        <span class="profile-meta">
+          <strong>${escapeHtml(profile.fullName)}</strong>
+          <span>${escapeHtml(profile.email || 'Logged in')}</span>
+        </span>
+      </button>
+    `;
+
+    const button = document.getElementById('merchAccountBtn');
+    button?.addEventListener('click', openAccountDrawer);
+  }
+
+  function renderAccountDrawer() {
+    if (!els.accountDrawerContent) return;
+
+    const profile = getMerchantProfile();
+    const orders = Array.isArray(state.merchOrders) ? state.merchOrders : [];
+    const addresses = Array.isArray(state.merchAddresses) ? state.merchAddresses : [];
+    const wishlistItems = Array.isArray(state.merchWishlistItems) ? state.merchWishlistItems : [];
+    const accountInitials = escapeHtml(getInitials(profile.fullName));
+    const avatarStyle = profile.avatarUrl
+      ? ` style="background-image:url('${escapeHtml(profile.avatarUrl)}')"`
+      : '';
+
+    els.accountDrawerContent.innerHTML = `
+      <section class="account-card account-card--profile">
+        <div class="account-card__avatar profile-avatar${profile.avatarUrl ? ' has-image' : ''}"${avatarStyle}>${accountInitials}</div>
+        <div class="account-card__summary">
+          <p class="account-card__eyebrow">My Profile</p>
+          <h3>${escapeHtml(profile.fullName)}</h3>
+          <ul class="account-meta-list">
+            <li><span>Email</span><strong>${escapeHtml(profile.email || 'Not added yet')}</strong></li>
+            <li><span>Mobile Number</span><strong>${escapeHtml(formatCustomerPhone(profile.mobile))}</strong></li>
+          </ul>
+          <p class="account-card__note">This information syncs from your House Bookings account.</p>
+        </div>
+      </section>
+
+      <section class="account-section">
+        <div class="account-section__head">
+          <div>
+            <p class="account-section__eyebrow">My Addresses</p>
+            <h4>Shipping and billing</h4>
+          </div>
+          <span class="account-section__count">${addresses.length}</span>
+        </div>
+        ${addresses.length ? `
+          <div class="account-list">
+            ${addresses.map((address) => `
+              <article class="account-list__item">
+                <div>
+                  <strong>${escapeHtml(address.label || address.recipientName || 'Address')}</strong>
+                  <p>${escapeHtml([address.line1, address.line2, address.city, address.state, address.postalCode].filter(Boolean).join(', '))}</p>
+                </div>
+                <span>${address.isDefault ? 'Default' : escapeHtml(address.country || 'India')}</span>
+              </article>
+            `).join('')}
+          </div>
+        ` : `
+          <div class="account-empty-state">
+            <p>No saved addresses yet.</p>
+            <span>Add one at checkout when you need shipping.</span>
+          </div>
+        `}
+      </section>
+
+      <section class="account-section">
+        <div class="account-section__head">
+          <div>
+            <p class="account-section__eyebrow">My Orders</p>
+            <h4>Merchandise orders</h4>
+          </div>
+          <span class="account-section__count">${orders.length}</span>
+        </div>
+        ${orders.length ? `
+          <div class="account-list">
+            ${orders.slice(0, 4).map((order) => `
+              <article class="account-list__item account-list__item--stacked">
+                <div class="account-list__row">
+                  <strong>${escapeHtml(order.orderNumber || `Order #${order.id}`)}</strong>
+                  <span>${escapeHtml(formatOrderStatus(order.status))}</span>
+                </div>
+                <p>${escapeHtml(formatDateLabel(order.createdAt))} · ${escapeHtml(order.totalAmount ? formatPrice(order.totalAmount) : 'Total unavailable')}</p>
+              </article>
+            `).join('')}
+          </div>
+        ` : `
+          <div class="account-empty-state">
+            <p>No orders yet.</p>
+            <span>Your first merch order will appear here after checkout.</span>
+          </div>
+        `}
+      </section>
+
+      <section class="account-section">
+        <div class="account-section__head">
+          <div>
+            <p class="account-section__eyebrow">Wishlist</p>
+            <h4>Saved for later</h4>
+          </div>
+          <span class="account-section__count">${wishlistItems.length}</span>
+        </div>
+        ${wishlistItems.length ? `
+          <div class="account-empty-state">
+            <p>Wishlist items are ready to build out.</p>
+            <span>We’ll show saved products here once your merch wishlist is populated.</span>
+          </div>
+        ` : `
+          <div class="account-empty-state">
+            <p>No wishlist items yet.</p>
+            <span>Tap the heart on a product to save it for later.</span>
+          </div>
+        `}
+      </section>
+
+      <section class="account-section">
+        <div class="account-section__head">
+          <div>
+            <p class="account-section__eyebrow">Saved Payments</p>
+            <h4>Fast checkout</h4>
+          </div>
+          <span class="account-section__count">0</span>
+        </div>
+        <div class="account-empty-state">
+          <p>Saved payment methods are coming soon.</p>
+          <span>Your active cart stays local until checkout.</span>
+        </div>
+      </section>
+
+      <section class="account-section">
+        <div class="account-section__head">
+          <div>
+            <p class="account-section__eyebrow">Account Settings</p>
+            <h4>Shopping preferences</h4>
+          </div>
+        </div>
+        <div class="account-chip-list">
+          <span class="account-chip">Merch updates</span>
+          <span class="account-chip">Order alerts</span>
+          <span class="account-chip">Default to shipping address</span>
+        </div>
+      </section>
+
+      <button id="merchLogoutBtn" class="btn btn-secondary btn-full account-logout-btn" type="button">Logout</button>
+    `;
+
+    document.getElementById('merchLogoutBtn')?.addEventListener('click', handleLogout);
+  }
+
+  function openAccountDrawer() {
+    if (!els.accountDrawer) return;
+
+    state.accountDrawerOpen = true;
+    state.accountDrawerTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    renderAccountDrawer();
+    els.accountDrawer.hidden = false;
+    els.accountDrawerOverlay.hidden = false;
+    requestAnimationFrame(() => {
+      els.accountDrawer.classList.add('is-open');
+      els.accountDrawerOverlay.classList.add('is-visible');
+    });
+    document.body.classList.add('is-account-drawer-open');
+    els.accountDrawerCloseBtn?.focus();
+    els.merchAuthCta?.querySelector('#merchAccountBtn')?.setAttribute('aria-expanded', 'true');
+  }
+
+  function closeAccountDrawer() {
+    if (!els.accountDrawer) return;
+
+    state.accountDrawerOpen = false;
+    els.accountDrawer.classList.remove('is-open');
+    els.accountDrawerOverlay.classList.remove('is-visible');
+    els.merchAuthCta?.querySelector('#merchAccountBtn')?.setAttribute('aria-expanded', 'false');
+    document.body.classList.remove('is-account-drawer-open');
+    setTimeout(() => {
+      els.accountDrawer.hidden = true;
+      els.accountDrawerOverlay.hidden = true;
+      state.accountDrawerTrigger?.focus?.();
+    }, 300);
+  }
+
+  async function handleLogout() {
+    try {
+      await api('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // Clear the merch UI even if the server could not be reached.
+    }
+
+    state.currentUser = null;
+    state.merchProfile = null;
+    state.merchOrders = [];
+    state.merchAddresses = [];
+    state.merchWishlistItems = [];
+    state.merchCartItems = [];
+    state.accountDrawerTrigger = null;
+    closeAccountDrawer();
+    renderAccountTrigger();
+    requestAnimationFrame(() => {
+      document.querySelector('#merchAuthCta a')?.focus();
+    });
   }
 
   // ─── Render: Product Grid ───
@@ -668,16 +984,28 @@
       if (state.cart.length === 0) return;
       initiateCheckout();
     });
+
+    els.accountDrawerCloseBtn?.addEventListener('click', closeAccountDrawer);
+    els.accountDrawerOverlay?.addEventListener('click', closeAccountDrawer);
+    els.accountDrawer?.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        closeAccountDrawer();
+      }
+    });
   }
 
   // ─── Razorpay Checkout Flow ───
   async function initiateCheckout() {
     // Collect customer info
-    const name = prompt('Your full name:');
+    const savedName = String(state.merchProfile?.fullName || state.currentUser?.name || '').trim();
+    const savedEmail = String(state.merchProfile?.email || state.currentUser?.email || '').trim();
+    const savedPhone = String(state.merchProfile?.mobile || state.currentUser?.mobile || '').trim();
+
+    const name = prompt('Your full name:', savedName);
     if (!name) return;
-    const email = prompt('Your email:');
+    const email = prompt('Your email:', savedEmail);
     if (!email) return;
-    const phone = prompt('Your phone number (10 digits):');
+    const phone = prompt('Your phone number (10 digits):', savedPhone);
     if (!phone) return;
 
     const address = prompt('Shipping address (full address with pincode):');
@@ -688,6 +1016,7 @@
     try {
       const res = await fetch(buildApiUrl('/api/merch/checkout'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items, customer, address: { full: address } }),
       });
@@ -719,6 +1048,7 @@
           // Verify payment
           const verifyRes = await fetch(buildApiUrl('/api/merch/verify-payment'), {
             method: 'POST',
+            credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               razorpay_order_id: response.razorpay_order_id,
@@ -757,12 +1087,51 @@
     });
   }
 
+  async function loadCustomerContext() {
+    try {
+      const authResult = await api('/api/auth/me');
+      state.currentUser = authResult.user || null;
+    } catch {
+      state.currentUser = null;
+    }
+
+    if (state.currentUser) {
+      try {
+        const profileResult = await api('/api/merch/profile');
+        state.merchProfile = profileResult.profile || null;
+        state.merchOrders = Array.isArray(profileResult.orders) ? profileResult.orders : [];
+        state.merchAddresses = Array.isArray(profileResult.addresses) ? profileResult.addresses : [];
+        state.merchWishlistItems = Array.isArray(profileResult.wishlistItems) ? profileResult.wishlistItems : [];
+        state.merchCartItems = Array.isArray(profileResult.cartItems) ? profileResult.cartItems : [];
+      } catch {
+        state.merchProfile = null;
+        state.merchOrders = [];
+        state.merchAddresses = [];
+        state.merchWishlistItems = [];
+        state.merchCartItems = [];
+      }
+    } else {
+      state.merchProfile = null;
+      state.merchOrders = [];
+      state.merchAddresses = [];
+      state.merchWishlistItems = [];
+      state.merchCartItems = [];
+    }
+
+    state.authResolved = true;
+    setBodyAuthLoading(false);
+    renderAccountTrigger();
+  }
+
   // ─── Initialize ───
   function init() {
     loadCart();
     renderCartBadge();
     renderProductGrid();
     bindEvents();
+    setBodyAuthLoading(true);
+    renderAccountTrigger();
+    loadCustomerContext();
   }
 
   // Boot
