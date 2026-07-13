@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="api-base-url" content="" />
+    <title>House Merch - H2 House of Health</title>
+    <meta
+      name="description"
+      content="Sign in or create a House Merch account using your existing House of Health customer login."
+    />
+    <link rel="icon" type="image/png" href="/booking/assets/brand/H2_icon.png" />
+    <link rel="stylesheet" href="/booking/styles.css" />
+  </head>
+
+  <body class="auth-mode app-booting">
+    <div class="storefront-header-wrapper">
+      <header class="storefront-header">
+        <div class="storefront-header__left">
+          <details class="storefront-header__drawer">
+            <summary aria-label="Menu">
+              <svg class="drawer-open-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                <path d="M.65 5.85h16.7M.65 11.85h16.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+              </svg>
+              <svg class="drawer-close-icon" width="18" height="17" viewBox="0 0 18 17" fill="none" aria-hidden="true">
+                <path d="m1.3.9 15.4 15.4M16.7.9 1.3 16.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+              </svg>
+            </summary>
+            <nav aria-label="Mobile navigation">
+              <a href="/">The House</a>
+              <a href="/pages/about-us.html">About The House</a>
+              <a href="/pages/by-the-house.html">By The House</a>
+              <a href="/pages/with-the-house.html">With The House</a>
+              <a class="is-active" href="/merch/" aria-current="page">House Merch</a>
+              <a href="/booking/">House Bookings</a>
+              <a href="/pages/contact.html">Contact</a>
+            </nav>
+          </details>
+
+          <a class="storefront-header__logo" href="/" aria-label="House of Health">
+            <img src="/cdn/shop/files/H2_Logo9664.png?v=1767874858&amp;width=135" alt="House of Health" width="135" height="50" />
+          </a>
+
+          <nav class="storefront-header__nav" aria-label="Main navigation">
+            <a href="/">The House</a>
+            <a href="/pages/about-us.html">About The House</a>
+            <a href="/pages/by-the-house.html">By The House</a>
+            <a href="/pages/with-the-house.html">With The House</a>
+            <a class="is-active" href="/merch/" aria-current="page">House Merch</a>
+            <a href="/booking/">House Bookings</a>
+            <a href="/pages/contact.html">Contact</a>
+          </nav>
+        </div>
+      </header>
+    </div>
+
+    <div class="background-shape shape-a"></div>
+    <div class="background-shape shape-b"></div>
+    <div class="leaf leaf-top-right" aria-hidden="true"></div>
+    <div class="leaf leaf-bottom-left" aria-hidden="true"></div>
+    <div class="grain" aria-hidden="true"></div>
+
+    <main class="portal">
+      <header class="portal-header">
+        <h1 class="sr-only">H2 House of Health - House Merch</h1>
+      </header>
+
+      <div id="authShell" class="auth-shell">
+        <div class="auth-hero" aria-hidden="true">
+          <img
+            class="auth-hero-img"
+            src="assets/images/merch signup image.png"
+            alt=""
+          />
+        </div>
+
+        <section id="authCard" class="auth-card panel" aria-label="Authentication">
+          <div class="auth-brand">
+            <img class="auth-logo" src="/booking/assets/brand/H2_Logo.png" alt="H2 House of Health" />
+          </div>
+          <p class="auth-kicker">Secure Access</p>
+          <h2 id="authTitle">Sign in to continue</h2>
+          <p class="auth-lead">Book Hydrogen Sessions, Therapies, and Shots in one place.</p>
+          <form id="authForm" class="auth-form">
+            <label id="authNameWrap" hidden>
+              Full name
+              <input id="authName" type="text" autocomplete="name" />
+            </label>
+            <label id="authRoleWrap" hidden>
+              Register as
+              <select id="authRole">
+                <option value="user">Patient/User</option>
+              </select>
+            </label>
+            <label>
+              Email
+              <input id="authEmail" type="email" autocomplete="email" required />
+            </label>
+            <label>
+              Password
+              <div class="auth-password-field">
+                <input id="authPassword" type="password" autocomplete="current-password" required />
+                <button
+                  type="button"
+                  id="authPasswordToggleBtn"
+                  class="password-toggle-btn"
+                  aria-label="Show password"
+                  aria-pressed="false"
+                >
+                  <span class="password-toggle-text">Show password</span>
+                </button>
+              </div>
+            </label>
+            <label id="authOtpWrap" hidden>
+              OTP
+              <input id="authOtp" type="text" inputmode="numeric" maxlength="6" placeholder="Enter 6-digit OTP" />
+            </label>
+            <p id="authDevOtp" class="auth-dev-otp" role="status" hidden>
+              Development OTP: <strong id="authDevOtpValue"></strong>
+            </p>
+            <div id="authOtpActions" class="auth-otp-actions" hidden>
+              <button type="button" id="authResendOtpBtn" class="link-btn">Resend OTP</button>
+              <span id="authResendOtpHint" class="auth-otp-hint" hidden></span>
+            </div>
+            <button id="authSubmitBtn" class="btn btn-primary" type="submit">Sign in</button>
+          </form>
+          <div id="authDivider" class="auth-divider" hidden><span>or</span></div>
+          <a id="googleAuthBtn" class="btn auth-google-btn" href="/auth/google" hidden>Continue with Google</a>
+          <p id="authError" class="auth-error"></p>
+          <p class="auth-forgot">
+            <button type="button" id="forgotPasswordBtn" class="link-btn">Forgot password?</button>
+          </p>
+          <p class="auth-switch">
+            <span id="authSwitchText">Don't have an account?</span>
+            <button type="button" id="authSwitchBtn" class="link-btn">Register</button>
+          </p>
+          <p class="auth-back">
+            <button type="button" id="authBackToChoicesBtn" class="link-btn">← Back to choices</button>
+          </p>
+        </section>
+      </div>
+    </main>
+
+    <script src="auth.js"></script>
+  </body>
+</html>

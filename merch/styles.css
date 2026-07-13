@@ -48,6 +48,10 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+body.is-account-drawer-open {
+  overflow: hidden;
+}
+
 img {
   max-width: 100%;
   height: auto;
@@ -117,6 +121,311 @@ button {
 
 .btn-full {
   width: 100%;
+}
+
+.merch-auth-row {
+  max-width: var(--max-width);
+  margin: 10px auto 0;
+  padding: 0 24px;
+  display: flex;
+  justify-content: flex-end;
+  position: relative;
+  z-index: 3;
+  pointer-events: auto;
+}
+
+.merch-auth-row .storefront-header__cta {
+  margin-left: 0;
+}
+
+body.is-auth-loading .merch-auth-cta {
+  visibility: hidden;
+}
+
+.merch-account-btn {
+  min-width: min(360px, 100%);
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.merch-account-btn .profile-avatar {
+  flex: 0 0 auto;
+}
+
+.merch-account-btn .profile-meta {
+  min-width: 0;
+}
+
+.merch-account-btn .profile-meta span {
+  display: block;
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 15, 15, 0.42);
+  backdrop-filter: blur(2px);
+  z-index: 1680;
+}
+
+.account-drawer-overlay[hidden] {
+  display: none !important;
+}
+
+.account-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: min(480px, 100vw);
+  height: 100dvh;
+  z-index: 1700;
+  transform: translateX(100%);
+  transition: transform 0.32s ease;
+  will-change: transform;
+}
+
+.account-drawer[hidden] {
+  display: block !important;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.account-drawer.is-open {
+  transform: translateX(0);
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.account-drawer__shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border-left: 1px solid var(--border);
+  box-shadow: -24px 0 48px rgba(0, 0, 0, 0.14);
+}
+
+.account-drawer__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.account-drawer__eyebrow,
+.account-section__eyebrow,
+.account-card__eyebrow {
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+}
+
+.account-drawer__header h2,
+.account-section h4,
+.account-card__summary h3 {
+  margin: 0;
+  color: var(--text-dark);
+}
+
+.drawer-close-btn {
+  width: 38px;
+  height: 38px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text-muted);
+  transition: all var(--transition);
+}
+
+.drawer-close-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: var(--text-dark);
+}
+
+.account-drawer__content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px 24px;
+  display: grid;
+  gap: 16px;
+}
+
+.account-card,
+.account-section {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.account-card {
+  padding: 18px;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.account-card__avatar.profile-avatar {
+  width: 56px;
+  height: 56px;
+}
+
+.account-card__summary {
+  min-width: 0;
+}
+
+.account-card__summary h3 {
+  font-size: 18px;
+  line-height: 1.2;
+  margin-bottom: 10px;
+}
+
+.account-meta-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.account-meta-list li {
+  display: grid;
+  gap: 2px;
+}
+
+.account-meta-list li span,
+.account-list__item p,
+.account-card__note,
+.account-empty-state span {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.account-meta-list li strong,
+.account-list__item strong {
+  color: var(--text-dark);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.account-card__note {
+  margin-top: 10px;
+}
+
+.account-section {
+  padding: 18px;
+}
+
+.account-section__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.account-section__head h4 {
+  font-size: 16px;
+}
+
+.account-section__count {
+  flex: 0 0 auto;
+  min-width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(200, 101, 45, 0.1);
+  color: var(--primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.account-list {
+  display: grid;
+  gap: 10px;
+}
+
+.account-list__item {
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: #faf7f3;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  display: grid;
+  gap: 6px;
+}
+
+.account-list__item p {
+  line-height: 1.45;
+}
+
+.account-list__item span {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--primary);
+}
+
+.account-list__item--stacked .account-list__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.account-list__item--stacked .account-list__row span {
+  flex: 0 0 auto;
+}
+
+.account-empty-state {
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  background: #faf7f3;
+  border: 1px dashed rgba(0, 0, 0, 0.08);
+}
+
+.account-empty-state p {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-dark);
+}
+
+.account-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.account-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(200, 101, 45, 0.06);
+  color: var(--text-dark);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.account-logout-btn {
+  margin-top: 2px;
 }
 
 /* ─── Hero ─── */
@@ -822,9 +1131,35 @@ button {
 }
 
 @media (max-width: 768px) {
+  .merch-auth-row {
+    padding: 0 16px;
+  }
+
+  .merch-account-btn {
+    width: 100%;
+    min-width: 0;
+  }
+
   .merch-footer__inner {
     grid-template-columns: 1fr;
     gap: 32px;
+  }
+
+  .account-drawer {
+    width: min(100vw, 420px);
+  }
+
+  .account-drawer__content {
+    padding: 16px;
+  }
+
+  .account-card {
+    grid-template-columns: 1fr;
+  }
+
+  .account-card__avatar.profile-avatar {
+    width: 52px;
+    height: 52px;
   }
 }
 
