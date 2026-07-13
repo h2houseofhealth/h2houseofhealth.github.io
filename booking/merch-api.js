@@ -82,10 +82,202 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     );
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS merch_customer_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      full_name TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE,
+      mobile TEXT,
+      avatar_url TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS merch_customer_addresses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER NOT NULL REFERENCES merch_customer_profiles(id) ON DELETE CASCADE,
+      label TEXT,
+      recipient_name TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      line1 TEXT NOT NULL,
+      line2 TEXT,
+      city TEXT,
+      state TEXT,
+      postal_code TEXT,
+      country TEXT NOT NULL DEFAULT 'India',
+      is_default INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS merch_customer_cart_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER NOT NULL REFERENCES merch_customer_profiles(id) ON DELETE CASCADE,
+      variant_id INTEGER NOT NULL,
+      quantity INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(customer_id, variant_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS merch_customer_wishlist_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER NOT NULL REFERENCES merch_customer_profiles(id) ON DELETE CASCADE,
+      product_id INTEGER,
+      variant_id INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(customer_id, product_id, variant_id)
+    );
+  `);
+
+  if (!hasColumn('merch_orders', 'customer_user_id')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN customer_user_id INTEGER');
+  }
+
+  if (!hasColumn('merch_orders', 'customer_id')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN customer_id INTEGER');
+  }
+
   // Seed products if table is empty
   const productCount = db.prepare('SELECT COUNT(*) AS cnt FROM merch_products').get().cnt;
   if (productCount === 0) {
     seedMerchProducts(db);
+  }
+
+  function hasTable(tableName) {
+    return Boolean(
+      db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1").get(tableName)
+    );
+  }
+
+  function hasColumn(tableName, columnName) {
+    if (!hasTable(tableName)) return false;
+    return db.prepare(`PRAGMA table_info(${tableName})`).all().some((row) => row.name === columnName);
+  }
+
+  function getBookingUserById(userId) {
+    const numericUserId = Number(userId);
+    if (!Number.isInteger(numericUserId)) return null;
+    return db
+      .prepare(
+        `SELECT id, name, email, mobile, avatar_url AS avatarUrl
+         FROM users
+         WHERE id = ?`
+      )
+      .get(numericUserId);
+  }
+
+  function getMerchAuthToken(req) {
+    const authorizationHeader = String(req.headers.authorization || '').trim();
+    const bearerToken = authorizationHeader.toLowerCase().startsWith('bearer ')
+      ? authorizationHeader.slice(7).trim()
+      : '';
+    return String(req.cookies?.booking_portal_token || bearerToken || '').trim();
+  }
+
+  function getMerchAuthUser(req) {
+    const token = getMerchAuthToken(req);
+    if (!token) return null;
+
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      const user = getBookingUserById(Number(payload.sub));
+      if (!user) return null;
+      return {
+        id: Number(user.id),
+        name: String(user.name || ''),
+        email: String(user.email || ''),
+        mobile: String(user.mobile || ''),
+        avatarUrl: String(user.avatarUrl || ''),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function getMerchCustomerProfileByUserId(userId) {
+    const numericUserId = Number(userId);
+    if (!Number.isInteger(numericUserId)) return null;
+    return db
+      .prepare(
+        `SELECT id, user_id AS userId, full_name AS fullName, email, mobile, avatar_url AS avatarUrl,
+                created_at AS createdAt, updated_at AS updatedAt
+         FROM merch_customer_profiles
+         WHERE user_id = ?`
+      )
+      .get(numericUserId);
+  }
+
+  function ensureMerchCustomerProfileForUser(user) {
+    const bookingUser = user?.id ? getBookingUserById(user.id) : null;
+    if (!bookingUser) return null;
+
+    const normalizedUserId = Number(bookingUser.id);
+    const nextName = String(bookingUser.name || user?.name || '').trim();
+    const nextEmail = String(bookingUser.email || user?.email || '').trim().toLowerCase();
+    const nextMobile = String(bookingUser.mobile || user?.mobile || '').trim();
+    const nextAvatarUrl = String(bookingUser.avatarUrl || user?.avatarUrl || '').trim();
+
+    const existing = getMerchCustomerProfileByUserId(normalizedUserId);
+    if (existing) {
+      const updates = [];
+      const params = [];
+      if (nextName && nextName !== existing.fullName) {
+        updates.push('full_name = ?');
+        params.push(nextName);
+      }
+      if (nextEmail && nextEmail !== existing.email) {
+        updates.push('email = ?');
+        params.push(nextEmail);
+      }
+      if (nextMobile !== String(existing.mobile || '')) {
+        updates.push('mobile = ?');
+        params.push(nextMobile || null);
+      }
+      if (nextAvatarUrl !== String(existing.avatarUrl || '')) {
+        updates.push('avatar_url = ?');
+        params.push(nextAvatarUrl || null);
+      }
+      if (updates.length) {
+        updates.push("updated_at = datetime('now')");
+        db.prepare(`UPDATE merch_customer_profiles SET ${updates.join(', ')} WHERE user_id = ?`).run(...params, normalizedUserId);
+      }
+      return getMerchCustomerProfileByUserId(normalizedUserId);
+    }
+
+    const result = db
+      .prepare(
+        `INSERT INTO merch_customer_profiles (user_id, full_name, email, mobile, avatar_url, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+      )
+      .run(
+        normalizedUserId,
+        nextName || 'House of Health Customer',
+        nextEmail || `customer-${normalizedUserId}@h2houseofhealth.local`,
+        nextMobile || null,
+        nextAvatarUrl || null
+      );
+
+    return db
+      .prepare(
+        `SELECT id, user_id AS userId, full_name AS fullName, email, mobile, avatar_url AS avatarUrl,
+                created_at AS createdAt, updated_at AS updatedAt
+         FROM merch_customer_profiles
+         WHERE id = ?`
+      )
+      .get(result.lastInsertRowid);
+  }
+
+  function requireMerchAuth(req, res, next) {
+    const user = getMerchAuthUser(req);
+    if (!user) {
+      return res.status(401).json({ message: 'unauthorized' });
+    }
+
+    req.user = user;
+    return next();
   }
 
   // ─── Helper: Generate order number ───
@@ -141,10 +333,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     const { items, customer, address } = req.body || {};
+    const authUser = getMerchAuthUser(req);
+    const merchProfile = authUser ? ensureMerchCustomerProfileForUser(authUser) : null;
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Cart is empty' });
     }
-    if (!customer || !customer.name || !customer.email || !customer.phone) {
+    const resolvedCustomer = {
+      name: String(customer?.name || merchProfile?.fullName || authUser?.name || '').trim(),
+      email: String(customer?.email || merchProfile?.email || authUser?.email || '').trim().toLowerCase(),
+      phone: String(customer?.phone || merchProfile?.mobile || authUser?.mobile || '').trim(),
+    };
+    if (!resolvedCustomer.name || !resolvedCustomer.email || !resolvedCustomer.phone) {
       return res.status(400).json({ error: 'Customer name, email, and phone required' });
     }
 
@@ -184,15 +383,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       amount: totalAmount,
       currency: 'INR',
       receipt: orderNumber,
-      notes: { customerEmail: customer.email, orderNumber },
+      notes: { customerEmail: resolvedCustomer.email, orderNumber },
     }).then(rpOrder => {
       // Save order to DB
       const insertOrder = db.prepare(`
-        INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, status, subtotal, gst_amount, shipping_charge, total_amount, payment_method, payment_status, razorpay_order_id, shipping_address)
-        VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, 'online', 'pending', ?, ?)
+        INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, total_amount, payment_method, payment_status, razorpay_order_id, shipping_address)
+        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, 'online', 'pending', ?, ?)
       `);
       const result = insertOrder.run(
-        orderNumber, customer.name, customer.email, customer.phone,
+        orderNumber, resolvedCustomer.name, resolvedCustomer.email, resolvedCustomer.phone,
+        authUser?.id || null, merchProfile?.id || null,
         subtotal, gstAmount, shippingCharge, totalAmount,
         rpOrder.id, JSON.stringify(address || {})
       );
@@ -217,7 +417,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         subtotal,
         gstAmount,
         shippingCharge,
-        customer: { name: customer.name, email: customer.email, phone: customer.phone },
+        customer: resolvedCustomer,
       });
     }).catch(err => {
       console.error('Merch Razorpay order create failed:', err?.message || err);
@@ -271,10 +471,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   // ─── COD Checkout ───
   app.post('/api/merch/checkout-cod', (req, res) => {
     const { items, customer, address } = req.body || {};
+    const authUser = getMerchAuthUser(req);
+    const merchProfile = authUser ? ensureMerchCustomerProfileForUser(authUser) : null;
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Cart is empty' });
     }
-    if (!customer || !customer.name || !customer.email || !customer.phone) {
+    const resolvedCustomer = {
+      name: String(customer?.name || merchProfile?.fullName || authUser?.name || '').trim(),
+      email: String(customer?.email || merchProfile?.email || authUser?.email || '').trim().toLowerCase(),
+      phone: String(customer?.phone || merchProfile?.mobile || authUser?.mobile || '').trim(),
+    };
+    if (!resolvedCustomer.name || !resolvedCustomer.email || !resolvedCustomer.phone) {
       return res.status(400).json({ error: 'Customer details required' });
     }
 
@@ -296,9 +503,21 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const orderNumber = generateOrderNumber();
 
     const result = db.prepare(`
-      INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, status, subtotal, gst_amount, shipping_charge, total_amount, payment_method, payment_status, shipping_address)
-      VALUES (?, ?, ?, ?, 'processing', ?, ?, ?, ?, 'cod', 'cod_pending', ?)
-    `).run(orderNumber, customer.name, customer.email, customer.phone, subtotal, gstAmount, shippingCharge, totalAmount, JSON.stringify(address || {}));
+      INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, total_amount, payment_method, payment_status, shipping_address)
+      VALUES (?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, 'cod', 'cod_pending', ?)
+    `).run(
+      orderNumber,
+      resolvedCustomer.name,
+      resolvedCustomer.email,
+      resolvedCustomer.phone,
+      authUser?.id || null,
+      merchProfile?.id || null,
+      subtotal,
+      gstAmount,
+      shippingCharge,
+      totalAmount,
+      JSON.stringify(address || {})
+    );
 
     const orderId = result.lastInsertRowid;
     const insertItem = db.prepare('INSERT INTO merch_order_items (order_id, variant_id, product_name, variant_label, sku, unit_price, quantity, line_total) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
@@ -308,10 +527,120 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       decrementStock.run(item.quantity, item.variantId);
     }
 
-    res.json({ success: true, orderNumber, orderId, totalAmount, message: 'COD order placed' });
+    res.json({ success: true, orderNumber, orderId, totalAmount, message: 'COD order placed', customer: resolvedCustomer });
   });
 
   // ─── ADMIN: Get all orders ───
+  app.get('/api/merch/profile', requireMerchAuth, (req, res) => {
+    const profile = ensureMerchCustomerProfileForUser(req.user);
+    if (!profile) {
+      return res.status(404).json({ message: 'Merch profile could not be created' });
+    }
+
+    const addresses = db
+      .prepare(
+        `SELECT id, customer_id AS customerId, label, recipient_name AS recipientName, phone, line1, line2,
+                city, state, postal_code AS postalCode, country, is_default AS isDefault,
+                created_at AS createdAt, updated_at AS updatedAt
+         FROM merch_customer_addresses
+         WHERE customer_id = ?
+         ORDER BY isDefault DESC, datetime(createdAt) DESC, id DESC`
+      )
+      .all(profile.id);
+
+    const cartItems = db
+      .prepare(
+        `SELECT id, customer_id AS customerId, variant_id AS variantId, quantity, created_at AS createdAt, updated_at AS updatedAt
+         FROM merch_customer_cart_items
+         WHERE customer_id = ?
+         ORDER BY id DESC`
+      )
+      .all(profile.id);
+
+    const wishlistItems = db
+      .prepare(
+        `SELECT id, customer_id AS customerId, product_id AS productId, variant_id AS variantId, created_at AS createdAt, updated_at AS updatedAt
+         FROM merch_customer_wishlist_items
+         WHERE customer_id = ?
+         ORDER BY id DESC`
+      )
+      .all(profile.id);
+
+    const orders = db
+      .prepare(
+        `SELECT id, order_number AS orderNumber, status, subtotal, gst_amount AS gstAmount,
+                shipping_charge AS shippingCharge, discount_amount AS discountAmount, total_amount AS totalAmount,
+                payment_method AS paymentMethod, payment_status AS paymentStatus, razorpay_order_id AS razorpayOrderId,
+                razorpay_payment_id AS razorpayPaymentId, shipping_address AS shippingAddress,
+                tracking_number AS trackingNumber, carrier_name AS carrierName,
+                created_at AS createdAt, updated_at AS updatedAt
+         FROM merch_orders
+         WHERE customer_user_id = ? OR customer_id = ?
+         ORDER BY datetime(createdAt) DESC, id DESC`
+      )
+      .all(Number(req.user.id), Number(profile.id));
+
+    res.json({ profile, addresses, cartItems, wishlistItems, orders });
+  });
+
+  app.patch('/api/merch/profile', requireMerchAuth, (req, res) => {
+    const profile = ensureMerchCustomerProfileForUser(req.user);
+    if (!profile) {
+      return res.status(404).json({ message: 'Merch profile could not be created' });
+    }
+
+    const fullName = String(req.body?.fullName || req.body?.name || '').trim();
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const mobile = String(req.body?.mobile || req.body?.phone || '').trim();
+    const avatarUrl = String(req.body?.avatarUrl || '').trim();
+
+    const updates = [];
+    const params = [];
+    if (fullName) {
+      updates.push('full_name = ?');
+      params.push(fullName);
+    }
+    if (email) {
+      updates.push('email = ?');
+      params.push(email);
+    }
+    if (mobile) {
+      updates.push('mobile = ?');
+      params.push(mobile);
+    }
+    if (avatarUrl) {
+      updates.push('avatar_url = ?');
+      params.push(avatarUrl);
+    }
+
+    if (updates.length) {
+      updates.push("updated_at = datetime('now')");
+      db.prepare(`UPDATE merch_customer_profiles SET ${updates.join(', ')} WHERE id = ?`).run(...params, profile.id);
+    }
+
+    const nextProfile = getMerchCustomerProfileByUserId(req.user.id);
+    res.json({ profile: nextProfile || profile });
+  });
+
+  app.get('/api/merch/orders', requireMerchAuth, (req, res) => {
+    const profile = ensureMerchCustomerProfileForUser(req.user);
+    const orders = db
+      .prepare(
+        `SELECT id, order_number AS orderNumber, status, subtotal, gst_amount AS gstAmount,
+                shipping_charge AS shippingCharge, discount_amount AS discountAmount, total_amount AS totalAmount,
+                payment_method AS paymentMethod, payment_status AS paymentStatus,
+                razorpay_order_id AS razorpayOrderId, razorpay_payment_id AS razorpayPaymentId,
+                shipping_address AS shippingAddress, tracking_number AS trackingNumber,
+                carrier_name AS carrierName, created_at AS createdAt, updated_at AS updatedAt
+         FROM merch_orders
+         WHERE customer_user_id = ? OR customer_id = ?
+         ORDER BY datetime(createdAt) DESC, id DESC`
+      )
+      .all(Number(req.user.id), Number(profile?.id || 0));
+
+    res.json({ orders });
+  });
+
   app.get('/api/merch/admin/orders', requireAdmin, (req, res) => {
     const { status, startDate, endDate } = req.query;
     let sql = 'SELECT * FROM merch_orders';

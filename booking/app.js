@@ -512,6 +512,7 @@ const elements = {
   membershipPeopleMeta: document.getElementById('membershipPeopleMeta'),
   membershipPeopleList: document.getElementById('membershipPeopleList'),
   membershipAddPersonDialog: document.getElementById('membershipAddPersonDialog'),
+  membershipAddPersonDialogTitle: document.getElementById('membershipAddPersonDialogTitle'),
   membershipAddPersonForm: document.getElementById('membershipAddPersonForm'),
   closeMembershipAddPersonDialogBtn: document.getElementById('closeMembershipAddPersonDialogBtn'),
   cancelMembershipAddPersonBtn: document.getElementById('cancelMembershipAddPersonBtn'),
@@ -1502,13 +1503,7 @@ function attachEvents() {
     });
   });
   elements.membershipQuickAddPersonBtn?.addEventListener('click', () => {
-    state.activeUserTab = 'membership';
-    state.membershipBrowseVisible = true;
-    window.location.hash = '#membership';
-    render();
-    requestAnimationFrame(() => {
-      elements.membershipBrowsePanel?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
+    openMembershipAddPersonDialog();
   });
   elements.membershipQuickHistoryBtn?.addEventListener('click', () => {
     resetServiceBrowserState();
@@ -1545,13 +1540,7 @@ function attachEvents() {
     });
   });
   elements.membershipAddPersonBtn?.addEventListener('click', () => {
-    const rosterLoaded = Boolean(state.membershipRoster && typeof state.membershipRoster === 'object');
-    const slotsRemaining = rosterLoaded ? Number(state.membershipRoster?.slotsRemaining) : Number.NaN;
-    if (!rosterLoaded || (Number.isFinite(slotsRemaining) && slotsRemaining > 0)) {
-      openMembershipAddPersonDialog();
-      return;
-    }
-    openMembershipAddPersonUpgradeCheckoutDialog();
+    openMembershipAddPersonDialog();
   });
   elements.servicesBackBtn?.addEventListener('click', () => {
     resetServiceBrowserState();
@@ -1615,11 +1604,9 @@ function attachEvents() {
     navigateToUserBookings();
   });
 
-  const publicBookSessionButtons = new Set([
-    elements.publicBookSessionBtn,
-    ...document.querySelectorAll('[data-public-book-session]'),
-  ]);
-  publicBookSessionButtons.forEach((button) => {
+  elements.publicBookSessionBtn?.addEventListener('click', handlePublicBookSession);
+  document.querySelectorAll('[data-public-book-session]').forEach((button) => {
+    if (button === elements.publicBookSessionBtn) return;
     button?.addEventListener('click', handlePublicBookSession);
   });
 
@@ -1721,7 +1708,7 @@ function attachEvents() {
       }
       if (submitBtn) {
         submitBtn.disabled = true;
-        submitBtn.textContent = 'Saving...';
+        submitBtn.textContent = 'Starting payment...';
       }
       await submitMembershipAddPerson();
     } catch (error) {
@@ -4224,6 +4211,10 @@ function navigateToUserBookings() {
 }
 
 async function handlePublicBookSession() {
+  if (this === elements.publicBookSessionBtn) {
+    window.location.href = '/booking/?entry=guest';
+    return;
+  }
   openAuthFromLanding('public-book-session');
 }
 
@@ -5288,6 +5279,7 @@ function setProfilePreview(src) {
 }
 
 async function upsertBooking() {
+  console.log("🔥 UPSERT BOOKING STARTED");
   const payload = {
     serviceName: elements.serviceName.value,
     bookingDate: elements.bookingDate.value,
@@ -5333,13 +5325,26 @@ async function upsertBooking() {
     : 0;
   
   const isAdmin = state.user?.role === 'admin';
+  console.log("MODE:", state.adminBookingMode);
   if (isAdmin) {
+   if (state.adminBookingMode === 'new') {
     syncAdminCustomerFromBookingModal();
     if (!isAdminCustomerFormValid()) {
-      setBookingCustomerInlineMessage(getAdminCustomerValidationMessage());
+      const msg = getAdminCustomerValidationMessage();
+      setBookingCustomerInlineMessage(msg);
       syncBookingModalCustomerGate();
+      showNotice({ title: 'Missing contact', body: msg, type: 'error' });
+      render();
+      // focus first missing field
+      const name = String(state.adminCustomerForm.name || '').trim();
+      const email = String(state.adminCustomerForm.email || '').trim();
+      const phone = normalizeTenDigitMobile(state.adminCustomerForm.phone || '');
+      if (!name && elements.bookingCustomerName) elements.bookingCustomerName.focus();
+      else if ((!email || !isValidEmail(email)) && elements.bookingCustomerEmail) elements.bookingCustomerEmail.focus();
+      else if ((!phone || phone.length !== 10) && elements.bookingCustomerPhone) elements.bookingCustomerPhone.focus();
       return;
     }
+  }
     if (state.adminBookingMode === 'new') {
       try {
         const userResult = await api('/api/admin/users', {
@@ -5365,6 +5370,30 @@ async function upsertBooking() {
     payload.customerName = state.adminCustomerForm.name;
     payload.customerEmail = state.adminCustomerForm.email;
     payload.customerPhone = state.adminCustomerForm.phone;
+  }
+
+  // For non-admin users require at least one contact (email or phone)
+  if (!isAdmin) {
+    const email = String(elements.bookingCustomerEmail?.value || '').trim();
+    const phone = normalizeTenDigitMobile(String(elements.bookingCustomerPhone?.value || ''));
+    if (!email && !phone) {
+      showNotice({ title: 'Missing contact', body: 'Please provide an email or contact number to confirm booking.' });
+      if (elements.bookingCustomerEmail) elements.bookingCustomerEmail.focus();
+      return;
+    }
+    if (email && !isValidEmail(email)) {
+      showNotice({ title: 'Invalid email', body: 'Please enter a valid email address.' });
+      elements.bookingCustomerEmail?.focus();
+      return;
+    }
+    if (phone && phone.length !== 10) {
+      showNotice({ title: 'Invalid phone', body: 'Please enter a valid 10-digit contact number.' });
+      elements.bookingCustomerPhone?.focus();
+      return;
+    }
+    payload.customerName = String(elements.bookingCustomerName?.value || '').trim();
+    payload.customerEmail = email;
+    payload.customerPhone = phone;
   }
 
   const id = elements.bookingId.value;
@@ -5615,18 +5644,12 @@ async function sendPaymentLinkViaEmail(bookingId, email, paymentLink = '', phone
     render();
 
     const link = String(result?.paymentLinkUrl || '').trim();
-    const messageId = String(result?.messageId || '').trim();
     if (link) copyTextToClipboard(link);
 
     showNotice({
-      title: 'Email queued',
+      title: 'Email sent',
       type: 'success',
-      body: [
-        `To: ${email}`,
-        result?.message || 'Email provider accepted the request.',
-        messageId ? `Message ID: ${messageId}` : '',
-        link ? `Payment Link:\n${link}\n\nLink copied.` : '',
-      ].filter(Boolean),
+      body: 'Payment email sent successfully.',
     });
   } catch (error) {
     await loadDashboardData();
@@ -11970,31 +11993,13 @@ async function openMembershipRosterDialog() {
     members.length
   );
   const visibleMembers = members.slice(0, resolvedPeopleCount || members.length);
-  const startedAtValue =
-    roster?.subscription?.startedAt ||
-    state.membership.current?.startedAt ||
-    state.user?.membershipStartedAt ||
-    null;
-  const expiresAtValue =
-    roster?.subscription?.expiresAt ||
-    state.membership.current?.expiresAt ||
-    state.user?.membershipExpiresAt ||
-    null;
-  const startedAt = startedAtValue ? new Date(startedAtValue) : null;
-  const expiresAt = expiresAtValue ? new Date(expiresAtValue) : null;
-  const validityText =
-    startedAt && !Number.isNaN(startedAt.getTime())
-      ? `Membership validity starts ${formatDateAsDayMonthYear(startedAt)}`
-      : 'Membership validity is active';
-  const endText = expiresAt && !Number.isNaN(expiresAt.getTime()) ? ` and ends ${formatDateAsDayMonthYear(expiresAt)}` : '';
-
   if (elements.membershipRosterDialogTitle) {
     elements.membershipRosterDialogTitle.textContent = 'Covered Members';
   }
   const summaryCount = resolvedPeopleCount || visibleMembers.length;
   elements.membershipRosterSummary.textContent =
     `${visibleMembers.length} of ${summaryCount} covered member${summaryCount === 1 ? '' : 's'}. ` +
-    `${validityText}${endText}.`;
+    `Each member shows their own validity window below.`;
 
   elements.membershipRosterList.innerHTML = '';
   if (!visibleMembers.length) {
@@ -12010,12 +12015,21 @@ async function openMembershipRosterDialog() {
       const place = String(member?.place || '').trim();
       const email = String(member?.email || '').trim() || '-';
       const contactNumber = String(member?.contactNumber || '').trim() || '-';
+      const memberStartedAt = member?.startedAt ? new Date(member.startedAt) : null;
+      const memberExpiresAt = member?.expiresAt ? new Date(member.expiresAt) : null;
+      const memberValidityText =
+        memberStartedAt && !Number.isNaN(memberStartedAt.getTime())
+          ? `Valid from ${formatDateAsDayMonthYear(memberStartedAt)}`
+          : 'Validity pending';
+      const memberValidityEndText =
+        memberExpiresAt && !Number.isNaN(memberExpiresAt.getTime()) ? ` to ${formatDateAsDayMonthYear(memberExpiresAt)}` : '';
       item.innerHTML = `
         <div><strong>Person ${index + 1}</strong></div>
         <div><strong>Name:</strong> ${escapeHtml(name)}</div>
         ${place ? `<div><strong>Place:</strong> ${escapeHtml(place)}</div>` : ''}
         <div><strong>Email:</strong> ${escapeHtml(email)}</div>
         <div><strong>Contact:</strong> ${escapeHtml(contactNumber)}</div>
+        <div><strong>Validity:</strong> ${escapeHtml(memberValidityText + memberValidityEndText)}</div>
       `;
       elements.membershipRosterList.appendChild(item);
     });
@@ -12040,17 +12054,12 @@ function openMembershipAddPersonDialog() {
     showNotice({ title: 'Members only', body: 'Active membership is required to add a person.' });
     return;
   }
-  const startedAtValue =
-    state.membershipRoster?.subscription?.startedAt ||
-    state.membership.current?.startedAt ||
-    state.user?.membershipStartedAt ||
-    null;
-  const startedAt = startedAtValue ? new Date(startedAtValue) : null;
+  if (elements.membershipAddPersonDialogTitle) {
+    elements.membershipAddPersonDialogTitle.textContent = 'Add Person Membership • Rs. 78,000';
+  }
   if (elements.membershipAddPersonValidityNote) {
     elements.membershipAddPersonValidityNote.textContent =
-      startedAt && !Number.isNaN(startedAt.getTime())
-        ? `Validity for this person starts from your payment date: ${formatDateAsDayMonthYear(startedAt)}.`
-        : 'Validity for this person starts from your membership payment date.';
+      'Validity for this person starts on the successful payment date and runs for one year.';
   }
   if (elements.membershipAddPersonName) elements.membershipAddPersonName.value = '';
   if (elements.membershipAddPersonPlace) elements.membershipAddPersonPlace.value = '';
@@ -12200,15 +12209,85 @@ async function submitMembershipAddPerson() {
     throw new Error('Contact number must be 10 digits.');
   }
 
-  const response = await api('/api/membership/members', {
+  const memberDetails = [{ name, place, email, contactNumber }];
+  await activateMembershipAddPersonWithPayment(memberDetails);
+}
+
+async function activateMembershipAddPersonWithPayment(memberDetails = []) {
+  const addPersonPlan = (state.membership.plans || []).find((plan) => String(plan.id) === 'h2_add_person') || null;
+  if (!addPersonPlan) {
+    throw new Error('Add Person plan is not configured.');
+  }
+
+  const order = await api('/api/membership/create-order', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, place, email, contactNumber }),
+    body: JSON.stringify({
+      planId: addPersonPlan.id,
+      additionalPeople: 0,
+      memberDetails,
+      couponCode: '',
+    }),
   });
 
-  state.membershipRoster = response || null;
+  if (!window.Razorpay) {
+    throw new Error('Razorpay SDK not loaded');
+  }
+
   closeMembershipAddPersonDialog();
-  renderMembership();
+
+  const options = {
+    key: order.keyId,
+    amount: order.amount,
+    currency: order.currency || 'INR',
+    name: 'H2 House Of Health',
+    description: `Membership: ${order.plan?.name || addPersonPlan.name}`,
+    order_id: order.orderId,
+    prefill: {
+      name: order.user?.name || state.user?.name || '',
+      email: order.user?.email || state.user?.email || '',
+    },
+    theme: {
+      color: '#8b5e3c',
+    },
+    handler: async (response) => {
+      try {
+        const result = await api('/api/membership/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            planId: addPersonPlan.id,
+            razorpay_order_id: response.razorpay_order_id,
+            razorpay_payment_id: response.razorpay_payment_id,
+            razorpay_signature: response.razorpay_signature,
+          }),
+        });
+        state.user = { ...state.user, ...(result.profile || {}) };
+        await loadDashboardData();
+        state.membershipCouponPreview = null;
+        if (elements.membershipCouponCode) elements.membershipCouponCode.value = '';
+        renderMembershipCouponPreview();
+        renderMembershipCheckoutSummary();
+        state.activeUserTab = 'membership';
+        window.location.hash = '#membership';
+        render();
+        showNotice({
+          title: 'Success',
+          body: [result.message || 'Additional member added successfully.', ...buildAppliedCouponSuccessLines(result.coupon || order.coupon)],
+        });
+      } catch (error) {
+        showNotice({ title: 'Error', body: getCheckoutPaymentErrorMessage(error, 'Membership payment verification failed.') });
+      }
+    },
+    modal: {
+      ondismiss: () => {
+        showNotice({ title: 'Notice', body: 'Membership payment was canceled.' });
+      },
+    },
+  };
+
+  const checkout = new window.Razorpay(options);
+  checkout.open();
 }
 
 function collectMembershipMemberDetails() {
@@ -12639,6 +12718,49 @@ function getAdminSessionKindLabel(booking) {
   return getBookingCategoryLabel(booking?.serviceName || 'Session');
 }
 
+function getAdminUserMembershipSessionSummary(user) {
+  const allowance = getMembershipPlanSessionAllowance(user);
+  const totalSessions = Number(allowance.totalSessions || 0);
+  const startedAtMs = user?.membershipStartedAt ? new Date(user.membershipStartedAt).getTime() : NaN;
+  const expiresAt = getEffectiveMembershipExpiryDate(user?.membershipStartedAt, user?.membershipExpiresAt);
+  const expiresAtMs = expiresAt && !Number.isNaN(expiresAt.getTime()) ? expiresAt.getTime() : NaN;
+  const hasMembershipWindow = Number.isFinite(startedAtMs) || Number.isFinite(expiresAtMs);
+  const active = Boolean(totalSessions) && hasMembershipWindow && (!Number.isFinite(expiresAtMs) || expiresAtMs >= Date.now());
+
+  if (!active) {
+    return {
+      active: false,
+      totalSessions: 0,
+      usedSessions: 0,
+      completedSessions: 0,
+      missedSessions: 0,
+      remainingSessions: 0,
+    };
+  }
+  const bookings = getAdminUserBookings(user?.id);
+
+  const membershipBookings = bookings.filter((booking) => {
+    if (!isAdminMemberSessionBooking(booking)) return false;
+    const bookingMs = getBookingStartTime(booking);
+    if (Number.isFinite(startedAtMs) && Number.isFinite(bookingMs) && bookingMs < startedAtMs) return false;
+    if (Number.isFinite(expiresAtMs) && Number.isFinite(bookingMs) && bookingMs > expiresAtMs) return false;
+    return true;
+  });
+
+  const usedSessions = membershipBookings.length;
+  const completedSessions = membershipBookings.filter((booking) => String(booking?.status || '').toLowerCase() === 'completed').length;
+  const missedSessions = membershipBookings.filter(isBookingMissed).length;
+
+  return {
+    active: true,
+    totalSessions,
+    usedSessions,
+    completedSessions,
+    missedSessions,
+    remainingSessions: Math.max(0, totalSessions - usedSessions),
+  };
+}
+
 function getAdminUserSessionsByFilter(bookings, filter = state.adminUserSessionFilter) {
   const normalizedFilter = String(filter || 'all').trim().toLowerCase();
   const source = Array.isArray(bookings) ? bookings : [];
@@ -12757,10 +12879,13 @@ function buildAdminUserSessionSummary(user) {
   const activeBookings = bookings.filter((booking) => String(booking?.status || '').toLowerCase() !== 'cancelled');
   const completed = activeBookings.filter((booking) => String(booking?.status || '').toLowerCase() === 'completed').length;
   const missed = activeBookings.filter(isBookingMissed).length;
-  const remaining = activeBookings.filter((booking) => {
-    const status = String(booking?.status || '').toLowerCase();
-    return status !== 'completed' && !isBookingMissed(booking);
-  }).length;
+  const membershipSummary = getAdminUserMembershipSessionSummary(user);
+  const remaining = membershipSummary.active
+    ? membershipSummary.remainingSessions
+    : activeBookings.filter((booking) => {
+        const status = String(booking?.status || '').toLowerCase();
+        return status !== 'completed' && !isBookingMissed(booking);
+      }).length;
 
   return {
     bookings,
@@ -12770,6 +12895,10 @@ function buildAdminUserSessionSummary(user) {
     missed,
     memberSessions: activeBookings.filter(isAdminMemberSessionBooking).length,
     topUpSessions: activeBookings.filter(isAdminTopUpSessionBooking).length,
+    membershipTotalSessions: membershipSummary.totalSessions,
+    membershipUsedSessions: membershipSummary.usedSessions,
+    membershipCompletedSessions: membershipSummary.completedSessions,
+    membershipMissedSessions: membershipSummary.missedSessions,
   };
 }
 
@@ -12930,6 +13059,11 @@ function renderAdminUserSessionDialog() {
     .forEach((booking) => {
       const derivedStatus = getDerivedBookingStatus(booking);
       const sessionKind = getAdminSessionKindLabel(booking);
+      const sessionKindChip = sessionKind === 'Paid'
+        ? ''
+        : `<span class="status-chip session-${escapeHtml(String(sessionKind).toLowerCase().replace(/[^a-z0-9]+/g, '-'))}">${escapeHtml(
+            sessionKind
+          )}</span>`;
       const row = document.createElement('article');
       row.className = 'admin-user-session-row';
       row.innerHTML = `
@@ -12938,9 +13072,7 @@ function renderAdminUserSessionDialog() {
           <p>${escapeHtml(formatAdminBookingDateTime(booking?.bookingDate, booking?.bookingTime).replace(/\n/g, ' • '))}</p>
         </div>
         <div class="admin-user-session-badges">
-          <span class="status-chip session-${escapeHtml(String(sessionKind).toLowerCase().replace(/[^a-z0-9]+/g, '-'))}">${escapeHtml(
-            sessionKind
-          )}</span>
+          ${sessionKindChip}
           <span class="status-chip status-${escapeHtml(derivedStatus)}">${escapeHtml(derivedStatus)}</span>
           <span class="status-chip payment-${escapeHtml(normalizePaymentStatusKey(booking?.paymentStatus))}">${escapeHtml(
             formatPaymentStatusLabel(booking?.paymentStatus)
@@ -13986,9 +14118,11 @@ function renderAdminRows(bookings) {
     const deliveryStatus = String(booking.paymentLinkDeliveryStatus || '').trim().toLowerCase();
     const deliveryDetail = String(booking.paymentLinkDeliveryDetail || '').trim();
     const deliveryEventAt = booking.paymentLinkEmailEventAt ? formatDateOnly(booking.paymentLinkEmailEventAt) : '';
+    const providerMatch = deliveryDetail.match(/provider:\s*([a-z0-9_-]+)/i);
+    const providerLabel = providerMatch?.[1]?.toUpperCase() || '';
     let emailCellText = 'Not sent';
     if (emailStatus === 'sent') {
-      const finalLabel = deliveryStatus ? `SENT • ${deliveryStatus.toUpperCase()}` : 'SENT';
+      const finalLabel = deliveryStatus ? `SENT • ${providerLabel || deliveryStatus.toUpperCase()}` : 'SENT';
       emailCellText =
         `${finalLabel}` +
         `${emailRecipient ? `\n${emailRecipient}` : ''}` +
@@ -16006,9 +16140,11 @@ function renderAdminHistoryRows(bookings) {
     const deliveryStatus = String(booking.paymentLinkDeliveryStatus || '').trim().toLowerCase();
     const deliveryDetail = String(booking.paymentLinkDeliveryDetail || '').trim();
     const deliveryEventAt = booking.paymentLinkEmailEventAt ? formatDateOnly(booking.paymentLinkEmailEventAt) : '';
+    const providerMatch = deliveryDetail.match(/provider:\s*([a-z0-9_-]+)/i);
+    const providerLabel = providerMatch?.[1]?.toUpperCase() || '';
     let emailCellText = 'Not sent';
     if (emailStatus === 'sent') {
-      const finalLabel = deliveryStatus ? `SENT • ${deliveryStatus.toUpperCase()}` : 'SENT';
+      const finalLabel = deliveryStatus ? `SENT • ${providerLabel || deliveryStatus.toUpperCase()}` : 'SENT';
       emailCellText =
         `${finalLabel}` +
         `${emailRecipient ? `\n${emailRecipient}` : ''}` +
@@ -16100,9 +16236,11 @@ function renderAdminAllBookingRows(bookings) {
     const deliveryStatus = String(booking.paymentLinkDeliveryStatus || '').trim().toLowerCase();
     const deliveryDetail = String(booking.paymentLinkDeliveryDetail || '').trim();
     const deliveryEventAt = booking.paymentLinkEmailEventAt ? formatDateOnly(booking.paymentLinkEmailEventAt) : '';
+    const providerMatch = deliveryDetail.match(/provider:\s*([a-z0-9_-]+)/i);
+    const providerLabel = providerMatch?.[1]?.toUpperCase() || '';
     let emailCellText = 'Not sent';
     if (emailStatus === 'sent') {
-      const finalLabel = deliveryStatus ? `SENT • ${deliveryStatus.toUpperCase()}` : 'SENT';
+      const finalLabel = deliveryStatus ? `SENT • ${providerLabel || deliveryStatus.toUpperCase()}` : 'SENT';
       emailCellText =
         `${finalLabel}` +
         `${emailRecipient ? `\n${emailRecipient}` : ''}` +

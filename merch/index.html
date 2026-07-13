@@ -59,12 +59,6 @@
               <path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
             </svg>
           </button>
-          <a href="#account" id="accountBtn" class="header-icon-btn" aria-label="Account">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.8"/>
-              <path d="M4 21c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-            </svg>
-          </a>
           <button id="cartToggleBtn" class="header-icon-btn cart-icon-btn" type="button" aria-label="Cart">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
               <path d="M4 5h2.2l1.6 8.4a1.4 1.4 0 0 0 1.38 1.16h7.6a1.4 1.4 0 0 0 1.35-1.03L19.6 8H7.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -75,7 +69,26 @@
           </button>
         </div>
       </header>
+      <div class="merch-auth-row">
+        <div class="storefront-header__cta merch-auth-cta" id="merchAuthCta" aria-live="polite">
+        </div>
+      </div>
     </div>
+
+    <!-- Account Drawer -->
+    <aside id="accountDrawer" class="account-drawer" hidden aria-label="Customer account panel">
+      <div class="account-drawer__shell" role="dialog" aria-modal="true" aria-labelledby="accountDrawerTitle">
+        <div class="account-drawer__header">
+          <div>
+            <p class="account-drawer__eyebrow">House Merch</p>
+            <h2 id="accountDrawerTitle">Your Account</h2>
+          </div>
+          <button id="accountDrawerCloseBtn" class="drawer-close-btn" type="button" aria-label="Close account panel">&#10005;</button>
+        </div>
+        <div id="accountDrawerContent" class="account-drawer__content"></div>
+      </div>
+    </aside>
+    <div id="accountDrawerOverlay" class="account-drawer-overlay" hidden></div>
 
     <!-- Search Overlay -->
     <div id="searchOverlay" class="search-overlay" hidden>
