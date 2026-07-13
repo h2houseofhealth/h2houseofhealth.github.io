@@ -5197,7 +5197,7 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
 
   if (Number(emailResult.statusCode || 0) !== 202) {
     const detail = `Email provider did not confirm 202 acceptance (status: ${Number(emailResult.statusCode || 0) || 'unknown'}).`;
-    markEmailDelivery.run(recipientEmail, 'failed', 'failed', detail, bookingId);
+    markEmailDelivery.run(recipientEmail, 'failed', 'failed', detail, 'failed',detail, bookingId);
     const eventAt = new Date().toISOString();
     const messageId = String(emailResult.messageId || '');
     const dedupeKey = buildPaymentLinkEventDedupeKey({
@@ -5845,7 +5845,7 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
     return res.status(502).json({ message: detail });
   }
 
-  markEmailDelivery.run(recipientEmail, 'sent', 'sent', null, bookingId);
+  markEmailDelivery.run(recipientEmail, 'sent', 'sent', null,'accepted', 'Send request accepted by Mailgun.', bookingId);
   const acceptedAt = new Date().toISOString();
   const acceptedMessageId = String(emailResult.messageId || '');
   const acceptedDetail = 'Send request accepted by email provider (202).';
