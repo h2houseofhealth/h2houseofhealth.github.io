@@ -68,6 +68,14 @@
     merchCartItems: [],
     accountDrawerOpen: false,
     accountDrawerTrigger: null,
+    accountProfileEditing: false,
+    accountProfileMessage: '',
+    accountAddressFormMode: null,
+    accountEditingAddressId: null,
+    accountOrdersExpanded: false,
+    checkoutModalOpen: false,
+    checkoutSelectedAddressId: '',
+    checkoutMessage: '',
   };
 
   // ─── Product Data (Static catalog until API is built) ───
@@ -213,6 +221,63 @@
 
   function formatCustomerPhone(phone) {
     return String(phone || '').trim() || 'Not added yet';
+  }
+
+  function getAddressId(address) {
+    return String(address?.id || address?.localId || '');
+  }
+
+  function getAddressSummary(address) {
+    const parts = [
+      address.line1,
+      address.line2,
+      address.city,
+      address.state,
+      address.postalCode,
+      address.country,
+    ].filter(Boolean);
+    return parts.join(', ') || 'Address details not added yet';
+  }
+
+  function getWishlistProductLabel(item) {
+    const product = PRODUCTS.find((entry) => Number(entry.id) === Number(item.productId));
+    return product?.name || item.productName || `Saved item #${item.productId || item.id || ''}`.trim();
+  }
+
+  function getAddressLabel(address) {
+    return String(address?.label || address?.recipientName || 'Shipping Address').trim();
+  }
+
+  function getDefaultAddress() {
+    const addresses = Array.isArray(state.merchAddresses) ? state.merchAddresses : [];
+    return addresses.find((address) => Boolean(address.isDefault)) || addresses[0] || null;
+  }
+
+  function serializeAddress(address) {
+    if (!address) return {};
+    return {
+      id: address.id || null,
+      label: address.label || '',
+      recipientName: address.recipientName || '',
+      phone: address.phone || '',
+      line1: address.line1 || '',
+      line2: address.line2 || '',
+      city: address.city || '',
+      state: address.state || '',
+      postalCode: address.postalCode || '',
+      country: address.country || 'India',
+      isDefault: Boolean(address.isDefault),
+      full: getAddressSummary(address),
+    };
+  }
+
+  function getAuthenticatedCheckoutCustomer() {
+    const profile = getMerchantProfile();
+    return {
+      name: profile.fullName,
+      email: profile.email,
+      phone: profile.mobile,
+    };
   }
 
   function setBodyAuthLoading(isLoading) {
@@ -432,6 +497,8 @@
     const orders = Array.isArray(state.merchOrders) ? state.merchOrders : [];
     const addresses = Array.isArray(state.merchAddresses) ? state.merchAddresses : [];
     const wishlistItems = Array.isArray(state.merchWishlistItems) ? state.merchWishlistItems : [];
+    const visibleOrders = state.accountOrdersExpanded ? orders : orders.slice(0, 4);
+    const editingAddress = addresses.find((address) => getAddressId(address) === String(state.accountEditingAddressId || ''));
     const accountInitials = escapeHtml(getInitials(profile.fullName));
     const avatarStyle = profile.avatarUrl
       ? ` style="background-image:url('${escapeHtml(profile.avatarUrl)}')"`
@@ -441,13 +508,40 @@
       <section class="account-card account-card--profile">
         <div class="account-card__avatar profile-avatar${profile.avatarUrl ? ' has-image' : ''}"${avatarStyle}>${accountInitials}</div>
         <div class="account-card__summary">
-          <p class="account-card__eyebrow">My Profile</p>
-          <h3>${escapeHtml(profile.fullName)}</h3>
-          <ul class="account-meta-list">
-            <li><span>Email</span><strong>${escapeHtml(profile.email || 'Not added yet')}</strong></li>
-            <li><span>Mobile Number</span><strong>${escapeHtml(formatCustomerPhone(profile.mobile))}</strong></li>
-          </ul>
-          <p class="account-card__note">This information syncs from your House Bookings account.</p>
+          <div class="account-card__title-row">
+            <div>
+              <p class="account-card__eyebrow">My Profile</p>
+              <h3>${escapeHtml(profile.fullName)}</h3>
+            </div>
+            ${state.accountProfileEditing ? '' : '<button class="btn btn-outline account-action-btn" type="button" data-account-action="edit-profile">Edit</button>'}
+          </div>
+          ${state.accountProfileEditing ? `
+            <form class="account-form" id="accountProfileForm">
+              <label class="account-field">
+                <span>Full Name</span>
+                <input name="fullName" type="text" value="${escapeHtml(profile.fullName)}" autocomplete="name" required />
+              </label>
+              <label class="account-field">
+                <span>Email</span>
+                <input type="email" value="${escapeHtml(profile.email || '')}" readonly aria-readonly="true" />
+              </label>
+              <label class="account-field">
+                <span>Mobile Number</span>
+                <input name="mobile" type="tel" value="${escapeHtml(profile.mobile)}" autocomplete="tel" />
+              </label>
+              <div class="account-form__actions">
+                <button class="btn btn-primary account-action-btn" type="submit">Save</button>
+                <button class="btn btn-outline account-action-btn" type="button" data-account-action="cancel-profile">Cancel</button>
+              </div>
+            </form>
+          ` : `
+            <ul class="account-meta-list">
+              <li><span>Email</span><strong>${escapeHtml(profile.email || 'Not added yet')}</strong></li>
+              <li><span>Mobile Number</span><strong>${escapeHtml(formatCustomerPhone(profile.mobile))}</strong></li>
+            </ul>
+            <p class="account-card__note">Email is your account identity and cannot be changed here.</p>
+          `}
+          ${state.accountProfileMessage ? `<p class="account-success-message">${escapeHtml(state.accountProfileMessage)}</p>` : ''}
         </div>
       </section>
 
@@ -457,24 +551,35 @@
             <p class="account-section__eyebrow">My Addresses</p>
             <h4>Shipping and billing</h4>
           </div>
-          <span class="account-section__count">${addresses.length}</span>
+          <div class="account-section__actions">
+            <button class="btn btn-outline account-action-btn" type="button" data-account-action="add-address">Add Address</button>
+            <span class="account-section__count">${addresses.length}</span>
+          </div>
         </div>
+        ${state.accountAddressFormMode ? renderAddressForm(editingAddress) : ''}
         ${addresses.length ? `
           <div class="account-list">
             ${addresses.map((address) => `
               <article class="account-list__item">
                 <div>
                   <strong>${escapeHtml(address.label || address.recipientName || 'Address')}</strong>
-                  <p>${escapeHtml([address.line1, address.line2, address.city, address.state, address.postalCode].filter(Boolean).join(', '))}</p>
+                  <p>${escapeHtml(getAddressSummary(address))}</p>
+                  <p>${escapeHtml([address.recipientName, address.phone].filter(Boolean).join(' · '))}</p>
                 </div>
-                <span>${address.isDefault ? 'Default' : escapeHtml(address.country || 'India')}</span>
+                <div class="account-item-actions">
+                  <span>${address.isDefault ? 'Default' : escapeHtml(address.country || 'India')}</span>
+                  <button type="button" data-account-action="edit-address" data-address-id="${escapeHtml(getAddressId(address))}">Edit</button>
+                  <button type="button" data-account-action="delete-address" data-address-id="${escapeHtml(getAddressId(address))}">Delete</button>
+                  ${address.isDefault ? '' : `<button type="button" data-account-action="default-address" data-address-id="${escapeHtml(getAddressId(address))}">Mark as Default</button>`}
+                </div>
               </article>
             `).join('')}
           </div>
         ` : `
           <div class="account-empty-state">
             <p>No saved addresses yet.</p>
-            <span>Add one at checkout when you need shipping.</span>
+            <span>Add one now to speed up merch checkout.</span>
+            <button class="btn btn-outline account-action-btn" type="button" data-account-action="add-address">Add Address</button>
           </div>
         `}
       </section>
@@ -485,17 +590,24 @@
             <p class="account-section__eyebrow">My Orders</p>
             <h4>Merchandise orders</h4>
           </div>
-          <span class="account-section__count">${orders.length}</span>
+          <div class="account-section__actions">
+            ${orders.length > 4 ? `<button class="btn btn-outline account-action-btn" type="button" data-account-action="view-all-orders">${state.accountOrdersExpanded ? 'Show Less' : 'View All'}</button>` : ''}
+            <span class="account-section__count">${orders.length}</span>
+          </div>
         </div>
         ${orders.length ? `
           <div class="account-list">
-            ${orders.slice(0, 4).map((order) => `
+            ${visibleOrders.map((order) => `
               <article class="account-list__item account-list__item--stacked">
                 <div class="account-list__row">
                   <strong>${escapeHtml(order.orderNumber || `Order #${order.id}`)}</strong>
                   <span>${escapeHtml(formatOrderStatus(order.status))}</span>
                 </div>
                 <p>${escapeHtml(formatDateLabel(order.createdAt))} · ${escapeHtml(order.totalAmount ? formatPrice(order.totalAmount) : 'Total unavailable')}</p>
+                <div class="account-item-actions account-item-actions--inline">
+                  <button type="button" data-account-action="view-order" data-order-id="${escapeHtml(String(order.id || ''))}">View Details</button>
+                  <button type="button" data-account-action="track-order" data-order-id="${escapeHtml(String(order.id || ''))}">Track Order</button>
+                </div>
               </article>
             `).join('')}
           </div>
@@ -513,17 +625,31 @@
             <p class="account-section__eyebrow">Wishlist</p>
             <h4>Saved for later</h4>
           </div>
-          <span class="account-section__count">${wishlistItems.length}</span>
+          <div class="account-section__actions">
+            <button class="btn btn-outline account-action-btn" type="button" data-account-action="view-wishlist">View Wishlist</button>
+            <span class="account-section__count">${wishlistItems.length}</span>
+          </div>
         </div>
         ${wishlistItems.length ? `
-          <div class="account-empty-state">
-            <p>Wishlist items are ready to build out.</p>
-            <span>We’ll show saved products here once your merch wishlist is populated.</span>
+          <div class="account-list">
+            ${wishlistItems.map((item) => `
+              <article class="account-list__item account-list__item--stacked">
+                <div class="account-list__row">
+                  <strong>${escapeHtml(getWishlistProductLabel(item))}</strong>
+                  <span>Saved</span>
+                </div>
+                <div class="account-item-actions account-item-actions--inline">
+                  <button type="button" data-account-action="wishlist-move" data-wishlist-id="${escapeHtml(String(item.id || ''))}">Move to Cart</button>
+                  <button type="button" data-account-action="wishlist-remove" data-wishlist-id="${escapeHtml(String(item.id || ''))}">Remove</button>
+                </div>
+              </article>
+            `).join('')}
           </div>
         ` : `
           <div class="account-empty-state">
             <p>No wishlist items yet.</p>
             <span>Tap the heart on a product to save it for later.</span>
+            <button class="btn btn-outline account-action-btn" type="button" data-account-action="view-wishlist">View Wishlist</button>
           </div>
         `}
       </section>
@@ -537,8 +663,8 @@
           <span class="account-section__count">0</span>
         </div>
         <div class="account-empty-state">
-          <p>Saved payment methods are coming soon.</p>
-          <span>Your active cart stays local until checkout.</span>
+          <p>Coming Soon</p>
+          <span>Payment storage is not enabled yet.</span>
         </div>
       </section>
 
@@ -560,6 +686,272 @@
     `;
 
     document.getElementById('merchLogoutBtn')?.addEventListener('click', handleLogout);
+    bindAccountDrawerActions();
+  }
+
+  function renderAddressForm(address = null) {
+    const isEdit = state.accountAddressFormMode === 'edit';
+    const value = (key, fallback = '') => escapeHtml(String(address?.[key] || fallback));
+    return `
+      <form class="account-form account-form--address" id="accountAddressForm">
+        <div class="account-form__grid">
+          <label class="account-field">
+            <span>Label</span>
+            <input name="label" type="text" value="${value('label', isEdit ? 'Home' : '')}" placeholder="Home" />
+          </label>
+          <label class="account-field">
+            <span>Recipient</span>
+            <input name="recipientName" type="text" value="${value('recipientName')}" autocomplete="name" required />
+          </label>
+          <label class="account-field">
+            <span>Mobile Number</span>
+            <input name="phone" type="tel" value="${value('phone')}" autocomplete="tel" required />
+          </label>
+          <label class="account-field account-field--wide">
+            <span>Address Line 1</span>
+            <input name="line1" type="text" value="${value('line1')}" autocomplete="address-line1" required />
+          </label>
+          <label class="account-field account-field--wide">
+            <span>Address Line 2</span>
+            <input name="line2" type="text" value="${value('line2')}" autocomplete="address-line2" />
+          </label>
+          <label class="account-field">
+            <span>City</span>
+            <input name="city" type="text" value="${value('city')}" autocomplete="address-level2" />
+          </label>
+          <label class="account-field">
+            <span>State</span>
+            <input name="state" type="text" value="${value('state')}" autocomplete="address-level1" />
+          </label>
+          <label class="account-field">
+            <span>Postal Code</span>
+            <input name="postalCode" type="text" value="${value('postalCode')}" autocomplete="postal-code" />
+          </label>
+          <label class="account-field">
+            <span>Country</span>
+            <input name="country" type="text" value="${value('country', 'India')}" autocomplete="country-name" />
+          </label>
+        </div>
+        <label class="account-check">
+          <input name="isDefault" type="checkbox" ${address?.isDefault ? 'checked' : ''} />
+          <span>Set as default address</span>
+        </label>
+        <div class="account-form__actions">
+          <button class="btn btn-primary account-action-btn" type="submit">${isEdit ? 'Save' : 'Add Address'}</button>
+          <button class="btn btn-outline account-action-btn" type="button" data-account-action="cancel-address">Cancel</button>
+        </div>
+      </form>
+    `;
+  }
+
+  function bindAccountDrawerActions() {
+    document.getElementById('accountProfileForm')?.addEventListener('submit', handleProfileSubmit);
+    document.getElementById('accountAddressForm')?.addEventListener('submit', handleAddressSubmit);
+
+    els.accountDrawerContent?.querySelectorAll('[data-account-action]').forEach((button) => {
+      button.addEventListener('click', () => handleAccountAction(button));
+    });
+  }
+
+  function getOrderById(orderId) {
+    return (Array.isArray(state.merchOrders) ? state.merchOrders : []).find((order) => String(order.id || '') === String(orderId || ''));
+  }
+
+  async function handleAccountAction(button) {
+    const action = button.dataset.accountAction;
+
+    if (action === 'edit-profile') {
+      state.accountProfileEditing = true;
+      state.accountProfileMessage = '';
+      renderAccountDrawer();
+      return;
+    }
+
+    if (action === 'cancel-profile') {
+      state.accountProfileEditing = false;
+      renderAccountDrawer();
+      return;
+    }
+
+    if (action === 'add-address') {
+      state.accountAddressFormMode = 'add';
+      state.accountEditingAddressId = null;
+      renderAccountDrawer();
+      return;
+    }
+
+    if (action === 'edit-address') {
+      state.accountAddressFormMode = 'edit';
+      state.accountEditingAddressId = button.dataset.addressId;
+      renderAccountDrawer();
+      return;
+    }
+
+    if (action === 'cancel-address') {
+      state.accountAddressFormMode = null;
+      state.accountEditingAddressId = null;
+      renderAccountDrawer();
+      return;
+    }
+
+    if (action === 'delete-address') {
+      await deleteAddress(button.dataset.addressId);
+      return;
+    }
+
+    if (action === 'default-address') {
+      await setDefaultAddress(button.dataset.addressId);
+      return;
+    }
+
+    if (action === 'view-all-orders') {
+      state.accountOrdersExpanded = !state.accountOrdersExpanded;
+      renderAccountDrawer();
+      return;
+    }
+
+    if (action === 'view-order') {
+      const order = getOrderById(button.dataset.orderId);
+      showCheckoutNotice(
+        order ? (order.orderNumber || `Order #${order.id}`) : 'Order details',
+        order
+          ? `Status: ${formatOrderStatus(order.status)}. Total: ${order.totalAmount ? formatPrice(order.totalAmount) : 'Unavailable'}.`
+          : 'Order details are unavailable.'
+      );
+      return;
+    }
+
+    if (action === 'track-order') {
+      const order = getOrderById(button.dataset.orderId);
+      const tracking = [order?.carrierName, order?.trackingNumber].filter(Boolean).join(' · ');
+      showCheckoutNotice('Track order', tracking || 'Tracking details will appear once this order ships.');
+      return;
+    }
+
+    if (action === 'view-wishlist') {
+      closeAccountDrawer();
+      document.getElementById('shopSection')?.scrollIntoView({ behavior: 'smooth' });
+      return;
+    }
+
+    if (action === 'wishlist-remove') {
+      state.merchWishlistItems = state.merchWishlistItems.filter((item) => String(item.id || '') !== String(button.dataset.wishlistId || ''));
+      renderAccountDrawer();
+      return;
+    }
+
+    if (action === 'wishlist-move') {
+      showCheckoutNotice('Wishlist', 'Move to Cart is ready for the wishlist service connection.');
+    }
+  }
+
+  async function handleProfileSubmit(event) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const payload = {
+      fullName: String(formData.get('fullName') || '').trim(),
+      mobile: String(formData.get('mobile') || '').trim(),
+    };
+
+    try {
+      const result = await api('/api/merch/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      state.merchProfile = result.profile || { ...(state.merchProfile || {}), ...payload };
+    } catch {
+      state.merchProfile = { ...(state.merchProfile || {}), ...payload };
+    }
+
+    if (state.currentUser) {
+      state.currentUser = { ...state.currentUser, name: payload.fullName, mobile: payload.mobile };
+    }
+    state.accountProfileEditing = false;
+    state.accountProfileMessage = 'Profile saved.';
+    renderAccountTrigger();
+    renderAccountDrawer();
+  }
+
+  function getAddressPayload(form) {
+    const formData = new FormData(form);
+    return {
+      label: String(formData.get('label') || '').trim(),
+      recipientName: String(formData.get('recipientName') || '').trim(),
+      phone: String(formData.get('phone') || '').trim(),
+      line1: String(formData.get('line1') || '').trim(),
+      line2: String(formData.get('line2') || '').trim(),
+      city: String(formData.get('city') || '').trim(),
+      state: String(formData.get('state') || '').trim(),
+      postalCode: String(formData.get('postalCode') || '').trim(),
+      country: String(formData.get('country') || 'India').trim() || 'India',
+      isDefault: formData.get('isDefault') === 'on',
+    };
+  }
+
+  async function handleAddressSubmit(event) {
+    event.preventDefault();
+    const payload = getAddressPayload(event.currentTarget);
+    const isEdit = state.accountAddressFormMode === 'edit';
+    const addressId = state.accountEditingAddressId;
+
+    try {
+      const result = await api(isEdit ? `/api/merch/addresses/${encodeURIComponent(addressId)}` : '/api/merch/addresses', {
+        method: isEdit ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      state.merchAddresses = Array.isArray(result.addresses) ? result.addresses : state.merchAddresses;
+    } catch {
+      if (isEdit) {
+        state.merchAddresses = state.merchAddresses.map((address) =>
+          getAddressId(address) === String(addressId) ? { ...address, ...payload } : address
+        );
+      } else {
+        state.merchAddresses = [
+          { ...payload, localId: `local-${Date.now()}`, isDefault: payload.isDefault || state.merchAddresses.length === 0 },
+          ...state.merchAddresses,
+        ];
+      }
+      if (payload.isDefault) {
+        const nextDefaultId = isEdit ? addressId : getAddressId(state.merchAddresses[0]);
+        state.merchAddresses = state.merchAddresses.map((address) => ({
+          ...address,
+          isDefault: getAddressId(address) === String(nextDefaultId),
+        }));
+      }
+    }
+
+    state.accountAddressFormMode = null;
+    state.accountEditingAddressId = null;
+    renderAccountDrawer();
+  }
+
+  async function deleteAddress(addressId) {
+    if (!addressId) return;
+    const shouldDelete = await showCheckoutConfirm('Delete address', 'Delete this saved address?');
+    if (!shouldDelete) return;
+    try {
+      const result = await api(`/api/merch/addresses/${encodeURIComponent(addressId)}`, { method: 'DELETE' });
+      state.merchAddresses = Array.isArray(result.addresses) ? result.addresses : state.merchAddresses;
+    } catch {
+      state.merchAddresses = state.merchAddresses.filter((address) => getAddressId(address) !== String(addressId));
+    }
+    renderAccountDrawer();
+  }
+
+  async function setDefaultAddress(addressId) {
+    if (!addressId) return;
+    try {
+      const result = await api(`/api/merch/addresses/${encodeURIComponent(addressId)}/default`, { method: 'PATCH' });
+      state.merchAddresses = Array.isArray(result.addresses) ? result.addresses : state.merchAddresses;
+    } catch {
+      state.merchAddresses = state.merchAddresses.map((address) => ({
+        ...address,
+        isDefault: getAddressId(address) === String(addressId),
+      }));
+    }
+    renderAccountDrawer();
   }
 
   function openAccountDrawer() {
@@ -927,6 +1319,317 @@
     });
   }
 
+  function ensureMerchModal() {
+    let modal = document.getElementById('merchFlowModal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = 'merchFlowModal';
+    modal.className = 'merch-flow-modal';
+    modal.hidden = true;
+    modal.innerHTML = '<div class="merch-flow-modal__panel" role="dialog" aria-modal="true"></div>';
+    document.body.appendChild(modal);
+
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) closeMerchModal();
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && state.checkoutModalOpen) {
+        closeMerchModal();
+      }
+    });
+
+    return modal;
+  }
+
+  function showMerchModal({ eyebrow = 'House Merch', title, body, footer = '' }) {
+    const modal = ensureMerchModal();
+    const panel = modal.querySelector('.merch-flow-modal__panel');
+    panel.innerHTML = `
+      <div class="merch-flow-modal__header">
+        <div>
+          <p class="merch-flow-modal__eyebrow">${escapeHtml(eyebrow)}</p>
+          <h3>${escapeHtml(title)}</h3>
+        </div>
+        <button class="drawer-close-btn" type="button" data-modal-close aria-label="Close">&#10005;</button>
+      </div>
+      <div class="merch-flow-modal__body">${body}</div>
+      ${footer ? `<div class="merch-flow-modal__footer">${footer}</div>` : ''}
+    `;
+    panel.querySelectorAll('[data-modal-close]').forEach((button) => {
+      button.addEventListener('click', closeMerchModal);
+    });
+    modal.hidden = false;
+    requestAnimationFrame(() => modal.classList.add('is-open'));
+    document.body.classList.add('is-checkout-modal-open');
+    state.checkoutModalOpen = true;
+    return modal;
+  }
+
+  function closeMerchModal() {
+    const modal = document.getElementById('merchFlowModal');
+    if (!modal) return;
+    modal.classList.remove('is-open');
+    document.body.classList.remove('is-checkout-modal-open');
+    state.checkoutModalOpen = false;
+    setTimeout(() => {
+      modal.hidden = true;
+    }, 180);
+  }
+
+  function showCheckoutNotice(title, message, options = {}) {
+    const variantClass = options.variant ? ` merch-flow-notice--${options.variant}` : '';
+    const modal = showMerchModal({
+      title,
+      body: `
+        <div class="merch-flow-notice${variantClass}">
+          <p>${escapeHtml(message)}</p>
+        </div>
+      `,
+      footer: '<button class="btn btn-primary account-action-btn" type="button" data-modal-ok>OK</button>',
+    });
+    modal.querySelector('[data-modal-ok]')?.addEventListener('click', () => {
+      closeMerchModal();
+      options.onClose?.();
+    });
+  }
+
+  function showCheckoutConfirm(title, message) {
+    return new Promise((resolve) => {
+      const modal = showMerchModal({
+        title,
+        body: `<div class="merch-flow-notice"><p>${escapeHtml(message)}</p></div>`,
+        footer: `
+          <button class="btn btn-primary account-action-btn" type="button" data-confirm-yes>Delete</button>
+          <button class="btn btn-outline account-action-btn" type="button" data-confirm-no>Cancel</button>
+        `,
+      });
+      const finish = (value) => {
+        closeMerchModal();
+        resolve(value);
+      };
+      modal.querySelector('[data-confirm-yes]')?.addEventListener('click', () => finish(true));
+      modal.querySelector('[data-confirm-no]')?.addEventListener('click', () => finish(false));
+    });
+  }
+
+  function renderCheckoutAddressCards() {
+    const addresses = Array.isArray(state.merchAddresses) ? state.merchAddresses : [];
+    const selectedId = state.checkoutSelectedAddressId || getAddressId(getDefaultAddress());
+    return addresses.map((address) => {
+      const addressId = getAddressId(address);
+      const isSelected = addressId === selectedId;
+      return `
+        <label class="checkout-address-card${isSelected ? ' is-selected' : ''}">
+          <input type="radio" name="checkoutAddress" value="${escapeHtml(addressId)}" ${isSelected ? 'checked' : ''} />
+          <span>
+            <strong>${escapeHtml(getAddressLabel(address))}</strong>
+            <small>${escapeHtml(getAddressSummary(address))}</small>
+            <small>${escapeHtml([address.recipientName, address.phone].filter(Boolean).join(' · '))}</small>
+          </span>
+          ${address.isDefault ? '<em>Default</em>' : ''}
+        </label>
+      `;
+    }).join('');
+  }
+
+  function openAuthenticatedCheckoutAddressModal() {
+    const addresses = Array.isArray(state.merchAddresses) ? state.merchAddresses : [];
+    const defaultAddress = getDefaultAddress();
+    state.checkoutSelectedAddressId = state.checkoutSelectedAddressId || getAddressId(defaultAddress);
+
+    if (!addresses.length) {
+      openCheckoutAddAddressModal();
+      return;
+    }
+
+    const customer = getAuthenticatedCheckoutCustomer();
+    const modal = showMerchModal({
+      title: 'Choose shipping address',
+      body: `
+        <div class="checkout-profile-summary">
+          <p>Checking out as</p>
+          <strong>${escapeHtml(customer.name)}</strong>
+          <span>${escapeHtml(customer.email)}${customer.phone ? ` · ${escapeHtml(customer.phone)}` : ''}</span>
+        </div>
+        <form id="checkoutAddressSelectForm" class="checkout-address-list">
+          ${renderCheckoutAddressCards()}
+        </form>
+      `,
+      footer: `
+        <button class="btn btn-outline account-action-btn" type="button" data-checkout-add-address>Add Address</button>
+        <button class="btn btn-primary account-action-btn" type="button" data-checkout-continue>Continue</button>
+      `,
+    });
+
+    modal.querySelectorAll('input[name="checkoutAddress"]').forEach((input) => {
+      input.addEventListener('change', () => {
+        state.checkoutSelectedAddressId = input.value;
+        modal.querySelectorAll('.checkout-address-card').forEach((card) => card.classList.remove('is-selected'));
+        input.closest('.checkout-address-card')?.classList.add('is-selected');
+      });
+    });
+    modal.querySelector('[data-checkout-add-address]')?.addEventListener('click', openCheckoutAddAddressModal);
+    modal.querySelector('[data-checkout-continue]')?.addEventListener('click', () => {
+      const selected = state.merchAddresses.find((address) => getAddressId(address) === String(state.checkoutSelectedAddressId));
+      if (!selected) {
+        showCheckoutNotice('Address needed', 'Choose or add a shipping address before checkout.');
+        return;
+      }
+      closeMerchModal();
+      startRazorpayCheckout(customer, serializeAddress(selected));
+    });
+  }
+
+  function renderCheckoutAddressForm() {
+    return `
+      <form id="checkoutAddAddressForm" class="account-form account-form--address checkout-address-form">
+        <div class="account-form__grid">
+          <label class="account-field">
+            <span>Label</span>
+            <input name="label" type="text" placeholder="Home" />
+          </label>
+          <label class="account-field">
+            <span>Recipient</span>
+            <input name="recipientName" type="text" value="${escapeHtml(getMerchantProfile().fullName)}" autocomplete="name" required />
+          </label>
+          <label class="account-field">
+            <span>Mobile Number</span>
+            <input name="phone" type="tel" value="${escapeHtml(getMerchantProfile().mobile)}" autocomplete="tel" required />
+          </label>
+          <label class="account-field account-field--wide">
+            <span>Address Line 1</span>
+            <input name="line1" type="text" autocomplete="address-line1" required />
+          </label>
+          <label class="account-field account-field--wide">
+            <span>Address Line 2</span>
+            <input name="line2" type="text" autocomplete="address-line2" />
+          </label>
+          <label class="account-field">
+            <span>City</span>
+            <input name="city" type="text" autocomplete="address-level2" />
+          </label>
+          <label class="account-field">
+            <span>State</span>
+            <input name="state" type="text" autocomplete="address-level1" />
+          </label>
+          <label class="account-field">
+            <span>Postal Code</span>
+            <input name="postalCode" type="text" autocomplete="postal-code" />
+          </label>
+          <label class="account-field">
+            <span>Country</span>
+            <input name="country" type="text" value="India" autocomplete="country-name" />
+          </label>
+        </div>
+        <label class="account-check">
+          <input name="isDefault" type="checkbox" checked />
+          <span>Set as default address</span>
+        </label>
+      </form>
+    `;
+  }
+
+  function openCheckoutAddAddressModal() {
+    const modal = showMerchModal({
+      title: 'Add shipping address',
+      body: renderCheckoutAddressForm(),
+      footer: `
+        <button class="btn btn-outline account-action-btn" type="button" data-checkout-back>Back</button>
+        <button class="btn btn-primary account-action-btn" type="submit" form="checkoutAddAddressForm">Save & Continue</button>
+      `,
+    });
+
+    modal.querySelector('[data-checkout-back]')?.addEventListener('click', () => {
+      if (state.merchAddresses.length) openAuthenticatedCheckoutAddressModal();
+      else closeMerchModal();
+    });
+    modal.querySelector('#checkoutAddAddressForm')?.addEventListener('submit', handleCheckoutAddressSubmit);
+  }
+
+  async function handleCheckoutAddressSubmit(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const submitButton = document.querySelector('[form="checkoutAddAddressForm"]');
+    const payload = getAddressPayload(form);
+    submitButton?.setAttribute('disabled', 'disabled');
+
+    try {
+      const result = await api('/api/merch/addresses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      state.merchAddresses = Array.isArray(result.addresses) ? result.addresses : state.merchAddresses;
+    } catch (error) {
+      showCheckoutNotice('Address not saved', error.message || 'Please check the address details and try again.', { variant: 'error' });
+      return;
+    } finally {
+      submitButton?.removeAttribute('disabled');
+    }
+
+    const selected = getDefaultAddress();
+    if (!selected) {
+      showCheckoutNotice('Address needed', 'Add a shipping address before checkout.', { variant: 'error' });
+      return;
+    }
+
+    closeMerchModal();
+    startRazorpayCheckout(getAuthenticatedCheckoutCustomer(), serializeAddress(selected));
+  }
+
+  function openGuestCheckoutModal() {
+    const modal = showMerchModal({
+      title: 'Guest checkout',
+      body: `
+        <form id="guestCheckoutForm" class="account-form guest-checkout-form">
+          <label class="account-field">
+            <span>Full Name</span>
+            <input name="name" type="text" autocomplete="name" required />
+          </label>
+          <label class="account-field">
+            <span>Email</span>
+            <input name="email" type="email" autocomplete="email" required />
+          </label>
+          <label class="account-field">
+            <span>Mobile Number</span>
+            <input name="phone" type="tel" autocomplete="tel" required />
+          </label>
+          <label class="account-field">
+            <span>Shipping Address</span>
+            <textarea name="address" rows="4" autocomplete="street-address" required></textarea>
+          </label>
+        </form>
+      `,
+      footer: `
+        <button class="btn btn-outline account-action-btn" type="button" data-modal-close>Cancel</button>
+        <button class="btn btn-primary account-action-btn" type="submit" form="guestCheckoutForm">Continue</button>
+      `,
+    });
+    modal.querySelector('[data-modal-close]')?.addEventListener('click', closeMerchModal);
+    modal.querySelector('#guestCheckoutForm')?.addEventListener('submit', handleGuestCheckoutSubmit);
+  }
+
+  function handleGuestCheckoutSubmit(event) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const customer = {
+      name: String(formData.get('name') || '').trim(),
+      email: String(formData.get('email') || '').trim(),
+      phone: String(formData.get('phone') || '').trim(),
+    };
+    const address = { full: String(formData.get('address') || '').trim() };
+
+    if (!customer.name || !customer.email || !customer.phone || !address.full) {
+      showCheckoutNotice('Missing details', 'Please complete all guest checkout fields.', { variant: 'error' });
+      return;
+    }
+
+    closeMerchModal();
+    startRazorpayCheckout(customer, address);
+  }
+
   // ─── Event Bindings ───
   function bindEvents() {
     // Hero shop button
@@ -996,34 +1699,47 @@
 
   // ─── Razorpay Checkout Flow ───
   async function initiateCheckout() {
-    // Collect customer info
-    const savedName = String(state.merchProfile?.fullName || state.currentUser?.name || '').trim();
-    const savedEmail = String(state.merchProfile?.email || state.currentUser?.email || '').trim();
-    const savedPhone = String(state.merchProfile?.mobile || state.currentUser?.mobile || '').trim();
+    if (!state.authResolved) {
+      await loadCustomerContext();
+    }
 
-    const name = prompt('Your full name:', savedName);
-    if (!name) return;
-    const email = prompt('Your email:', savedEmail);
-    if (!email) return;
-    const phone = prompt('Your phone number (10 digits):', savedPhone);
-    if (!phone) return;
+    if (state.currentUser) {
+      const customer = getAuthenticatedCheckoutCustomer();
+      if (!customer.name || !customer.email || !customer.phone) {
+        showCheckoutNotice(
+          'Profile incomplete',
+          'Your merchandise profile needs a full name, email, and mobile number before checkout.',
+          { variant: 'error' }
+        );
+        return;
+      }
 
-    const address = prompt('Shipping address (full address with pincode):');
+      openAuthenticatedCheckoutAddressModal();
+      return;
+    }
 
+    openGuestCheckoutModal();
+  }
+
+  async function startRazorpayCheckout(customer, address) {
     const items = state.cart.map(item => ({ variantId: item.variantId, quantity: item.quantity }));
-    const customer = { name, email, phone };
 
     try {
       const res = await fetch(buildApiUrl('/api/merch/checkout'), {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items, customer, address: { full: address } }),
+        body: JSON.stringify({ items, customer, address,}),
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        alert(err.error || 'Checkout failed');
+        let err = {};
+        try {
+          err = await res.json();
+        } catch {
+          err = {};
+        }
+        showCheckoutNotice('Checkout failed', err.error || err.message || 'Please try again.', { variant: 'error' });
         return;
       }
 
@@ -1062,9 +1778,9 @@
             saveCart();
             renderCart();
             closeCart();
-            alert('Payment successful! Order ' + data.orderNumber + ' confirmed.');
+            showCheckoutNotice('Payment successful', `Order ${data.orderNumber} confirmed.`);
           } else {
-            alert('Payment verification failed. Please contact support.');
+            showCheckoutNotice('Payment verification failed', 'Please contact support with your payment details.', { variant: 'error' });
           }
         },
       };
@@ -1073,7 +1789,7 @@
       rzp.open();
     } catch (err) {
       console.error('Checkout error:', err);
-      alert('Something went wrong. Please try again.');
+      showCheckoutNotice('Checkout unavailable', 'Something went wrong. Please try again.', { variant: 'error' });
     }
   }
 
