@@ -604,9 +604,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       updates.push('email = ?');
       params.push(email);
     }
-    if (mobile) {
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'mobile') || Object.prototype.hasOwnProperty.call(req.body || {}, 'phone')) {
       updates.push('mobile = ?');
-      params.push(mobile);
+      params.push(mobile || null);
     }
     if (avatarUrl) {
       updates.push('avatar_url = ?');
@@ -620,6 +620,185 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     const nextProfile = getMerchCustomerProfileByUserId(req.user.id);
     res.json({ profile: nextProfile || profile });
+  });
+
+  function getMerchCustomerAddresses(customerId) {
+    return db
+      .prepare(
+        `SELECT id, customer_id AS customerId, label, recipient_name AS recipientName, phone, line1, line2,
+                city, state, postal_code AS postalCode, country, is_default AS isDefault,
+                created_at AS createdAt, updated_at AS updatedAt
+         FROM merch_customer_addresses
+         WHERE customer_id = ?
+         ORDER BY isDefault DESC, datetime(createdAt) DESC, id DESC`
+      )
+      .all(customerId);
+  }
+
+  function normalizeAddressInput(body = {}) {
+    return {
+      label: String(body.label || '').trim(),
+      recipientName: String(body.recipientName || body.recipient_name || '').trim(),
+      phone: String(body.phone || body.mobile || '').trim(),
+      line1: String(body.line1 || '').trim(),
+      line2: String(body.line2 || '').trim(),
+      city: String(body.city || '').trim(),
+      state: String(body.state || '').trim(),
+      postalCode: String(body.postalCode || body.postal_code || '').trim(),
+      country: String(body.country || 'India').trim() || 'India',
+      isDefault: body.isDefault === true || body.is_default === true || body.isDefault === 1 || body.is_default === 1,
+    };
+  }
+
+  app.post('/api/merch/addresses', requireMerchAuth, (req, res) => {
+    const profile = ensureMerchCustomerProfileForUser(req.user);
+    if (!profile) {
+      return res.status(404).json({ message: 'Merch profile could not be created' });
+    }
+
+    const address = normalizeAddressInput(req.body);
+    if (!address.recipientName || !address.phone || !address.line1) {
+      return res.status(400).json({ message: 'Recipient, phone, and address line 1 are required' });
+    }
+
+    const existingCount = db
+      .prepare('SELECT COUNT(*) AS count FROM merch_customer_addresses WHERE customer_id = ?')
+      .get(profile.id).count;
+    const shouldSetDefault = address.isDefault || existingCount === 0;
+
+    if (shouldSetDefault) {
+      db.prepare('UPDATE merch_customer_addresses SET is_default = 0 WHERE customer_id = ?').run(profile.id);
+    }
+
+    db
+      .prepare(
+        `INSERT INTO merch_customer_addresses
+          (customer_id, label, recipient_name, phone, line1, line2, city, state, postal_code, country, is_default, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+      )
+      .run(
+        profile.id,
+        address.label || null,
+        address.recipientName,
+        address.phone,
+        address.line1,
+        address.line2 || null,
+        address.city || null,
+        address.state || null,
+        address.postalCode || null,
+        address.country,
+        shouldSetDefault ? 1 : 0
+      );
+
+    res.status(201).json({ addresses: getMerchCustomerAddresses(profile.id) });
+  });
+
+  app.patch('/api/merch/addresses/:id', requireMerchAuth, (req, res) => {
+    const profile = ensureMerchCustomerProfileForUser(req.user);
+    if (!profile) {
+      return res.status(404).json({ message: 'Merch profile could not be created' });
+    }
+
+    const addressId = Number(req.params.id);
+    if (!Number.isInteger(addressId)) {
+      return res.status(400).json({ message: 'Invalid address id' });
+    }
+
+    const existing = db
+      .prepare('SELECT id FROM merch_customer_addresses WHERE id = ? AND customer_id = ?')
+      .get(addressId, profile.id);
+    if (!existing) {
+      return res.status(404).json({ message: 'Address not found' });
+    }
+
+    const address = normalizeAddressInput(req.body);
+    if (!address.recipientName || !address.phone || !address.line1) {
+      return res.status(400).json({ message: 'Recipient, phone, and address line 1 are required' });
+    }
+
+    if (address.isDefault) {
+      db.prepare('UPDATE merch_customer_addresses SET is_default = 0 WHERE customer_id = ?').run(profile.id);
+    }
+
+    db
+      .prepare(
+        `UPDATE merch_customer_addresses
+         SET label = ?, recipient_name = ?, phone = ?, line1 = ?, line2 = ?, city = ?, state = ?,
+             postal_code = ?, country = ?, is_default = CASE WHEN ? THEN 1 ELSE is_default END,
+             updated_at = datetime('now')
+         WHERE id = ? AND customer_id = ?`
+      )
+      .run(
+        address.label || null,
+        address.recipientName,
+        address.phone,
+        address.line1,
+        address.line2 || null,
+        address.city || null,
+        address.state || null,
+        address.postalCode || null,
+        address.country,
+        address.isDefault ? 1 : 0,
+        addressId,
+        profile.id
+      );
+
+    res.json({ addresses: getMerchCustomerAddresses(profile.id) });
+  });
+
+  app.patch('/api/merch/addresses/:id/default', requireMerchAuth, (req, res) => {
+    const profile = ensureMerchCustomerProfileForUser(req.user);
+    if (!profile) {
+      return res.status(404).json({ message: 'Merch profile could not be created' });
+    }
+
+    const addressId = Number(req.params.id);
+    if (!Number.isInteger(addressId)) {
+      return res.status(400).json({ message: 'Invalid address id' });
+    }
+
+    const existing = db
+      .prepare('SELECT id FROM merch_customer_addresses WHERE id = ? AND customer_id = ?')
+      .get(addressId, profile.id);
+    if (!existing) {
+      return res.status(404).json({ message: 'Address not found' });
+    }
+
+    db.prepare('UPDATE merch_customer_addresses SET is_default = 0 WHERE customer_id = ?').run(profile.id);
+    db
+      .prepare("UPDATE merch_customer_addresses SET is_default = 1, updated_at = datetime('now') WHERE id = ? AND customer_id = ?")
+      .run(addressId, profile.id);
+
+    res.json({ addresses: getMerchCustomerAddresses(profile.id) });
+  });
+
+  app.delete('/api/merch/addresses/:id', requireMerchAuth, (req, res) => {
+    const profile = ensureMerchCustomerProfileForUser(req.user);
+    if (!profile) {
+      return res.status(404).json({ message: 'Merch profile could not be created' });
+    }
+
+    const addressId = Number(req.params.id);
+    if (!Number.isInteger(addressId)) {
+      return res.status(400).json({ message: 'Invalid address id' });
+    }
+
+    const deleted = db
+      .prepare('DELETE FROM merch_customer_addresses WHERE id = ? AND customer_id = ?')
+      .run(addressId, profile.id);
+
+    if (!deleted.changes) {
+      return res.status(404).json({ message: 'Address not found' });
+    }
+
+    const addresses = getMerchCustomerAddresses(profile.id);
+    if (addresses.length && !addresses.some((address) => Number(address.isDefault) === 1)) {
+      db
+        .prepare("UPDATE merch_customer_addresses SET is_default = 1, updated_at = datetime('now') WHERE id = ? AND customer_id = ?")
+        .run(addresses[0].id, profile.id);
+    }
+
+    res.json({ addresses: getMerchCustomerAddresses(profile.id) });
   });
 
   app.get('/api/merch/orders', requireMerchAuth, (req, res) => {
