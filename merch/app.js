@@ -340,7 +340,7 @@
 
     const existing = state.cart.find(item => item.variantId === variantId);
     if (existing) {
-      const newQty = Math.min(existing.quantity + quantity, variant.stock);
+      const newQty = Math.min(Math.max(1, quantity), variant.stock);
       existing.quantity = newQty;
     } else {
       state.cart.push({
