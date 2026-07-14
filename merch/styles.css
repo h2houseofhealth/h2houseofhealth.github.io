@@ -48,6 +48,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+body.merch-page::before,
+body.merch-page::after {
+  content: none !important;
+  display: none !important;
+  background: none !important;
+}
+
 body.is-account-drawer-open,
 body.is-checkout-modal-open {
   overflow: hidden;

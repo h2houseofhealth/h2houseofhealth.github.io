@@ -33,6 +33,20 @@ function getReturnTo() {
   return candidate;
 }
 
+const ADMIN_LOGIN_EMAIL = 'admin@h2health.local';
+
+function isAdminLoginIdentity(value) {
+  return String(value || '').trim().toLowerCase() === ADMIN_LOGIN_EMAIL;
+}
+
+function getPostAuthRedirectTarget({ email = '', user = null } = {}) {
+  if (isAdminLoginIdentity(email) || isAdminLoginIdentity(user?.email) || String(user?.role || '').toLowerCase() === 'admin') {
+    return '/merch/admin/index.html';
+  }
+
+  return getReturnTo();
+}
+
 function api(path, options = {}) {
   return fetch(buildApiUrl(path), {
     credentials: 'include',
@@ -333,6 +347,7 @@ async function resendAuthOtp() {
 
 async function finishAuthSuccess(result) {
   const token = String(result?.token || result?.authToken || '').trim();
+  const user = result?.user || null;
   if (token) {
     try {
       window.localStorage?.setItem('booking_portal_auth_token', token);
@@ -340,7 +355,7 @@ async function finishAuthSuccess(result) {
       // Ignore storage issues.
     }
   }
-  window.location.replace(getReturnTo());
+  window.location.replace(getPostAuthRedirectTarget({ user }));
 }
 
 async function submitAuth() {
@@ -357,6 +372,10 @@ async function submitAuth() {
       });
 
       elements.authForm.reset();
+      if (isAdminLoginIdentity(email) || isAdminLoginIdentity(result?.user?.email) || String(result?.user?.role || '').toLowerCase() === 'admin') {
+        window.location.replace('/merch/admin/index.html');
+        return;
+      }
       await finishAuthSuccess(result);
       return;
     }
@@ -479,8 +498,8 @@ async function submitAuth() {
 
 async function loadCurrentUser() {
   try {
-    await api('/api/auth/me');
-    window.location.replace(getReturnTo());
+    const result = await api('/api/auth/me');
+    window.location.replace(getPostAuthRedirectTarget({ user: result?.user || null }));
   } catch {
     // Anonymous shopper, stay on auth page.
   }

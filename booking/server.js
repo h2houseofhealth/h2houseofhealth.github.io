@@ -777,7 +777,19 @@ app.use('/uploads', express.static(uploadsDir));
 
 // Mount Merch API routes
 const mountMerchApi = require('./merch-api');
-mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, JWT_SECRET, jwt });
+mountMerchApi(app, {
+  db,
+  razorpay,
+  RAZORPAY_KEY_ID,
+  RAZORPAY_KEY_SECRET,
+  JWT_SECRET,
+  jwt,
+  couponHelpers: {
+    normalizeCouponCode,
+    validateCouponForUser,
+    recordCouponRedemption,
+  },
+});
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -2441,7 +2453,7 @@ app.patch('/api/admin/coupons/:id/active', requireAuth, requireAdmin, (req, res)
 
 app.get('/api/coupons/general', requireAuth, (req, res) => {
   const appliesTo = String(req.query?.appliesTo || '').trim().toLowerCase();
-  const allowedAppliesTo = new Set(['services', 'membership']);
+  const allowedAppliesTo = new Set(['services', 'membership', 'merch']);
   const filterAppliesTo = allowedAppliesTo.has(appliesTo) ? appliesTo : '';
   const requesterRole = String(req.user?.role || '').trim().toLowerCase();
 
@@ -2566,7 +2578,8 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   const festivalName = String(req.body?.festivalName || '').trim();
   const discountType = 'flat';
   const discountValue = Number(req.body?.discountValue || 0);
-  const appliesTo = 'all';
+  const appliesToRaw = String(req.body?.appliesTo || 'all').trim().toLowerCase();
+  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || '').trim().toLowerCase();
   const sendEmail = req.body?.sendEmail !== false;
   let couponType = String(req.body?.couponType || '').trim().toLowerCase();
@@ -2713,6 +2726,119 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     code,
     emailStatus,
     emailMessage,
+  });
+});
+
+app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
+  const couponId = Number(req.params.id);
+  if (!Number.isInteger(couponId)) {
+    return res.status(400).json({ message: 'Invalid coupon id.' });
+  }
+
+  const existing = getCouponById(couponId);
+  if (!existing) {
+    return res.status(404).json({ message: 'Coupon not found.' });
+  }
+
+  let code = normalizeCouponCode(req.body?.code || existing.code);
+  const description = String(req.body?.description || existing.description || '').trim();
+  const festivalName = String(req.body?.festivalName || existing.festivalName || '').trim();
+  const discountType = String(req.body?.discountType || existing.discountType || 'flat').trim().toLowerCase() || 'flat';
+  const discountValue = Number(req.body?.discountValue ?? existing.discountValue ?? 0);
+  const appliesToRaw = String(req.body?.appliesTo || existing.appliesTo || 'all').trim().toLowerCase();
+  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) ? appliesToRaw : 'all';
+  const recipientEmail = String(req.body?.recipientEmail || existing.recipientEmail || '').trim().toLowerCase();
+  const recipientName = String(req.body?.recipientName || existing.recipientName || '').trim();
+  let couponType = String(req.body?.couponType || existing.couponType || '').trim().toLowerCase();
+  if (!['public', 'private'].includes(couponType)) {
+    couponType = recipientEmail ? 'private' : 'public';
+  }
+  const singleUse = Boolean(req.body?.singleUse) || couponType === 'private';
+  const maxRedemptionsRaw = req.body?.maxRedemptions;
+  let maxRedemptions =
+    maxRedemptionsRaw === '' || maxRedemptionsRaw == null
+      ? existing.maxRedemptions ?? null
+      : Number(maxRedemptionsRaw);
+  const validFrom = String(req.body?.validFrom || existing.validFrom || '').trim();
+  const validTill = String(req.body?.validTill || req.body?.expiresAt || existing.validTill || existing.expiresAt || '').trim();
+  const active = req.body?.active == null ? Number(existing.active || existing.isActive || 1) : Number(req.body?.active) === 1 ? 1 : 0;
+
+  if (!code) {
+    code = generateUniqueCouponCode();
+  }
+  if (!Number.isFinite(discountValue) || discountValue <= 0) {
+    return res.status(400).json({ message: 'discountValue must be greater than 0.' });
+  }
+  if (couponType === 'private' && !recipientEmail) {
+    return res.status(400).json({ message: 'recipientEmail is required for private coupons.' });
+  }
+  if (singleUse || couponType === 'private') {
+    maxRedemptions = 1;
+  }
+  if (maxRedemptions != null && (!Number.isInteger(maxRedemptions) || maxRedemptions <= 0)) {
+    return res.status(400).json({ message: 'maxRedemptions must be a positive integer.' });
+  }
+  if (validFrom && Number.isNaN(new Date(validFrom).getTime())) {
+    return res.status(400).json({ message: 'validFrom must be a valid date.' });
+  }
+  if (validTill) {
+    const parsedExpiry = new Date(validTill);
+    if (Number.isNaN(parsedExpiry.getTime())) {
+      return res.status(400).json({ message: 'validTill must be a valid date.' });
+    }
+  }
+
+  try {
+    db.prepare(
+      `UPDATE coupons SET
+        code = ?,
+        description = ?,
+        discount_type = ?,
+        discount_value = ?,
+        applies_to = ?,
+        max_redemptions = ?,
+        coupon_type = ?,
+        assigned_user_email = ?,
+        is_active = ?,
+        valid_from = ?,
+        valid_till = ?,
+        recipient_email = ?,
+        recipient_name = ?,
+        festival_name = ?,
+        expires_at = ?,
+        active = ?,
+        per_user_limit = 1
+       WHERE id = ?`
+    ).run(
+      code,
+      description,
+      discountType || 'flat',
+      discountValue,
+      appliesTo,
+      maxRedemptions,
+      couponType,
+      recipientEmail || null,
+      active,
+      validFrom || null,
+      validTill || null,
+      recipientEmail || null,
+      recipientName || null,
+      festivalName || null,
+      validTill || null,
+      active,
+      couponId
+    );
+  } catch (error) {
+    if (String(error?.message || '').includes('UNIQUE')) {
+      return res.status(409).json({ message: 'Coupon code already exists.' });
+    }
+    console.error('Failed to update coupon:', error);
+    return res.status(500).json({ message: 'Unable to update coupon.' });
+  }
+
+  return res.json({
+    message: 'Coupon updated.',
+    coupon: getCouponById(couponId),
   });
 });
 

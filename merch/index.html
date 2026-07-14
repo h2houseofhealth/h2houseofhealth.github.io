@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="/site-background.css" />
   </head>
 
-  <body>
+  <body class="merch-page">
     <!-- Site Header -->
     <div class="storefront-header-wrapper">
       <header class="storefront-header">
@@ -187,6 +187,14 @@
               <span id="cartSubtotal">&#8377;0</span>
             </div>
             <p class="cart-note">Shipping &amp; taxes calculated at checkout</p>
+          </div>
+          <div class="cart-coupon">
+            <label class="cart-coupon__field" for="cartCouponCode">
+              <span>Coupon Code</span>
+              <input id="cartCouponCode" type="text" placeholder="Enter coupon code" autocomplete="off" />
+            </label>
+            <button id="cartCouponApplyBtn" class="btn btn-secondary btn-full" type="button">Apply Coupon</button>
+            <div id="cartCouponPreview" class="cart-coupon__preview" hidden></div>
           </div>
           <button id="checkoutBtn" class="btn btn-primary btn-full" type="button">Proceed to Checkout</button>
         </div>
