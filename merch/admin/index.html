@@ -1,205 +1,115 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Merch Admin – H2 House of Health</title>
-  <link rel="icon" type="image/png" href="/booking/assets/brand/H2_icon.png" />
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --primary: #c8652d; --primary-dark: #9f3e1f;
-      --bg: #f8f3ee; --card: #ffffff; --text: #1a1a1a;
-      --muted: #6f6f6f; --border: rgba(0,0,0,0.08);
-      --radius: 12px; --shadow: 0 2px 8px rgba(0,0,0,0.04);
-    }
-    body { font-family: 'DM Sans', -apple-system, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
-    .admin-shell { max-width: 1200px; margin: 0 auto; padding: 24px; }
-    .admin-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; }
-    .admin-header h1 { font-size: 24px; font-weight: 700; }
-    .admin-header a { color: var(--primary); text-decoration: none; font-size: 14px; }
-    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 32px; }
-    .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; text-align: center; box-shadow: var(--shadow); }
-    .stat-card h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 8px; }
-    .stat-card .stat-value { font-size: 28px; font-weight: 700; color: var(--primary); }
-    .stat-card .stat-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
-</style>
-</head>
-<body>
-<div class="admin-shell">
-  <header class="admin-header">
-    <h1>🏪 Merch Admin</h1>
-    <div>
-      <a href="/merch/">← Back to Store</a> &nbsp;|&nbsp;
-      <a href="/booking/">Booking Portal</a>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="api-base-url" content="" />
+    <title>House Merch Admin - H2 House of Health</title>
+    <meta
+      name="description"
+      content="House Merch Admin Dashboard for products, orders, customers, coupons, influencers, reports, and store settings."
+    />
+    <link rel="icon" type="image/png" href="/booking/assets/brand/H2_icon.png" />
+    <link rel="stylesheet" href="/booking/styles.css" />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="admin.css" />
+  </head>
+  <body class="merch-page merch-admin-page">
+    <div class="admin-shell">
+      <aside class="admin-sidebar" id="adminSidebar" aria-label="Admin navigation">
+        <div class="admin-sidebar__brand">
+          <a class="admin-brand" href="/merch/" aria-label="House of Health merch store">
+            <img src="/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=144" alt="House of Health" width="144" height="54" />
+          </a>
+          <button class="admin-icon-btn admin-sidebar__close" id="sidebarCloseBtn" type="button" aria-label="Close navigation">
+            <span aria-hidden="true">&times;</span>
+          </button>
+        </div>
+
+        <div class="admin-sidebar__meta">
+          <p class="admin-kicker">House Merch Admin</p>
+          <strong>Merchandise control center</strong>
+        </div>
+
+        <nav class="admin-nav" aria-label="Sections">
+          <button class="admin-nav__item is-active" type="button" data-nav-view="dashboard">Dashboard</button>
+          <button class="admin-nav__item" type="button" data-nav-view="products">Products</button>
+          <button class="admin-nav__item" type="button" data-nav-view="categories">Categories</button>
+          <button class="admin-nav__item" type="button" data-nav-view="orders">Orders</button>
+          <button class="admin-nav__item" type="button" data-nav-view="customers">Customers</button>
+          <button class="admin-nav__item" type="button" data-nav-view="coupons">Coupons</button>
+          <button class="admin-nav__item" type="button" data-nav-view="influencers">Influencers</button>
+          <button class="admin-nav__item" type="button" data-nav-view="reports">Reports</button>
+          <button class="admin-nav__item" type="button" data-nav-view="settings">Settings</button>
+          <button class="admin-nav__item admin-nav__item--danger" type="button" data-action="logout">Logout</button>
+        </nav>
+      </aside>
+
+      <div class="admin-overlay" id="sidebarOverlay" hidden></div>
+
+      <div class="admin-main">
+        <header class="admin-topbar">
+          <div class="admin-topbar__left">
+            <button class="admin-icon-btn admin-topbar__menu" id="sidebarOpenBtn" type="button" aria-label="Open navigation">
+              <span></span>
+              <span></span>
+              <span></span>
+            </button>
+            <div>
+              <p class="admin-kicker">House Merch</p>
+              <h1 id="pageTitle">Dashboard</h1>
+            </div>
+          </div>
+
+          <div class="admin-topbar__right">
+            <button class="admin-pill" type="button" data-action="open-notifications">
+              <span class="admin-pill__dot"></span>
+              <span>Notifications</span>
+            </button>
+            <button class="admin-profile" type="button" data-action="open-profile" aria-label="Open admin profile">
+              <span class="admin-profile__avatar" id="profileAvatar">AH</span>
+              <span class="admin-profile__meta">
+                <strong>Admin House</strong>
+                <small>admin@h2health.local</small>
+              </span>
+            </button>
+          </div>
+        </header>
+
+        <main class="admin-content" id="adminContent">
+          <section class="admin-view is-active" data-view="dashboard" id="dashboardView"></section>
+          <section class="admin-view" data-view="products" id="productsView"></section>
+          <section class="admin-view" data-view="categories" id="categoriesView"></section>
+          <section class="admin-view" data-view="orders" id="ordersView"></section>
+          <section class="admin-view" data-view="customers" id="customersView"></section>
+          <section class="admin-view" data-view="coupons" id="couponsView"></section>
+          <section class="admin-view" data-view="influencers" id="influencersView"></section>
+          <section class="admin-view" data-view="reports" id="reportsView"></section>
+          <section class="admin-view" data-view="settings" id="settingsView"></section>
+        </main>
+      </div>
     </div>
-  </header>
 
-  <section class="stats-grid" id="statsGrid">
-    <div class="stat-card"><h3>Today's Orders</h3><p class="stat-value" id="statToday">–</p></div>
-    <div class="stat-card"><h3>Total Orders</h3><p class="stat-value" id="statTotal">–</p></div>
-    <div class="stat-card"><h3>Revenue (Paid)</h3><p class="stat-value" id="statRevenue">–</p></div>
-    <div class="stat-card"><h3>Pending</h3><p class="stat-value" id="statPending">–</p></div>
-    <div class="stat-card"><h3>Processing</h3><p class="stat-value" id="statProcessing">–</p></div>
-    <div class="stat-card"><h3>Shipped</h3><p class="stat-value" id="statShipped">–</p></div>
-    <div class="stat-card"><h3>Delivered</h3><p class="stat-value" id="statDelivered">–</p></div>
-  </section>
-
-  <section class="orders-section">
-    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
-      <h2 style="font-size:18px; font-weight:600;">Orders</h2>
-      <select id="statusFilter" style="padding:6px 12px; border:1px solid var(--border); border-radius:6px; font-size:13px;">
-        <option value="all">All Statuses</option>
-        <option value="pending">Pending</option>
-        <option value="processing">Processing</option>
-        <option value="shipped">Shipped</option>
-        <option value="delivered">Delivered</option>
-        <option value="cancelled">Cancelled</option>
-        <option value="returned">Returned</option>
-      </select>
+    <div class="admin-drawer" id="notificationsDrawer" hidden>
+      <div class="admin-drawer__panel">
+        <div class="admin-drawer__header">
+          <div>
+            <p class="admin-kicker">Activity</p>
+            <h2>Notifications</h2>
+          </div>
+          <button class="admin-icon-btn" type="button" data-action="close-notifications" aria-label="Close notifications">&times;</button>
+        </div>
+        <div class="admin-drawer__body" id="notificationsList"></div>
+      </div>
     </div>
-    <div id="ordersTable" style="overflow-x:auto;"></div>
-  </section>
-</div>
 
-<style>
-  .orders-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .orders-table th, .orders-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
-  .orders-table th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); background: #faf8f5; }
-  .orders-table tr:hover td { background: #fdf9f5; }
-  .status-badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
-  .status-pending { background: #fff3cd; color: #856404; }
-  .status-processing { background: #cce5ff; color: #004085; }
-  .status-shipped { background: #d4edda; color: #155724; }
-  .status-delivered { background: #d1ecf1; color: #0c5460; }
-  .status-cancelled { background: #f8d7da; color: #721c24; }
-  .status-returned { background: #e2e3e5; color: #383d41; }
-  .action-btn { padding: 4px 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--card); font-size: 11px; cursor: pointer; }
-  .action-btn:hover { border-color: var(--primary); color: var(--primary); }
-</style>
+    <div class="admin-modal" id="adminModal" hidden aria-hidden="true">
+      <div class="admin-modal__backdrop" data-action="close-modal"></div>
+      <div class="admin-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="adminModalTitle" id="adminModalDialog"></div>
+    </div>
 
-<script>
-(function() {
-  const API_BASE = window.location.origin;
+    <div class="admin-toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
 
-  function getAuthToken() {
-    try { return localStorage.getItem('booking_portal_auth_token') || ''; }
-    catch { return ''; }
-  }
-
-  function authHeaders() {
-    const token = getAuthToken();
-    return { 'Content-Type': 'application/json', 'Authorization': token ? `Bearer ${token}` : '' };
-  }
-
-  function formatPrice(paise) {
-    return '\u20B9' + (paise / 100).toLocaleString('en-IN');
-  }
-
-  async function loadStats() {
-    try {
-      const res = await fetch(`${API_BASE}/api/merch/admin/stats`, { headers: authHeaders() });
-      if (!res.ok) {
-        if (res.status === 401 || res.status === 403) {
-          document.querySelector('.admin-shell').innerHTML = '<div style="text-align:center;padding:60px;"><h2>Admin Access Required</h2><p style="color:var(--muted);margin-top:8px;">Please log in as admin in the <a href="/booking/">Booking Portal</a> first.</p></div>';
-          return;
-        }
-        return;
-      }
-      const data = await res.json();
-      document.getElementById('statToday').textContent = data.todayOrders || 0;
-      document.getElementById('statTotal').textContent = data.totalOrders || 0;
-      document.getElementById('statRevenue').textContent = formatPrice(data.totalRevenue || 0);
-      document.getElementById('statPending').textContent = data.pendingOrders || 0;
-      document.getElementById('statProcessing').textContent = data.processingOrders || 0;
-      document.getElementById('statShipped').textContent = data.shippedOrders || 0;
-      document.getElementById('statDelivered').textContent = data.deliveredOrders || 0;
-    } catch (err) { console.error('Stats load failed:', err); }
-  }
-
-  async function loadOrders(status) {
-    try {
-      const url = status && status !== 'all'
-        ? `${API_BASE}/api/merch/admin/orders?status=${status}`
-        : `${API_BASE}/api/merch/admin/orders`;
-      const res = await fetch(url, { headers: authHeaders() });
-      if (!res.ok) return;
-      const data = await res.json();
-      renderOrders(data.orders || []);
-    } catch (err) { console.error('Orders load failed:', err); }
-  }
-
-  function renderOrders(orders) {
-    const container = document.getElementById('ordersTable');
-    if (orders.length === 0) {
-      container.innerHTML = '<p style="text-align:center;padding:32px;color:var(--muted);">No orders yet</p>';
-      return;
-    }
-    container.innerHTML = `
-      <table class="orders-table">
-        <thead><tr>
-          <th>Order #</th><th>Date</th><th>Customer</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th>Actions</th>
-        </tr></thead>
-        <tbody>${orders.map(o => `
-          <tr>
-            <td><strong>${o.order_number}</strong></td>
-            <td>${new Date(o.created_at).toLocaleDateString('en-IN')}</td>
-            <td>${escapeHtml(o.customer_name)}<br><small style="color:var(--muted)">${escapeHtml(o.customer_email)}</small></td>
-            <td>–</td>
-            <td><strong>${formatPrice(o.total_amount)}</strong></td>
-            <td>${o.payment_method.toUpperCase()}<br><small>${o.payment_status}</small></td>
-            <td><span class="status-badge status-${o.status}">${o.status}</span></td>
-            <td><button class="action-btn" onclick="updateStatus(${o.id}, '${o.status}')">Update</button></td>
-          </tr>
-        `).join('')}</tbody>
-      </table>`;
-  }
-
-  function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str || '';
-    return div.innerHTML;
-  }
-
-  window.updateStatus = async function(orderId, currentStatus) {
-    const nextMap = { pending: 'processing', processing: 'shipped', shipped: 'delivered' };
-    const next = nextMap[currentStatus];
-    if (!next) { alert('No further status update available for: ' + currentStatus); return; }
-
-    let tracking = '';
-    let carrier = '';
-    if (next === 'shipped') {
-      tracking = prompt('Enter tracking number (optional):') || '';
-      carrier = prompt('Enter carrier name (optional):') || '';
-    }
-
-    if (!confirm(`Update order to "${next}"?`)) return;
-
-    try {
-      const res = await fetch(`${API_BASE}/api/merch/admin/orders/${orderId}/status`, {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({ status: next, tracking_number: tracking, carrier_name: carrier }),
-      });
-      if (res.ok) {
-        loadStats();
-        loadOrders(document.getElementById('statusFilter').value);
-      } else {
-        const err = await res.json();
-        alert(err.error || 'Update failed');
-      }
-    } catch (err) { alert('Network error'); }
-  };
-
-  // Filter change
-  document.getElementById('statusFilter').addEventListener('change', (e) => {
-    loadOrders(e.target.value);
-  });
-
-  // Init
-  loadStats();
-  loadOrders('all');
-})();
-</script>
-</body>
+    <script src="admin.js"></script>
+  </body>
 </html>
