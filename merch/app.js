@@ -18,6 +18,7 @@
   const API_URL = resolveApiUrl();
 
   function buildApiUrl(path) {
+    if (/^https?:\/\//i.test(String(path || ''))) return String(path);
     const base = API_URL || window.location.origin;
     return `${base}${path}`;
   }
@@ -76,6 +77,10 @@
     checkoutModalOpen: false,
     checkoutSelectedAddressId: '',
     checkoutMessage: '',
+    merchCouponCode: '',
+    merchCouponPreview: null,
+    merchCouponError: '',
+    merchCouponLoading: false,
   };
 
   // ─── Product Data (Static catalog until API is built) ───
@@ -309,6 +314,9 @@
     cartFooter: document.getElementById('cartFooter'),
     cartEmpty: document.getElementById('cartEmpty'),
     cartSubtotal: document.getElementById('cartSubtotal'),
+    cartCouponCode: document.getElementById('cartCouponCode'),
+    cartCouponApplyBtn: document.getElementById('cartCouponApplyBtn'),
+    cartCouponPreview: document.getElementById('cartCouponPreview'),
     cartBadge: document.getElementById('cartBadge'),
     cartShopBtn: document.getElementById('cartShopBtn'),
     checkoutBtn: document.getElementById('checkoutBtn'),
@@ -340,7 +348,7 @@
 
     const existing = state.cart.find(item => item.variantId === variantId);
     if (existing) {
-      const newQty = Math.min(existing.quantity + quantity, variant.stock);
+      const newQty = Math.min(Math.max(1, quantity), variant.stock);
       existing.quantity = newQty;
     } else {
       state.cart.push({
@@ -372,6 +380,75 @@
     return state.cart.reduce((sum, item) => sum + item.quantity, 0);
   }
 
+  function normalizeCouponCode(code) {
+    return String(code || '').trim().toUpperCase().replace(/\s+/g, '');
+  }
+
+  function renderMerchCouponPreview() {
+    if (!els.cartCouponPreview) return;
+    const preview = state.merchCouponPreview;
+    if (!preview) {
+      if (state.merchCouponError) {
+        els.cartCouponPreview.hidden = false;
+        els.cartCouponPreview.innerHTML = `<span>${escapeHtml(state.merchCouponError)}</span>`;
+      } else {
+        els.cartCouponPreview.hidden = true;
+        els.cartCouponPreview.innerHTML = '';
+      }
+      return;
+    }
+
+    els.cartCouponPreview.hidden = false;
+    els.cartCouponPreview.innerHTML = `
+      <strong>${escapeHtml(preview.code || '')}</strong>
+      <span>${escapeHtml(preview.description || 'Coupon applied')}</span>
+      <span>Discount: ${formatPrice(Number(preview.discountAmountInr || 0) * 100)}</span>
+      <span>Payable: ${formatPrice(Number(preview.payableAmountInr || 0) * 100)}</span>
+    `;
+  }
+
+  async function applyMerchCouponFromCart() {
+    const code = normalizeCouponCode(els.cartCouponCode?.value || state.merchCouponCode || '');
+    state.merchCouponCode = code;
+    state.merchCouponError = '';
+
+    if (!code) {
+      state.merchCouponPreview = null;
+      renderMerchCouponPreview();
+      return;
+    }
+
+    if (!state.currentUser) {
+      state.merchCouponPreview = null;
+      state.merchCouponError = 'Sign in to apply merch coupons.';
+      showCheckoutNotice('Sign in required', 'Sign in to apply a merch coupon.', { variant: 'error' });
+      renderMerchCouponPreview();
+      return;
+    }
+
+    state.merchCouponLoading = true;
+    try {
+      const result = await api('/api/merch/preview-coupon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          couponCode: code,
+          subtotalAmountPaise: getCartTotal(),
+        }),
+      });
+      state.merchCouponPreview = result.coupon || null;
+      if (els.cartCouponCode) els.cartCouponCode.value = code;
+      showCheckoutNotice('Coupon applied', `${code} is ready for checkout.`);
+    } catch (error) {
+      state.merchCouponPreview = null;
+      state.merchCouponError = error.message || 'Unable to validate coupon.';
+      showCheckoutNotice('Coupon error', state.merchCouponError, { variant: 'error' });
+    } finally {
+      state.merchCouponLoading = false;
+      renderMerchCouponPreview();
+    }
+  }
+
   // ─── Render: Cart Badge ───
   function renderCartBadge() {
     const count = getCartCount();
@@ -389,11 +466,23 @@
       els.cartItems.innerHTML = '';
       els.cartFooter.hidden = true;
       els.cartEmpty.style.display = 'flex';
+      state.merchCouponCode = '';
+      state.merchCouponPreview = null;
+      state.merchCouponError = '';
+      renderMerchCouponPreview();
       return;
     }
 
     els.cartEmpty.style.display = 'none';
     els.cartFooter.hidden = false;
+    if (els.cartCouponCode) els.cartCouponCode.value = state.merchCouponCode || '';
+    if (els.cartCouponApplyBtn) {
+      els.cartCouponApplyBtn.textContent = state.currentUser
+        ? (state.merchCouponLoading ? 'Applying...' : 'Apply Coupon')
+        : 'Sign in to Apply';
+      els.cartCouponApplyBtn.disabled = Boolean(state.merchCouponLoading || !state.currentUser);
+    }
+    renderMerchCouponPreview();
 
     els.cartItems.innerHTML = state.cart.map(item => `
       <div class="cart-item">
@@ -601,12 +690,22 @@
               <article class="account-list__item account-list__item--stacked">
                 <div class="account-list__row">
                   <strong>${escapeHtml(order.orderNumber || `Order #${order.id}`)}</strong>
-                  <span>${escapeHtml(formatOrderStatus(order.status))}</span>
+                  <div class="order-status-group">
+                    <span class="payment-status payment-status--paid">
+                      ${order.paymentStatus === 'paid' ? 'Paid' : 'Pending Payment'}
+                    </span>
+                    <span class="order-status">
+                      ${escapeHtml(formatOrderStatus(order.status))}
+                    </span>
+                  </div>
+                  
                 </div>
                 <p>${escapeHtml(formatDateLabel(order.createdAt))} · ${escapeHtml(order.totalAmount ? formatPrice(order.totalAmount) : 'Total unavailable')}</p>
                 <div class="account-item-actions account-item-actions--inline">
                   <button type="button" data-account-action="view-order" data-order-id="${escapeHtml(String(order.id || ''))}">View Details</button>
                   <button type="button" data-account-action="track-order" data-order-id="${escapeHtml(String(order.id || ''))}">Track Order</button>
+                  <button type="button" data-account-action="invoice-order" data-order-id="${escapeHtml(String(order.id || ''))}">Invoice</button>
+                  <button type="button" data-account-action="download-invoice" data-order-id="${escapeHtml(String(order.id || ''))}">Download PDF</button>
                 </div>
               </article>
             `).join('')}
@@ -812,11 +911,36 @@
 
     if (action === 'view-order') {
       const order = getOrderById(button.dataset.orderId);
+      console.log('View order:', JSON.stringify(order, null, 2));
       showCheckoutNotice(
         order ? (order.orderNumber || `Order #${order.id}`) : 'Order details',
         order
-          ? `Status: ${formatOrderStatus(order.status)}. Total: ${order.totalAmount ? formatPrice(order.totalAmount) : 'Unavailable'}.`
-          : 'Order details are unavailable.'
+        ? `
+           <div class="order-details">
+             <div class="order-detail-row">
+               <span>Order Date</span>
+               <strong>${formatDateLabel(order.createdAt)}</strong>
+             </div>
+             <div class="order-detail-row">
+               <span>Order Status</span>
+               <strong>${formatOrderStatus(order.status)}</strong>
+             </div>
+             <div class="order-detail-row">
+               <span>Payment Status</span>
+               <strong>${order.paymentStatus || 'Pending'}</strong>
+             </div>
+             <div class="order-detail-row">
+               <span>Payment Method</span>
+               <strong>${order.paymentMethod || 'Online'}</strong>
+             </div>
+             <div class="order-detail-row">
+               <span>Total</span>
+               <strong>${order.totalAmount ? formatPrice(order.totalAmount) : 'Unavailable'}</strong>
+             </div>
+           </div>
+         `
+        : 'Order details are unavailable.',
+       { html: true }
       );
       return;
     }
@@ -825,6 +949,16 @@
       const order = getOrderById(button.dataset.orderId);
       const tracking = [order?.carrierName, order?.trackingNumber].filter(Boolean).join(' · ');
       showCheckoutNotice('Track order', tracking || 'Tracking details will appear once this order ships.');
+      return;
+    }
+
+    if (action === 'invoice-order') {
+      await openMerchInvoice(button.dataset.orderId);
+      return;
+    }
+
+    if (action === 'download-invoice') {
+      await downloadMerchInvoice(button.dataset.orderId);
       return;
     }
 
@@ -842,6 +976,68 @@
 
     if (action === 'wishlist-move') {
       showCheckoutNotice('Wishlist', 'Move to Cart is ready for the wishlist service connection.');
+    }
+  }
+
+  async function fetchMerchInvoiceLink(orderId) {
+    const id = Number(orderId);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error('Order details are unavailable.');
+    }
+    return api(`/api/merch/orders/${encodeURIComponent(id)}/invoice-link`);
+  }
+
+  function openMerchDocument(url) {
+    const targetUrl = buildApiUrl(url);
+    const opened = window.open(targetUrl, '_blank', 'noopener,noreferrer');
+    if (!opened) {
+      showCheckoutNotice('Invoice', 'The invoice could not open. Please allow popups and try again.', { variant: 'error' });
+    }
+  }
+
+  function getInvoiceFilename(headerValue, orderId) {
+    const header = String(headerValue || '');
+    const utfMatch = header.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utfMatch) {
+      try {
+        return decodeURIComponent(utfMatch[1]);
+      } catch {}
+    }
+    const match = header.match(/filename="?([^";]+)"?/i);
+    if (match?.[1]) return match[1];
+    return `Invoice-Merch-${String(orderId || 'Order').replace(/[^a-z0-9_-]+/gi, '-')}.pdf`;
+  }
+
+  async function openMerchInvoice(orderId) {
+    try {
+      const data = await fetchMerchInvoiceLink(orderId);
+      if (!data.invoiceUrl) throw new Error('Invoice link missing.');
+      openMerchDocument(data.invoiceUrl);
+    } catch (error) {
+      showCheckoutNotice('Invoice unavailable', error.message || 'Unable to open the invoice. Please try again.', { variant: 'error' });
+    }
+  }
+
+  async function downloadMerchInvoice(orderId) {
+    try {
+      const data = await fetchMerchInvoiceLink(orderId);
+      const downloadUrl = data.invoiceDownloadUrl || data.invoiceUrl;
+      if (!downloadUrl) throw new Error('Invoice download link missing.');
+      const response = await fetch(buildApiUrl(downloadUrl), { credentials: 'include' });
+      if (!response.ok || !(response.headers.get('content-type') || '').includes('application/pdf')) {
+        throw new Error('Unable to generate the invoice PDF.');
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = getInvoiceFilename(response.headers.get('content-disposition'), orderId);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      showCheckoutNotice('Download unavailable', error.message || 'Unable to download the invoice. Please try again.', { variant: 'error' });
     }
   }
 
@@ -1380,11 +1576,14 @@
 
   function showCheckoutNotice(title, message, options = {}) {
     const variantClass = options.variant ? ` merch-flow-notice--${options.variant}` : '';
+    const content = options.html
+      ? message
+      : `<p>${escapeHtml(message)}</p>`;
     const modal = showMerchModal({
       title,
       body: `
         <div class="merch-flow-notice${variantClass}">
-          <p>${escapeHtml(message)}</p>
+          ${content}
         </div>
       `,
       footer: '<button class="btn btn-primary account-action-btn" type="button" data-modal-ok>OK</button>',
@@ -1394,7 +1593,6 @@
       options.onClose?.();
     });
   }
-
   function showCheckoutConfirm(title, message) {
     return new Promise((resolve) => {
       const modal = showMerchModal({
@@ -1688,6 +1886,17 @@
       initiateCheckout();
     });
 
+    els.cartCouponApplyBtn?.addEventListener('click', () => {
+      applyMerchCouponFromCart();
+    });
+
+    els.cartCouponCode?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        applyMerchCouponFromCart();
+      }
+    });
+
     els.accountDrawerCloseBtn?.addEventListener('click', closeAccountDrawer);
     els.accountDrawerOverlay?.addEventListener('click', closeAccountDrawer);
     els.accountDrawer?.addEventListener('keydown', (event) => {
@@ -1723,13 +1932,14 @@
 
   async function startRazorpayCheckout(customer, address) {
     const items = state.cart.map(item => ({ variantId: item.variantId, quantity: item.quantity }));
+    const couponCode = normalizeCouponCode(state.merchCouponCode || els.cartCouponCode?.value || '');
 
     try {
       const res = await fetch(buildApiUrl('/api/merch/checkout'), {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items, customer, address,}),
+        body: JSON.stringify({ items, customer, address, couponCode }),
       });
 
       if (!res.ok) {
@@ -1775,6 +1985,9 @@
           });
           if (verifyRes.ok) {
             state.cart = [];
+            state.merchCouponCode = '';
+            state.merchCouponPreview = null;
+            state.merchCouponError = '';
             saveCart();
             renderCart();
             closeCart();

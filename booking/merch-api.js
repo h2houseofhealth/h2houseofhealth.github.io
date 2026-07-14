@@ -9,7 +9,12 @@ const crypto = require('crypto');
 const express = require('express');
 const router = express.Router();
 
-module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, JWT_SECRET, jwt }) {
+module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, JWT_SECRET, jwt, couponHelpers = {} }) {
+  const {
+    normalizeCouponCode,
+    validateCouponForUser,
+    recordCouponRedemption,
+  } = couponHelpers;
 
   // ─── Merch Database Schema (run once) ───
   db.exec(`
@@ -55,6 +60,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       gst_amount INTEGER NOT NULL DEFAULT 0,
       shipping_charge INTEGER NOT NULL DEFAULT 0,
       discount_amount INTEGER NOT NULL DEFAULT 0,
+      coupon_id INTEGER REFERENCES coupons(id),
+      coupon_code TEXT,
       total_amount INTEGER NOT NULL,
       payment_method TEXT NOT NULL DEFAULT 'online',
       payment_status TEXT NOT NULL DEFAULT 'pending',
@@ -138,6 +145,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   if (!hasColumn('merch_orders', 'customer_id')) {
     db.exec('ALTER TABLE merch_orders ADD COLUMN customer_id INTEGER');
+  }
+
+  if (!hasColumn('merch_orders', 'coupon_id')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN coupon_id INTEGER REFERENCES coupons(id)');
+  }
+
+  if (!hasColumn('merch_orders', 'coupon_code')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN coupon_code TEXT');
   }
 
   // Seed products if table is empty
@@ -304,6 +319,43 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
 
   // ─── PUBLIC: Get all active products ───
+  function normalizeMerchCouponCode(code) {
+    if (typeof normalizeCouponCode === 'function') {
+      return normalizeCouponCode(code);
+    }
+    return String(code || '').trim().toUpperCase().replace(/\s+/g, '');
+  }
+
+  function validateMerchCouponForUser(args) {
+    if (typeof validateCouponForUser !== 'function') {
+      return { error: 'Coupon validation is unavailable.' };
+    }
+    return validateCouponForUser({ ...args, appliesTo: 'merch' });
+  }
+
+  function recordMerchCouponRedemption(payload) {
+    if (typeof recordCouponRedemption !== 'function') return;
+    recordCouponRedemption(payload);
+  }
+
+  function buildMerchCouponPreview(result) {
+    const discountAmountPaise = Math.max(0, Math.round(Number(result?.discountAmountPaise || 0)));
+    const originalAmountPaise = Math.max(0, Math.round(Number(result?.originalAmountPaise || 0)));
+    const finalAmountPaise = Math.max(0, Math.round(Number(result?.finalAmountPaise || 0)));
+    return {
+      code: result?.coupon?.code || result?.couponCode || '',
+      description: result?.coupon?.description || '',
+      discountType: result?.coupon?.discountType || '',
+      appliesTo: result?.coupon?.appliesTo || 'merch',
+      originalAmountInr: Math.round(originalAmountPaise / 100),
+      discountAmountInr: Math.round(discountAmountPaise / 100),
+      payableAmountInr: Math.round(finalAmountPaise / 100),
+      couponType: result?.coupon?.couponType || '',
+      validFrom: result?.coupon?.validFrom || null,
+      validTill: result?.coupon?.validTill || null,
+    };
+  }
+
   app.get('/api/merch/products', (req, res) => {
     const products = db.prepare(`
       SELECT p.*, GROUP_CONCAT(v.id || '|' || v.sku || '|' || COALESCE(v.size,'') || '|' || COALESCE(v.color,'') || '|' || v.price || '|' || v.stock) AS variants_raw
@@ -327,6 +379,26 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   });
 
   // ─── PUBLIC: Create Razorpay order for checkout ───
+  app.post('/api/merch/preview-coupon', requireMerchAuth, (req, res) => {
+    const couponCode = normalizeMerchCouponCode(req.body?.couponCode);
+    if (!couponCode) {
+      return res.status(400).json({ error: 'couponCode is required' });
+    }
+
+    const subtotalAmountPaise = Number(req.body?.subtotalAmountPaise || 0);
+    const couponResult = validateMerchCouponForUser({
+      code: couponCode,
+      userId: req.user?.id,
+      subtotalAmountPaise,
+    });
+
+    if (couponResult.error) {
+      return res.status(400).json({ error: couponResult.error });
+    }
+
+    return res.json({ coupon: buildMerchCouponPreview(couponResult) });
+  });
+
   app.post('/api/merch/checkout', (req, res) => {
     if (!razorpay || !RAZORPAY_KEY_SECRET) {
       return res.status(503).json({ error: 'Payment gateway not configured' });
@@ -335,8 +407,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const { items, customer, address } = req.body || {};
     const authUser = getMerchAuthUser(req);
     const merchProfile = authUser ? ensureMerchCustomerProfileForUser(authUser) : null;
+    const couponCode = normalizeMerchCouponCode(req.body?.couponCode);
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Cart is empty' });
+    }
+    if (couponCode && !authUser) {
+      return res.status(401).json({ error: 'Sign in to apply a coupon.' });
     }
     const resolvedCustomer = {
       name: String(customer?.name || merchProfile?.fullName || authUser?.name || '').trim(),
@@ -372,10 +448,22 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       });
     }
 
+    const couponResult = couponCode
+      ? validateMerchCouponForUser({
+          code: couponCode,
+          userId: authUser?.id,
+          subtotalAmountPaise: subtotal,
+        })
+      : { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
+    if (couponResult.error) {
+      return res.status(400).json({ error: couponResult.error });
+    }
+
     // Calculate GST (18%) and shipping
     const gstAmount = Math.round(subtotal * 18 / 100);
     const shippingCharge = subtotal >= 99900 ? 0 : 9900; // Free above ₹999
-    const totalAmount = subtotal + gstAmount + shippingCharge;
+    const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
+    const totalAmount = Math.max(100, subtotal + gstAmount + shippingCharge - discountAmount);
     const orderNumber = generateOrderNumber();
 
     // Create Razorpay order
@@ -383,17 +471,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       amount: totalAmount,
       currency: 'INR',
       receipt: orderNumber,
-      notes: { customerEmail: resolvedCustomer.email, orderNumber },
+      notes: { customerEmail: resolvedCustomer.email, orderNumber, couponCode: String(couponResult.couponCode || couponCode || '') },
     }).then(rpOrder => {
       // Save order to DB
       const insertOrder = db.prepare(`
-        INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, total_amount, payment_method, payment_status, razorpay_order_id, shipping_address)
-        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, 'online', 'pending', ?, ?)
+        INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, total_amount, payment_method, payment_status, razorpay_order_id, shipping_address)
+        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, 'online', 'pending', ?, ?)
       `);
       const result = insertOrder.run(
         orderNumber, resolvedCustomer.name, resolvedCustomer.email, resolvedCustomer.phone,
         authUser?.id || null, merchProfile?.id || null,
-        subtotal, gstAmount, shippingCharge, totalAmount,
+        subtotal, gstAmount, shippingCharge, discountAmount, couponResult.coupon?.id || null, couponResult.couponCode || null, totalAmount,
         rpOrder.id, JSON.stringify(address || {})
       );
       const orderId = result.lastInsertRowid;
@@ -417,7 +505,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         subtotal,
         gstAmount,
         shippingCharge,
+        discountAmount,
         customer: resolvedCustomer,
+        coupon: buildMerchCouponPreview(couponResult),
       });
     }).catch(err => {
       console.error('Merch Razorpay order create failed:', err?.message || err);
@@ -443,7 +533,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     // Update order
-    const order = db.prepare('SELECT id, status FROM merch_orders WHERE razorpay_order_id = ?').get(razorpay_order_id);
+    const order = db.prepare('SELECT id, status, customer_user_id AS customerUserId, coupon_id AS couponId, coupon_code AS couponCode, discount_amount AS discountAmount FROM merch_orders WHERE razorpay_order_id = ?').get(razorpay_order_id);
     if (!order) {
       return res.status(404).json({ error: 'Order not found' });
     }
@@ -465,6 +555,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       decrementStock.run(item.quantity, item.variant_id);
     }
 
+    if (Number(order.couponId || 0) > 0 && Number(order.discountAmount || 0) > 0 && Number(order.customerUserId || 0) > 0) {
+      recordMerchCouponRedemption({
+        couponId: Number(order.couponId),
+        userId: Number(order.customerUserId),
+        contextType: 'merch_payment',
+        contextRef: String(order.id),
+        discountAmountPaise: Number(order.discountAmount || 0),
+      });
+    }
+
     res.json({ success: true, message: 'Payment verified, order confirmed', orderId: order.id });
   });
 
@@ -473,8 +573,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const { items, customer, address } = req.body || {};
     const authUser = getMerchAuthUser(req);
     const merchProfile = authUser ? ensureMerchCustomerProfileForUser(authUser) : null;
+    const couponCode = normalizeMerchCouponCode(req.body?.couponCode);
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Cart is empty' });
+    }
+    if (couponCode && !authUser) {
+      return res.status(401).json({ error: 'Sign in to apply a coupon.' });
     }
     const resolvedCustomer = {
       name: String(customer?.name || merchProfile?.fullName || authUser?.name || '').trim(),
@@ -496,15 +600,27 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       validatedItems.push({ variantId: variant.id, productName: variant.product_name, variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '), sku: variant.sku, unitPrice: variant.price, quantity: item.quantity, lineTotal });
     }
 
+    const couponResult = couponCode
+      ? validateMerchCouponForUser({
+          code: couponCode,
+          userId: authUser?.id,
+          subtotalAmountPaise: subtotal,
+        })
+      : { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
+    if (couponResult.error) {
+      return res.status(400).json({ error: couponResult.error });
+    }
+
     const gstAmount = Math.round(subtotal * 18 / 100);
     const shippingCharge = subtotal >= 99900 ? 0 : 9900;
     const codSurcharge = 5000; // ₹50
-    const totalAmount = subtotal + gstAmount + shippingCharge + codSurcharge;
+    const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
+    const totalAmount = Math.max(100, subtotal + gstAmount + shippingCharge + codSurcharge - discountAmount);
     const orderNumber = generateOrderNumber();
 
     const result = db.prepare(`
-      INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, total_amount, payment_method, payment_status, shipping_address)
-      VALUES (?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, 'cod', 'cod_pending', ?)
+      INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, total_amount, payment_method, payment_status, shipping_address)
+      VALUES (?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?, ?, 'cod', 'cod_pending', ?)
     `).run(
       orderNumber,
       resolvedCustomer.name,
@@ -515,6 +631,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       subtotal,
       gstAmount,
       shippingCharge,
+      discountAmount,
+      couponResult.coupon?.id || null,
+      couponResult.couponCode || null,
       totalAmount,
       JSON.stringify(address || {})
     );
@@ -527,7 +646,26 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       decrementStock.run(item.quantity, item.variantId);
     }
 
-    res.json({ success: true, orderNumber, orderId, totalAmount, message: 'COD order placed', customer: resolvedCustomer });
+    if (Number(couponResult.coupon?.id || 0) > 0 && Number(discountAmount || 0) > 0 && Number(authUser?.id || 0) > 0) {
+      recordMerchCouponRedemption({
+        couponId: Number(couponResult.coupon.id),
+        userId: Number(authUser.id),
+        contextType: 'merch_cod',
+        contextRef: String(orderId),
+        discountAmountPaise: discountAmount,
+      });
+    }
+
+    res.json({
+      success: true,
+      orderNumber,
+      orderId,
+      totalAmount,
+      discountAmount,
+      coupon: buildMerchCouponPreview(couponResult),
+      message: 'COD order placed',
+      customer: resolvedCustomer,
+    });
   });
 
   // ─── ADMIN: Get all orders ───
@@ -570,6 +708,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       .prepare(
         `SELECT id, order_number AS orderNumber, status, subtotal, gst_amount AS gstAmount,
                 shipping_charge AS shippingCharge, discount_amount AS discountAmount, total_amount AS totalAmount,
+                coupon_id AS couponId, coupon_code AS couponCode,
                 payment_method AS paymentMethod, payment_status AS paymentStatus, razorpay_order_id AS razorpayOrderId,
                 razorpay_payment_id AS razorpayPaymentId, shipping_address AS shippingAddress,
                 tracking_number AS trackingNumber, carrier_name AS carrierName,
@@ -807,6 +946,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       .prepare(
         `SELECT id, order_number AS orderNumber, status, subtotal, gst_amount AS gstAmount,
                 shipping_charge AS shippingCharge, discount_amount AS discountAmount, total_amount AS totalAmount,
+                coupon_id AS couponId, coupon_code AS couponCode,
                 payment_method AS paymentMethod, payment_status AS paymentStatus,
                 razorpay_order_id AS razorpayOrderId, razorpay_payment_id AS razorpayPaymentId,
                 shipping_address AS shippingAddress, tracking_number AS trackingNumber,

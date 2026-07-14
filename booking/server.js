@@ -777,7 +777,19 @@ app.use('/uploads', express.static(uploadsDir));
 
 // Mount Merch API routes
 const mountMerchApi = require('./merch-api');
-mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, JWT_SECRET, jwt });
+mountMerchApi(app, {
+  db,
+  razorpay,
+  RAZORPAY_KEY_ID,
+  RAZORPAY_KEY_SECRET,
+  JWT_SECRET,
+  jwt,
+  couponHelpers: {
+    normalizeCouponCode,
+    validateCouponForUser,
+    recordCouponRedemption,
+  },
+});
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -2325,6 +2337,59 @@ app.get('/api/membership-orders/:orderId/invoice-link', requireAuth, (req, res) 
   });
 });
 
+app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
+  const orderId = Number(req.params.id);
+  if (!Number.isInteger(orderId) || orderId <= 0) {
+    return res.status(400).json({ message: 'order id is required' });
+  }
+
+  const order = db
+    .prepare(
+      `SELECT id,
+              order_number AS orderNumber,
+              customer_user_id AS customerUserId,
+              customer_id AS customerId,
+              payment_status AS paymentStatus
+       FROM merch_orders
+       WHERE id = ?`
+    )
+    .get(orderId);
+  if (!order) {
+    return res.status(404).json({ message: 'merch order not found' });
+  }
+
+  let invoiceUserId = Number(order.customerUserId || 0) || 0;
+  let ownsOrder = invoiceUserId === Number(req.user.id);
+  if (!ownsOrder && Number(order.customerId || 0) > 0) {
+    const profile = db
+      .prepare('SELECT id, user_id AS userId FROM merch_customer_profiles WHERE id = ?')
+      .get(Number(order.customerId));
+    if (profile) {
+      invoiceUserId = Number(profile.userId || invoiceUserId || 0);
+      ownsOrder = Number(profile.userId || 0) === Number(req.user.id);
+    }
+  }
+
+  if (req.user.role !== 'admin' && !ownsOrder) {
+    return res.status(403).json({ message: 'forbidden' });
+  }
+  if (!Number.isInteger(invoiceUserId) || invoiceUserId <= 0) {
+    return res.status(409).json({ message: 'invoice is available only for linked customer accounts' });
+  }
+
+  const token = createInvoiceAccessToken({
+    scope: 'merch_invoice',
+    orderId: order.id,
+    userId: invoiceUserId,
+  });
+
+  const invoiceUrl = `${getRequestOrigin(req)}/invoice/merch?token=${encodeURIComponent(token)}`;
+  return res.json({
+    invoiceUrl,
+    invoiceDownloadUrl: `${invoiceUrl}&format=pdf&download=1`,
+  });
+});
+
 app.get('/api/admin/discount-phones', requireAuth, requireAdmin, (_req, res) => {
   const discountPhones = db
     .prepare(
@@ -2441,7 +2506,7 @@ app.patch('/api/admin/coupons/:id/active', requireAuth, requireAdmin, (req, res)
 
 app.get('/api/coupons/general', requireAuth, (req, res) => {
   const appliesTo = String(req.query?.appliesTo || '').trim().toLowerCase();
-  const allowedAppliesTo = new Set(['services', 'membership']);
+  const allowedAppliesTo = new Set(['services', 'membership', 'merch']);
   const filterAppliesTo = allowedAppliesTo.has(appliesTo) ? appliesTo : '';
   const requesterRole = String(req.user?.role || '').trim().toLowerCase();
 
@@ -2566,7 +2631,8 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   const festivalName = String(req.body?.festivalName || '').trim();
   const discountType = 'flat';
   const discountValue = Number(req.body?.discountValue || 0);
-  const appliesTo = 'all';
+  const appliesToRaw = String(req.body?.appliesTo || 'all').trim().toLowerCase();
+  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || '').trim().toLowerCase();
   const sendEmail = req.body?.sendEmail !== false;
   let couponType = String(req.body?.couponType || '').trim().toLowerCase();
@@ -2713,6 +2779,119 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     code,
     emailStatus,
     emailMessage,
+  });
+});
+
+app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
+  const couponId = Number(req.params.id);
+  if (!Number.isInteger(couponId)) {
+    return res.status(400).json({ message: 'Invalid coupon id.' });
+  }
+
+  const existing = getCouponById(couponId);
+  if (!existing) {
+    return res.status(404).json({ message: 'Coupon not found.' });
+  }
+
+  let code = normalizeCouponCode(req.body?.code || existing.code);
+  const description = String(req.body?.description || existing.description || '').trim();
+  const festivalName = String(req.body?.festivalName || existing.festivalName || '').trim();
+  const discountType = String(req.body?.discountType || existing.discountType || 'flat').trim().toLowerCase() || 'flat';
+  const discountValue = Number(req.body?.discountValue ?? existing.discountValue ?? 0);
+  const appliesToRaw = String(req.body?.appliesTo || existing.appliesTo || 'all').trim().toLowerCase();
+  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) ? appliesToRaw : 'all';
+  const recipientEmail = String(req.body?.recipientEmail || existing.recipientEmail || '').trim().toLowerCase();
+  const recipientName = String(req.body?.recipientName || existing.recipientName || '').trim();
+  let couponType = String(req.body?.couponType || existing.couponType || '').trim().toLowerCase();
+  if (!['public', 'private'].includes(couponType)) {
+    couponType = recipientEmail ? 'private' : 'public';
+  }
+  const singleUse = Boolean(req.body?.singleUse) || couponType === 'private';
+  const maxRedemptionsRaw = req.body?.maxRedemptions;
+  let maxRedemptions =
+    maxRedemptionsRaw === '' || maxRedemptionsRaw == null
+      ? existing.maxRedemptions ?? null
+      : Number(maxRedemptionsRaw);
+  const validFrom = String(req.body?.validFrom || existing.validFrom || '').trim();
+  const validTill = String(req.body?.validTill || req.body?.expiresAt || existing.validTill || existing.expiresAt || '').trim();
+  const active = req.body?.active == null ? Number(existing.active || existing.isActive || 1) : Number(req.body?.active) === 1 ? 1 : 0;
+
+  if (!code) {
+    code = generateUniqueCouponCode();
+  }
+  if (!Number.isFinite(discountValue) || discountValue <= 0) {
+    return res.status(400).json({ message: 'discountValue must be greater than 0.' });
+  }
+  if (couponType === 'private' && !recipientEmail) {
+    return res.status(400).json({ message: 'recipientEmail is required for private coupons.' });
+  }
+  if (singleUse || couponType === 'private') {
+    maxRedemptions = 1;
+  }
+  if (maxRedemptions != null && (!Number.isInteger(maxRedemptions) || maxRedemptions <= 0)) {
+    return res.status(400).json({ message: 'maxRedemptions must be a positive integer.' });
+  }
+  if (validFrom && Number.isNaN(new Date(validFrom).getTime())) {
+    return res.status(400).json({ message: 'validFrom must be a valid date.' });
+  }
+  if (validTill) {
+    const parsedExpiry = new Date(validTill);
+    if (Number.isNaN(parsedExpiry.getTime())) {
+      return res.status(400).json({ message: 'validTill must be a valid date.' });
+    }
+  }
+
+  try {
+    db.prepare(
+      `UPDATE coupons SET
+        code = ?,
+        description = ?,
+        discount_type = ?,
+        discount_value = ?,
+        applies_to = ?,
+        max_redemptions = ?,
+        coupon_type = ?,
+        assigned_user_email = ?,
+        is_active = ?,
+        valid_from = ?,
+        valid_till = ?,
+        recipient_email = ?,
+        recipient_name = ?,
+        festival_name = ?,
+        expires_at = ?,
+        active = ?,
+        per_user_limit = 1
+       WHERE id = ?`
+    ).run(
+      code,
+      description,
+      discountType || 'flat',
+      discountValue,
+      appliesTo,
+      maxRedemptions,
+      couponType,
+      recipientEmail || null,
+      active,
+      validFrom || null,
+      validTill || null,
+      recipientEmail || null,
+      recipientName || null,
+      festivalName || null,
+      validTill || null,
+      active,
+      couponId
+    );
+  } catch (error) {
+    if (String(error?.message || '').includes('UNIQUE')) {
+      return res.status(409).json({ message: 'Coupon code already exists.' });
+    }
+    console.error('Failed to update coupon:', error);
+    return res.status(500).json({ message: 'Unable to update coupon.' });
+  }
+
+  return res.json({
+    message: 'Coupon updated.',
+    coupon: getCouponById(couponId),
   });
 });
 
@@ -7483,6 +7662,592 @@ function getPaidBookingDiscountMeta(bookings) {
     discountAmountInr: Math.max(0, Math.round(Number(row?.discountAmountPaise || 0) / 100)),
   };
 }
+
+function merchPaiseToInr(value) {
+  return Math.max(0, Math.round(Number(value || 0) / 100));
+}
+
+function parseMerchShippingAddress(value) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(String(value));
+  } catch {
+    return { full: String(value || '').trim() };
+  }
+}
+
+function formatMerchAddressHtml(address) {
+  const parsed = parseMerchShippingAddress(address);
+  const lines = [
+    parsed.recipientName || parsed.name || '',
+    parsed.phone || parsed.mobile || '',
+    parsed.line1 || '',
+    parsed.line2 || '',
+    [parsed.city, parsed.state, parsed.postalCode || parsed.pincode].filter(Boolean).join(', '),
+    parsed.country || '',
+  ].filter(Boolean);
+  if (!lines.length && parsed.full) lines.push(parsed.full);
+  if (!lines.length) return '<span>Shipping address unavailable.</span>';
+  return lines.map((line) => `<span>${escapeHtml(line)}</span>`).join('');
+}
+
+function buildMerchOrderSummaryHtml(items) {
+  if (!Array.isArray(items) || !items.length) {
+    return '<div class="invoice-service-summary"><strong>Merchandise Order</strong><span>Purchased merchandise details unavailable.</span></div>';
+  }
+  return items
+    .map((item) => `<div class="invoice-service-summary">
+        <strong>${escapeHtml(item.productName || 'Merchandise')}</strong>
+        <span>${escapeHtml(
+          [
+            item.variantLabel ? `Variant: ${item.variantLabel}` : '',
+            item.sku ? `SKU: ${item.sku}` : '',
+            `Quantity: ${item.quantity || 1}`,
+          ].filter(Boolean).join(' | ')
+        )}</span>
+      </div>`)
+    .join('');
+}
+
+function buildMerchInvoiceRowsHtml(items) {
+  return (Array.isArray(items) ? items : [])
+    .map((item, index) => `<tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(item.productName || 'Merchandise')}</td>
+          <td>${escapeHtml(item.variantLabel || '-')}</td>
+          <td>${escapeHtml(String(item.quantity || 1))}</td>
+          <td class="right">${formatInvoiceInr(merchPaiseToInr(item.unitPrice))}</td>
+          <td class="right">${formatInvoiceInr(merchPaiseToInr(item.lineTotal))}</td>
+        </tr>`)
+    .join('');
+}
+
+function buildMerchOrderInfoHtml(order) {
+  const rows = [
+    ['Order Number', order.orderNumber || `Order #${order.id}`],
+    ['Payment Status', order.paymentStatus || 'Pending'],
+    ['Order Status', order.status || 'Pending'],
+    ['Payment Method', order.paymentMethod || 'Online'],
+    ['Order Date', formatInvoiceDateTime(order.createdAt) || order.createdAt || ''],
+  ];
+  return `<ul class="invoice-detail-list">${rows
+    .map(([label, value]) => `<li><strong>${escapeHtml(label)}</strong><span>${escapeHtml(value)}</span></li>`)
+    .join('')}</ul>`;
+}
+
+app.get('/invoice/merch', async (req, res) => {
+  const access = verifyInvoiceAccessToken(req.query?.token);
+  const orderId = Number(access?.orderId);
+  if (!access || access.scope !== 'merch_invoice' || !Number.isInteger(orderId) || !Number.isInteger(access.userId)) {
+    return res.status(400).send('Invalid or expired invoice link');
+  }
+
+  const order = db
+    .prepare(
+      `SELECT id,
+              order_number AS orderNumber,
+              customer_name AS customerName,
+              customer_email AS customerEmail,
+              customer_phone AS customerPhone,
+              customer_user_id AS customerUserId,
+              customer_id AS customerId,
+              status,
+              subtotal,
+              gst_amount AS gstAmount,
+              shipping_charge AS shippingCharge,
+              discount_amount AS discountAmount,
+              total_amount AS totalAmount,
+              payment_method AS paymentMethod,
+              payment_status AS paymentStatus,
+              shipping_address AS shippingAddress,
+              created_at AS createdAt,
+              updated_at AS updatedAt
+       FROM merch_orders
+       WHERE id = ?`
+    )
+    .get(orderId);
+  if (!order) {
+    return res.status(404).send('Invoice not found');
+  }
+
+  let ownsOrder = Number(order.customerUserId || 0) === Number(access.userId);
+  if (!ownsOrder && Number(order.customerId || 0) > 0) {
+    const profile = db
+      .prepare('SELECT id FROM merch_customer_profiles WHERE id = ? AND user_id = ?')
+      .get(Number(order.customerId), Number(access.userId));
+    ownsOrder = Boolean(profile);
+  }
+  if (!ownsOrder) {
+    return res.status(404).send('Invoice not found');
+  }
+
+  const items = db
+    .prepare(
+      `SELECT id,
+              product_name AS productName,
+              variant_label AS variantLabel,
+              sku,
+              unit_price AS unitPrice,
+              quantity,
+              line_total AS lineTotal
+       FROM merch_order_items
+       WHERE order_id = ?
+       ORDER BY id`
+    )
+    .all(order.id);
+
+  const subtotalAmountInr = merchPaiseToInr(order.subtotal);
+  const discountAmountInr = merchPaiseToInr(order.discountAmount);
+  const shippingAmountInr = merchPaiseToInr(order.shippingCharge);
+  const gstAmountInr = merchPaiseToInr(order.gstAmount);
+  const amountInr = merchPaiseToInr(order.totalAmount);
+  const invoiceNo = `MR-${order.orderNumber || order.id}`;
+  const invoiceDateLabel = formatInvoiceDateTime(order.updatedAt || order.createdAt || new Date()) || formatInvoiceDateTime(new Date());
+  const orderSummaryHtml = buildMerchOrderSummaryHtml(items);
+  const orderInfoHtml = buildMerchOrderInfoHtml(order);
+  const addressHtml = formatMerchAddressHtml(order.shippingAddress);
+  const invoiceRowsHtml = buildMerchInvoiceRowsHtml(items);
+  const amountInWordsHtml = buildAmountInWordsHtml(amountInr);
+
+  const invoiceHtml = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Merchandise Invoice ${escapeHtml(invoiceNo)}</title>
+  <style>
+    @page{size:240mm 320mm;margin:0}
+    :root{--ink:#111;--muted:#444;--line:#e8e8f0}
+    html,body{min-height:100%;height:auto;overflow-y:auto}
+    body{
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      margin:0;
+      color:var(--ink);
+      background:#f3f3f7;
+      -webkit-print-color-adjust:exact;
+      print-color-adjust:exact;
+    }
+    .page{
+      position:relative;
+      width:min(240mm, calc(100% - 24px));
+      margin:18px auto;
+      box-sizing:border-box;
+      background:#fff;
+      padding:46mm 18mm 18mm 18mm;
+      box-shadow:0 10px 32px rgba(0,0,0,.10);
+      overflow:visible;
+    }
+    .page::before{
+      content:"";
+      position:absolute;
+      inset:0 0 auto 0;
+      height:120mm;
+      background:url('/booking/assets/invoice-page.png') no-repeat top center;
+      background-size:100% auto;
+      pointer-events:none;
+      z-index:0;
+    }
+    .page > *{
+      position:relative;
+      z-index:1;
+    }
+    .row{display:flex;gap:16px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap}
+    .title{font-size:18px;margin:0 0 4px;letter-spacing:.02em}
+    .muted{color:var(--muted);font-size:13px;line-height:1.35}
+    .block{margin-top:10px}
+    .invoice-box{
+       border:1px solid rgba(174,84,49,0.35);
+       margin-top:8px;
+       width:220px;
+       margin-left:auto;
+       margin-bottom:12px;
+    }
+    .invoice-box-label,
+    .invoice-section-title{
+
+       background:#AE5431;
+       color:#fff;
+       padding:12px;
+       font-weight:700;
+       text-align:center;
+    }
+    .invoice-box,
+    .invoice-to-card{
+      border:1px solid rgba(174,84,49,0.35);
+    }
+    .invoice-box div:last-child{
+       padding:10px;
+       text-align:center;
+    }
+    .invoice-to-card{
+      margin-top:24px;
+      border:1px solid rgba(174,84,49,0.35);
+    }
+    .invoice-to-body{
+      padding:14px 18px;
+    }
+    .invoice-to-body span{
+      display:block;
+      line-height:1.55;
+    }
+    .invoice-section-title{
+      background:#AE5431;
+      padding:10px;
+      font-weight:700;
+      text-align:center;
+    }
+    .customer-table{
+       width:100%;
+       margin-top:24px;
+       border-collapse:collapse;
+       table-layout:fixed;
+    }
+
+    .customer-table th{
+       background:#AE5431;
+       color:#fff;
+       padding:12px;
+    }
+    .customer-table td{
+       padding:16px;
+       border:1px solid #d7b5a2;
+    }
+    .service-info-card{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      margin-top:24px;
+      margin-bottom:24px;
+      border:1px solid rgba(174,84,49,0.35);
+    }
+    .invoice-bottom-section{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      margin-top:24px;
+      gap:40px;
+    }
+     
+    .invoice-bottom-left{
+      flex:1;
+    }
+    .summary-box{
+       width:340px;
+       margin-left:auto;
+       margin-top:24px;
+       border:1px solid rgba(174,84,49,.35);
+    }
+    .invoice-bottom-section .summary-box{
+      margin-top:0;
+    }
+    .summary-row{
+       display:flex;
+       justify-content:space-between;
+       padding:12px 18px;
+       border-bottom:1px solid rgba(174,84,49,.15);
+    }
+
+    .summary-row:last-child{
+      border-bottom:none;
+    }
+
+    .summary-total{
+      background:#AE5431;
+      color:#fff;
+      font-weight:700;
+    
+    }
+    .service-info-col{
+      border-right:1px solid rgba(174,84,49,0.35);
+    }
+    .service-info-col:last-child{
+      border-right:none;
+    }
+    .service-info-title{
+      background:#AE5431;
+      color:#fff;
+      padding:12px;
+      font-weight:700;
+      text-align:center;
+    }
+    .service-info-body{
+      padding:18px;
+      min-height:120px;
+      line-height:1.8;
+    }
+    .invoice-service-summary + .invoice-service-summary{
+      margin-top:14px;
+      padding-top:14px;
+      border-top:1px solid rgba(174,84,49,0.16);
+    }
+    .invoice-service-summary strong,
+    .invoice-detail-list strong{
+      display:block;
+      color:#AE5431;
+      line-height:1.35;
+    }
+    .invoice-service-summary span,
+    .invoice-detail-list span{
+      display:block;
+      line-height:1.55;
+    }
+    .invoice-detail-list{
+      margin:0;
+      padding-left:18px;
+    }
+    .invoice-detail-list li + li{
+      margin-top:10px;
+    }
+    
+    .gst{margin-top:6px}
+    .gst-space{display:inline-block;min-width:240px;border-bottom:1px solid #777;transform:translateY(-2px)}
+    table{width:100%;border-collapse:collapse;margin-top:18px}
+    .invoice-service-table{width:100%;border-collapse:collapse;margin-top:24px;}
+    .invoice-service-table th{background:#AE5431;color:#fff;border:1px solid rgba(174,84,49,.35);padding:12px;}
+    .invoice-service-table td{border:1px solid rgba(174,84,49,.35);padding:14px;}
+    .invoice-service-table thead{display:table-header-group}
+    .invoice-service-table tr{break-inside:avoid;page-break-inside:avoid}
+    th,td{border-bottom:1px solid var(--line);padding:10px 8px;text-align:left;font-size:14px;vertical-align:top}
+    th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+    .right{text-align:right}
+    .total{font-weight:700;font-size:16px}
+    .footer{margin-top:14px}
+    .invoice-service-summary,
+    .invoice-detail-list li,
+    .summary-box{
+      break-inside:avoid;
+      page-break-inside:avoid;
+    }
+    .invoice-company-footer{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:24px;
+      margin-top:24px;
+      font-size:14px;
+      line-height:1.55;
+      color:#111;
+    }
+    .invoice-company-footer div:last-child{text-align:right}
+    @media screen and (max-width:700px){
+      html,body{height:auto;min-height:100%}
+      body{background:#fff}
+      .page{
+        width:100%;
+        margin:0;
+        padding:132px 16px 24px;
+        box-shadow:none;
+      }
+      .page::before{
+        height:180px;
+        background-size:100% auto;
+      }
+      .invoice-box{width:min(220px, 100%)}
+      .customer-table{table-layout:auto}
+      .customer-table th,
+      .customer-table td{display:block;width:100%;text-align:left}
+      .customer-table colgroup,
+      .customer-table thead{display:none}
+      .customer-table td:nth-child(1)::before{content:"Name: ";font-weight:700;color:#AE5431}
+      .customer-table td:nth-child(2)::before{content:"Email: ";font-weight:700;color:#AE5431}
+      .customer-table td:nth-child(3)::before{content:"Phone: ";font-weight:700;color:#AE5431}
+      .service-info-card{display:block}
+      .service-info-col{border-right:0;border-bottom:1px solid rgba(174,84,49,0.35)}
+      .service-info-col:last-child{border-bottom:0}
+      .service-info-body{min-height:auto}
+      .invoice-bottom-section{display:block}
+      .summary-box{width:100%;margin-left:0}
+      .invoice-bottom-section .summary-box{margin-top:16px}
+      .row{display:block}
+      .row > div{max-width:100%;overflow-wrap:anywhere}
+      .row > div + div{margin-top:18px}
+      .title{font-size:17px}
+      .muted{font-size:12px}
+      .gst-space{display:block;min-width:0;width:100%;max-width:260px;margin-top:4px;transform:none}
+      table{table-layout:fixed;margin-top:16px}
+      th,td{padding:9px 5px;font-size:12px;overflow-wrap:anywhere}
+      th{font-size:10px;letter-spacing:.03em}
+      .total{font-size:14px}
+      .invoice-company-footer{grid-template-columns:1fr;margin-top:40px;gap:18px}
+      .invoice-company-footer div:last-child{text-align:left}
+    }
+    @media print{
+      body{background:#fff}
+      .page{
+        width:240mm;
+        margin:0;
+        box-shadow:none;
+        break-after:auto;
+      }
+      .service-info-card,
+      .invoice-bottom-section{
+        break-inside:auto;
+        page-break-inside:auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="row invoice-header">
+      <div>
+        <div style="font-weight:700;">
+           Vasporixus Apex Therapeutics LLP
+        </div>
+        <div class="muted">
+           GSTIN: 36ABBFV3058K1ZW
+        </div>
+      </div>
+    </div>
+    <div style="text-align:right;">
+
+      <div class="invoice-box">
+         <div class="invoice-box-label">INVOICE</div>
+         <div>${escapeHtml(invoiceNo)}</div>
+      </div>
+
+      <div class="invoice-box">
+         <div class="invoice-box-label">DATE</div>
+         <div>${escapeHtml(invoiceDateLabel)}</div>
+      </div>
+    </div>
+    <table class="customer-table">
+      <colgroup>
+        <col style="width:33%">
+        <col style="width:34%">
+        <col style="width:33%">
+      </colgroup>
+      <thead>
+       <tr>
+         <th>NAME</th>
+         <th>EMAIL</th>
+         <th>PHONE</th>
+       </tr>
+      </thead>
+      <tbody>
+        <tr>
+           <td>${escapeHtml(order.customerName || '')}</td>
+           <td>${escapeHtml(order.customerEmail || '')}</td>
+           <td>${escapeHtml(order.customerPhone || '')}</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="service-info-card">
+
+      <div class="service-info-col">
+         <div class="service-info-title">
+            ORDER SUMMARY
+         </div>
+
+         <div class="service-info-body">
+           ${orderSummaryHtml}
+         </div>
+      </div>
+
+      <div class="service-info-col">
+        <div class="service-info-title">
+            ORDER INFORMATION
+        </div>
+        <div class="service-info-body">
+            ${orderInfoHtml}
+        </div>
+      </div>
+
+    </div>
+    <div class="invoice-to-card">
+      <div class="invoice-section-title">SHIPPING ADDRESS</div>
+      <div class="invoice-to-body">
+        ${addressHtml}
+      </div>
+    </div>
+    
+
+    <table class="invoice-service-table">
+      <thead>
+        <tr>
+          <th>S.No</th>
+          <th>Product</th>
+          <th>Variant (Size / Color)</th>
+          <th>Quantity</th>
+          <th class="right">Unit Price</th>
+          <th class="right">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${invoiceRowsHtml}
+      </tbody>
+      
+    </table>
+    <div class="invoice-bottom-section">
+      <div class="invoice-bottom-left">
+        <div class="amount-words">
+          <strong>Amount in Words:</strong><br>
+          ${escapeHtml(amountInWordsHtml)}
+        </div>
+        <div class="invoice-notes">
+           <strong>Notes:</strong>
+             <ul>
+              <li>Thank you for your merchandise purchase from H2 House of Health.</li>
+              <li>Please keep this invoice for order, warranty, exchange, and support reference.</li>
+             </ul>
+        </div>
+      </div>
+      <div class="summary-box">
+       <div class="summary-row">
+         <span>Subtotal</span>
+         <span>
+            ${formatInvoiceInr(subtotalAmountInr)}
+         </span>
+       </div>
+       <div class="summary-row">
+         <span>Discount</span>
+         <span>
+           - ${formatInvoiceInr(discountAmountInr)}
+         </span>
+       </div>
+       <div class="summary-row">
+         <span>Shipping</span>
+         <span>
+           ${formatInvoiceInr(shippingAmountInr)}
+         </span>
+       </div>
+       <div class="summary-row">
+         <span>CGST (9%)</span>
+         <span>
+           ${formatInvoiceInr((gstAmountInr || 0) / 2)}
+         </span>
+       </div>
+       <div class="summary-row">
+         <span>SGST (9%)</span>
+         <span>
+           ${formatInvoiceInr((gstAmountInr || 0) / 2)}
+         </span>
+       </div>
+       <div class="summary-row summary-total">
+         <span>GRAND TOTAL</span>
+         <span>
+            ${formatInvoiceInr(amountInr)}
+         </span>
+       </div>
+      </div>
+    </div>
+    <div class="invoice-company-footer">
+      <div>
+        P: 91000 56979, 91000 86979<br>
+        E: hello@h2houseofhealth.com
+      </div>
+      <div>
+        A: 47A, Journalist Colony, Road No:70,<br>
+        Jubilee Hills, Hyderabad - 500033<br>
+        W: www.h2houseofhealth.com
+      </div>
+    </div>
+    
+    
+  </div>
+</body>
+</html>`;
+  return sendInvoiceResponse(req, res, invoiceHtml, invoiceNo);
+});
 
 app.get('/invoice/booking', async (req, res) => {
   const access = verifyInvoiceAccessToken(req.query?.token);
