@@ -2020,6 +2020,10 @@
     try {
       const authResult = await api('/api/auth/me');
       state.currentUser = authResult.user || null;
+      if (state.currentUser && String(state.currentUser.role || '').toLowerCase() === 'admin') {
+    window.location.replace('/merch/admin/index.html');
+    return;
+}
     } catch {
       state.currentUser = null;
     }

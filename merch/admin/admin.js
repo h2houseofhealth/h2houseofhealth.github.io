@@ -2303,12 +2303,28 @@
         closeModal();
         return;
       case 'logout':
-        closeModal();
-        toast('Logging out', 'Redirecting to merch login.', 'warning');
-        window.setTimeout(() => {
-          window.location.href = '/merch/auth.html?returnTo=%2Fmerch%2F';
-        }, 500);
-        return;
+  closeModal();
+
+  try {
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      credentials: 'include'
+    });
+  } catch (err) {
+    console.error(err);
+  }
+
+  try {
+    localStorage.removeItem('booking_portal_auth_token');
+  } catch {}
+
+  toast('Logged out', 'Redirecting to login...', 'success');
+
+  window.setTimeout(() => {
+    window.location.replace('/merch/auth.html');
+  }, 500);
+
+  return;
       case 'change-password':
         toast('Placeholder', 'Password reset flow can be wired to the auth API later.', 'default');
         return;
