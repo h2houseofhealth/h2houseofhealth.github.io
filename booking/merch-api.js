@@ -247,9 +247,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         updates.push('email = ?');
         params.push(nextEmail);
       }
-      if (nextMobile !== String(existing.mobile || '')) {
+      if (nextMobile && nextMobile !== String(existing.mobile || '')) {
         updates.push('mobile = ?');
-        params.push(nextMobile || null);
+        params.push(nextMobile);
       }
       if (nextAvatarUrl !== String(existing.avatarUrl || '')) {
         updates.push('avatar_url = ?');
@@ -732,6 +732,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const email = String(req.body?.email || '').trim().toLowerCase();
     const mobile = String(req.body?.mobile || req.body?.phone || '').trim();
     const avatarUrl = String(req.body?.avatarUrl || '').trim();
+    const hasMobileField =
+      Object.prototype.hasOwnProperty.call(req.body || {}, 'mobile') ||
+      Object.prototype.hasOwnProperty.call(req.body || {}, 'phone');
+
+    if (mobile && !/^[0-9+\-\s()]{7,20}$/.test(mobile)) {
+      return res.status(400).json({ message: 'invalid mobile number' });
+    }
 
     const updates = [];
     const params = [];
@@ -743,7 +750,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       updates.push('email = ?');
       params.push(email);
     }
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'mobile') || Object.prototype.hasOwnProperty.call(req.body || {}, 'phone')) {
+    if (hasMobileField) {
       updates.push('mobile = ?');
       params.push(mobile || null);
     }
@@ -755,6 +762,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (updates.length) {
       updates.push("updated_at = datetime('now')");
       db.prepare(`UPDATE merch_customer_profiles SET ${updates.join(', ')} WHERE id = ?`).run(...params, profile.id);
+    }
+    if (hasMobileField && mobile) {
+      db.prepare('UPDATE users SET mobile = ? WHERE id = ?').run(mobile, req.user.id);
     }
 
     const nextProfile = getMerchCustomerProfileByUserId(req.user.id);
