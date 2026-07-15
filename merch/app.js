@@ -97,6 +97,8 @@
     merchCouponLoading: false,
   };
 
+  const FALLBACK_PRODUCT_IMAGE = '/booking/assets/service-hydrogen-session.jpg';
+
   // ─── Product Data (Static catalog until API is built) ───
   const PRODUCTS = [
     {
@@ -259,7 +261,7 @@
   }
 
   function getWishlistProductLabel(item) {
-    const product = PRODUCTS.find((entry) => Number(entry.id) === Number(item.productId));
+    const product = state.products.find((entry) => Number(entry.id) === Number(item.productId));
     return product?.name || item.productName || `Saved item #${item.productId || item.id || ''}`.trim();
   }
 
@@ -301,6 +303,57 @@
 
   function setBodyAuthLoading(isLoading) {
     document.body.classList.toggle('is-auth-loading', Boolean(isLoading));
+  }
+
+  function normalizeMerchProduct(product) {
+    const variants = Array.isArray(product?.variants) ? product.variants : [];
+    const imageUrl = String(product?.imageUrl || product?.image || product?.image_url || '').trim();
+    const images = Array.isArray(product?.images) && product.images.length
+      ? product.images.filter(Boolean)
+      : imageUrl
+        ? [imageUrl]
+        : [];
+
+    return {
+      ...product,
+      id: Number(product?.id || 0),
+      name: String(product?.name || ''),
+      slug: String(product?.slug || ''),
+      description: String(product?.description || ''),
+      category: String(product?.category || ''),
+      basePrice: Number(product?.basePrice || product?.base_price || 0),
+      imageUrl,
+      image: imageUrl,
+      images,
+      variants,
+      price: Number(product?.price || product?.basePrice || product?.base_price || 0),
+      priceLabel: String(product?.priceLabel || ''),
+      createdAt: String(product?.createdAt || ''),
+    };
+  }
+
+  async function loadMerchProducts() {
+    try {
+      const result = await api('/api/merch/products');
+      state.products = Array.isArray(result) ? result.map(normalizeMerchProduct) : [];
+    } catch (error) {
+      state.products = [];
+      console.error('Unable to load merch products:', error);
+    }
+
+    renderProductGrid();
+
+    if (state.currentView === 'detail' && state.selectedProduct) {
+      const refreshed = state.products.find((product) => Number(product.id) === Number(state.selectedProduct.id));
+      if (refreshed) {
+        state.selectedProduct = refreshed;
+        state.selectedVariant = refreshed.variants?.find((variant) => Number(variant.id) === Number(state.selectedVariant?.id)) || refreshed.variants?.[0] || null;
+        if (state.selectedVariant) {
+          renderProductGallery(refreshed);
+          renderProductInfo(refreshed);
+        }
+      }
+    }
   }
 
   // ─── Elements ───
@@ -364,18 +417,18 @@
     if (existing) {
       const newQty = Math.min(Math.max(1, quantity), variant.stock);
       existing.quantity = newQty;
-    } else {
-      state.cart.push({
-        variantId,
-        productId: product.id,
-        productName: product.name,
-        variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '),
-        price: variant.price,
-        quantity: Math.min(quantity, variant.stock),
-        image: product.images[0] || '',
-        sku: variant.sku,
-      });
-    }
+      } else {
+        state.cart.push({
+          variantId,
+          productId: product.id,
+          productName: product.name,
+          variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '),
+          price: variant.price,
+          quantity: Math.min(quantity, variant.stock),
+          image: product.images?.[0] || product.imageUrl || FALLBACK_PRODUCT_IMAGE,
+          sku: variant.sku,
+        });
+      }
     saveCart();
     openCart();
   }
@@ -1213,7 +1266,7 @@
 
   // ─── Render: Product Grid ───
   function getFilteredProducts() {
-    let products = [...PRODUCTS];
+    let products = [...state.products];
 
     // Category filter
     if (state.selectedCategory !== 'all') {
@@ -1260,7 +1313,7 @@
     els.productGrid.innerHTML = products.map(product => `
       <article class="product-card" data-product-id="${product.id}" tabindex="0" role="button" aria-label="View ${escapeHtml(product.name)}">
         <div class="product-card__image">
-          <img src="${product.images[0]}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.src='/booking/assets/service-hydrogen-session.jpg'" />
+          <img src="${escapeHtml(product.images?.[0] || product.imageUrl || FALLBACK_PRODUCT_IMAGE)}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
         </div>
         <div class="product-card__body">
           <p class="product-card__category">${escapeHtml(getCategoryLabel(product.category))}</p>
@@ -1299,7 +1352,7 @@
 
   // ─── Render: Product Detail ───
   function showProductDetail(productId) {
-    const product = PRODUCTS.find(p => p.id === productId);
+    const product = state.products.find(p => Number(p.id) === Number(productId));
     if (!product) return;
 
     state.currentView = 'detail';
@@ -1331,14 +1384,14 @@
   }
 
   function renderProductGallery(product) {
-    const mainImage = product.images[0] || '/booking/assets/service-hydrogen-session.jpg';
+    const mainImage = product.images?.[0] || product.imageUrl || FALLBACK_PRODUCT_IMAGE;
     els.productGallery.innerHTML = `
       <div class="gallery-main">
-        <img id="galleryMainImg" src="${mainImage}" alt="${escapeHtml(product.name)}" onerror="this.src='/booking/assets/service-hydrogen-session.jpg'" />
+        <img id="galleryMainImg" src="${escapeHtml(mainImage)}" alt="${escapeHtml(product.name)}" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
       </div>
-      ${product.images.length > 1 ? `
+      ${(product.images || []).length > 1 ? `
         <div class="gallery-thumbs">
-          ${product.images.map((img, i) => `
+          ${(product.images || []).map((img, i) => `
             <button class="gallery-thumb ${i === 0 ? 'is-active' : ''}" data-index="${i}" type="button">
               <img src="${img}" alt="Image ${i + 1}" />
             </button>
@@ -1351,7 +1404,7 @@
     els.productGallery.querySelectorAll('.gallery-thumb').forEach(thumb => {
       thumb.addEventListener('click', () => {
         const idx = Number(thumb.dataset.index);
-        document.getElementById('galleryMainImg').src = product.images[idx];
+        document.getElementById('galleryMainImg').src = product.images?.[idx] || product.imageUrl || FALLBACK_PRODUCT_IMAGE;
         els.productGallery.querySelectorAll('.gallery-thumb').forEach(t => t.classList.remove('is-active'));
         thumb.classList.add('is-active');
       });
@@ -1491,7 +1544,7 @@
     }
 
     const q = query.toLowerCase();
-    const results = PRODUCTS.filter(p =>
+    const results = state.products.filter(p =>
       p.name.toLowerCase().includes(q) ||
       p.description.toLowerCase().includes(q) ||
       p.category.toLowerCase().includes(q)
@@ -1507,7 +1560,7 @@
         display: flex; gap: 12px; padding: 12px; cursor: pointer; border-bottom: 1px solid var(--border);
         border-radius: 8px; transition: background 0.2s;
       " onmouseover="this.style.background='rgba(0,0,0,0.03)'" onmouseout="this.style.background='transparent'">
-        <img src="${p.images[0]}" alt="" style="width: 48px; height: 48px; border-radius: 6px; object-fit: cover;" onerror="this.src='/booking/assets/service-hydrogen-session.jpg'" />
+        <img src="${escapeHtml(p.images?.[0] || p.imageUrl || FALLBACK_PRODUCT_IMAGE)}" alt="" style="width: 48px; height: 48px; border-radius: 6px; object-fit: cover;" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
         <div>
           <p style="font-weight: 600; font-size: 14px; margin: 0 0 2px;">${escapeHtml(p.name)}</p>
           <p style="font-size: 13px; color: var(--text-muted); margin: 0;">${getPriceRange(p)}</p>
@@ -2072,6 +2125,7 @@
     bindEvents();
     setBodyAuthLoading(true);
     renderAccountTrigger();
+    loadMerchProducts();
     loadCustomerContext();
   }
 

@@ -277,7 +277,7 @@
     selectedProductIds: [],
     selectedProductId: 101,
     selectedOrderId: 50031,
-    selectedCustomerId: 1,
+    selectedCustomerId: null,
     selectedCouponId: 1,
     selectedInfluencerId: null,
     productsSearch: '',
@@ -322,6 +322,7 @@
     modalOpen: false,
     modalType: '',
     modalEntityId: null,
+    customersLoading: false,
   };
 
   const els = {
@@ -1155,7 +1156,18 @@
     if (!customer) {
       return `<p class="admin-table__muted">Select a customer to view profile details.</p>`;
     }
-    const customerOrders = state.orders.filter((order) => order.email === customer.email);
+    const addressList = Array.isArray(customer.addresses) && customer.addresses.length
+      ? customer.addresses.map((address) => `
+          <div style="margin-bottom:0.75rem;">
+            <strong>${escapeHtml(address.label || address.source || 'Address')}</strong><br>
+            <span class="admin-table__muted">${escapeHtml(address.text)}</span>
+          </div>
+        `).join('')
+      : '<p class="admin-table__muted" style="margin:0;">No saved addresses yet.</p>';
+    const registrationDate = customer.registrationDate || customer.registeredAt || '';
+    const lastOrderLabel = customer.lastOrder?.orderNumber
+      ? `${customer.lastOrder.orderNumber}${customer.lastOrder.createdAt ? ` - ${dateLabel(customer.lastOrder.createdAt)}` : ''}`
+      : customer.lastOrderLabel || 'No orders yet';
     return `
       <div class="admin-list">
         <div class="admin-list__item">
@@ -1168,37 +1180,58 @@
           </div>
         </div>
         <div class="admin-list__item">
-          <p class="admin-list__item-title">Personal Details</p>
-          <p class="admin-list__item-sub">${escapeHtml(customer.phone)}<br>Registered: ${escapeHtml(dateLabel(customer.registeredAt))}</p>
+          <p class="admin-list__item-title">Merchandise Orders</p>
+          <p class="admin-list__item-sub">${formatCount(customer.merchandiseOrders)} order(s)</p>
+        </div>
+        <div class="admin-list__item">
+          <p class="admin-list__item-title">Lifetime Merchandise Spend</p>
+          <p class="admin-list__item-sub"><strong>${escapeHtml(money(customer.lifetimeMerchSpend))}</strong></p>
+        </div>
+        <div class="admin-list__item">
+          <p class="admin-list__item-title">Last Order</p>
+          <p class="admin-list__item-sub">${escapeHtml(lastOrderLabel)}</p>
         </div>
         <div class="admin-list__item">
           <p class="admin-list__item-title">Addresses</p>
-          <p class="admin-list__item-sub">${escapeHtml(customer.addresses)} saved address(es)</p>
+          <div class="admin-list__item-sub">${addressList}</div>
         </div>
         <div class="admin-list__item">
-          <p class="admin-list__item-title">Order History</p>
-          <p class="admin-list__item-sub">${escapeHtml(customerOrders.length)} order(s) placed</p>
-        </div>
-        <div class="admin-list__item">
-          <p class="admin-list__item-title">Wishlist and Coupons</p>
-          <p class="admin-list__item-sub">Wishlist items: ${escapeHtml(customer.wishlist)}<br>Coupons used: ${escapeHtml(customer.couponsUsed)}</p>
+          <p class="admin-list__item-title">Registration Date</p>
+          <p class="admin-list__item-sub">${escapeHtml(dateLabel(registrationDate))}</p>
         </div>
       </div>
     `;
   }
 
   function renderCustomers() {
+    if (state.customersLoading && !state.customers.length) {
+      els.customersView.innerHTML = `
+        <section class="admin-section">
+          <div class="admin-section__head">
+            <div>
+              <h2 class="admin-section__title">Customers</h2>
+              <p class="admin-section__desc">Loading live merchandise customer data...</p>
+            </div>
+          </div>
+          <div class="admin-section__body">
+            ${renderEmptyState('Loading customers', 'Pulling live merch profiles, orders, and addresses from the store API.')}
+          </div>
+        </section>
+      `;
+      return;
+    }
+
     if (!state.customers.length) {
       els.customersView.innerHTML = `
         <section class="admin-section">
           <div class="admin-section__head">
             <div>
               <h2 class="admin-section__title">Customers</h2>
-              <p class="admin-section__desc">No live customer data is connected yet.</p>
+              <p class="admin-section__desc">No live merch customer data is connected yet.</p>
             </div>
           </div>
           <div class="admin-section__body">
-            ${renderEmptyState('No customer profiles', 'Connect the customer API to view profiles, addresses, order history, and loyalty details.')}
+            ${renderEmptyState('No customer profiles', 'Connect the customer API to view profiles, orders, addresses, and loyalty details.')}
           </div>
         </section>
       `;
@@ -1208,11 +1241,19 @@
     const query = state.customersSearch.trim().toLowerCase();
     const filtered = state.customers.filter((customer) =>
       !query ||
-      [customer.name, customer.email, customer.phone]
+      [
+        customer.name,
+        customer.email,
+        customer.phone,
+        customer.addressSummary,
+        customer.lastOrderLabel,
+        String(customer.merchandiseOrders || ''),
+        String(customer.lifetimeMerchSpend || ''),
+      ]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(query))
     );
-    const selectedCustomer = state.customers.find((customer) => Number(customer.id) === Number(state.selectedCustomerId)) || filtered[0] || state.customers[0];
+    const selectedCustomer = state.customers.find((customer) => String(customer.id) === String(state.selectedCustomerId)) || filtered[0] || state.customers[0];
     if (selectedCustomer) state.selectedCustomerId = selectedCustomer.id;
 
     els.customersView.innerHTML = `
@@ -1226,7 +1267,7 @@
         <div class="admin-section__body">
           <div class="admin-toolbar">
             <div class="admin-toolbar__group" style="flex:1 1 420px;">
-              <input class="admin-input" data-input="customersSearch" value="${escapeHtml(state.customersSearch)}" placeholder="Search by name, email, or phone" />
+              <input class="admin-input" data-input="customersSearch" value="${escapeHtml(state.customersSearch)}" placeholder="Search by name, email, phone, address, or last order" />
             </div>
           </div>
 
@@ -1241,20 +1282,26 @@
                   <thead>
                     <tr>
                       <th>Name</th>
+                      <th>Email</th>
                       <th>Phone</th>
-                      <th>Registered</th>
-                      <th>Orders</th>
-                      <th>Spend</th>
+                      <th>Merchandise Orders</th>
+                      <th>Lifetime Merchandise Spend</th>
+                      <th>Last Order</th>
+                      <th>Addresses</th>
+                      <th>Registration Date</th>
                     </tr>
                   </thead>
                   <tbody>
                     ${filtered.map((customer) => `
                       <tr data-action="select-customer" data-id="${customer.id}" style="cursor:pointer;">
-                        <td><strong>${escapeHtml(customer.name)}</strong><br><span class="admin-table__muted">${escapeHtml(customer.email)}</span></td>
+                        <td><strong>${escapeHtml(customer.name)}</strong></td>
+                        <td>${escapeHtml(customer.email)}</td>
                         <td>${escapeHtml(customer.phone)}</td>
-                        <td>${escapeHtml(dateLabel(customer.registeredAt))}</td>
-                        <td>${escapeHtml(customer.totalOrders)}</td>
-                        <td><strong>${escapeHtml(money(customer.totalSpend))}</strong></td>
+                        <td>${escapeHtml(formatCount(customer.merchandiseOrders))}</td>
+                        <td><strong>${escapeHtml(money(customer.lifetimeMerchSpend))}</strong></td>
+                        <td>${escapeHtml(customer.lastOrder?.orderNumber ? `${customer.lastOrder.orderNumber}${customer.lastOrder.createdAt ? ` - ${dateLabel(customer.lastOrder.createdAt)}` : ''}` : customer.lastOrderLabel || 'No orders yet')}</td>
+                        <td>${escapeHtml(customer.addressSummary || 'No saved addresses')}</td>
+                        <td>${escapeHtml(dateLabel(customer.registrationDate || customer.registeredAt))}</td>
                       </tr>
                     `).join('')}
                   </tbody>
@@ -1265,7 +1312,7 @@
               <article class="admin-card">
                 <div class="admin-card__head">
                   <h3 class="admin-card__title">Customer Profile</h3>
-                  <p class="admin-card__sub">Orders, wishlist, and coupons used</p>
+                  <p class="admin-card__sub">Merchandise orders, spend, addresses, and first interaction date</p>
                 </div>
                 <div class="admin-card__body">
                   ${renderCustomerDetail(selectedCustomer)}
@@ -2201,6 +2248,21 @@
     }
   }
 
+  async function loadCustomerData() {
+    state.customersLoading = true;
+    renderCustomers();
+    try {
+      const result = await apiRequest('/api/merch/admin/customers');
+      state.customers = Array.isArray(result.customers) ? result.customers : [];
+    } catch (error) {
+      state.customers = [];
+      toast('Customers unavailable', error.message || 'Unable to load merch customer data from the admin API.', 'warning');
+    } finally {
+      state.customersLoading = false;
+      renderCustomers();
+    }
+  }
+
   function advanceOrderStatus(order, direction = 'next') {
     const flow = ['pending', 'processing', 'shipped', 'delivered'];
     const currentIndex = flow.indexOf(order.status);
@@ -2281,11 +2343,12 @@
   }
 
   async function handleAction(action, target) {
-    const id = Number(target?.dataset?.id || target?.closest?.('[data-id]')?.dataset?.id || 0);
+    const rawId = String(target?.dataset?.id || target?.closest?.('[data-id]')?.dataset?.id || '');
+    const id = Number(rawId || 0);
     const product = state.products.find((item) => Number(item.id) === id);
     const category = state.categories.find((item) => Number(item.id) === id);
     const order = state.orders.find((item) => Number(item.id) === id);
-    const customer = state.customers.find((item) => Number(item.id) === id);
+    const customer = state.customers.find((item) => String(item.id) === rawId);
     const coupon = state.coupons.find((item) => Number(item.id) === id);
     const influencer = state.influencers.find((item) => Number(item.id) === id);
 
@@ -2819,6 +2882,7 @@
   function init() {
     bindEvents();
     renderAll();
+    loadCustomerData();
     loadCouponData();
   }
 
