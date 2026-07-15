@@ -16,6 +16,7 @@
   }
 
   const API_URL = resolveApiUrl();
+  const AUTH_TOKEN_STORAGE_KEY = 'booking_portal_auth_token';
 
   function buildApiUrl(path) {
     if (/^https?:\/\//i.test(String(path || ''))) return String(path);
@@ -23,13 +24,25 @@
     return `${base}${path}`;
   }
 
+  function getStoredAuthToken() {
+    try {
+      return String(window.localStorage?.getItem(AUTH_TOKEN_STORAGE_KEY) || '').trim();
+    } catch {
+      return '';
+    }
+  }
+
   async function api(path, options = {}) {
+    const headers = new Headers(options.headers || {});
+    const authToken = getStoredAuthToken();
+    if (authToken && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${authToken}`);
+    }
+
     const response = await fetch(buildApiUrl(path), {
-      credentials: 'include',
       ...options,
-      headers: {
-        ...(options.headers || {}),
-      },
+      credentials: 'include',
+      headers,
     });
 
     let data = null;
@@ -71,6 +84,7 @@
     accountDrawerTrigger: null,
     accountProfileEditing: false,
     accountProfileMessage: '',
+    accountAddressMessage: '',
     accountAddressFormMode: null,
     accountEditingAddressId: null,
     accountOrdersExpanded: false,
@@ -646,6 +660,7 @@
           </div>
         </div>
         ${state.accountAddressFormMode ? renderAddressForm(editingAddress) : ''}
+        ${state.accountAddressMessage ? `<p class="account-success-message" role="alert">${escapeHtml(state.accountAddressMessage)}</p>` : ''}
         ${addresses.length ? `
           <div class="account-list">
             ${addresses.map((address) => `
@@ -875,6 +890,7 @@
     if (action === 'add-address') {
       state.accountAddressFormMode = 'add';
       state.accountEditingAddressId = null;
+      state.accountAddressMessage = '';
       renderAccountDrawer();
       return;
     }
@@ -882,6 +898,7 @@
     if (action === 'edit-address') {
       state.accountAddressFormMode = 'edit';
       state.accountEditingAddressId = button.dataset.addressId;
+      state.accountAddressMessage = '';
       renderAccountDrawer();
       return;
     }
@@ -889,6 +906,7 @@
     if (action === 'cancel-address') {
       state.accountAddressFormMode = null;
       state.accountEditingAddressId = null;
+      state.accountAddressMessage = '';
       renderAccountDrawer();
       return;
     }
@@ -1098,26 +1116,16 @@
         body: JSON.stringify(payload),
       });
       state.merchAddresses = Array.isArray(result.addresses) ? result.addresses : state.merchAddresses;
-    } catch {
-      if (isEdit) {
-        state.merchAddresses = state.merchAddresses.map((address) =>
-          getAddressId(address) === String(addressId) ? { ...address, ...payload } : address
-        );
-      } else {
-        state.merchAddresses = [
-          { ...payload, localId: `local-${Date.now()}`, isDefault: payload.isDefault || state.merchAddresses.length === 0 },
-          ...state.merchAddresses,
-        ];
-      }
-      if (payload.isDefault) {
-        const nextDefaultId = isEdit ? addressId : getAddressId(state.merchAddresses[0]);
-        state.merchAddresses = state.merchAddresses.map((address) => ({
-          ...address,
-          isDefault: getAddressId(address) === String(nextDefaultId),
-        }));
-      }
+    } catch (error) {
+      const detail = String(error?.message || '').trim();
+      state.accountAddressMessage = detail
+        ? `Address was not saved. ${detail}`
+        : 'Address was not saved. Please try again.';
+      renderAccountDrawer();
+      return;
     }
 
+    state.accountAddressMessage = '';
     state.accountAddressFormMode = null;
     state.accountEditingAddressId = null;
     renderAccountDrawer();
