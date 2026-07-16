@@ -18,6 +18,19 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   // ─── Merch Database Schema (run once) ───
   db.exec(`
+    CREATE TABLE IF NOT EXISTS merch_influencers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      handle TEXT,
+      email TEXT,
+      phone TEXT,
+      notes TEXT,
+      commission_rate REAL NOT NULL DEFAULT 10,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS merch_products (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -62,6 +75,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       discount_amount INTEGER NOT NULL DEFAULT 0,
       coupon_id INTEGER REFERENCES coupons(id),
       coupon_code TEXT,
+      influencer_id INTEGER REFERENCES merch_influencers(id),
       total_amount INTEGER NOT NULL,
       payment_method TEXT NOT NULL DEFAULT 'online',
       payment_status TEXT NOT NULL DEFAULT 'pending',
@@ -155,6 +169,22 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     db.exec('ALTER TABLE merch_orders ADD COLUMN coupon_code TEXT');
   }
 
+  if (!hasColumn('merch_orders', 'influencer_id')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN influencer_id INTEGER REFERENCES merch_influencers(id)');
+  }
+
+  if (hasTable('coupons') && !hasColumn('coupons', 'influencer_id')) {
+    db.exec('ALTER TABLE coupons ADD COLUMN influencer_id INTEGER REFERENCES merch_influencers(id)');
+  }
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_merch_orders_influencer_id
+      ON merch_orders(influencer_id);
+
+    CREATE INDEX IF NOT EXISTS idx_coupons_influencer_portal
+      ON coupons(influencer_id, portal);
+  `);
+
   function hasTable(tableName) {
     return Boolean(
       db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1").get(tableName)
@@ -168,6 +198,143 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function formatMerchPrice(paise) {
     return '₹' + Number(paise || 0).toLocaleString('en-IN');
+  }
+
+  function normalizeInfluencerPayload(body = {}) {
+    const commissionRate = Number(body.commissionRate ?? body.commission_rate ?? 10);
+    return {
+      name: String(body.name || '').trim(),
+      handle: String(body.handle || '').trim(),
+      email: String(body.email || '').trim().toLowerCase(),
+      phone: String(body.phone || '').trim(),
+      notes: String(body.notes || '').trim(),
+      commissionRate: Number.isFinite(commissionRate) ? Math.min(Math.max(commissionRate, 0), 100) : 10,
+      active: body.active === false || Number(body.active) === 0 ? 0 : 1,
+    };
+  }
+
+  function getInfluencerById(influencerId) {
+    const id = Number(influencerId);
+    if (!Number.isInteger(id) || id <= 0) return null;
+    return db.prepare(`
+      SELECT id, name, handle, email, phone, notes, commission_rate AS commissionRate,
+             active, created_at AS createdAt, updated_at AS updatedAt
+      FROM merch_influencers
+      WHERE id = ?
+    `).get(id);
+  }
+
+  function getMerchCouponByCode(code) {
+    const normalizedCode = normalizeMerchCouponCode(code);
+    if (!normalizedCode) return null;
+    return db.prepare(`
+      SELECT c.id, c.code, c.description, c.discount_type AS discountType, c.discount_value AS discountValue,
+             c.applies_to AS appliesTo, c.active, c.is_active AS isActive, c.portal,
+             c.influencer_id AS influencerId, i.name AS influencerName, i.handle AS influencerHandle,
+             i.email AS influencerEmail, i.commission_rate AS influencerCommissionRate
+      FROM coupons c
+      LEFT JOIN merch_influencers i ON i.id = c.influencer_id
+      WHERE c.code = ? AND c.portal = 'merch'
+      LIMIT 1
+    `).get(normalizedCode);
+  }
+
+  function getInfluencerCouponRows(influencerIds = []) {
+    const ids = Array.from(new Set(
+      influencerIds.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0)
+    ));
+    if (!ids.length) return [];
+    return db.prepare(`
+      SELECT c.id, c.code, c.description, c.discount_type AS discountType, c.discount_value AS discountValue,
+             c.active, c.is_active AS isActive, c.influencer_id AS influencerId,
+             COUNT(mo.id) AS usageCount,
+             COALESCE(SUM(CASE WHEN mo.payment_status IN ('paid', 'cod_pending') THEN mo.total_amount ELSE 0 END), 0) AS revenue
+      FROM coupons c
+      LEFT JOIN merch_orders mo ON mo.coupon_id = c.id AND mo.influencer_id = c.influencer_id
+      WHERE c.portal = 'merch'
+        AND c.influencer_id IN (${ids.map(() => '?').join(', ')})
+      GROUP BY c.id
+      ORDER BY c.code ASC
+    `).all(...ids);
+  }
+
+  function getInfluencerStatsRows(influencerIds = []) {
+    const ids = Array.from(new Set(
+      influencerIds.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0)
+    ));
+    if (!ids.length) return [];
+    return db.prepare(`
+      SELECT influencer_id AS influencerId,
+             COUNT(*) AS totalOrders,
+             COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'cod_pending') THEN total_amount ELSE 0 END), 0) AS revenue,
+             COALESCE(SUM(CASE WHEN coupon_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS couponUsage
+      FROM merch_orders
+      WHERE influencer_id IN (${ids.map(() => '?').join(', ')})
+        AND payment_status IN ('paid', 'cod_pending')
+      GROUP BY influencer_id
+    `).all(...ids);
+  }
+
+  function serializeInfluencer(row, coupons = [], stats = {}) {
+    const commissionRate = Number(row.commissionRate ?? row.commission_rate ?? 10);
+    const revenue = Number(stats.revenue || 0);
+    return {
+      id: Number(row.id),
+      name: String(row.name || ''),
+      handle: String(row.handle || ''),
+      email: String(row.email || ''),
+      phone: String(row.phone || ''),
+      notes: String(row.notes || ''),
+      commissionRate,
+      active: Number(row.active ?? 1) === 1,
+      coupons: coupons.map((coupon) => String(coupon.code || '')).filter(Boolean),
+      couponDetails: coupons.map((coupon) => ({
+        id: Number(coupon.id),
+        code: String(coupon.code || ''),
+        description: String(coupon.description || ''),
+        discountType: String(coupon.discountType || ''),
+        discountValue: Number(coupon.discountValue || 0),
+        active: Number(coupon.isActive ?? coupon.active ?? 0) === 1,
+        usageCount: Number(coupon.usageCount || 0),
+        revenue: Number(coupon.revenue || 0),
+      })),
+      totalOrders: Number(stats.totalOrders || 0),
+      revenue,
+      couponUsage: Number(stats.couponUsage || 0),
+      activeCampaigns: coupons.filter((coupon) => Number(coupon.isActive ?? coupon.active ?? 0) === 1).length,
+      commission: Math.round(revenue * (commissionRate / 100)),
+      createdAt: row.createdAt || row.created_at || null,
+      updatedAt: row.updatedAt || row.updated_at || null,
+    };
+  }
+
+  function loadMerchInfluencers() {
+    const rows = db.prepare(`
+      SELECT id, name, handle, email, phone, notes, commission_rate AS commissionRate,
+             active, created_at AS createdAt, updated_at AS updatedAt
+      FROM merch_influencers
+      ORDER BY active DESC, datetime(created_at) DESC, id DESC
+    `).all();
+    const ids = rows.map((row) => Number(row.id));
+    const couponRows = getInfluencerCouponRows(ids);
+    const statRows = getInfluencerStatsRows(ids);
+    const couponsByInfluencer = new Map();
+    const statsByInfluencer = new Map();
+
+    for (const coupon of couponRows) {
+      const influencerId = Number(coupon.influencerId);
+      if (!couponsByInfluencer.has(influencerId)) couponsByInfluencer.set(influencerId, []);
+      couponsByInfluencer.get(influencerId).push(coupon);
+    }
+    for (const stats of statRows) {
+      statsByInfluencer.set(Number(stats.influencerId), stats);
+    }
+
+    return rows.map((row) => serializeInfluencer(
+      row,
+      couponsByInfluencer.get(Number(row.id)) || [],
+      statsByInfluencer.get(Number(row.id)) || {}
+    ));
   }
 
   function getMerchProductVariants(productIds = [], { includeInactive = false } = {}) {
@@ -385,6 +552,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       discountAmount: Number(order.discountAmount || order.discount_amount || 0),
       couponId: order.couponId || order.coupon_id || null,
       couponCode: String(order.couponCode || order.coupon_code || ''),
+      influencerId: order.influencerId || order.influencer_id || null,
+      influencerName: String(order.influencerName || order.influencer_name || ''),
+      influencerHandle: String(order.influencerHandle || order.influencer_handle || ''),
+      influencerCoupon: order.influencerName || order.influencer_name
+        ? `${String(order.influencerName || order.influencer_name)}${order.couponCode || order.coupon_code ? ` (${String(order.couponCode || order.coupon_code)})` : ''}`
+        : '',
       totalAmount: Number(order.totalAmount || order.total_amount || 0),
       paymentMethod: String(order.paymentMethod || order.payment_method || 'online'),
       paymentStatus: String(order.paymentStatus || order.payment_status || 'pending'),
@@ -422,40 +595,42 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const params = [];
 
     if (status && status !== 'all') {
-      clauses.push('status = ?');
+      clauses.push('mo.status = ?');
       params.push(status);
     }
     if (startDate) {
-      clauses.push("date(created_at) >= date(?)");
+      clauses.push("date(mo.created_at) >= date(?)");
       params.push(startDate);
     }
     if (endDate) {
-      clauses.push("date(created_at) <= date(?)");
+      clauses.push("date(mo.created_at) <= date(?)");
       params.push(endDate);
     }
     if (Number.isInteger(Number(customerUserId)) && Number(customerUserId) > 0) {
-      clauses.push('customer_user_id = ?');
+      clauses.push('mo.customer_user_id = ?');
       params.push(Number(customerUserId));
     }
     if (Number.isInteger(Number(customerId)) && Number(customerId) > 0) {
-      clauses.push('customer_id = ?');
+      clauses.push('mo.customer_id = ?');
       params.push(Number(customerId));
     }
 
     let sql = `
-      SELECT id, order_number AS orderNumber, customer_name AS customerName, customer_email AS customerEmail,
-             customer_phone AS customerPhone, status, subtotal, gst_amount AS gstAmount,
-             shipping_charge AS shippingCharge, discount_amount AS discountAmount, coupon_id AS couponId,
-             coupon_code AS couponCode, total_amount AS totalAmount, payment_method AS paymentMethod,
-             payment_status AS paymentStatus, razorpay_order_id AS razorpayOrderId,
-             razorpay_payment_id AS razorpayPaymentId, shipping_address AS shippingAddress,
-             tracking_number AS trackingNumber, carrier_name AS carrierName,
-             created_at AS createdAt, updated_at AS updatedAt,
-             customer_user_id AS customerUserId, customer_id AS customerId
-      FROM merch_orders
+      SELECT mo.id, mo.order_number AS orderNumber, mo.customer_name AS customerName, mo.customer_email AS customerEmail,
+             mo.customer_phone AS customerPhone, mo.status, mo.subtotal, mo.gst_amount AS gstAmount,
+             mo.shipping_charge AS shippingCharge, mo.discount_amount AS discountAmount, mo.coupon_id AS couponId,
+             mo.coupon_code AS couponCode, mo.influencer_id AS influencerId, mi.name AS influencerName,
+             mi.handle AS influencerHandle, mo.total_amount AS totalAmount, mo.payment_method AS paymentMethod,
+             mo.payment_status AS paymentStatus, mo.razorpay_order_id AS razorpayOrderId,
+             mo.razorpay_payment_id AS razorpayPaymentId, mo.shipping_address AS shippingAddress,
+             mo.tracking_number AS trackingNumber, mo.carrier_name AS carrierName,
+             mo.created_at AS createdAt, mo.updated_at AS updatedAt,
+             mo.customer_user_id AS customerUserId, mo.customer_id AS customerId
+      FROM merch_orders mo
+      LEFT JOIN merch_influencers mi ON mi.id = mo.influencer_id
     `;
     if (clauses.length) sql += ` WHERE ${clauses.join(' AND ')}`;
-    sql += ' ORDER BY datetime(created_at) DESC, id DESC';
+    sql += ' ORDER BY datetime(mo.created_at) DESC, mo.id DESC';
 
     const orders = db.prepare(sql).all(...params);
     if (!orders.length) return [];
@@ -493,10 +668,15 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       .all();
     const coupons = db
       .prepare(
-        `SELECT id, code, coupon_type AS couponType, owner_type AS ownerType, active, total_redemptions AS totalRedemptions
-         FROM coupons`
+        `SELECT c.id, c.code, c.coupon_type AS couponType, c.active, c.influencer_id AS influencerId,
+                COUNT(cr.id) AS totalRedemptions
+         FROM coupons c
+         LEFT JOIN coupon_redemptions cr ON cr.coupon_id = c.id
+         WHERE c.portal = 'merch'
+         GROUP BY c.id`
       )
       .all();
+    const influencers = loadMerchInfluencers();
 
     const paidOrders = allOrders.filter((order) => String(order.paymentStatus || '').toLowerCase() === 'paid');
     const revenue = paidOrders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
@@ -618,6 +798,19 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       topCategories: [...categoryStats.values()]
         .sort((left, right) => right.revenue - left.revenue || right.quantity - left.quantity)
         .slice(0, 5),
+      influencerReports: influencers
+        .map((influencer) => ({
+          id: influencer.id,
+          name: influencer.name,
+          handle: influencer.handle,
+          coupons: influencer.coupons,
+          orders: influencer.totalOrders,
+          revenue: influencer.revenue,
+          couponUsage: influencer.couponUsage,
+          commissionRate: influencer.commissionRate,
+          commission: influencer.commission,
+        }))
+        .sort((left, right) => right.revenue - left.revenue || right.orders - left.orders),
       recentOrders: allOrders.slice(0, 5),
     };
   }
@@ -871,7 +1064,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (typeof validateCouponForUser !== 'function') {
       return { error: 'Coupon validation is unavailable.' };
     }
-    return validateCouponForUser({ ...args, appliesTo: 'merch' });
+    return validateCouponForUser({ ...args, appliesTo: 'merch', portal: 'merch' });
   }
 
   function recordMerchCouponRedemption(payload) {
@@ -894,6 +1087,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       couponType: result?.coupon?.couponType || '',
       validFrom: result?.coupon?.validFrom || null,
       validTill: result?.coupon?.validTill || null,
+      influencerId: result?.coupon?.influencerId || null,
+      influencerName: result?.coupon?.influencerName || '',
+      influencerHandle: result?.coupon?.influencerHandle || '',
     };
   }
 
@@ -986,7 +1182,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const gstAmount = Math.max(0, subtotal - Math.round(subtotal / 1.18));
     const shippingCharge = subtotal >= 99900 ? 0 : 9900; // Free above ₹999
     const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
-    const totalAmount = Math.max(100, subtotal + shippingCharge - discountAmount);
+    const influencerId = Number(couponResult.coupon?.influencerId || 0) > 0 ? Number(couponResult.coupon.influencerId) : null;
+    const totalAmount = Math.max(100, subtotal + gstAmount + shippingCharge - discountAmount);
     const orderNumber = generateOrderNumber();
 
     // Create Razorpay order
@@ -998,13 +1195,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }).then(rpOrder => {
       // Save order to DB
       const insertOrder = db.prepare(`
-        INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, total_amount, payment_method, payment_status, razorpay_order_id, shipping_address)
-        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, 'online', 'pending', ?, ?)
+        INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, total_amount, payment_method, payment_status, razorpay_order_id, shipping_address)
+        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, 'online', 'pending', ?, ?)
       `);
       const result = insertOrder.run(
         orderNumber, resolvedCustomer.name, resolvedCustomer.email, resolvedCustomer.phone,
         authUser?.id || null, merchProfile?.id || null,
-        subtotal, gstAmount, shippingCharge, discountAmount, couponResult.coupon?.id || null, couponResult.couponCode || null, totalAmount,
+        subtotal, gstAmount, shippingCharge, discountAmount, couponResult.coupon?.id || null, couponResult.couponCode || null, influencerId, totalAmount,
         rpOrder.id, JSON.stringify(address || {})
       );
       const orderId = result.lastInsertRowid;
@@ -1138,12 +1335,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const shippingCharge = subtotal >= 99900 ? 0 : 9900;
     const codSurcharge = 5000; // ₹50
     const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
-    const totalAmount = Math.max(100, subtotal + shippingCharge + codSurcharge - discountAmount);
+    const influencerId = Number(couponResult.coupon?.influencerId || 0) > 0 ? Number(couponResult.coupon.influencerId) : null;
+    const totalAmount = Math.max(100, subtotal + gstAmount + shippingCharge + codSurcharge - discountAmount);
     const orderNumber = generateOrderNumber();
 
     const result = db.prepare(`
-      INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, total_amount, payment_method, payment_status, shipping_address)
-      VALUES (?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?, ?, 'cod', 'cod_pending', ?)
+      INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, total_amount, payment_method, payment_status, shipping_address)
+      VALUES (?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?, ?, ?, 'cod', 'cod_pending', ?)
     `).run(
       orderNumber,
       resolvedCustomer.name,
@@ -1157,6 +1355,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       discountAmount,
       couponResult.coupon?.id || null,
       couponResult.couponCode || null,
+      influencerId,
       totalAmount,
       JSON.stringify(address || {})
     );
@@ -1674,6 +1873,174 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       });
 
     res.json({ customers, total: customers.length });
+  });
+
+  app.get('/api/merch/admin/influencers', requireAdmin, (_req, res) => {
+    const influencers = loadMerchInfluencers();
+    res.json({ influencers, total: influencers.length });
+  });
+
+  app.post('/api/merch/admin/influencers', requireAdmin, (req, res) => {
+    const influencer = normalizeInfluencerPayload(req.body);
+    if (!influencer.name) {
+      return res.status(400).json({ message: 'Influencer name is required' });
+    }
+
+    const result = db.prepare(`
+      INSERT INTO merch_influencers (name, handle, email, phone, notes, commission_rate, active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    `).run(
+      influencer.name,
+      influencer.handle || null,
+      influencer.email || null,
+      influencer.phone || null,
+      influencer.notes || null,
+      influencer.commissionRate,
+      influencer.active
+    );
+
+    const created = getInfluencerById(result.lastInsertRowid);
+    res.status(201).json({ influencer: serializeInfluencer(created, [], {}) });
+  });
+
+  app.put('/api/merch/admin/influencers/:id', requireAdmin, (req, res) => {
+    const influencerId = Number(req.params.id);
+    if (!Number.isInteger(influencerId) || influencerId <= 0) {
+      return res.status(400).json({ message: 'Invalid influencer id' });
+    }
+    const existing = getInfluencerById(influencerId);
+    if (!existing) {
+      return res.status(404).json({ message: 'Influencer not found' });
+    }
+
+    const influencer = normalizeInfluencerPayload({
+      ...existing,
+      ...req.body,
+      active: Object.prototype.hasOwnProperty.call(req.body || {}, 'active') ? req.body.active : existing.active,
+    });
+    if (!influencer.name) {
+      return res.status(400).json({ message: 'Influencer name is required' });
+    }
+
+    db.prepare(`
+      UPDATE merch_influencers
+      SET name = ?, handle = ?, email = ?, phone = ?, notes = ?, commission_rate = ?,
+          active = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      influencer.name,
+      influencer.handle || null,
+      influencer.email || null,
+      influencer.phone || null,
+      influencer.notes || null,
+      influencer.commissionRate,
+      influencer.active,
+      influencerId
+    );
+
+    const updated = loadMerchInfluencers().find((item) => Number(item.id) === influencerId);
+    res.json({ influencer: updated });
+  });
+
+  app.patch('/api/merch/admin/influencers/:id/active', requireAdmin, (req, res) => {
+    const influencerId = Number(req.params.id);
+    if (!Number.isInteger(influencerId) || influencerId <= 0) {
+      return res.status(400).json({ message: 'Invalid influencer id' });
+    }
+    const active = req.body?.active === false || Number(req.body?.active) === 0 ? 0 : 1;
+    const result = db.prepare(`
+      UPDATE merch_influencers
+      SET active = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(active, influencerId);
+    if (!result.changes) {
+      return res.status(404).json({ message: 'Influencer not found' });
+    }
+    const updated = loadMerchInfluencers().find((item) => Number(item.id) === influencerId);
+    res.json({ influencer: updated });
+  });
+
+  app.put('/api/merch/admin/influencers/:id/coupons', requireAdmin, (req, res) => {
+    const influencerId = Number(req.params.id);
+    if (!Number.isInteger(influencerId) || influencerId <= 0) {
+      return res.status(400).json({ message: 'Invalid influencer id' });
+    }
+    const influencer = getInfluencerById(influencerId);
+    if (!influencer) {
+      return res.status(404).json({ message: 'Influencer not found' });
+    }
+
+    const codes = Array.from(new Set(
+      (Array.isArray(req.body?.couponCodes) ? req.body.couponCodes : String(req.body?.couponCodes || req.body?.coupons || '').split(/[\n,]/))
+        .map((code) => normalizeMerchCouponCode(code))
+        .filter(Boolean)
+    ));
+
+    const update = db.transaction(() => {
+      db.prepare(`
+        UPDATE coupons
+        SET influencer_id = NULL
+        WHERE portal = 'merch'
+          AND influencer_id = ?
+          ${codes.length ? `AND code NOT IN (${codes.map(() => '?').join(', ')})` : ''}
+      `).run(influencerId, ...codes);
+
+      if (!codes.length) return [];
+
+      const rows = db.prepare(`
+        SELECT id, code
+        FROM coupons
+        WHERE portal = 'merch'
+          AND code IN (${codes.map(() => '?').join(', ')})
+      `).all(...codes);
+      const foundCodes = new Set(rows.map((row) => String(row.code || '').toUpperCase()));
+      const missingCodes = codes.filter((code) => !foundCodes.has(code));
+      if (missingCodes.length) {
+        const error = new Error(`Coupon(s) not found for merch: ${missingCodes.join(', ')}`);
+        error.status = 400;
+        throw error;
+      }
+
+      db.prepare(`
+        UPDATE coupons
+        SET influencer_id = ?
+        WHERE portal = 'merch'
+          AND code IN (${codes.map(() => '?').join(', ')})
+      `).run(influencerId, ...codes);
+
+      return rows;
+    });
+
+    try {
+      update();
+    } catch (error) {
+      return res.status(error.status || 500).json({ message: error.message || 'Unable to assign coupons' });
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'notes')) {
+      db.prepare("UPDATE merch_influencers SET notes = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(String(req.body.notes || '').trim() || null, influencerId);
+    }
+
+    const updated = loadMerchInfluencers().find((item) => Number(item.id) === influencerId);
+    res.json({ influencer: updated });
+  });
+
+  app.delete('/api/merch/admin/influencers/:id/coupons/:couponId', requireAdmin, (req, res) => {
+    const influencerId = Number(req.params.id);
+    const couponId = Number(req.params.couponId);
+    if (!Number.isInteger(influencerId) || !Number.isInteger(couponId)) {
+      return res.status(400).json({ message: 'Invalid influencer or coupon id' });
+    }
+    db.prepare(`
+      UPDATE coupons
+      SET influencer_id = NULL
+      WHERE id = ?
+        AND influencer_id = ?
+        AND portal = 'merch'
+    `).run(couponId, influencerId);
+    const updated = loadMerchInfluencers().find((item) => Number(item.id) === influencerId);
+    res.json({ influencer: updated || null });
   });
 
   // ─── ADMIN: Get order detail ───

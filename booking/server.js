@@ -2452,36 +2452,46 @@ app.delete('/api/admin/discount-phones/:id', requireAuth, requireAdmin, (req, re
   res.json({ message: 'Discount phone removed.' });
 });
 
-app.get('/api/admin/coupons', requireAuth, requireAdmin, (_req, res) => {
+app.get('/api/admin/coupons', requireAuth, requireAdmin, (req, res) => {
+  const portal = String(req.query?.portal || 'booking')
+    .trim()
+    .toLowerCase();
   const coupons = db
     .prepare(
-      `SELECT id,
-              code,
-              description,
-              discount_type AS discountType,
-              discount_value AS discountValue,
-              applies_to AS appliesTo,
-              max_redemptions AS maxRedemptions,
-              per_user_limit AS perUserLimit,
-              expires_at AS expiresAt,
-              active,
-              coupon_type AS couponType,
-              assigned_user_email AS assignedUserEmail,
-              used_by AS usedBy,
-              is_active AS isActive,
-              valid_from AS validFrom,
-              valid_till AS validTill,
-              recipient_email AS recipientEmail,
-              recipient_name AS recipientName,
-              festival_name AS festivalName,
-              emailed_at AS emailedAt,
-              email_status AS emailStatus,
-              email_error AS emailError,
-              created_at AS createdAt
-       FROM coupons
-       ORDER BY active DESC, datetime(created_at) DESC, id DESC`
+      `SELECT c.id,
+              c.code,
+              c.description,
+              c.discount_type AS discountType,
+              c.discount_value AS discountValue,
+              c.applies_to AS appliesTo,
+              c.max_redemptions AS maxRedemptions,
+              c.per_user_limit AS perUserLimit,
+              c.expires_at AS expiresAt,
+              c.active,
+              c.coupon_type AS couponType,
+              c.assigned_user_email AS assignedUserEmail,
+              c.used_by AS usedBy,
+              c.is_active AS isActive,
+              c.valid_from AS validFrom,
+              c.valid_till AS validTill,
+              c.recipient_email AS recipientEmail,
+              c.recipient_name AS recipientName,
+              c.festival_name AS festivalName,
+              c.emailed_at AS emailedAt,
+              c.email_status AS emailStatus,
+              c.email_error AS emailError,
+              c.portal,
+              c.influencer_id AS influencerId,
+              i.name AS influencerName,
+              i.handle AS influencerHandle,
+              i.email AS influencerEmail,
+              c.created_at AS createdAt
+       FROM coupons c
+       LEFT JOIN merch_influencers i ON i.id = c.influencer_id
+       WHERE c.portal = ?
+       ORDER BY c.active DESC, datetime(c.created_at) DESC, c.id DESC`
     )
-    .all()
+    .all(portal)
     .map((row) => {
       const stats = getCouponRedemptionStats(row.id, -1);
       const coupon = mapCouponRow(row);
@@ -2541,6 +2551,7 @@ app.get('/api/coupons/general', requireAuth, (req, res) => {
                 festival_name AS festivalName,
                 created_at AS createdAt
          FROM coupons
+         WHERE portal = 'booking'
          WHERE active = 1
            AND COALESCE(is_active, 1) = 1
            AND COALESCE(coupon_type, 'public') = 'public'
@@ -2634,7 +2645,11 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   const appliesToRaw = String(req.body?.appliesTo || 'all').trim().toLowerCase();
   const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || '').trim().toLowerCase();
+  const influencerId = Number(req.body?.influencerId || req.body?.influencer_id || 0);
   const sendEmail = req.body?.sendEmail !== false;
+  const portal = String(req.body?.portal || 'booking')
+    .trim()
+    .toLowerCase();
   let couponType = String(req.body?.couponType || '').trim().toLowerCase();
   if (!['public', 'private'].includes(couponType)) {
     couponType = recipientEmail ? 'private' : 'public';
@@ -2695,6 +2710,12 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   if (validFrom && validTill && new Date(validFrom).getTime() >= new Date(validTill).getTime()) {
     return res.status(400).json({ message: 'validTill must be after validFrom.' });
   }
+  if (portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0) {
+    const influencer = db.prepare('SELECT id FROM merch_influencers WHERE id = ?').get(influencerId);
+    if (!influencer) {
+      return res.status(400).json({ message: 'Influencer not found.' });
+    }
+  }
 
   const assignedUserEmail = couponType === 'private' ? recipientEmail : '';
   const recipient = assignedUserEmail ? getUserByEmail(assignedUserEmail) : null;
@@ -2705,8 +2726,8 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     `INSERT INTO coupons (
       code, description, discount_type, discount_value, applies_to, max_redemptions, per_user_limit, expires_at, active,
       coupon_type, assigned_user_email, used_by, is_active, valid_from, valid_till,
-      recipient_email, recipient_name, festival_name, emailed_at, email_status, email_error, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, 1, ?, ?, '[]', 1, ?, ?, ?, ?, ?, NULL, ?, ?, datetime('now'))
+      recipient_email, recipient_name, festival_name, emailed_at, email_status, email_error, portal, influencer_id, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, 1, ?, ?, '[]', 1, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(code) DO UPDATE SET
       description = excluded.description,
       discount_type = excluded.discount_type,
@@ -2725,6 +2746,7 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
       festival_name = excluded.festival_name,
       email_status = excluded.email_status,
       email_error = excluded.email_error,
+      influencer_id = excluded.influencer_id,
       active = 1`
   ).run(
     code,
@@ -2742,7 +2764,9 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     recipientName || null,
     festivalName || null,
     initialEmailStatus,
-    ''
+    '',
+    portal,
+    portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0 ? influencerId : null
   );
 
   let emailStatus = initialEmailStatus;
@@ -2802,6 +2826,15 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || existing.recipientEmail || '').trim().toLowerCase();
   const recipientName = String(req.body?.recipientName || existing.recipientName || '').trim();
+  const influencerIdRaw = Object.prototype.hasOwnProperty.call(req.body || {}, 'influencerId')
+    ? req.body.influencerId
+    : Object.prototype.hasOwnProperty.call(req.body || {}, 'influencer_id')
+      ? req.body.influencer_id
+      : existing.influencerId;
+  const influencerId = Number(influencerIdRaw || 0);
+  const portal = String(req.body?.portal || existing.portal || 'booking')
+    .trim()
+    .toLowerCase();
   let couponType = String(req.body?.couponType || existing.couponType || '').trim().toLowerCase();
   if (!['public', 'private'].includes(couponType)) {
     couponType = recipientEmail ? 'private' : 'public';
@@ -2840,6 +2873,12 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
       return res.status(400).json({ message: 'validTill must be a valid date.' });
     }
   }
+  if (portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0) {
+    const influencer = db.prepare('SELECT id FROM merch_influencers WHERE id = ?').get(influencerId);
+    if (!influencer) {
+      return res.status(400).json({ message: 'Influencer not found.' });
+    }
+  }
 
   try {
     db.prepare(
@@ -2860,6 +2899,8 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
         festival_name = ?,
         expires_at = ?,
         active = ?,
+        portal = ?,
+        influencer_id = ?,
         per_user_limit = 1
        WHERE id = ?`
     ).run(
@@ -2879,6 +2920,8 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
       festivalName || null,
       validTill || null,
       active,
+      portal,
+      portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0 ? influencerId : null,
       couponId
     );
   } catch (error) {
@@ -10028,6 +10071,19 @@ function mapCouponRow(row) {
     emailStatus: row.emailStatus || '',
     emailError: row.emailError || '',
     createdAt: row.createdAt || null,
+    portal: row.portal || 'booking',
+    influencerId: row.influencerId == null ? null : Number(row.influencerId),
+    influencerName: row.influencerName || '',
+    influencerHandle: row.influencerHandle || '',
+    influencerEmail: row.influencerEmail || '',
+    influencer: row.influencerId
+      ? {
+          id: Number(row.influencerId),
+          name: row.influencerName || '',
+          handle: row.influencerHandle || '',
+          email: row.influencerEmail || '',
+        }
+      : null,
     couponType,
     assignedUserEmail,
     usedBy,
@@ -10042,31 +10098,37 @@ function getCouponByCode(code) {
   if (!normalizedCode) return null;
   const row = db
     .prepare(
-      `SELECT id,
-              code,
-              description,
-              discount_type AS discountType,
-              discount_value AS discountValue,
-              applies_to AS appliesTo,
-              max_redemptions AS maxRedemptions,
-              per_user_limit AS perUserLimit,
-              expires_at AS expiresAt,
-              active,
-              coupon_type AS couponType,
-              assigned_user_email AS assignedUserEmail,
-              used_by AS usedBy,
-              is_active AS isActive,
-              valid_from AS validFrom,
-              valid_till AS validTill,
-              recipient_email AS recipientEmail,
-              recipient_name AS recipientName,
-              festival_name AS festivalName,
-              emailed_at AS emailedAt,
-              email_status AS emailStatus,
-              email_error AS emailError,
-              created_at AS createdAt
-       FROM coupons
-       WHERE code = ?`
+      `SELECT c.id,
+              c.code,
+              c.description,
+              c.discount_type AS discountType,
+              c.discount_value AS discountValue,
+              c.applies_to AS appliesTo,
+              c.max_redemptions AS maxRedemptions,
+              c.per_user_limit AS perUserLimit,
+              c.expires_at AS expiresAt,
+              c.active,
+              c.coupon_type AS couponType,
+              c.assigned_user_email AS assignedUserEmail,
+              c.used_by AS usedBy,
+              c.is_active AS isActive,
+              c.valid_from AS validFrom,
+              c.valid_till AS validTill,
+              c.recipient_email AS recipientEmail,
+              c.recipient_name AS recipientName,
+              c.festival_name AS festivalName,
+              c.emailed_at AS emailedAt,
+              c.email_status AS emailStatus,
+              c.email_error AS emailError,
+              c.portal,
+              c.influencer_id AS influencerId,
+              i.name AS influencerName,
+              i.handle AS influencerHandle,
+              i.email AS influencerEmail,
+              c.created_at AS createdAt
+       FROM coupons c
+       LEFT JOIN merch_influencers i ON i.id = c.influencer_id
+       WHERE c.code = ?`
     )
     .get(normalizedCode);
   if (!row) return null;
@@ -10078,31 +10140,37 @@ function getCouponById(couponId) {
   if (!Number.isInteger(id)) return null;
   const row = db
     .prepare(
-      `SELECT id,
-              code,
-              description,
-              discount_type AS discountType,
-              discount_value AS discountValue,
-              applies_to AS appliesTo,
-              max_redemptions AS maxRedemptions,
-              per_user_limit AS perUserLimit,
-              expires_at AS expiresAt,
-              active,
-              coupon_type AS couponType,
-              assigned_user_email AS assignedUserEmail,
-              used_by AS usedBy,
-              is_active AS isActive,
-              valid_from AS validFrom,
-              valid_till AS validTill,
-              recipient_email AS recipientEmail,
-              recipient_name AS recipientName,
-              festival_name AS festivalName,
-              emailed_at AS emailedAt,
-              email_status AS emailStatus,
-              email_error AS emailError,
-              created_at AS createdAt
-       FROM coupons
-       WHERE id = ?`
+      `SELECT c.id,
+              c.code,
+              c.description,
+              c.discount_type AS discountType,
+              c.discount_value AS discountValue,
+              c.applies_to AS appliesTo,
+              c.max_redemptions AS maxRedemptions,
+              c.per_user_limit AS perUserLimit,
+              c.expires_at AS expiresAt,
+              c.active,
+              c.coupon_type AS couponType,
+              c.assigned_user_email AS assignedUserEmail,
+              c.used_by AS usedBy,
+              c.is_active AS isActive,
+              c.valid_from AS validFrom,
+              c.valid_till AS validTill,
+              c.recipient_email AS recipientEmail,
+              c.recipient_name AS recipientName,
+              c.festival_name AS festivalName,
+              c.emailed_at AS emailedAt,
+              c.email_status AS emailStatus,
+              c.email_error AS emailError,
+              c.portal,
+              c.influencer_id AS influencerId,
+              i.name AS influencerName,
+              i.handle AS influencerHandle,
+              i.email AS influencerEmail,
+              c.created_at AS createdAt
+       FROM coupons c
+       LEFT JOIN merch_influencers i ON i.id = c.influencer_id
+       WHERE c.id = ?`
     )
     .get(id);
   if (!row) return null;
@@ -10147,7 +10215,7 @@ function calculateCouponDiscountPaise(coupon, subtotalAmountPaise) {
   return Math.min(discountPaise, Math.max(0, subtotal - 100));
 }
 
-function validateCouponForUser({ code, userId, appliesTo, subtotalAmountPaise, singleBookingAmountPaise }) {
+function validateCouponForUser({ code, userId, appliesTo, subtotalAmountPaise, singleBookingAmountPaise, portal }) {
   const normalizedCode = normalizeCouponCode(code);
   if (!normalizedCode) {
     return {
@@ -10161,6 +10229,10 @@ function validateCouponForUser({ code, userId, appliesTo, subtotalAmountPaise, s
 
   const coupon = getCouponByCode(normalizedCode);
   if (!coupon) {
+    return { error: 'Invalid coupon code.' };
+  }
+  const expectedPortal = String(portal || '').trim().toLowerCase();
+  if (expectedPortal && String(coupon.portal || 'booking').trim().toLowerCase() !== expectedPortal) {
     return { error: 'Invalid coupon code.' };
   }
   if (!coupon.active || !coupon.isActive) {
@@ -14343,6 +14415,12 @@ function migrate() {
   }
   if (hasTable('coupons') && !hasColumn('coupons', 'email_error')) {
     db.exec('ALTER TABLE coupons ADD COLUMN email_error TEXT');
+  }
+  if (hasTable('coupons') && !hasColumn('coupons', 'portal')) {
+    db.exec("ALTER TABLE coupons ADD COLUMN portal TEXT NOT NULL DEFAULT 'booking'");
+  }
+  if (hasTable('coupons') && !hasColumn('coupons', 'influencer_id')) {
+    db.exec('ALTER TABLE coupons ADD COLUMN influencer_id INTEGER REFERENCES merch_influencers(id)');
   }
   if (hasTable('coupons')) {
     db.exec(`
