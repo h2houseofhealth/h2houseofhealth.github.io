@@ -30,8 +30,13 @@
   }
 
   function money(paise) {
-    return '\u20B9' + Number(paise || 0).toLocaleString('en-IN');
-  }
+  const amount = Number(paise || 0) / 100;
+
+  return '\u20B9' + amount.toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
 
   function dateLabel(value) {
     const parsed = new Date(String(value || '').replace(' ', 'T'));
@@ -205,7 +210,7 @@
       primarySku: 'HM-HOD-BLK-S',
       categoryId: 1,
       category: 'Hoodies',
-      price: 349900,
+      price: 3499.00,
       priceLabel: '₹3,499',
       stock: 100,
       status: 'published',
@@ -224,7 +229,7 @@
       primarySku: 'HM-HOD-SND-S',
       categoryId: 1,
       category: 'Hoodies',
-      price: 349900,
+      price: 3499.00,
       priceLabel: '₹3,499',
       stock: 83,
       status: 'published',
@@ -243,7 +248,7 @@
       primarySku: 'HM-BTL-300-SLV',
       categoryId: 2,
       category: 'Hydrogen Water Bottles',
-      price: 699900,
+      price: 6999.00,
       priceLabel: '₹6,999 - ₹8,499',
       stock: 130,
       status: 'published',
@@ -262,7 +267,7 @@
       primarySku: 'HM-SPR-050-WHT',
       categoryId: 3,
       category: 'Hydrogen Mists / Sprays',
-      price: 249900,
+      price: 2499.00,
       priceLabel: '₹2,499 - ₹3,799',
       stock: 155,
       status: 'published',
@@ -297,6 +302,7 @@
     productsSort: 'newest',
     productsStatus: 'all',
     productsPage: 1,
+    ordersLoading: false,
     ordersSearch: '',
     ordersStatus: 'all',
     ordersPage: 1,
@@ -538,7 +544,7 @@
         <div class="admin-section__head">
           <div>
             <h2 class="admin-section__title">Overview</h2>
-            <p class="admin-section__desc">This shell is wired to the live merch catalog data only. Orders, customers, coupons, and influencer data remain blank until backend APIs are connected.</p>
+            <p class="admin-section__desc">Live merch orders, customers, coupons, and influencer data are synced from the merch API.</p>
           </div>
         </div>
         <div class="admin-section__body">
@@ -567,7 +573,7 @@
             <article class="admin-card">
               <div class="admin-card__head">
                 <h3 class="admin-card__title">Wiring Status</h3>
-                <p class="admin-card__sub">What is connected now versus what still needs APIs</p>
+                <p class="admin-card__sub">What is connected right now</p>
               </div>
               <div class="admin-card__body admin-list">
                 <div class="admin-list__item">
@@ -576,15 +582,15 @@
                 </div>
                 <div class="admin-list__item">
                   <p class="admin-list__item-title">Orders</p>
-                  <p class="admin-list__item-sub">Waiting for the real order management API.</p>
+                  <p class="admin-list__item-sub">Synced from the merch order table and refreshed on admin load.</p>
                 </div>
                 <div class="admin-list__item">
                   <p class="admin-list__item-title">Customers</p>
-                  <p class="admin-list__item-sub">Waiting for customer profile API data.</p>
+                  <p class="admin-list__item-sub">Built from live merch profiles and completed orders.</p>
                 </div>
                 <div class="admin-list__item">
                   <p class="admin-list__item-title">Coupons and Influencers</p>
-                  <p class="admin-list__item-sub">UI is ready, but the backend source is not wired yet.</p>
+                  <p class="admin-list__item-sub">Loaded from the shared coupon store and merch influencer table.</p>
                 </div>
               </div>
             </article>
@@ -1042,6 +1048,23 @@
   }
 
   function renderOrders() {
+    if (state.ordersLoading) {
+      els.ordersView.innerHTML = `
+        <section class="admin-section">
+          <div class="admin-section__head">
+            <div>
+              <h2 class="admin-section__title">Orders</h2>
+              <p class="admin-section__desc">Loading live merch orders from the database...</p>
+            </div>
+          </div>
+          <div class="admin-section__body">
+            ${renderEmptyState('Loading orders', 'Pulling the latest merch checkout activity into the dashboard.')}
+          </div>
+        </section>
+      `;
+      return;
+    }
+
     if (!state.orders.length) {
       els.ordersView.innerHTML = `
         <section class="admin-section">
@@ -2312,6 +2335,25 @@
     }
   }
 
+  async function loadOrderData() {
+    state.ordersLoading = true;
+    renderOrders();
+    try {
+      const result = await apiRequest('/api/merch/admin/orders');
+      state.orders = Array.isArray(result.orders) ? result.orders : [];
+      if (!state.selectedOrderId && state.orders[0]) {
+        state.selectedOrderId = state.orders[0].id;
+      }
+    } catch (error) {
+      state.orders = [];
+      toast('Orders unavailable', error.message || 'Unable to load merch orders from the admin API.', 'warning');
+    } finally {
+      state.ordersLoading = false;
+      renderOrders();
+      renderDashboard();
+    }
+  }
+
   async function loadCustomerData() {
     state.customersLoading = true;
     renderCustomers();
@@ -2438,6 +2480,18 @@
     renderReports();
     renderSettings();
     renderNotifications();
+  }
+
+  async function updateOrderOnServer(order, payload) {
+    const response = await apiRequest(`/api/merch/admin/orders/${encodeURIComponent(order.id)}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    await loadOrderData();
+    await loadCustomerData();
+    await loadReportData();
+    return response;
   }
 
   async function handleAction(action, target) {
@@ -2624,26 +2678,48 @@
       case 'ship-order':
       case 'deliver-order':
         if (order) {
-          if (action === 'advance-order') advanceOrderStatus(order, 'next');
-          if (action === 'ship-order') {
-            order.status = 'shipped';
-            order.timeline.unshift({ label: 'Shipped', note: 'Manually advanced from admin dashboard', time: `${toISODate(today)}T${pad(today.getHours())}:${pad(today.getMinutes())}:00` });
-            toast('Order shipped', `${order.orderNumber} marked as shipped.`, 'success');
-            renderAll();
+          const flow = ['pending', 'processing', 'shipped', 'delivered'];
+          const currentIndex = flow.indexOf(String(order.status || 'pending'));
+          let nextStatus = order.status;
+          if (action === 'advance-order') {
+            nextStatus = flow[Math.min(flow.length - 1, Math.max(0, currentIndex + 1))];
           }
-          if (action === 'deliver-order') {
-            order.status = 'delivered';
-            order.timeline.unshift({ label: 'Delivered', note: 'Manually marked as delivered', time: `${toISODate(today)}T${pad(today.getHours())}:${pad(today.getMinutes())}:00` });
-            toast('Order delivered', `${order.orderNumber} marked as delivered.`, 'success');
-            renderAll();
+          if (action === 'ship-order') nextStatus = 'shipped';
+          if (action === 'deliver-order') nextStatus = 'delivered';
+
+          const payload = { status: nextStatus };
+          if (nextStatus === 'shipped' && !order.trackingNumber) {
+            payload.tracking_number = `TRK-${Math.floor(10000 + Math.random() * 90000)}-HM`;
+            payload.carrier_name = order.carrier || 'Shiprocket';
+          }
+
+          try {
+            await updateOrderOnServer(order, payload);
+            toast('Order updated', `${order.orderNumber} moved to ${getStatusLabel(nextStatus)}.`, 'success');
+          } catch (error) {
+            toast('Order update failed', error.message || 'Unable to update the order status.', 'warning');
           }
         }
         return;
       case 'cancel-order':
-        if (order) cancelOrder(order);
+        if (order) {
+          try {
+            await updateOrderOnServer(order, { status: 'cancelled', payment_status: 'refunded' });
+            toast('Order cancelled', `${order.orderNumber} has been marked cancelled.`, 'warning');
+          } catch (error) {
+            toast('Order update failed', error.message || 'Unable to cancel the order.', 'warning');
+          }
+        }
         return;
       case 'refund-order':
-        if (order) refundOrder(order);
+        if (order) {
+          try {
+            await updateOrderOnServer(order, { status: order.status || 'processing', payment_status: 'refunded' });
+            toast('Refund recorded', `${order.orderNumber} has been flagged for refund.`, 'success');
+          } catch (error) {
+            toast('Refund failed', error.message || 'Unable to record the refund.', 'warning');
+          }
+        }
         return;
       case 'orders-prev':
         state.ordersPage = Math.max(1, state.ordersPage - 1);
@@ -3000,6 +3076,7 @@
   function init() {
     bindEvents();
     renderAll();
+    loadOrderData();
     loadCustomerData();
     loadInfluencerData();
     loadCouponData();

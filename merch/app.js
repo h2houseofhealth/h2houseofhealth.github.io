@@ -107,7 +107,7 @@
       slug: 'zenith-hoodie-black',
       description: 'Meet the hoodie that understands the assignment. Engineered from a heavyweight 450 GSM organic cotton blend, the Zenith offers a structured, premium silhouette without sacrificing that "lived-in" softness. Whether you\'re hitting the gym, the coffee shop, or the couch, this is your new uniform.',
       category: 'hoodies',
-      basePrice: 349900,
+      basePrice: 3499.00,
       images: [
         '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146',
         '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_18271.jpg?v=1770377146',
@@ -116,11 +116,11 @@
         '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.318271.jpg?v=1770377146',
       ],
       variants: [
-        { id: 1, size: 'S', color: 'Black', price: 349900, stock: 25, sku: 'HM-HOD-BLK-S' },
-        { id: 2, size: 'M', color: 'Black', price: 349900, stock: 30, sku: 'HM-HOD-BLK-M' },
-        { id: 3, size: 'L', color: 'Black', price: 349900, stock: 20, sku: 'HM-HOD-BLK-L' },
-        { id: 4, size: 'XL', color: 'Black', price: 349900, stock: 15, sku: 'HM-HOD-BLK-XL' },
-        { id: 5, size: 'XXL', color: 'Black', price: 349900, stock: 10, sku: 'HM-HOD-BLK-XXL' },
+        { id: 1, size: 'S', color: 'Black', price: 3499.00, stock: 25, sku: 'HM-HOD-BLK-S' },
+        { id: 2, size: 'M', color: 'Black', price: 3499.00, stock: 30, sku: 'HM-HOD-BLK-M' },
+        { id: 3, size: 'L', color: 'Black', price: 3499.00, stock: 20, sku: 'HM-HOD-BLK-L' },
+        { id: 4, size: 'XL', color: 'Black', price: 3499.00, stock: 15, sku: 'HM-HOD-BLK-XL' },
+        { id: 5, size: 'XXL', color: 'Black', price: 3499.00, stock: 10, sku: 'HM-HOD-BLK-XXL' },
       ],
       gstRate: 18,
       weightGrams: 650,
@@ -132,18 +132,18 @@
       slug: 'zenith-hoodie-sand',
       description: 'Same Zenith. New vibe. The Sand colourway brings an earthy, tonal palette to the heavyweight 450 GSM frame. Perfect for layering or wearing solo — this piece transitions from sunrise sessions to evening outings effortlessly.',
       category: 'hoodies',
-      basePrice: 349900,
+      basePrice: 3499.00,
       images: [
         '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.30034b.jpg?v=1770377146',
         '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.308271.jpg?v=1770377146',
         '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.302cf7.jpg?v=1770377146',
       ],
       variants: [
-        { id: 6, size: 'S', color: 'Sand', price: 349900, stock: 20, sku: 'HM-HOD-SND-S' },
-        { id: 7, size: 'M', color: 'Sand', price: 349900, stock: 25, sku: 'HM-HOD-SND-M' },
-        { id: 8, size: 'L', color: 'Sand', price: 349900, stock: 18, sku: 'HM-HOD-SND-L' },
-        { id: 9, size: 'XL', color: 'Sand', price: 349900, stock: 12, sku: 'HM-HOD-SND-XL' },
-        { id: 10, size: 'XXL', color: 'Sand', price: 349900, stock: 8, sku: 'HM-HOD-SND-XXL' },
+        { id: 6, size: 'S', color: 'Sand', price: 3499.00, stock: 20, sku: 'HM-HOD-SND-S' },
+        { id: 7, size: 'M', color: 'Sand', price: 3499.00, stock: 25, sku: 'HM-HOD-SND-M' },
+        { id: 8, size: 'L', color: 'Sand', price: 3499.00, stock: 18, sku: 'HM-HOD-SND-L' },
+        { id: 9, size: 'XL', color: 'Sand', price: 3499.00, stock: 12, sku: 'HM-HOD-SND-XL' },
+        { id: 10, size: 'XXL', color: 'Sand', price: 3499.00, stock: 8, sku: 'HM-HOD-SND-XXL' },
       ],
       gstRate: 18,
       weightGrams: 650,
@@ -155,17 +155,17 @@
       slug: 'molecular-hydrogen-water-bottle',
       description: 'Generate hydrogen-rich water on the go. This portable bottle uses advanced PEM/SPE electrolysis technology to infuse your water with molecular hydrogen (H₂) in just 3 minutes. BPA-free, USB-C rechargeable, and built to last.',
       category: 'bottles',
-      basePrice: 699900,
+      basePrice: 6999.00,
       images: [
         '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113',
         '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_29477.jpg?v=1770378113',
         '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_2c1ed.jpg?v=1770378113',
       ],
       variants: [
-        { id: 11, size: '300ml', color: 'Silver', price: 699900, stock: 40, sku: 'HM-BTL-300-SLV' },
-        { id: 12, size: '500ml', color: 'Silver', price: 849900, stock: 35, sku: 'HM-BTL-500-SLV' },
-        { id: 13, size: '300ml', color: 'Black', price: 699900, stock: 30, sku: 'HM-BTL-300-BLK' },
-        { id: 14, size: '500ml', color: 'Black', price: 849900, stock: 25, sku: 'HM-BTL-500-BLK' },
+        { id: 11, size: '300ml', color: 'Silver', price: 6999.00, stock: 40, sku: 'HM-BTL-300-SLV' },
+        { id: 12, size: '500ml', color: 'Silver', price: 8499.00, stock: 35, sku: 'HM-BTL-500-SLV' },
+        { id: 13, size: '300ml', color: 'Black', price: 6999.00, stock: 30, sku: 'HM-BTL-300-BLK' },
+        { id: 14, size: '500ml', color: 'Black', price: 8499.00, stock: 25, sku: 'HM-BTL-500-BLK' },
       ],
       gstRate: 18,
       weightGrams: 380,
@@ -177,23 +177,65 @@
       slug: 'hydrogen-mist-spray',
       description: 'Refresh and rejuvenate your skin anywhere. This compact hydrogen mist spray delivers antioxidant-rich hydrogen water directly to your face and body. Perfect for post-workout recovery, skincare routines, or a quick pick-me-up throughout the day.',
       category: 'sprays',
-      basePrice: 249900,
+      basePrice: 2499.00,
       images: [
         '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138',
         '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.3351c7.jpg?v=1770378138',
         '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33de1d.jpg?v=1770378138',
       ],
       variants: [
-        { id: 15, size: '50ml', color: 'White', price: 249900, stock: 50, sku: 'HM-SPR-050-WHT' },
-        { id: 16, size: '100ml', color: 'White', price: 349900, stock: 40, sku: 'HM-SPR-100-WHT' },
-        { id: 17, size: '50ml', color: 'Rose Gold', price: 279900, stock: 35, sku: 'HM-SPR-050-RSG' },
-        { id: 18, size: '100ml', color: 'Rose Gold', price: 379900, stock: 30, sku: 'HM-SPR-100-RSG' },
+        { id: 15, size: '50ml', color: 'White', price: 2499.00, stock: 50, sku: 'HM-SPR-050-WHT' },
+        { id: 16, size: '100ml', color: 'White', price: 3499.00, stock: 40, sku: 'HM-SPR-100-WHT' },
+        { id: 17, size: '50ml', color: 'Rose Gold', price: 2799.00, stock: 35, sku: 'HM-SPR-050-RSG' },
+        { id: 18, size: '100ml', color: 'Rose Gold', price: 3799.00, stock: 30, sku: 'HM-SPR-100-RSG' },
       ],
       gstRate: 18,
       weightGrams: 150,
       createdAt: '2026-04-01',
     },
   ];
+
+  const PRODUCT_IMAGE_SOURCES = PRODUCTS.reduce((map, product) => {
+    const source = {
+      imageUrl: product.images?.[0] || '',
+      images: Array.isArray(product.images) ? [...product.images] : [],
+    };
+    map[product.slug] = source;
+    if (product.slug === 'molecular-hydrogen-water-bottle') {
+      map['h2-water-bottle'] = source;
+    }
+    if (product.slug === 'hydrogen-mist-spray') {
+      map['h2-mist-spray'] = source;
+    }
+    if (product.slug === 'zenith-hoodie-black') {
+      map['zenith-hoodie-black'] = source;
+    }
+    if (product.slug === 'zenith-hoodie-sand') {
+      map['zenith-hoodie-sand'] = source;
+    }
+    return map;
+  }, {});
+
+  function resolveProductImageSource(product) {
+    const slug = String(product?.slug || '').trim().toLowerCase();
+    const name = String(product?.name || '').trim().toLowerCase();
+    const category = String(product?.category || '').trim().toLowerCase();
+    const source =
+      (slug && PRODUCT_IMAGE_SOURCES[slug]) ||
+      (name.includes('water bottle') ? PRODUCT_IMAGE_SOURCES['h2-water-bottle'] : null) ||
+      (name.includes('mist') || category === 'sprays' ? PRODUCT_IMAGE_SOURCES['h2-mist-spray'] : null) ||
+      (name.includes('hoodie') && name.includes('black') ? PRODUCT_IMAGE_SOURCES['zenith-hoodie-black'] : null) ||
+      (name.includes('hoodie') && name.includes('sand') ? PRODUCT_IMAGE_SOURCES['zenith-hoodie-sand'] : null) ||
+      null;
+    const fallbackImages = Array.isArray(source?.images) ? source.images.filter(Boolean) : [];
+    const productImages = Array.isArray(product?.images) ? product.images.filter(Boolean) : [];
+    const imageUrl = String(source?.imageUrl || product?.imageUrl || product?.image || product?.image_url || '').trim();
+
+    return {
+      imageUrl: imageUrl || fallbackImages[0] || '',
+      images: fallbackImages.length ? fallbackImages : (productImages.length ? productImages : (imageUrl ? [imageUrl] : [])),
+    };
+  }
 
   // ─── Utility ───
   function formatPrice(paise) {
@@ -307,9 +349,10 @@
 
   function normalizeMerchProduct(product) {
     const variants = Array.isArray(product?.variants) ? product.variants : [];
-    const imageUrl = String(product?.imageUrl || product?.image || product?.image_url || '').trim();
-    const images = Array.isArray(product?.images) && product.images.length
-      ? product.images.filter(Boolean)
+    const imageSource = resolveProductImageSource(product);
+    const imageUrl = String(imageSource.imageUrl || '').trim();
+    const images = Array.isArray(imageSource.images) && imageSource.images.length
+      ? imageSource.images.filter(Boolean)
       : imageUrl
         ? [imageUrl]
         : [];
@@ -2052,6 +2095,7 @@
             saveCart();
             renderCart();
             closeCart();
+            await loadCustomerContext();
             showCheckoutNotice('Payment successful', `Order ${data.orderNumber} confirmed.`);
           } else {
             showCheckoutNotice('Payment verification failed', 'Please contact support with your payment details.', { variant: 'error' });
