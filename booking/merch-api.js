@@ -2053,19 +2053,25 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   // ─── ADMIN: Update order status ───
   app.patch('/api/merch/admin/orders/:id/status', requireAdmin, (req, res) => {
-    const { status, tracking_number, carrier_name } = req.body || {};
+    const { status, payment_status, tracking_number, carrier_name } = req.body || {};
     const validStatuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'returned'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: 'Invalid status' });
     }
     const updates = ['status = ?', "updated_at = datetime('now')"];
     const params = [status];
+    if (payment_status) {
+      updates.push('payment_status = ?');
+      params.push(String(payment_status));
+    }
     if (tracking_number) { updates.push('tracking_number = ?'); params.push(tracking_number); }
     if (carrier_name) { updates.push('carrier_name = ?'); params.push(carrier_name); }
     params.push(req.params.id);
 
     db.prepare(`UPDATE merch_orders SET ${updates.join(', ')} WHERE id = ?`).run(...params);
-    res.json({ success: true });
+    const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
+    const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(req.params.id);
+    res.json({ success: true, order: buildMerchOrderRecord(order, items) });
   });
 
   // ─── ADMIN: Dashboard stats ───
