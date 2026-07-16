@@ -1183,7 +1183,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const shippingCharge = subtotal >= 99900 ? 0 : 9900; // Free above ₹999
     const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
     const influencerId = Number(couponResult.coupon?.influencerId || 0) > 0 ? Number(couponResult.coupon.influencerId) : null;
-    const totalAmount = Math.max(100, subtotal + gstAmount + shippingCharge - discountAmount);
+    const totalAmount = Math.max(100, subtotal + shippingCharge - discountAmount);
     const orderNumber = generateOrderNumber();
 
     // Create Razorpay order
@@ -1336,7 +1336,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const codSurcharge = 5000; // ₹50
     const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
     const influencerId = Number(couponResult.coupon?.influencerId || 0) > 0 ? Number(couponResult.coupon.influencerId) : null;
-    const totalAmount = Math.max(100, subtotal + gstAmount + shippingCharge + codSurcharge - discountAmount);
+    const totalAmount = Math.max(100, subtotal + shippingCharge + codSurcharge - discountAmount);
     const orderNumber = generateOrderNumber();
 
     const result = db.prepare(`
