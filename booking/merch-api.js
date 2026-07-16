@@ -982,11 +982,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       return res.status(400).json({ error: couponResult.error });
     }
 
-    // Calculate GST (18%) and shipping
-    const gstAmount = Math.round(subtotal * 18 / 100);
+    // Product prices are GST-inclusive; derive included GST for reporting only.
+    const gstAmount = Math.max(0, subtotal - Math.round(subtotal / 1.18));
     const shippingCharge = subtotal >= 99900 ? 0 : 9900; // Free above ₹999
     const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
-    const totalAmount = Math.max(100, subtotal + gstAmount + shippingCharge - discountAmount);
+    const totalAmount = Math.max(100, subtotal + shippingCharge - discountAmount);
     const orderNumber = generateOrderNumber();
 
     // Create Razorpay order
@@ -1134,11 +1134,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       return res.status(400).json({ error: couponResult.error });
     }
 
-    const gstAmount = Math.round(subtotal * 18 / 100);
+    const gstAmount = Math.max(0, subtotal - Math.round(subtotal / 1.18));
     const shippingCharge = subtotal >= 99900 ? 0 : 9900;
     const codSurcharge = 5000; // ₹50
     const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
-    const totalAmount = Math.max(100, subtotal + gstAmount + shippingCharge + codSurcharge - discountAmount);
+    const totalAmount = Math.max(100, subtotal + shippingCharge + codSurcharge - discountAmount);
     const orderNumber = generateOrderNumber();
 
     const result = db.prepare(`
