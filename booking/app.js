@@ -2790,7 +2790,7 @@ async function loadDashboardData({ skipAdminUsers = false } = {}) {
       api('/api/bookings'),
       api('/api/admin/membership-orders'),
       api('/api/admin/discount-phones'),
-      api('/api/admin/coupons'),
+      api('/api/admin/coupons?portal=booking'),
       api('/api/services'),
       skipAdminUsers ? Promise.resolve({ users: state.adminUsers || [] }) : api('/api/admin/users'),
       api(analyticsUrl),
@@ -15317,6 +15317,7 @@ async function saveAdminCoupon({ sendEmail = true } = {}) {
         recipientEmail: couponType === 'private' ? recipientEmail : '',
         singleUse: true,
         sendEmail: shouldSendEmail,
+        portal: 'booking'
       }),
     });
 
