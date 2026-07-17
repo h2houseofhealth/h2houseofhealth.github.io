@@ -17,6 +17,7 @@
 
   const API_URL = resolveApiUrl();
   const AUTH_TOKEN_STORAGE_KEY = 'booking_portal_auth_token';
+  const CONFIRMATION_STORAGE_KEY = 'merch_booking_confirmation';
 
   function buildApiUrl(path) {
     if (/^https?:\/\//i.test(String(path || ''))) return String(path);
@@ -69,7 +70,7 @@
     selectedCategory: 'all',
     sortBy: 'newest',
     searchQuery: '',
-    currentView: 'shop', // 'shop' | 'detail'
+    currentView: 'shop', // 'shop' | 'detail' | 'confirmation' | 'tracking'
     selectedProduct: null,
     selectedVariant: null,
     quantity: 1,
@@ -95,6 +96,7 @@
     merchCouponPreview: null,
     merchCouponError: '',
     merchCouponLoading: false,
+    latestConfirmation: null,
   };
 
   const FALLBACK_PRODUCT_IMAGE = '/booking/assets/service-hydrogen-session.jpg';
@@ -322,6 +324,183 @@
     return label.charAt(0).toUpperCase() + label.slice(1);
   }
 
+  function formatTrackingDateTime(value) {
+    if (!value) return 'Pending';
+    const parsed = new Date(String(value).replace(' ', 'T'));
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    const date = new Intl.DateTimeFormat('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }).format(parsed);
+    const time = new Intl.DateTimeFormat('en-IN', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    }).format(parsed);
+    return `${date}, ${time}`;
+  }
+
+  function addTrackingOffset(value, hours) {
+    const parsed = value ? new Date(String(value).replace(' ', 'T')) : null;
+    if (!parsed || Number.isNaN(parsed.getTime())) return null;
+    parsed.setHours(parsed.getHours() + hours);
+    return parsed.toISOString();
+  }
+
+  function normalizeTrackingStatus(status) {
+    const normalized = String(status || 'processing').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (normalized === 'pending') return 'processing';
+    if (normalized === 'packed') return 'packed';
+    if (normalized === 'shipped') return 'shipped';
+    if (normalized === 'out_for_delivery') return 'out_for_delivery';
+    if (normalized === 'delivered') return 'delivered';
+    return normalized === 'processing' ? 'processing' : normalized;
+  }
+
+  function getTrackingSteps(order) {
+    const statusOrder = ['processing', 'packed', 'shipped', 'out_for_delivery', 'delivered'];
+    const labels = ['Order Placed', 'Packed', 'Shipped', 'Out for Delivery', 'Delivered'];
+    const status = normalizeTrackingStatus(order?.status);
+    const currentIndex = Math.max(0, statusOrder.indexOf(status));
+    const createdAt = order?.createdAt || null;
+    const updatedAt = order?.updatedAt || createdAt;
+    const backendTimeline = Array.isArray(order?.timeline) ? order.timeline : [];
+    const timelineTime = (label) => {
+      const match = backendTimeline.find((entry) => String(entry?.label || '').toLowerCase().includes(label));
+      return match?.time || null;
+    };
+    const fallbackTimes = [
+      createdAt,
+      currentIndex >= 1 ? timelineTime('pack') || addTrackingOffset(createdAt, 6) || updatedAt : null,
+      currentIndex >= 2 ? timelineTime('ship') || timelineTime('tracking') || updatedAt || addTrackingOffset(createdAt, 24) : null,
+      currentIndex >= 3 ? timelineTime('delivery') || updatedAt || addTrackingOffset(createdAt, 48) : null,
+      currentIndex >= 4 ? timelineTime('delivered') || updatedAt || addTrackingOffset(createdAt, 72) : null,
+    ];
+
+    return labels.map((label, index) => ({
+      label,
+      time: fallbackTimes[index],
+      isComplete: index <= currentIndex,
+      isCurrent: index === currentIndex,
+      note: index === 2 && (order?.carrier || order?.carrierName || order?.trackingNumber)
+        ? [order.carrier || order.carrierName, order.trackingNumber].filter(Boolean).join(' - ')
+        : '',
+    }));
+  }
+
+  function findProductForOrderItem(item) {
+    const name = String(item?.name || item?.productName || '').trim().toLowerCase();
+    const sku = String(item?.sku || '').trim().toLowerCase();
+    const products = Array.isArray(state.products) ? state.products : [];
+    return products.find((product) => {
+      const productName = String(product.name || '').trim().toLowerCase();
+      const variants = Array.isArray(product.variants) ? product.variants : [];
+      return productName === name || productName.includes(name) || name.includes(productName)
+        || variants.some((variant) => String(variant.sku || '').trim().toLowerCase() === sku);
+    }) || null;
+  }
+
+  function getTrackingProductSummary(order) {
+    const items = Array.isArray(order?.items) ? order.items : [];
+    const item = items[0] || {};
+    const product = findProductForOrderItem(item);
+    const imageSource = product ? resolveProductImageSource(product) : null;
+    return {
+      name: item.name || item.productName || order?.service || 'House Merch Order',
+      variantLabel: item.variantLabel || '',
+      quantity: Number(item.qty || item.quantity || 0) || 1,
+      imageUrl: imageSource?.imageUrl || product?.imageUrl || FALLBACK_PRODUCT_IMAGE,
+      extraCount: Math.max(0, items.length - 1),
+    };
+  }
+
+  function getFallbackTrackingOrder(orderId) {
+    const confirmation = state.latestConfirmation || getStoredConfirmation();
+    if (!confirmation || String(confirmation.orderId || '') !== String(orderId || '')) return null;
+    return {
+      id: confirmation.orderId,
+      orderNumber: confirmation.bookingId,
+      status: 'processing',
+      createdAt: confirmation.createdAt,
+      updatedAt: confirmation.createdAt,
+      totalAmount: confirmation.totalAmount,
+      items: (Array.isArray(confirmation.items) ? confirmation.items : []).map((item) => ({
+        name: item.productName,
+        productName: item.productName,
+        variantLabel: item.variantLabel,
+        quantity: item.quantity,
+        qty: item.quantity,
+      })),
+    };
+  }
+
+  function getTrackingOrderById(orderId) {
+    return getOrderById(orderId) || getFallbackTrackingOrder(orderId);
+  }
+
+  function renderTrackingTimeline(order) {
+    return `
+      <div class="tracking-timeline" aria-label="Order tracking timeline">
+        ${getTrackingSteps(order).map((step) => `
+          <article class="tracking-step${step.isComplete ? ' is-complete' : ''}${step.isCurrent ? ' is-current' : ''}">
+            <div class="tracking-step__marker" aria-hidden="true">${step.isComplete ? confirmationIcon('check') : ''}</div>
+            <div class="tracking-step__body">
+              <h3>${escapeHtml(step.label)}</h3>
+              <p>${escapeHtml(formatTrackingDateTime(step.time))}</p>
+              ${step.note ? `<small>${escapeHtml(step.note)}</small>` : ''}
+            </div>
+          </article>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function OrderTrackingPage(order) {
+    if (!order) {
+      return `
+        <div class="order-tracking__inner">
+          <button class="tracking-back-btn" type="button" data-tracking-action="back">&larr; Back</button>
+          <div class="tracking-empty">
+            <h1 id="orderTrackingTitle">Order tracking</h1>
+            <p>We could not find this merchandise order in your account yet.</p>
+          </div>
+        </div>
+      `;
+    }
+
+    const product = getTrackingProductSummary(order);
+    const statusLabel = formatOrderStatus(order.status || 'processing');
+    return `
+      <div class="order-tracking__inner">
+        <button class="tracking-back-btn" type="button" data-tracking-action="back">&larr; Back</button>
+        <article class="tracking-card">
+          <header class="tracking-product">
+            <img src="${escapeHtml(product.imageUrl)}" alt="${escapeHtml(product.name)}" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
+            <div class="tracking-product__meta">
+              <h1 id="orderTrackingTitle">${escapeHtml(product.name)}</h1>
+              <p>${escapeHtml([product.variantLabel, `Qty: ${product.quantity}`].filter(Boolean).join(' - '))}</p>
+              ${product.extraCount ? `<small>+${product.extraCount} more item${product.extraCount > 1 ? 's' : ''}</small>` : ''}
+            </div>
+            <span class="tracking-status-badge">${escapeHtml(statusLabel)}</span>
+          </header>
+          ${renderTrackingTimeline(order)}
+          <footer class="tracking-details">
+            <div>
+              <span>Order ID</span>
+              <strong>${escapeHtml(order.orderNumber || `Order #${order.id}`)}</strong>
+            </div>
+            <div>
+              <span>Expected Delivery</span>
+              <strong>${escapeHtml(order.status === 'delivered' ? 'Delivered' : 'Pending')}</strong>
+            </div>
+            <button class="btn btn-outline account-action-btn" type="button" data-tracking-action="invoice" data-order-id="${escapeHtml(String(order.id || ''))}">Invoice</button>
+          </footer>
+        </article>
+      </div>
+    `;
+  }
+
   function formatCustomerPhone(phone) {
     return String(phone || '').trim() || 'Not added yet';
   }
@@ -460,6 +639,11 @@
         }
       }
     }
+
+    if (state.currentView === 'tracking') {
+      const trackingOrderId = getTrackingOrderIdFromHash();
+      if (trackingOrderId) showOrderTracking(trackingOrderId);
+    }
   }
 
   // ─── Elements ───
@@ -493,6 +677,8 @@
     cartBadge: document.getElementById('cartBadge'),
     cartShopBtn: document.getElementById('cartShopBtn'),
     checkoutBtn: document.getElementById('checkoutBtn'),
+    bookingConfirmation: document.getElementById('bookingConfirmation'),
+    orderTracking: document.getElementById('orderTracking'),
     merchAuthCta: document.getElementById('merchAuthCta'),
     accountDrawer: document.getElementById('accountDrawer'),
     accountDrawerOverlay: document.getElementById('accountDrawerOverlay'),
@@ -713,6 +899,320 @@
         removeFromCart(Number(btn.dataset.variantId));
       });
     });
+  }
+
+  function getStoredConfirmation() {
+    try {
+      const raw = window.sessionStorage?.getItem(CONFIRMATION_STORAGE_KEY) || '';
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function saveConfirmation(confirmation) {
+    state.latestConfirmation = confirmation;
+    try {
+      window.sessionStorage?.setItem(CONFIRMATION_STORAGE_KEY, JSON.stringify(confirmation));
+    } catch {
+      // Session storage is a convenience for the redirect; the in-memory state still renders.
+    }
+  }
+
+  function formatConfirmationDate(value) {
+    const parsed = value ? new Date(value) : new Date();
+    const date = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+    return new Intl.DateTimeFormat('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      weekday: 'long',
+    }).format(date);
+  }
+
+  function formatConfirmationTime(value) {
+    const parsed = value ? new Date(value) : new Date();
+    const date = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+    return new Intl.DateTimeFormat('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    }).format(date);
+  }
+
+  function getConfirmationLocation(address) {
+    const parts = [
+      address?.line1,
+      address?.line2,
+      address?.city,
+      address?.state,
+      address?.postalCode,
+      address?.country,
+    ].filter(Boolean);
+    return parts.length ? parts.join(', ') : String(address?.full || 'Hyderabad, Telangana').trim();
+  }
+
+  function buildConfirmationData({ order, verifyResult, customer, address, cartItems }) {
+    const createdAt = new Date().toISOString();
+    const items = Array.isArray(cartItems) ? cartItems : [];
+    const itemCount = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+    return {
+      bookingId: String(order?.orderNumber || verifyResult?.orderNumber || 'BK20260717001'),
+      orderId: verifyResult?.orderId || order?.orderId || null,
+      createdAt,
+      dateLabel: formatConfirmationDate(createdAt),
+      timeLabel: `${formatConfirmationTime(createdAt)} - Order received`,
+      service: itemCount > 1 ? `House Merch Order (${itemCount} items)` : 'House Merch Order',
+      locationTitle: 'Delivery Location',
+      location: getConfirmationLocation(address),
+      email: String(customer?.email || order?.customer?.email || 'example@email.com').trim(),
+      customerName: String(customer?.name || order?.customer?.name || 'H2 Customer').trim(),
+      totalAmount: Number(order?.amount || 0),
+      items: items.map((item) => ({
+        productName: item.productName,
+        variantLabel: item.variantLabel,
+        quantity: item.quantity,
+      })),
+    };
+  }
+
+  function confirmationIcon(name) {
+    const icons = {
+      check: '<path d="M7 12.2 10.4 15.6 18 8" />',
+      copy: '<rect x="9" y="9" width="9" height="11" rx="1.5" /><path d="M6 15H5a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 5 4h8a1.5 1.5 0 0 1 1.5 1.5v1" />',
+      calendar: '<rect x="4" y="5" width="16" height="15" rx="2" /><path d="M8 3v4M16 3v4M4 10h16" />',
+      user: '<circle cx="12" cy="8" r="3.5" /><path d="M5 20a7 7 0 0 1 14 0" />',
+      map: '<path d="M12 21s7-5.2 7-12a7 7 0 1 0-14 0c0 6.8 7 12 7 12Z" /><circle cx="12" cy="9" r="2.4" />',
+      truck: '<path d="M3 7h10v9H3zM13 10h4l3 3v3h-7z" /><circle cx="7" cy="18" r="1.8" /><circle cx="17" cy="18" r="1.8" />',
+      home: '<path d="m4 11 8-7 8 7" /><path d="M6.5 10.5V20h11v-9.5" /><path d="M10 20v-6h4v6" />',
+      mail: '<rect x="3.5" y="5.5" width="17" height="13" rx="2" /><path d="m4.5 7 7.5 6 7.5-6" />',
+      shield: '<path d="M12 3 5 6v5.5c0 4 2.8 7.2 7 8.5 4.2-1.3 7-4.5 7-8.5V6z" /><path d="m9 12 2 2 4-5" />',
+      bell: '<path d="M18 16H6c1.2-1.4 1.8-3 1.8-5V9a4.2 4.2 0 0 1 8.4 0v2c0 2 .6 3.6 1.8 5Z" /><path d="M10 19a2.3 2.3 0 0 0 4 0" />',
+      heart: '<path d="M20.5 8.8c0 5-8.5 10.2-8.5 10.2S3.5 13.8 3.5 8.8A4.3 4.3 0 0 1 12 7.5a4.3 4.3 0 0 1 8.5 1.3Z" />',
+    };
+    return `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.check}</svg>`;
+  }
+
+  function BookingSuccessHeader(data) {
+    return `
+      <div class="booking-success-header">
+        <div class="booking-confetti" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div class="booking-success-icon">${confirmationIcon('check')}</div>
+        <h1 id="bookingConfirmationTitle">Booking Confirmed!</h1>
+        <p>Your booking has been confirmed successfully.</p>
+        <p>A confirmation has been sent to your email.</p>
+      </div>
+    `;
+  }
+
+  function BookingIdCard(data) {
+    return `
+      <div class="booking-id-card">
+        <span>Booking ID</span>
+        <strong>${escapeHtml(data.bookingId)}</strong>
+        <button class="booking-copy-btn" type="button" data-confirmation-action="copy-id" aria-label="Copy booking ID">
+          ${confirmationIcon('copy')}
+        </button>
+      </div>
+    `;
+  }
+
+  function BookingDetailsCard(data) {
+    const details = [
+      { icon: 'calendar', label: 'Date & Time', lines: [data.dateLabel, data.timeLabel] },
+      { icon: 'user', label: 'Service', lines: [data.service] },
+      { icon: 'map', label: data.locationTitle || 'Location', lines: ['H2 House of Health', data.location] },
+    ];
+    return `
+      <div class="booking-details-card">
+        ${details.map((item) => `
+          <article class="booking-detail-item">
+            <div class="booking-detail-icon">${confirmationIcon(item.icon)}</div>
+            <div>
+              <h2>${escapeHtml(item.label)}</h2>
+              ${item.lines.map((line) => `<p>${escapeHtml(line)}</p>`).join('')}
+            </div>
+          </article>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function BookingActions() {
+    return `
+      <div class="booking-actions">
+        <button class="booking-action-btn booking-action-btn--neutral" type="button" data-confirmation-action="calendar">
+          ${confirmationIcon('calendar')} <span>Add to Calendar</span>
+        </button>
+        <button class="booking-action-btn booking-action-btn--accent" type="button" data-confirmation-action="track">
+          ${confirmationIcon('truck')} <span>Track My Order</span>
+        </button>
+        <button class="booking-action-btn booking-action-btn--primary" type="button" data-confirmation-action="home">
+          ${confirmationIcon('home')} <span>Back to Home</span>
+        </button>
+      </div>
+    `;
+  }
+
+  function EmailConfirmationCard(data) {
+    return `
+      <div class="booking-email-card">
+        <div class="booking-email-icon">${confirmationIcon('mail')}</div>
+        <div>
+          <p>We've sent all the details to</p>
+          <strong>${escapeHtml(data.email)}</strong>
+          <p>Please check your inbox (and spam folder).</p>
+        </div>
+        <div class="booking-email-illustration" aria-hidden="true">
+          <div class="booking-envelope">${confirmationIcon('mail')}</div>
+          <span>${confirmationIcon('check')}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  function BookingFeatureCards() {
+    const features = [
+      { icon: 'shield', title: 'Secure Booking', text: 'Your booking is safe with us.' },
+      { icon: 'calendar', title: 'Easy Reschedule', text: 'Reschedule or modify your booking anytime.' },
+      { icon: 'bell', title: 'Timely Reminders', text: "We'll remind you before your session." },
+      { icon: 'heart', title: 'Premium Experience', text: 'We are here to make your experience exceptional.' },
+    ];
+    return `
+      <div class="booking-feature-cards">
+        ${features.map((feature) => `
+          <article class="booking-feature-card">
+            <div class="booking-feature-icon">${confirmationIcon(feature.icon)}</div>
+            <div>
+              <h2>${escapeHtml(feature.title)}</h2>
+              <p>${escapeHtml(feature.text)}</p>
+            </div>
+          </article>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function BookingConfirmationPage(data) {
+    return `
+      <div class="booking-confirmation__inner">
+        ${BookingSuccessHeader(data)}
+        ${BookingIdCard(data)}
+        ${BookingDetailsCard(data)}
+        ${BookingActions(data)}
+        ${EmailConfirmationCard(data)}
+        ${BookingFeatureCards(data)}
+      </div>
+    `;
+  }
+
+  function bindBookingConfirmationActions(data) {
+    if (!els.bookingConfirmation) return;
+    els.bookingConfirmation.querySelectorAll('[data-confirmation-action]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const action = button.dataset.confirmationAction;
+        if (action === 'copy-id') {
+          try {
+            await navigator.clipboard?.writeText(data.bookingId);
+            button.classList.add('is-copied');
+            setTimeout(() => button.classList.remove('is-copied'), 1200);
+          } catch {
+            showCheckoutNotice('Copy unavailable', `Booking ID: ${data.bookingId}`);
+          }
+          return;
+        }
+        if (action === 'home') {
+          window.location.href = '/';
+          return;
+        }
+        if (action === 'track') {
+          if (data.orderId) {
+            window.location.hash = `track-order/${encodeURIComponent(data.orderId)}`;
+          } else {
+            showCheckoutNotice('Track My Order', 'Order details are unavailable for tracking yet.');
+          }
+          return;
+        }
+        if (action === 'calendar') {
+          showCheckoutNotice('Add to Calendar', 'Calendar export is ready for future booking schedule details.');
+        }
+      });
+    });
+  }
+
+  function showBookingConfirmation(data = null) {
+    const confirmation = data || state.latestConfirmation || getStoredConfirmation() || buildConfirmationData({});
+    state.currentView = 'confirmation';
+    state.latestConfirmation = confirmation;
+
+    els.productDetail.hidden = true;
+    els.shopSection.hidden = true;
+    if (els.orderTracking) els.orderTracking.hidden = true;
+    document.querySelector('.merch-hero').hidden = true;
+    document.querySelector('.merch-categories').hidden = true;
+    if (els.bookingConfirmation) {
+      els.bookingConfirmation.hidden = false;
+      els.bookingConfirmation.innerHTML = BookingConfirmationPage(confirmation);
+      bindBookingConfirmationActions(confirmation);
+    }
+    closeCart();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function getTrackingOrderIdFromHash() {
+    const match = String(window.location.hash || '').match(/^#track-order\/([^/?#]+)/);
+    return match ? decodeURIComponent(match[1]) : '';
+  }
+
+  function bindOrderTrackingActions(order) {
+    if (!els.orderTracking) return;
+    els.orderTracking.querySelectorAll('[data-tracking-action]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const action = button.dataset.trackingAction;
+        if (action === 'back') {
+          if (state.accountDrawerOpen) closeAccountDrawer();
+          window.history.length > 1 ? window.history.back() : showShop();
+          return;
+        }
+        if (action === 'invoice' && order?.id) {
+          await openMerchInvoice(order.id);
+        }
+      });
+    });
+  }
+
+  function showOrderTracking(orderId) {
+    const order = getTrackingOrderById(orderId);
+    state.currentView = 'tracking';
+
+    els.productDetail.hidden = true;
+    els.shopSection.hidden = true;
+    if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
+    document.querySelector('.merch-hero').hidden = true;
+    document.querySelector('.merch-categories').hidden = true;
+    if (els.orderTracking) {
+      els.orderTracking.hidden = false;
+      els.orderTracking.innerHTML = OrderTrackingPage(order);
+      bindOrderTrackingActions(order);
+    }
+    closeCart();
+    closeAccountDrawer();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function routeFromLocation() {
+    const trackingOrderId = getTrackingOrderIdFromHash();
+    if (trackingOrderId) {
+      showOrderTracking(trackingOrderId);
+      return true;
+    }
+    if (window.location.hash === '#booking-confirmation') {
+      showBookingConfirmation();
+      return true;
+    }
+    return false;
   }
 
   function openCart() {
@@ -1158,9 +1658,9 @@
     }
 
     if (action === 'track-order') {
-      const order = getOrderById(button.dataset.orderId);
-      const tracking = [order?.carrierName, order?.trackingNumber].filter(Boolean).join(' · ');
-      showCheckoutNotice('Track order', tracking || 'Tracking details will appear once this order ships.');
+      if (button.dataset.orderId) {
+        window.location.hash = `track-order/${encodeURIComponent(button.dataset.orderId)}`;
+      }
       return;
     }
 
@@ -1551,6 +2051,8 @@
     els.shopSection.hidden = true;
     document.querySelector('.merch-hero').hidden = true;
     document.querySelector('.merch-categories').hidden = true;
+    if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
+    if (els.orderTracking) els.orderTracking.hidden = true;
     els.productDetail.hidden = false;
 
     renderProductGallery(product);
@@ -1565,9 +2067,14 @@
     state.selectedVariant = null;
 
     els.productDetail.hidden = true;
+    if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
+    if (els.orderTracking) els.orderTracking.hidden = true;
     els.shopSection.hidden = false;
     document.querySelector('.merch-hero').hidden = false;
     document.querySelector('.merch-categories').hidden = false;
+    if (window.location.hash === '#booking-confirmation' || getTrackingOrderIdFromHash()) {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
   }
 
   function renderProductGallery(product) {
@@ -2178,6 +2685,12 @@
         closeAccountDrawer();
       }
     });
+
+    window.addEventListener('hashchange', () => {
+      if (!routeFromLocation()) {
+        showShop();
+      }
+    });
   }
 
   // ─── Razorpay Checkout Flow ───
@@ -2227,6 +2740,7 @@
       }
 
       const data = await res.json();
+      const confirmationCartItems = state.cart.map((item) => ({ ...item }));
 
       // Load Razorpay script if not loaded
       if (!window.Razorpay) {
@@ -2257,6 +2771,15 @@
             }),
           });
           if (verifyRes.ok) {
+            const verifyData = await verifyRes.json().catch(() => ({}));
+            const confirmation = buildConfirmationData({
+              order: data,
+              verifyResult: { ...verifyData, orderNumber: data.orderNumber },
+              customer,
+              address,
+              cartItems: confirmationCartItems,
+            });
+            saveConfirmation(confirmation);
             state.cart = [];
             state.merchCouponCode = '';
             state.merchCouponPreview = null;
@@ -2265,7 +2788,8 @@
             renderCart();
             closeCart();
             await loadCustomerContext();
-            showCheckoutNotice('Payment successful', `Order ${data.orderNumber} confirmed.`);
+            window.location.hash = 'booking-confirmation';
+            showBookingConfirmation(confirmation);
           } else {
             showCheckoutNotice('Payment verification failed', 'Please contact support with your payment details.', { variant: 'error' });
           }
@@ -2328,6 +2852,11 @@
     state.authResolved = true;
     setBodyAuthLoading(false);
     renderAccountTrigger();
+
+    if (state.currentView === 'tracking') {
+      const trackingOrderId = getTrackingOrderIdFromHash();
+      if (trackingOrderId) showOrderTracking(trackingOrderId);
+    }
   }
 
   // ─── Initialize ───
@@ -2336,6 +2865,7 @@
     renderCartBadge();
     renderProductGrid();
     bindEvents();
+    routeFromLocation();
     setBodyAuthLoading(true);
     renderAccountTrigger();
     loadMerchProducts();
