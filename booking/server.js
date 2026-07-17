@@ -174,6 +174,30 @@ async function sendMailgunEmail({ to, from, subject, text, html }) {
     html,
   });
 }
+
+async function sendConfiguredEmail({ to, from, subject, text, html }) {
+  const normalizedTo = String(to || '').trim().toLowerCase();
+  const normalizedFrom = String(from || '').trim();
+  if (!normalizedTo) {
+    throw new Error('Recipient email is required');
+  }
+  if (!normalizedFrom) {
+    throw new Error('Sender email is required');
+  }
+
+  if (mg) {
+    await sendMailgunEmail({ to: normalizedTo, from: normalizedFrom, subject, text, html });
+    return { delivery: 'mailgun' };
+  }
+
+  const transporter = getTransporter();
+  if (transporter) {
+    await transporter.sendMail({ from: normalizedFrom, to: normalizedTo, subject, text, html });
+    return { delivery: 'smtp' };
+  }
+
+  throw new Error('Email service is not configured');
+}
 const SERVICE_CATALOG = [
   {
     category: 'EXPERIENCE SESSION',
@@ -2358,6 +2382,7 @@ app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
     return res.status(404).json({ message: 'merch order not found' });
   }
 
+  const isAdmin = String(req.user?.role || '').trim().toLowerCase() === 'admin';
   let invoiceUserId = Number(order.customerUserId || 0) || 0;
   let ownsOrder = invoiceUserId === Number(req.user.id);
   if (!ownsOrder && Number(order.customerId || 0) > 0) {
@@ -2370,17 +2395,22 @@ app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
     }
   }
 
-  if (req.user.role !== 'admin' && !ownsOrder) {
+  if (!isAdmin && !ownsOrder) {
     return res.status(403).json({ message: 'forbidden' });
   }
   if (!Number.isInteger(invoiceUserId) || invoiceUserId <= 0) {
-    return res.status(409).json({ message: 'invoice is available only for linked customer accounts' });
+    if (isAdmin) {
+      invoiceUserId = Number(req.user.id);
+    } else {
+      return res.status(409).json({ message: 'invoice is available only for linked customer accounts' });
+    }
   }
 
   const token = createInvoiceAccessToken({
     scope: 'merch_invoice',
     orderId: order.id,
     userId: invoiceUserId,
+    isAdmin,
   });
 
   const invoiceUrl = `${getRequestOrigin(req)}/invoice/merch?token=${encodeURIComponent(token)}`;
@@ -2388,6 +2418,116 @@ app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
     invoiceUrl,
     invoiceDownloadUrl: `${invoiceUrl}&format=pdf&download=1`,
   });
+});
+
+app.post('/api/merch/orders/:id/invoice-email', requireAuth, async (req, res) => {
+  const orderId = Number(req.params.id);
+  if (!Number.isInteger(orderId) || orderId <= 0) {
+    return res.status(400).json({ message: 'order id is required' });
+  }
+
+  const order = db
+    .prepare(
+      `SELECT id,
+              order_number AS orderNumber,
+              customer_name AS customerName,
+              customer_email AS customerEmail,
+              customer_user_id AS customerUserId,
+              customer_id AS customerId,
+              payment_status AS paymentStatus
+       FROM merch_orders
+       WHERE id = ?`
+    )
+    .get(orderId);
+  if (!order) {
+    return res.status(404).json({ message: 'merch order not found' });
+  }
+
+  const isAdmin = String(req.user?.role || '').trim().toLowerCase() === 'admin';
+  let invoiceUserId = Number(order.customerUserId || 0) || 0;
+  let ownsOrder = invoiceUserId === Number(req.user.id);
+  let recipientEmail = '';
+  if (!ownsOrder && Number(order.customerId || 0) > 0) {
+    const profile = db
+      .prepare('SELECT id, user_id AS userId, email FROM merch_customer_profiles WHERE id = ?')
+      .get(Number(order.customerId));
+    if (profile) {
+      invoiceUserId = Number(profile.userId || invoiceUserId || 0);
+      ownsOrder = Number(profile.userId || 0) === Number(req.user.id);
+      recipientEmail = String(profile.email || '').trim().toLowerCase();
+    }
+  }
+  if (!recipientEmail && Number(req.user?.id || 0) === Number(invoiceUserId || 0) && !isAdmin) {
+    recipientEmail = String(req.user?.email || '').trim().toLowerCase();
+  }
+  if (!recipientEmail) {
+    recipientEmail = String(order.customerEmail || '').trim().toLowerCase();
+  }
+  if (isAdmin && String(req.body?.recipientEmail || '').trim()) {
+    recipientEmail = String(req.body.recipientEmail || '').trim().toLowerCase();
+  }
+
+  if (!isAdmin && !ownsOrder) {
+    return res.status(403).json({ message: 'forbidden' });
+  }
+  if (!recipientEmail || !isValidEmail(recipientEmail)) {
+    return res.status(400).json({ message: 'A valid recipient email is required' });
+  }
+
+  if (!Number.isInteger(invoiceUserId) || invoiceUserId <= 0) {
+    invoiceUserId = Number(req.user.id);
+  }
+
+  const token = createInvoiceAccessToken({
+    scope: 'merch_invoice',
+    orderId: order.id,
+    userId: invoiceUserId,
+    isAdmin,
+  });
+  const invoiceUrl = `${getRequestOrigin(req)}/invoice/merch?token=${encodeURIComponent(token)}`;
+  const invoiceDownloadUrl = `${invoiceUrl}&format=pdf&download=1`;
+  const subject = `${order.orderNumber || `Order #${order.id}`} invoice from H2 House of Health`;
+  const greeting = order.customerName ? `Hi ${order.customerName},` : 'Hi,';
+  const text =
+    `${greeting}\n\n` +
+    `Your invoice for ${order.orderNumber || `Order #${order.id}`} is ready.\n\n` +
+    `View invoice: ${invoiceUrl}\n` +
+    `Download PDF: ${invoiceDownloadUrl}\n\n` +
+    `If you need anything else, please reply to this email.`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #1f2937;">
+      <p style="margin: 0 0 12px;">${escapeHtml(greeting)}</p>
+      <p style="margin: 0 0 12px;">Your invoice for <strong>${escapeHtml(order.orderNumber || `Order #${order.id}`)}</strong> is ready.</p>
+      <p style="margin: 0 0 12px;">You can open the secure invoice page or download the PDF directly.</p>
+      <p style="margin: 0 0 8px;">
+        <a href="${escapeHtml(invoiceUrl)}" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#111827;color:#fff;text-decoration:none;font-weight:600;">View Invoice</a>
+      </p>
+      <p style="margin: 0 0 12px;">
+        <a href="${escapeHtml(invoiceDownloadUrl)}" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#9f3e1f;color:#fff;text-decoration:none;font-weight:600;">Download PDF</a>
+      </p>
+      <p style="margin: 0; color: #6b7280;">If you need anything else, please reply to this email.</p>
+    </div>
+  `;
+
+  try {
+    await sendConfiguredEmail({
+      to: recipientEmail,
+      from: MAIL_FROM,
+      subject,
+      text,
+      html,
+    });
+    return res.json({
+      success: true,
+      message: 'Invoice email sent',
+      recipientEmail,
+      invoiceUrl,
+      invoiceDownloadUrl,
+    });
+  } catch (error) {
+    console.error('Failed to send merch invoice email:', error);
+    return res.status(500).json({ message: error.message || 'Unable to send invoice email' });
+  }
 });
 
 app.get('/api/admin/discount-phones', requireAuth, requireAdmin, (_req, res) => {
@@ -10558,6 +10698,7 @@ function createInvoiceAccessToken(payload) {
       bookingId: payload?.bookingId != null ? Number(payload.bookingId) : undefined,
       userId: payload?.userId != null ? Number(payload.userId) : undefined,
       orderId: payload?.orderId != null ? String(payload.orderId) : undefined,
+      isAdmin: payload?.isAdmin === true,
     },
     JWT_SECRET,
     { expiresIn: '30d' }
@@ -10574,6 +10715,7 @@ function verifyInvoiceAccessToken(token) {
       bookingId: payload?.bookingId != null ? Number(payload.bookingId) : null,
       userId: payload?.userId != null ? Number(payload.userId) : null,
       orderId: payload?.orderId != null ? String(payload.orderId) : '',
+      isAdmin: payload?.isAdmin === true,
     };
   } catch {
     return null;

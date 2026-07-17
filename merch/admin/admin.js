@@ -1030,6 +1030,14 @@
           </p>
         </div>
         <div class="admin-list__item">
+          <p class="admin-list__item-title">Invoice &amp; Receipt</p>
+          <div class="admin-actions">
+            <button class="admin-action-link" type="button" data-action="open-order-invoice" data-id="${order.id}">View Invoice</button>
+            <button class="admin-action-link" type="button" data-action="email-order-invoice" data-id="${order.id}">Email Invoice</button>
+            <button class="admin-action-link" type="button" data-action="download-order-invoice" data-id="${order.id}">Download PDF</button>
+          </div>
+        </div>
+        <div class="admin-list__item">
           <p class="admin-list__item-title">Order Timeline</p>
           <div class="admin-status-timeline">
             ${order.timeline.map((entry) => `
@@ -1136,18 +1144,21 @@
                   <tbody>
                     ${pageItems.map((order) => `
                       <tr data-action="select-order" data-id="${order.id}" style="cursor:pointer;">
-                        <td><strong>${escapeHtml(order.orderNumber)}</strong><br><span class="admin-table__muted">${escapeHtml(dateLabel(order.createdAt))}</span></td>
-                        <td>${escapeHtml(order.customerName)}<br><span class="admin-table__muted">${escapeHtml(order.email)}</span></td>
-                        <td>${escapeHtml(order.paymentMethod.toUpperCase())}<br><span class="admin-table__muted">${escapeHtml(getStatusLabel(order.paymentStatus))}</span></td>
-                        <td><strong>${escapeHtml(money(order.totalAmount))}</strong></td>
-                        <td><span class="admin-badge ${statusClass(order.status)}">${escapeHtml(getStatusLabel(order.status))}</span></td>
-                        <td>
-                          <div class="admin-actions">
+                    <td><strong>${escapeHtml(order.orderNumber)}</strong><br><span class="admin-table__muted">${escapeHtml(dateLabel(order.createdAt))}</span></td>
+                    <td>${escapeHtml(order.customerName)}<br><span class="admin-table__muted">${escapeHtml(order.email)}</span></td>
+                    <td>${escapeHtml(order.paymentMethod.toUpperCase())}<br><span class="admin-table__muted">${escapeHtml(getStatusLabel(order.paymentStatus))}</span></td>
+                    <td><strong>${escapeHtml(money(order.totalAmount))}</strong></td>
+                    <td><span class="admin-badge ${statusClass(order.status)}">${escapeHtml(getStatusLabel(order.status))}</span></td>
+                    <td>
+                      <div class="admin-actions">
+                            <button class="admin-action-link" type="button" data-action="open-order-invoice" data-id="${order.id}">Invoice</button>
+                            <button class="admin-action-link" type="button" data-action="email-order-invoice" data-id="${order.id}">Email</button>
+                            <button class="admin-action-link" type="button" data-action="download-order-invoice" data-id="${order.id}">Download</button>
                             <button class="admin-action-link" type="button" data-action="advance-order" data-id="${order.id}">Next Step</button>
                             <button class="admin-action-link" type="button" data-action="cancel-order" data-id="${order.id}">Cancel</button>
                             <button class="admin-action-link" type="button" data-action="refund-order" data-id="${order.id}">Refund</button>
-                          </div>
-                        </td>
+                      </div>
+                    </td>
                       </tr>
                     `).join('')}
                   </tbody>
@@ -2487,6 +2498,83 @@
     return response;
   }
 
+  async function fetchOrderInvoiceLink(orderId) {
+    const id = Number(orderId);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error('Order details are unavailable.');
+    }
+    return apiRequest(`/api/merch/orders/${encodeURIComponent(id)}/invoice-link`);
+  }
+
+  function openInvoiceDocument(url) {
+    const targetUrl = buildApiUrl(url);
+    const opened = window.open(targetUrl, '_blank', 'noopener,noreferrer');
+    if (!opened) {
+      toast('Invoice unavailable', 'The invoice could not open. Please allow popups and try again.', 'warning');
+    }
+  }
+
+  function getInvoiceFilename(headerValue, orderId) {
+    const header = String(headerValue || '');
+    const utfMatch = header.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utfMatch) {
+      try {
+        return decodeURIComponent(utfMatch[1]);
+      } catch {}
+    }
+    const match = header.match(/filename="?([^";]+)"?/i);
+    if (match?.[1]) return match[1];
+    return `Invoice-Merch-${String(orderId || 'Order').replace(/[^a-z0-9_-]+/gi, '-')}.pdf`;
+  }
+
+  async function openOrderInvoice(orderId) {
+    try {
+      const data = await fetchOrderInvoiceLink(orderId);
+      if (!data.invoiceUrl) throw new Error('Invoice link missing.');
+      openInvoiceDocument(data.invoiceUrl);
+    } catch (error) {
+      toast('Invoice unavailable', error.message || 'Unable to open the invoice.', 'warning');
+    }
+  }
+
+  async function downloadOrderInvoice(orderId) {
+    try {
+      const data = await fetchOrderInvoiceLink(orderId);
+      const downloadUrl = data.invoiceDownloadUrl || data.invoiceUrl;
+      if (!downloadUrl) throw new Error('Invoice download link missing.');
+      const response = await fetch(buildApiUrl(downloadUrl), { credentials: 'include' });
+      if (!response.ok || !(response.headers.get('content-type') || '').includes('application/pdf')) {
+        throw new Error('Unable to generate the invoice PDF.');
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = getInvoiceFilename(response.headers.get('content-disposition'), orderId);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      toast('Download unavailable', error.message || 'Unable to download the invoice.', 'warning');
+    }
+  }
+
+  async function emailOrderInvoice(orderId) {
+    try {
+      const id = Number(orderId);
+      if (!Number.isInteger(id) || id <= 0) throw new Error('Order details are unavailable.');
+      const result = await apiRequest(`/api/merch/orders/${encodeURIComponent(id)}/invoice-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      toast('Invoice emailed', `Sent to ${result.recipientEmail || 'the customer email on file'}.`, 'success');
+    } catch (error) {
+      toast('Email unavailable', error.message || 'Unable to email the invoice.', 'warning');
+    }
+  }
+
   async function handleAction(action, target) {
     const rawId = String(target?.dataset?.id || target?.closest?.('[data-id]')?.dataset?.id || '');
     const id = Number(rawId || 0);
@@ -2665,6 +2753,21 @@
         if (order) {
           state.selectedOrderId = order.id;
           renderOrders();
+        }
+        return;
+      case 'open-order-invoice':
+        if (order) {
+          await openOrderInvoice(order.id);
+        }
+        return;
+      case 'download-order-invoice':
+        if (order) {
+          await downloadOrderInvoice(order.id);
+        }
+        return;
+      case 'email-order-invoice':
+        if (order) {
+          await emailOrderInvoice(order.id);
         }
         return;
       case 'advance-order':
