@@ -250,6 +250,11 @@
     return `${formatPrice(min)} – ${formatPrice(max)}`;
   }
 
+  function getDefaultPurchasableVariant(product) {
+    const variants = Array.isArray(product?.variants) ? product.variants : [];
+    return variants.find((variant) => Number(variant?.stock || 0) > 0) || variants[0] || null;
+  }
+
   function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str;
@@ -341,6 +346,29 @@
       email: profile.email,
       phone: profile.mobile,
     };
+  }
+
+  function syncCheckoutProfileDetails(payload) {
+    const fullName = String(payload?.recipientName || '').trim();
+    const mobile = String(payload?.phone || '').trim();
+
+    if (fullName || mobile) {
+      state.merchProfile = {
+        ...(state.merchProfile || {}),
+        ...(fullName ? { fullName } : {}),
+        ...(mobile ? { mobile } : {}),
+      };
+
+      if (state.currentUser) {
+        state.currentUser = {
+          ...state.currentUser,
+          ...(fullName ? { name: fullName } : {}),
+          ...(mobile ? { mobile } : {}),
+        };
+      }
+
+      renderAccountTrigger();
+    }
   }
 
   function setBodyAuthLoading(isLoading) {
@@ -452,28 +480,62 @@
     renderCartBadge();
   }
 
-  function addToCart(variantId, quantity, product) {
+  function addToCart(variantId, quantity, product, options = {}) {
+    const { openDrawerAfterAdd = true } = options;
     const variant = product.variants.find(v => v.id === variantId);
-    if (!variant || variant.stock <= 0) return;
+    if (!variant || variant.stock <= 0) return false;
 
     const existing = state.cart.find(item => item.variantId === variantId);
     if (existing) {
       const newQty = Math.min(Math.max(1, quantity), variant.stock);
       existing.quantity = newQty;
-      } else {
-        state.cart.push({
-          variantId,
-          productId: product.id,
-          productName: product.name,
-          variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '),
-          price: variant.price,
-          quantity: Math.min(quantity, variant.stock),
-          image: product.images?.[0] || product.imageUrl || FALLBACK_PRODUCT_IMAGE,
-          sku: variant.sku,
-        });
-      }
+    } else {
+      state.cart.push({
+        variantId,
+        productId: product.id,
+        productName: product.name,
+        variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '),
+        price: variant.price,
+        quantity: Math.min(quantity, variant.stock),
+        image: product.images?.[0] || product.imageUrl || FALLBACK_PRODUCT_IMAGE,
+        sku: variant.sku,
+      });
+    }
     saveCart();
-    openCart();
+    if (openDrawerAfterAdd) {
+      openCart();
+    }
+    return true;
+  }
+
+  async function buyNow(variantId, quantity, product) {
+    const added = addToCart(variantId, quantity, product, { openDrawerAfterAdd: false });
+    if (!added) {
+      showCheckoutNotice('Out of stock', 'This product is currently unavailable.', { variant: 'error' });
+      return;
+    }
+
+    await initiateCheckout();
+  }
+
+  async function handleProductCardAction(action, product) {
+    const variant = getDefaultPurchasableVariant(product);
+    if (!variant || Number(variant.stock || 0) <= 0) {
+      showCheckoutNotice('Out of stock', 'This product is currently unavailable.', { variant: 'error' });
+      return;
+    }
+
+    if (action === 'buy-now') {
+      const added = addToCart(variant.id, 1, product, { openDrawerAfterAdd: false });
+      if (!added) {
+        showCheckoutNotice('Out of stock', 'This product is currently unavailable.', { variant: 'error' });
+        return;
+      }
+      await initiateCheckout();
+      return;
+    }
+
+    addToCart(variant.id, 1, product);
   }
 
   function removeFromCart(variantId) {
@@ -1353,7 +1415,10 @@
 
     els.productEmpty.hidden = true;
 
-    els.productGrid.innerHTML = products.map(product => `
+    els.productGrid.innerHTML = products.map(product => {
+      const defaultVariant = getDefaultPurchasableVariant(product);
+      const isSoldOut = !defaultVariant || Number(defaultVariant.stock || 0) <= 0;
+      return `
       <article class="product-card" data-product-id="${product.id}" tabindex="0" role="button" aria-label="View ${escapeHtml(product.name)}">
         <div class="product-card__image">
           <img src="${escapeHtml(product.images?.[0] || product.imageUrl || FALLBACK_PRODUCT_IMAGE)}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
@@ -1364,9 +1429,18 @@
           <p class="product-card__price">
             ${product.variants.length > 1 ? '<span class="price-from">From </span>' : ''}${getPriceRange(product)}
           </p>
+          <div class="product-card__actions">
+            <button class="btn btn-secondary product-card__action" type="button" data-product-action="add-to-cart" data-product-id="${product.id}" ${isSoldOut ? 'disabled' : ''}>
+              ${isSoldOut ? 'Out of Stock' : 'Add to Cart'}
+            </button>
+            <button class="btn btn-outline product-card__action" type="button" data-product-action="buy-now" data-product-id="${product.id}" ${isSoldOut ? 'disabled' : ''}>
+              ${isSoldOut ? 'Unavailable' : 'Buy Now'}
+            </button>
+          </div>
         </div>
       </article>
-    `).join('');
+    `;
+    }).join('');
 
     // Bind click events
     els.productGrid.querySelectorAll('.product-card').forEach(card => {
@@ -1380,6 +1454,16 @@
           const id = Number(card.dataset.productId);
           showProductDetail(id);
         }
+      });
+    });
+
+    els.productGrid.querySelectorAll('[data-product-action]').forEach((button) => {
+      button.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const product = state.products.find((item) => Number(item.id) === Number(button.dataset.productId));
+        if (!product) return;
+        await handleProductCardAction(button.dataset.productAction, product);
       });
     });
   }
@@ -1508,7 +1592,10 @@
         <button id="addToCartBtn" class="btn btn-primary btn-lg" type="button" ${variant.stock <= 0 ? 'disabled' : ''}>
           ${variant.stock <= 0 ? 'Out of Stock' : 'Add to Cart'}
         </button>
-        <button id="addToWishlistBtn" class="btn btn-outline" type="button">♡ Wishlist</button>
+        <button id="buyNowBtn" class="btn btn-secondary btn-lg" type="button" ${variant.stock <= 0 ? 'disabled' : ''}>
+          ${variant.stock <= 0 ? 'Unavailable' : 'Buy Now'}
+        </button>
+        <button id="addToWishlistBtn" class="btn btn-outline btn-lg" type="button">♡ Wishlist</button>
       </div>
 
       <p class="stock-status ${variant.stock > 0 ? 'in-stock' : 'out-of-stock'}">
@@ -1564,6 +1651,12 @@
     document.getElementById('addToCartBtn')?.addEventListener('click', () => {
       if (state.selectedVariant && state.selectedVariant.stock > 0) {
         addToCart(state.selectedVariant.id, state.quantity, product);
+      }
+    });
+
+    document.getElementById('buyNowBtn')?.addEventListener('click', () => {
+      if (state.selectedVariant && state.selectedVariant.stock > 0) {
+        buyNow(state.selectedVariant.id, state.quantity, product);
       }
     });
   }
@@ -1784,25 +1877,31 @@
     });
   }
 
-  function renderCheckoutAddressForm() {
+  function renderCheckoutAddressForm(options = {}) {
+    const profile = options.profile || getMerchantProfile();
+    const helpText = options.helpText || 'Fill in your name, address, phone, and pincode to continue checkout.';
+
     return `
       <form id="checkoutAddAddressForm" class="account-form account-form--address checkout-address-form">
+        <div class="merch-flow-notice">
+          <p>${escapeHtml(helpText)}</p>
+        </div>
         <div class="account-form__grid">
           <label class="account-field">
             <span>Label</span>
             <input name="label" type="text" placeholder="Home" />
           </label>
           <label class="account-field">
-            <span>Recipient</span>
-            <input name="recipientName" type="text" value="${escapeHtml(getMerchantProfile().fullName)}" autocomplete="name" required />
+            <span>Full Name</span>
+            <input name="recipientName" type="text" value="${escapeHtml(profile.fullName)}" autocomplete="name" placeholder="Enter full name" required />
           </label>
           <label class="account-field">
-            <span>Mobile Number</span>
-            <input name="phone" type="tel" value="${escapeHtml(getMerchantProfile().mobile)}" autocomplete="tel" required />
+            <span>Phone Number</span>
+            <input name="phone" type="tel" value="${escapeHtml(profile.mobile)}" autocomplete="tel" placeholder="Enter phone number" required />
           </label>
           <label class="account-field account-field--wide">
-            <span>Address Line 1</span>
-            <input name="line1" type="text" autocomplete="address-line1" required />
+            <span>Address</span>
+            <input name="line1" type="text" autocomplete="address-line1" placeholder="House number, street, area" required />
           </label>
           <label class="account-field account-field--wide">
             <span>Address Line 2</span>
@@ -1817,8 +1916,8 @@
             <input name="state" type="text" autocomplete="address-level1" />
           </label>
           <label class="account-field">
-            <span>Postal Code</span>
-            <input name="postalCode" type="text" autocomplete="postal-code" />
+            <span>Pincode</span>
+            <input name="postalCode" type="text" autocomplete="postal-code" placeholder="Enter pincode" required />
           </label>
           <label class="account-field">
             <span>Country</span>
@@ -1833,10 +1932,13 @@
     `;
   }
 
-  function openCheckoutAddAddressModal() {
+  function openCheckoutAddAddressModal(options = {}) {
     const modal = showMerchModal({
-      title: 'Add shipping address',
-      body: renderCheckoutAddressForm(),
+      title: options.title || 'Add shipping address',
+      body: renderCheckoutAddressForm({
+        profile: options.profile || getAuthenticatedCheckoutCustomer(),
+        helpText: options.helpText,
+      }),
       footer: `
         <button class="btn btn-outline account-action-btn" type="button" data-checkout-back>Back</button>
         <button class="btn btn-primary account-action-btn" type="submit" form="checkoutAddAddressForm">Save & Continue</button>
@@ -1864,6 +1966,7 @@
         body: JSON.stringify(payload),
       });
       state.merchAddresses = Array.isArray(result.addresses) ? result.addresses : state.merchAddresses;
+      syncCheckoutProfileDetails(payload);
     } catch (error) {
       showCheckoutNotice('Address not saved', error.message || 'Please check the address details and try again.', { variant: 'error' });
       return;
@@ -2019,11 +2122,10 @@
     if (state.currentUser) {
       const customer = getAuthenticatedCheckoutCustomer();
       if (!customer.name || !customer.email || !customer.phone) {
-        showCheckoutNotice(
-          'Profile incomplete',
-          'Your merchandise profile needs a full name, email, and mobile number before checkout.',
-          { variant: 'error' }
-        );
+        openCheckoutAddAddressModal({
+          title: 'Complete your details',
+          helpText: 'Add your name, phone, address, and pincode to continue checkout.',
+        });
         return;
       }
 
