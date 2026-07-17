@@ -248,8 +248,8 @@
       primarySku: 'HM-BTL-300-SLV',
       categoryId: 2,
       category: 'Hydrogen Water Bottles',
-      price: 6999.00,
-      priceLabel: '₹6,999 - ₹8,499',
+      price: 6499.00,
+      priceLabel: '₹6,499 - ₹8,499',
       stock: 130,
       status: 'published',
       createdAt: '2026-03-15',
@@ -1222,10 +1222,6 @@
           <p class="admin-list__item-sub">${formatCount(customer.merchandiseOrders)} order(s)</p>
         </div>
         <div class="admin-list__item">
-          <p class="admin-list__item-title">Lifetime Merchandise Spend</p>
-          <p class="admin-list__item-sub"><strong>${escapeHtml(money(customer.lifetimeMerchSpend))}</strong></p>
-        </div>
-        <div class="admin-list__item">
           <p class="admin-list__item-title">Last Order</p>
           <p class="admin-list__item-sub">${escapeHtml(lastOrderLabel)}</p>
         </div>
@@ -1286,7 +1282,6 @@
         customer.addressSummary,
         customer.lastOrderLabel,
         String(customer.merchandiseOrders || ''),
-        String(customer.lifetimeMerchSpend || ''),
       ]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(query))
@@ -1323,7 +1318,6 @@
                       <th>Email</th>
                       <th>Phone</th>
                       <th>Merchandise Orders</th>
-                      <th>Lifetime Merchandise Spend</th>
                       <th>Last Order</th>
                       <th>Addresses</th>
                       <th>Registration Date</th>
@@ -1336,7 +1330,6 @@
                         <td>${escapeHtml(customer.email)}</td>
                         <td>${escapeHtml(customer.phone)}</td>
                         <td>${escapeHtml(formatCount(customer.merchandiseOrders))}</td>
-                        <td><strong>${escapeHtml(money(customer.lifetimeMerchSpend))}</strong></td>
                         <td>${escapeHtml(customer.lastOrder?.orderNumber ? `${customer.lastOrder.orderNumber}${customer.lastOrder.createdAt ? ` - ${dateLabel(customer.lastOrder.createdAt)}` : ''}` : customer.lastOrderLabel || 'No orders yet')}</td>
                         <td>${escapeHtml(customer.addressSummary || 'No saved addresses')}</td>
                         <td>${escapeHtml(dateLabel(customer.registrationDate || customer.registeredAt))}</td>
@@ -1350,7 +1343,7 @@
               <article class="admin-card">
                 <div class="admin-card__head">
                   <h3 class="admin-card__title">Customer Profile</h3>
-                  <p class="admin-card__sub">Merchandise orders, spend, addresses, and first interaction date</p>
+                  <p class="admin-card__sub">Merchandise orders, addresses, and first interaction date</p>
                 </div>
                 <div class="admin-card__body">
                   ${renderCustomerDetail(selectedCustomer)}

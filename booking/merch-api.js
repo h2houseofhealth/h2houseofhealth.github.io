@@ -200,6 +200,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return '₹' + Number(paise || 0).toLocaleString('en-IN');
   }
 
+  function getMerchVariantPriceOverrides(slug) {
+    const normalizedSlug = String(slug || '').trim().toLowerCase();
+    if (normalizedSlug === 'h2-water-bottle' || normalizedSlug === 'molecular-hydrogen-water-bottle') {
+      return [699900, 649900, 749900];
+    }
+    if (normalizedSlug === 'h2-mist-spray' || normalizedSlug === 'hydrogen-mist-spray') {
+      return [249900, 349900, 279900];
+    }
+    return null;
+  }
+
   function normalizeInfluencerPayload(body = {}) {
     const commissionRate = Number(body.commissionRate ?? body.commission_rate ?? 10);
     return {
@@ -399,13 +410,20 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function buildMerchProductRecord(product, variants = [], sales = null) {
     const activeVariants = variants.filter((variant) => Number(variant.isActive ?? 1) === 1);
+    const priceOverrides = getMerchVariantPriceOverrides(product.slug);
+    const normalizedVariants = activeVariants.map((variant, index) => {
+      const overridePrice = Array.isArray(priceOverrides) ? Number(priceOverrides[index]) : NaN;
+      return Number.isFinite(overridePrice) && overridePrice > 0
+        ? { ...variant, price: overridePrice }
+        : variant;
+    });
     const priceValues = activeVariants.length
-      ? activeVariants.map((variant) => Number(variant.price || 0)).filter((value) => Number.isFinite(value))
+      ? normalizedVariants.map((variant) => Number(variant.price || 0)).filter((value) => Number.isFinite(value))
       : [Number(product.base_price || 0)];
     const minPrice = priceValues.length ? Math.min(...priceValues) : Number(product.base_price || 0);
     const maxPrice = priceValues.length ? Math.max(...priceValues) : Number(product.base_price || 0);
-    const primaryVariant = activeVariants[0] || variants[0] || null;
-    const stock = activeVariants.reduce((sum, variant) => sum + Number(variant.stock || 0), 0);
+    const primaryVariant = normalizedVariants[0] || activeVariants[0] || variants[0] || null;
+    const stock = normalizedVariants.reduce((sum, variant) => sum + Number(variant.stock || 0), 0);
     const salesCount = Number(sales?.sales || 0);
     const orderCount = Number(sales?.orderCount || 0);
 
@@ -415,13 +433,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       slug: String(product.slug || ''),
       description: String(product.description || ''),
       category: String(product.category || ''),
-      basePrice: Number(product.base_price || 0),
+      basePrice: minPrice,
       price: minPrice,
       priceLabel: minPrice === maxPrice ? formatMerchPrice(minPrice) : `${formatMerchPrice(minPrice)} - ${formatMerchPrice(maxPrice)}`,
       imageUrl: String(product.image_url || ''),
       image: String(product.image_url || ''),
       images: product.image_url ? [String(product.image_url)] : [],
-      variants: activeVariants.map((variant) => ({
+      variants: normalizedVariants.map((variant) => ({
         id: Number(variant.id),
         productId: Number(variant.productId),
         sku: String(variant.sku || ''),
@@ -590,7 +608,22 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     };
   }
 
-  function loadMerchOrders({ status = null, startDate = null, endDate = null, customerUserId = null, customerId = null } = {}) {
+  function isVisibleMerchOrder(order) {
+    const paymentStatus = String(order?.paymentStatus || order?.payment_status || '').trim().toLowerCase();
+    const status = String(order?.status || '').trim().toLowerCase();
+
+    if (['paid', 'cod_pending', 'refunded'].includes(paymentStatus)) return true;
+    return ['processing', 'shipped', 'delivered', 'cancelled', 'returned'].includes(status);
+  }
+
+  function loadMerchOrders({
+    status = null,
+    startDate = null,
+    endDate = null,
+    customerUserId = null,
+    customerId = null,
+    includeUnconfirmed = false,
+  } = {}) {
     const clauses = [];
     const params = [];
 
@@ -635,7 +668,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const orders = db.prepare(sql).all(...params);
     if (!orders.length) return [];
 
-    const orderIds = orders.map((order) => Number(order.id));
+    const visibleOrders = includeUnconfirmed ? orders : orders.filter(isVisibleMerchOrder);
+    if (!visibleOrders.length) return [];
+
+    const orderIds = visibleOrders.map((order) => Number(order.id));
     const itemRows = db.prepare(`
       SELECT id, order_id AS orderId, variant_id AS variantId, product_name AS productName,
              variant_label AS variantLabel, sku, unit_price AS unitPrice, quantity, line_total AS lineTotal
@@ -653,7 +689,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       itemsByOrderId.get(orderId).push(item);
     }
 
-    return orders.map((order) => buildMerchOrderRecord(order, itemsByOrderId.get(Number(order.id)) || []));
+    return visibleOrders.map((order) => buildMerchOrderRecord(order, itemsByOrderId.get(Number(order.id)) || []));
   }
 
   function buildMerchReports({ startDate = null, endDate = null } = {}) {
@@ -1794,6 +1830,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     for (const order of orders) {
+      if (!isVisibleMerchOrder(order)) {
+        continue;
+      }
+
       const linkedProfileId = Number(order.customerId || 0);
       const linkedUserId = Number(order.customerUserId || 0);
       const linkedProfile = linkedProfileId > 0
@@ -1836,6 +1876,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           });
 
       const orderTotal = Number(order.totalAmount || 0);
+      const paymentStatus = String(order.paymentStatus || '').trim().toLowerCase();
       const orderTime = getMerchCustomerActivityTimestamp(order.createdAt);
       const registrationTime = getMerchCustomerActivityTimestamp(customer.registrationDate);
 
@@ -1843,7 +1884,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       customer.email = String(customer.email || order.customerEmail || '').trim().toLowerCase();
       customer.phone = String(customer.phone || order.customerPhone || '').trim();
       customer.merchandiseOrders += 1;
-      customer.lifetimeMerchSpend += orderTotal;
+      if (paymentStatus === 'paid') {
+        customer.lifetimeMerchSpend += orderTotal;
+      }
 
       if (!customer.registrationDate || (registrationTime > 0 && orderTime > 0 && orderTime < registrationTime)) {
         customer.registrationDate = order.createdAt || customer.registrationDate;
@@ -2046,6 +2089,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   // ─── ADMIN: Get order detail ───
   app.get('/api/merch/admin/orders/:id', requireAdmin, (req, res) => {
     const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
+    if (order && !isVisibleMerchOrder(order)) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
     if (!order) return res.status(404).json({ error: 'Order not found' });
     const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
     res.json({ order, items });
@@ -2076,13 +2122,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   // ─── ADMIN: Dashboard stats ───
   app.get('/api/merch/admin/stats', requireAdmin, (req, res) => {
-    const totalOrders = db.prepare('SELECT COUNT(*) AS cnt FROM merch_orders').get().cnt;
-    const totalRevenue = db.prepare("SELECT COALESCE(SUM(total_amount), 0) AS total FROM merch_orders WHERE payment_status = 'paid'").get().total;
-    const pendingOrders = db.prepare("SELECT COUNT(*) AS cnt FROM merch_orders WHERE status = 'pending'").get().cnt;
-    const processingOrders = db.prepare("SELECT COUNT(*) AS cnt FROM merch_orders WHERE status = 'processing'").get().cnt;
-    const shippedOrders = db.prepare("SELECT COUNT(*) AS cnt FROM merch_orders WHERE status = 'shipped'").get().cnt;
-    const deliveredOrders = db.prepare("SELECT COUNT(*) AS cnt FROM merch_orders WHERE status = 'delivered'").get().cnt;
-    const todayOrders = db.prepare("SELECT COUNT(*) AS cnt FROM merch_orders WHERE date(created_at) = date('now')").get().cnt;
+    const orders = loadMerchOrders({ includeUnconfirmed: false });
+    const totalOrders = orders.length;
+    const totalRevenue = orders
+      .filter((order) => String(order.paymentStatus || '').toLowerCase() === 'paid')
+      .reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
+    const pendingOrders = orders.filter((order) => order.status === 'pending').length;
+    const processingOrders = orders.filter((order) => order.status === 'processing').length;
+    const shippedOrders = orders.filter((order) => order.status === 'shipped').length;
+    const deliveredOrders = orders.filter((order) => order.status === 'delivered').length;
+    const todayOrders = orders.filter((order) => String(order.createdAt || '').slice(0, 10) === new Date().toISOString().slice(0, 10)).length;
 
     res.json({ totalOrders, totalRevenue, pendingOrders, processingOrders, shippedOrders, deliveredOrders, todayOrders });
   });
@@ -2118,7 +2167,7 @@ function seedMerchProducts(db) {
   const products = [
     { name: 'Zenith Hoodie – Black', slug: 'zenith-hoodie-black', description: 'Heavyweight 450 GSM organic cotton blend hoodie with structured premium silhouette.', category: 'hoodies', base_price: 349900, image_url: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146&width=600', gst_rate: 18, weight_grams: 650 },
     { name: 'Zenith Hoodie – Sand', slug: 'zenith-hoodie-sand', description: 'Same Zenith frame in earthy sand colourway. 450 GSM organic cotton blend.', category: 'hoodies', base_price: 349900, image_url: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146&width=600', gst_rate: 18, weight_grams: 650 },
-    { name: 'H2 Molecular Hydrogen Water Bottle', slug: 'h2-water-bottle', description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 3 minutes. BPA-free, USB-C rechargeable.', category: 'bottles', base_price: 699900, image_url: '/booking/assets/service-hydrogen-session.jpg', gst_rate: 18, weight_grams: 380 },
+    { name: 'H2 Molecular Hydrogen Water Bottle', slug: 'h2-water-bottle', description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 3 minutes. BPA-free, USB-C rechargeable.', category: 'bottles', base_price: 649900, image_url: '/booking/assets/service-hydrogen-session.jpg', gst_rate: 18, weight_grams: 380 },
     { name: 'H2 Hydrogen Mist Spray', slug: 'h2-mist-spray', description: 'Compact hydrogen mist spray for skin rejuvenation. Antioxidant-rich hydrogen water delivery.', category: 'sprays', base_price: 249900, image_url: '/booking/assets/service-iv-shots.jpg', gst_rate: 18, weight_grams: 150 },
   ];
 
@@ -2150,8 +2199,8 @@ function seedMerchProducts(db) {
   r = insertProduct.run(products[2].name, products[2].slug, products[2].description, products[2].category, products[2].base_price, products[2].image_url, products[2].gst_rate, products[2].weight_grams);
   pid = r.lastInsertRowid;
   insertVariant.run(pid, 'HM-BTL-300-SLV', '300ml', 'Silver', 699900, 40);
-  insertVariant.run(pid, 'HM-BTL-500-SLV', '500ml', 'Silver', 849900, 35);
-  insertVariant.run(pid, 'HM-BTL-300-BLK', '300ml', 'Black', 699900, 30);
+  insertVariant.run(pid, 'HM-BTL-500-SLV', '500ml', 'Silver', 649900, 35);
+  insertVariant.run(pid, 'HM-BTL-300-BLK', '300ml', 'Black', 749900, 30);
   insertVariant.run(pid, 'HM-BTL-500-BLK', '500ml', 'Black', 849900, 25);
 
   // Product 4: Mist Spray
