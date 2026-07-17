@@ -155,7 +155,7 @@
       slug: 'molecular-hydrogen-water-bottle',
       description: 'Generate hydrogen-rich water on the go. This portable bottle uses advanced PEM/SPE electrolysis technology to infuse your water with molecular hydrogen (H₂) in just 3 minutes. BPA-free, USB-C rechargeable, and built to last.',
       category: 'bottles',
-      basePrice: 6999.00,
+      basePrice: 6499.00,
       images: [
         '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113',
         '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_29477.jpg?v=1770378113',
@@ -163,8 +163,8 @@
       ],
       variants: [
         { id: 11, size: '300ml', color: 'Silver', price: 6999.00, stock: 40, sku: 'HM-BTL-300-SLV' },
-        { id: 12, size: '500ml', color: 'Silver', price: 8499.00, stock: 35, sku: 'HM-BTL-500-SLV' },
-        { id: 13, size: '300ml', color: 'Black', price: 6999.00, stock: 30, sku: 'HM-BTL-300-BLK' },
+        { id: 12, size: '500ml', color: 'Silver', price: 6499.00, stock: 35, sku: 'HM-BTL-500-SLV' },
+        { id: 13, size: '300ml', color: 'Black', price: 7499.00, stock: 30, sku: 'HM-BTL-300-BLK' },
         { id: 14, size: '500ml', color: 'Black', price: 8499.00, stock: 25, sku: 'HM-BTL-500-BLK' },
       ],
       gstRate: 18,
@@ -216,6 +216,13 @@
     return map;
   }, {});
 
+  const PRODUCT_GALLERY_VARIANT_PRICES = {
+    'molecular-hydrogen-water-bottle': [6999.00, 6499.00, 7499.00],
+    'h2-water-bottle': [6999.00, 6499.00, 7499.00],
+    'hydrogen-mist-spray': [2499.00, 3499.00, 2799.00],
+    'h2-mist-spray': [2499.00, 3499.00, 2799.00],
+  };
+
   function resolveProductImageSource(product) {
     const slug = String(product?.slug || '').trim().toLowerCase();
     const name = String(product?.name || '').trim().toLowerCase();
@@ -235,6 +242,34 @@
       imageUrl: imageUrl || fallbackImages[0] || '',
       images: fallbackImages.length ? fallbackImages : (productImages.length ? productImages : (imageUrl ? [imageUrl] : [])),
     };
+  }
+
+  function getGalleryVariantPrice(product, index) {
+    const slug = String(product?.slug || '').trim().toLowerCase();
+    const prices = PRODUCT_GALLERY_VARIANT_PRICES[slug];
+    if (!Array.isArray(prices) || !Number.isInteger(index) || index < 0) return null;
+    const value = Number(prices[index]);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  }
+
+  function getGalleryVariantForIndex(product, index) {
+    const targetPrice = getGalleryVariantPrice(product, index);
+    if (targetPrice == null) return null;
+
+    const variants = Array.isArray(product?.variants) ? product.variants : [];
+    return variants.find((variant) => Number(variant.price) === targetPrice) || variants[index] || null;
+  }
+
+  function getGalleryVariantFromThumb(product, index) {
+    const category = String(product?.category || '').trim().toLowerCase();
+    const variants = Array.isArray(product?.variants) ? product.variants : [];
+    if (!variants.length) return null;
+
+    if (category === 'hoodies') {
+      return variants[index % variants.length] || variants[0] || null;
+    }
+
+    return getGalleryVariantForIndex(product, index);
   }
 
   // ─── Utility ───
@@ -1484,7 +1519,7 @@
 
     state.currentView = 'detail';
     state.selectedProduct = product;
-    state.selectedVariant = product.variants[0];
+    state.selectedVariant = getDefaultPurchasableVariant(product);
     state.quantity = 1;
 
     // Hide shop, show detail
@@ -1519,7 +1554,7 @@
       ${(product.images || []).length > 1 ? `
         <div class="gallery-thumbs">
           ${(product.images || []).map((img, i) => `
-            <button class="gallery-thumb ${i === 0 ? 'is-active' : ''}" data-index="${i}" type="button">
+            <button class="gallery-thumb ${i === 0 ? 'is-active' : ''}" data-index="${i}" type="button" aria-label="View image ${i + 1}${getGalleryVariantPrice(product, i) ? `, ${formatPrice(getGalleryVariantPrice(product, i))}` : ''}">
               <img src="${img}" alt="Image ${i + 1}" />
             </button>
           `).join('')}
@@ -1534,6 +1569,13 @@
         document.getElementById('galleryMainImg').src = product.images?.[idx] || product.imageUrl || FALLBACK_PRODUCT_IMAGE;
         els.productGallery.querySelectorAll('.gallery-thumb').forEach(t => t.classList.remove('is-active'));
         thumb.classList.add('is-active');
+
+        const galleryVariant = getGalleryVariantFromThumb(product, idx);
+        if (galleryVariant) {
+          state.selectedVariant = galleryVariant;
+          state.quantity = 1;
+          renderProductInfo(product);
+        }
       });
     });
   }
