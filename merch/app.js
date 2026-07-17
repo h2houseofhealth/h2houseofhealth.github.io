@@ -16,6 +16,7 @@
   }
 
   const API_URL = resolveApiUrl();
+  const AUTH_TOKEN_STORAGE_KEY = 'booking_portal_auth_token';
 
   function buildApiUrl(path) {
     if (/^https?:\/\//i.test(String(path || ''))) return String(path);
@@ -23,13 +24,25 @@
     return `${base}${path}`;
   }
 
+  function getStoredAuthToken() {
+    try {
+      return String(window.localStorage?.getItem(AUTH_TOKEN_STORAGE_KEY) || '').trim();
+    } catch {
+      return '';
+    }
+  }
+
   async function api(path, options = {}) {
+    const headers = new Headers(options.headers || {});
+    const authToken = getStoredAuthToken();
+    if (authToken && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${authToken}`);
+    }
+
     const response = await fetch(buildApiUrl(path), {
-      credentials: 'include',
       ...options,
-      headers: {
-        ...(options.headers || {}),
-      },
+      credentials: 'include',
+      headers,
     });
 
     let data = null;
@@ -71,6 +84,7 @@
     accountDrawerTrigger: null,
     accountProfileEditing: false,
     accountProfileMessage: '',
+    accountAddressMessage: '',
     accountAddressFormMode: null,
     accountEditingAddressId: null,
     accountOrdersExpanded: false,
@@ -83,6 +97,8 @@
     merchCouponLoading: false,
   };
 
+  const FALLBACK_PRODUCT_IMAGE = '/booking/assets/service-hydrogen-session.jpg';
+
   // ─── Product Data (Static catalog until API is built) ───
   const PRODUCTS = [
     {
@@ -91,7 +107,7 @@
       slug: 'zenith-hoodie-black',
       description: 'Meet the hoodie that understands the assignment. Engineered from a heavyweight 450 GSM organic cotton blend, the Zenith offers a structured, premium silhouette without sacrificing that "lived-in" softness. Whether you\'re hitting the gym, the coffee shop, or the couch, this is your new uniform.',
       category: 'hoodies',
-      basePrice: 349900,
+      basePrice: 3499.00,
       images: [
         '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146',
         '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_18271.jpg?v=1770377146',
@@ -100,11 +116,11 @@
         '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.318271.jpg?v=1770377146',
       ],
       variants: [
-        { id: 1, size: 'S', color: 'Black', price: 349900, stock: 25, sku: 'HM-HOD-BLK-S' },
-        { id: 2, size: 'M', color: 'Black', price: 349900, stock: 30, sku: 'HM-HOD-BLK-M' },
-        { id: 3, size: 'L', color: 'Black', price: 349900, stock: 20, sku: 'HM-HOD-BLK-L' },
-        { id: 4, size: 'XL', color: 'Black', price: 349900, stock: 15, sku: 'HM-HOD-BLK-XL' },
-        { id: 5, size: 'XXL', color: 'Black', price: 349900, stock: 10, sku: 'HM-HOD-BLK-XXL' },
+        { id: 1, size: 'S', color: 'Black', price: 3499.00, stock: 25, sku: 'HM-HOD-BLK-S' },
+        { id: 2, size: 'M', color: 'Black', price: 3499.00, stock: 30, sku: 'HM-HOD-BLK-M' },
+        { id: 3, size: 'L', color: 'Black', price: 3499.00, stock: 20, sku: 'HM-HOD-BLK-L' },
+        { id: 4, size: 'XL', color: 'Black', price: 3499.00, stock: 15, sku: 'HM-HOD-BLK-XL' },
+        { id: 5, size: 'XXL', color: 'Black', price: 3499.00, stock: 10, sku: 'HM-HOD-BLK-XXL' },
       ],
       gstRate: 18,
       weightGrams: 650,
@@ -116,18 +132,18 @@
       slug: 'zenith-hoodie-sand',
       description: 'Same Zenith. New vibe. The Sand colourway brings an earthy, tonal palette to the heavyweight 450 GSM frame. Perfect for layering or wearing solo — this piece transitions from sunrise sessions to evening outings effortlessly.',
       category: 'hoodies',
-      basePrice: 349900,
+      basePrice: 3499.00,
       images: [
         '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.30034b.jpg?v=1770377146',
         '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.308271.jpg?v=1770377146',
         '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.302cf7.jpg?v=1770377146',
       ],
       variants: [
-        { id: 6, size: 'S', color: 'Sand', price: 349900, stock: 20, sku: 'HM-HOD-SND-S' },
-        { id: 7, size: 'M', color: 'Sand', price: 349900, stock: 25, sku: 'HM-HOD-SND-M' },
-        { id: 8, size: 'L', color: 'Sand', price: 349900, stock: 18, sku: 'HM-HOD-SND-L' },
-        { id: 9, size: 'XL', color: 'Sand', price: 349900, stock: 12, sku: 'HM-HOD-SND-XL' },
-        { id: 10, size: 'XXL', color: 'Sand', price: 349900, stock: 8, sku: 'HM-HOD-SND-XXL' },
+        { id: 6, size: 'S', color: 'Sand', price: 3499.00, stock: 20, sku: 'HM-HOD-SND-S' },
+        { id: 7, size: 'M', color: 'Sand', price: 3499.00, stock: 25, sku: 'HM-HOD-SND-M' },
+        { id: 8, size: 'L', color: 'Sand', price: 3499.00, stock: 18, sku: 'HM-HOD-SND-L' },
+        { id: 9, size: 'XL', color: 'Sand', price: 3499.00, stock: 12, sku: 'HM-HOD-SND-XL' },
+        { id: 10, size: 'XXL', color: 'Sand', price: 3499.00, stock: 8, sku: 'HM-HOD-SND-XXL' },
       ],
       gstRate: 18,
       weightGrams: 650,
@@ -139,17 +155,17 @@
       slug: 'molecular-hydrogen-water-bottle',
       description: 'Generate hydrogen-rich water on the go. This portable bottle uses advanced PEM/SPE electrolysis technology to infuse your water with molecular hydrogen (H₂) in just 3 minutes. BPA-free, USB-C rechargeable, and built to last.',
       category: 'bottles',
-      basePrice: 699900,
+      basePrice: 6499.00,
       images: [
         '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113',
         '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_29477.jpg?v=1770378113',
         '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_2c1ed.jpg?v=1770378113',
       ],
       variants: [
-        { id: 11, size: '300ml', color: 'Silver', price: 699900, stock: 40, sku: 'HM-BTL-300-SLV' },
-        { id: 12, size: '500ml', color: 'Silver', price: 849900, stock: 35, sku: 'HM-BTL-500-SLV' },
-        { id: 13, size: '300ml', color: 'Black', price: 699900, stock: 30, sku: 'HM-BTL-300-BLK' },
-        { id: 14, size: '500ml', color: 'Black', price: 849900, stock: 25, sku: 'HM-BTL-500-BLK' },
+        { id: 11, size: '300ml', color: 'Silver', price: 6999.00, stock: 40, sku: 'HM-BTL-300-SLV' },
+        { id: 12, size: '500ml', color: 'Silver', price: 6499.00, stock: 35, sku: 'HM-BTL-500-SLV' },
+        { id: 13, size: '300ml', color: 'Black', price: 7499.00, stock: 30, sku: 'HM-BTL-300-BLK' },
+        { id: 14, size: '500ml', color: 'Black', price: 8499.00, stock: 25, sku: 'HM-BTL-500-BLK' },
       ],
       gstRate: 18,
       weightGrams: 380,
@@ -161,23 +177,100 @@
       slug: 'hydrogen-mist-spray',
       description: 'Refresh and rejuvenate your skin anywhere. This compact hydrogen mist spray delivers antioxidant-rich hydrogen water directly to your face and body. Perfect for post-workout recovery, skincare routines, or a quick pick-me-up throughout the day.',
       category: 'sprays',
-      basePrice: 249900,
+      basePrice: 2499.00,
       images: [
         '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138',
         '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.3351c7.jpg?v=1770378138',
         '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33de1d.jpg?v=1770378138',
       ],
       variants: [
-        { id: 15, size: '50ml', color: 'White', price: 249900, stock: 50, sku: 'HM-SPR-050-WHT' },
-        { id: 16, size: '100ml', color: 'White', price: 349900, stock: 40, sku: 'HM-SPR-100-WHT' },
-        { id: 17, size: '50ml', color: 'Rose Gold', price: 279900, stock: 35, sku: 'HM-SPR-050-RSG' },
-        { id: 18, size: '100ml', color: 'Rose Gold', price: 379900, stock: 30, sku: 'HM-SPR-100-RSG' },
+        { id: 15, size: '50ml', color: 'White', price: 2499.00, stock: 50, sku: 'HM-SPR-050-WHT' },
+        { id: 16, size: '100ml', color: 'White', price: 3499.00, stock: 40, sku: 'HM-SPR-100-WHT' },
+        { id: 17, size: '50ml', color: 'Rose Gold', price: 2799.00, stock: 35, sku: 'HM-SPR-050-RSG' },
+        { id: 18, size: '100ml', color: 'Rose Gold', price: 3799.00, stock: 30, sku: 'HM-SPR-100-RSG' },
       ],
       gstRate: 18,
       weightGrams: 150,
       createdAt: '2026-04-01',
     },
   ];
+
+  const PRODUCT_IMAGE_SOURCES = PRODUCTS.reduce((map, product) => {
+    const source = {
+      imageUrl: product.images?.[0] || '',
+      images: Array.isArray(product.images) ? [...product.images] : [],
+    };
+    map[product.slug] = source;
+    if (product.slug === 'molecular-hydrogen-water-bottle') {
+      map['h2-water-bottle'] = source;
+    }
+    if (product.slug === 'hydrogen-mist-spray') {
+      map['h2-mist-spray'] = source;
+    }
+    if (product.slug === 'zenith-hoodie-black') {
+      map['zenith-hoodie-black'] = source;
+    }
+    if (product.slug === 'zenith-hoodie-sand') {
+      map['zenith-hoodie-sand'] = source;
+    }
+    return map;
+  }, {});
+
+  const PRODUCT_GALLERY_VARIANT_PRICES = {
+    'molecular-hydrogen-water-bottle': [6999.00, 6499.00, 7499.00],
+    'h2-water-bottle': [6999.00, 6499.00, 7499.00],
+    'hydrogen-mist-spray': [2499.00, 3499.00, 2799.00],
+    'h2-mist-spray': [2499.00, 3499.00, 2799.00],
+  };
+
+  function resolveProductImageSource(product) {
+    const slug = String(product?.slug || '').trim().toLowerCase();
+    const name = String(product?.name || '').trim().toLowerCase();
+    const category = String(product?.category || '').trim().toLowerCase();
+    const source =
+      (slug && PRODUCT_IMAGE_SOURCES[slug]) ||
+      (name.includes('water bottle') ? PRODUCT_IMAGE_SOURCES['h2-water-bottle'] : null) ||
+      (name.includes('mist') || category === 'sprays' ? PRODUCT_IMAGE_SOURCES['h2-mist-spray'] : null) ||
+      (name.includes('hoodie') && name.includes('black') ? PRODUCT_IMAGE_SOURCES['zenith-hoodie-black'] : null) ||
+      (name.includes('hoodie') && name.includes('sand') ? PRODUCT_IMAGE_SOURCES['zenith-hoodie-sand'] : null) ||
+      null;
+    const fallbackImages = Array.isArray(source?.images) ? source.images.filter(Boolean) : [];
+    const productImages = Array.isArray(product?.images) ? product.images.filter(Boolean) : [];
+    const imageUrl = String(source?.imageUrl || product?.imageUrl || product?.image || product?.image_url || '').trim();
+
+    return {
+      imageUrl: imageUrl || fallbackImages[0] || '',
+      images: fallbackImages.length ? fallbackImages : (productImages.length ? productImages : (imageUrl ? [imageUrl] : [])),
+    };
+  }
+
+  function getGalleryVariantPrice(product, index) {
+    const slug = String(product?.slug || '').trim().toLowerCase();
+    const prices = PRODUCT_GALLERY_VARIANT_PRICES[slug];
+    if (!Array.isArray(prices) || !Number.isInteger(index) || index < 0) return null;
+    const value = Number(prices[index]);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  }
+
+  function getGalleryVariantForIndex(product, index) {
+    const targetPrice = getGalleryVariantPrice(product, index);
+    if (targetPrice == null) return null;
+
+    const variants = Array.isArray(product?.variants) ? product.variants : [];
+    return variants.find((variant) => Number(variant.price) === targetPrice) || variants[index] || null;
+  }
+
+  function getGalleryVariantFromThumb(product, index) {
+    const category = String(product?.category || '').trim().toLowerCase();
+    const variants = Array.isArray(product?.variants) ? product.variants : [];
+    if (!variants.length) return null;
+
+    if (category === 'hoodies') {
+      return variants[index % variants.length] || variants[0] || null;
+    }
+
+    return getGalleryVariantForIndex(product, index);
+  }
 
   // ─── Utility ───
   function formatPrice(paise) {
@@ -190,6 +283,11 @@
     const max = Math.max(...prices);
     if (min === max) return formatPrice(min);
     return `${formatPrice(min)} – ${formatPrice(max)}`;
+  }
+
+  function getDefaultPurchasableVariant(product) {
+    const variants = Array.isArray(product?.variants) ? product.variants : [];
+    return variants.find((variant) => Number(variant?.stock || 0) > 0) || variants[0] || null;
   }
 
   function escapeHtml(str) {
@@ -245,7 +343,7 @@
   }
 
   function getWishlistProductLabel(item) {
-    const product = PRODUCTS.find((entry) => Number(entry.id) === Number(item.productId));
+    const product = state.products.find((entry) => Number(entry.id) === Number(item.productId));
     return product?.name || item.productName || `Saved item #${item.productId || item.id || ''}`.trim();
   }
 
@@ -285,8 +383,83 @@
     };
   }
 
+  function syncCheckoutProfileDetails(payload) {
+    const fullName = String(payload?.recipientName || '').trim();
+    const mobile = String(payload?.phone || '').trim();
+
+    if (fullName || mobile) {
+      state.merchProfile = {
+        ...(state.merchProfile || {}),
+        ...(fullName ? { fullName } : {}),
+        ...(mobile ? { mobile } : {}),
+      };
+
+      if (state.currentUser) {
+        state.currentUser = {
+          ...state.currentUser,
+          ...(fullName ? { name: fullName } : {}),
+          ...(mobile ? { mobile } : {}),
+        };
+      }
+
+      renderAccountTrigger();
+    }
+  }
+
   function setBodyAuthLoading(isLoading) {
     document.body.classList.toggle('is-auth-loading', Boolean(isLoading));
+  }
+
+  function normalizeMerchProduct(product) {
+    const variants = Array.isArray(product?.variants) ? product.variants : [];
+    const imageSource = resolveProductImageSource(product);
+    const imageUrl = String(imageSource.imageUrl || '').trim();
+    const images = Array.isArray(imageSource.images) && imageSource.images.length
+      ? imageSource.images.filter(Boolean)
+      : imageUrl
+        ? [imageUrl]
+        : [];
+
+    return {
+      ...product,
+      id: Number(product?.id || 0),
+      name: String(product?.name || ''),
+      slug: String(product?.slug || ''),
+      description: String(product?.description || ''),
+      category: String(product?.category || ''),
+      basePrice: Number(product?.basePrice || product?.base_price || 0),
+      imageUrl,
+      image: imageUrl,
+      images,
+      variants,
+      price: Number(product?.price || product?.basePrice || product?.base_price || 0),
+      priceLabel: String(product?.priceLabel || ''),
+      createdAt: String(product?.createdAt || ''),
+    };
+  }
+
+  async function loadMerchProducts() {
+    try {
+      const result = await api('/api/merch/products');
+      state.products = Array.isArray(result) ? result.map(normalizeMerchProduct) : [];
+    } catch (error) {
+      state.products = [];
+      console.error('Unable to load merch products:', error);
+    }
+
+    renderProductGrid();
+
+    if (state.currentView === 'detail' && state.selectedProduct) {
+      const refreshed = state.products.find((product) => Number(product.id) === Number(state.selectedProduct.id));
+      if (refreshed) {
+        state.selectedProduct = refreshed;
+        state.selectedVariant = refreshed.variants?.find((variant) => Number(variant.id) === Number(state.selectedVariant?.id)) || refreshed.variants?.[0] || null;
+        if (state.selectedVariant) {
+          renderProductGallery(refreshed);
+          renderProductInfo(refreshed);
+        }
+      }
+    }
   }
 
   // ─── Elements ───
@@ -342,9 +515,10 @@
     renderCartBadge();
   }
 
-  function addToCart(variantId, quantity, product) {
+  function addToCart(variantId, quantity, product, options = {}) {
+    const { openDrawerAfterAdd = true } = options;
     const variant = product.variants.find(v => v.id === variantId);
-    if (!variant || variant.stock <= 0) return;
+    if (!variant || variant.stock <= 0) return false;
 
     const existing = state.cart.find(item => item.variantId === variantId);
     if (existing) {
@@ -358,12 +532,45 @@
         variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '),
         price: variant.price,
         quantity: Math.min(quantity, variant.stock),
-        image: product.images[0] || '',
+        image: product.images?.[0] || product.imageUrl || FALLBACK_PRODUCT_IMAGE,
         sku: variant.sku,
       });
     }
     saveCart();
-    openCart();
+    if (openDrawerAfterAdd) {
+      openCart();
+    }
+    return true;
+  }
+
+  async function buyNow(variantId, quantity, product) {
+    const added = addToCart(variantId, quantity, product, { openDrawerAfterAdd: false });
+    if (!added) {
+      showCheckoutNotice('Out of stock', 'This product is currently unavailable.', { variant: 'error' });
+      return;
+    }
+
+    await initiateCheckout();
+  }
+
+  async function handleProductCardAction(action, product) {
+    const variant = getDefaultPurchasableVariant(product);
+    if (!variant || Number(variant.stock || 0) <= 0) {
+      showCheckoutNotice('Out of stock', 'This product is currently unavailable.', { variant: 'error' });
+      return;
+    }
+
+    if (action === 'buy-now') {
+      const added = addToCart(variant.id, 1, product, { openDrawerAfterAdd: false });
+      if (!added) {
+        showCheckoutNotice('Out of stock', 'This product is currently unavailable.', { variant: 'error' });
+        return;
+      }
+      await initiateCheckout();
+      return;
+    }
+
+    addToCart(variant.id, 1, product);
   }
 
   function removeFromCart(variantId) {
@@ -646,6 +853,7 @@
           </div>
         </div>
         ${state.accountAddressFormMode ? renderAddressForm(editingAddress) : ''}
+        ${state.accountAddressMessage ? `<p class="account-success-message" role="alert">${escapeHtml(state.accountAddressMessage)}</p>` : ''}
         ${addresses.length ? `
           <div class="account-list">
             ${addresses.map((address) => `
@@ -875,6 +1083,7 @@
     if (action === 'add-address') {
       state.accountAddressFormMode = 'add';
       state.accountEditingAddressId = null;
+      state.accountAddressMessage = '';
       renderAccountDrawer();
       return;
     }
@@ -882,6 +1091,7 @@
     if (action === 'edit-address') {
       state.accountAddressFormMode = 'edit';
       state.accountEditingAddressId = button.dataset.addressId;
+      state.accountAddressMessage = '';
       renderAccountDrawer();
       return;
     }
@@ -889,6 +1099,7 @@
     if (action === 'cancel-address') {
       state.accountAddressFormMode = null;
       state.accountEditingAddressId = null;
+      state.accountAddressMessage = '';
       renderAccountDrawer();
       return;
     }
@@ -1098,26 +1309,16 @@
         body: JSON.stringify(payload),
       });
       state.merchAddresses = Array.isArray(result.addresses) ? result.addresses : state.merchAddresses;
-    } catch {
-      if (isEdit) {
-        state.merchAddresses = state.merchAddresses.map((address) =>
-          getAddressId(address) === String(addressId) ? { ...address, ...payload } : address
-        );
-      } else {
-        state.merchAddresses = [
-          { ...payload, localId: `local-${Date.now()}`, isDefault: payload.isDefault || state.merchAddresses.length === 0 },
-          ...state.merchAddresses,
-        ];
-      }
-      if (payload.isDefault) {
-        const nextDefaultId = isEdit ? addressId : getAddressId(state.merchAddresses[0]);
-        state.merchAddresses = state.merchAddresses.map((address) => ({
-          ...address,
-          isDefault: getAddressId(address) === String(nextDefaultId),
-        }));
-      }
+    } catch (error) {
+      const detail = String(error?.message || '').trim();
+      state.accountAddressMessage = detail
+        ? `Address was not saved. ${detail}`
+        : 'Address was not saved. Please try again.';
+      renderAccountDrawer();
+      return;
     }
 
+    state.accountAddressMessage = '';
     state.accountAddressFormMode = null;
     state.accountEditingAddressId = null;
     renderAccountDrawer();
@@ -1205,7 +1406,7 @@
 
   // ─── Render: Product Grid ───
   function getFilteredProducts() {
-    let products = [...PRODUCTS];
+    let products = [...state.products];
 
     // Category filter
     if (state.selectedCategory !== 'all') {
@@ -1249,10 +1450,13 @@
 
     els.productEmpty.hidden = true;
 
-    els.productGrid.innerHTML = products.map(product => `
+    els.productGrid.innerHTML = products.map(product => {
+      const defaultVariant = getDefaultPurchasableVariant(product);
+      const isSoldOut = !defaultVariant || Number(defaultVariant.stock || 0) <= 0;
+      return `
       <article class="product-card" data-product-id="${product.id}" tabindex="0" role="button" aria-label="View ${escapeHtml(product.name)}">
         <div class="product-card__image">
-          <img src="${product.images[0]}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.src='/booking/assets/service-hydrogen-session.jpg'" />
+          <img src="${escapeHtml(product.images?.[0] || product.imageUrl || FALLBACK_PRODUCT_IMAGE)}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
         </div>
         <div class="product-card__body">
           <p class="product-card__category">${escapeHtml(getCategoryLabel(product.category))}</p>
@@ -1260,9 +1464,18 @@
           <p class="product-card__price">
             ${product.variants.length > 1 ? '<span class="price-from">From </span>' : ''}${getPriceRange(product)}
           </p>
+          <div class="product-card__actions">
+            <button class="btn btn-secondary product-card__action" type="button" data-product-action="add-to-cart" data-product-id="${product.id}" ${isSoldOut ? 'disabled' : ''}>
+              ${isSoldOut ? 'Out of Stock' : 'Add to Cart'}
+            </button>
+            <button class="btn btn-outline product-card__action" type="button" data-product-action="buy-now" data-product-id="${product.id}" ${isSoldOut ? 'disabled' : ''}>
+              ${isSoldOut ? 'Unavailable' : 'Buy Now'}
+            </button>
+          </div>
         </div>
       </article>
-    `).join('');
+    `;
+    }).join('');
 
     // Bind click events
     els.productGrid.querySelectorAll('.product-card').forEach(card => {
@@ -1278,6 +1491,16 @@
         }
       });
     });
+
+    els.productGrid.querySelectorAll('[data-product-action]').forEach((button) => {
+      button.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const product = state.products.find((item) => Number(item.id) === Number(button.dataset.productId));
+        if (!product) return;
+        await handleProductCardAction(button.dataset.productAction, product);
+      });
+    });
   }
 
   function getCategoryLabel(category) {
@@ -1291,12 +1514,12 @@
 
   // ─── Render: Product Detail ───
   function showProductDetail(productId) {
-    const product = PRODUCTS.find(p => p.id === productId);
+    const product = state.products.find(p => Number(p.id) === Number(productId));
     if (!product) return;
 
     state.currentView = 'detail';
     state.selectedProduct = product;
-    state.selectedVariant = product.variants[0];
+    state.selectedVariant = getDefaultPurchasableVariant(product);
     state.quantity = 1;
 
     // Hide shop, show detail
@@ -1323,15 +1546,15 @@
   }
 
   function renderProductGallery(product) {
-    const mainImage = product.images[0] || '/booking/assets/service-hydrogen-session.jpg';
+    const mainImage = product.images?.[0] || product.imageUrl || FALLBACK_PRODUCT_IMAGE;
     els.productGallery.innerHTML = `
       <div class="gallery-main">
-        <img id="galleryMainImg" src="${mainImage}" alt="${escapeHtml(product.name)}" onerror="this.src='/booking/assets/service-hydrogen-session.jpg'" />
+        <img id="galleryMainImg" src="${escapeHtml(mainImage)}" alt="${escapeHtml(product.name)}" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
       </div>
-      ${product.images.length > 1 ? `
+      ${(product.images || []).length > 1 ? `
         <div class="gallery-thumbs">
-          ${product.images.map((img, i) => `
-            <button class="gallery-thumb ${i === 0 ? 'is-active' : ''}" data-index="${i}" type="button">
+          ${(product.images || []).map((img, i) => `
+            <button class="gallery-thumb ${i === 0 ? 'is-active' : ''}" data-index="${i}" type="button" aria-label="View image ${i + 1}${getGalleryVariantPrice(product, i) ? `, ${formatPrice(getGalleryVariantPrice(product, i))}` : ''}">
               <img src="${img}" alt="Image ${i + 1}" />
             </button>
           `).join('')}
@@ -1343,9 +1566,16 @@
     els.productGallery.querySelectorAll('.gallery-thumb').forEach(thumb => {
       thumb.addEventListener('click', () => {
         const idx = Number(thumb.dataset.index);
-        document.getElementById('galleryMainImg').src = product.images[idx];
+        document.getElementById('galleryMainImg').src = product.images?.[idx] || product.imageUrl || FALLBACK_PRODUCT_IMAGE;
         els.productGallery.querySelectorAll('.gallery-thumb').forEach(t => t.classList.remove('is-active'));
         thumb.classList.add('is-active');
+
+        const galleryVariant = getGalleryVariantFromThumb(product, idx);
+        if (galleryVariant) {
+          state.selectedVariant = galleryVariant;
+          state.quantity = 1;
+          renderProductInfo(product);
+        }
       });
     });
   }
@@ -1404,7 +1634,10 @@
         <button id="addToCartBtn" class="btn btn-primary btn-lg" type="button" ${variant.stock <= 0 ? 'disabled' : ''}>
           ${variant.stock <= 0 ? 'Out of Stock' : 'Add to Cart'}
         </button>
-        <button id="addToWishlistBtn" class="btn btn-outline" type="button">♡ Wishlist</button>
+        <button id="buyNowBtn" class="btn btn-secondary btn-lg" type="button" ${variant.stock <= 0 ? 'disabled' : ''}>
+          ${variant.stock <= 0 ? 'Unavailable' : 'Buy Now'}
+        </button>
+        <button id="addToWishlistBtn" class="btn btn-outline btn-lg" type="button">♡ Wishlist</button>
       </div>
 
       <p class="stock-status ${variant.stock > 0 ? 'in-stock' : 'out-of-stock'}">
@@ -1462,6 +1695,12 @@
         addToCart(state.selectedVariant.id, state.quantity, product);
       }
     });
+
+    document.getElementById('buyNowBtn')?.addEventListener('click', () => {
+      if (state.selectedVariant && state.selectedVariant.stock > 0) {
+        buyNow(state.selectedVariant.id, state.quantity, product);
+      }
+    });
   }
 
   // ─── Search ───
@@ -1483,7 +1722,7 @@
     }
 
     const q = query.toLowerCase();
-    const results = PRODUCTS.filter(p =>
+    const results = state.products.filter(p =>
       p.name.toLowerCase().includes(q) ||
       p.description.toLowerCase().includes(q) ||
       p.category.toLowerCase().includes(q)
@@ -1499,7 +1738,7 @@
         display: flex; gap: 12px; padding: 12px; cursor: pointer; border-bottom: 1px solid var(--border);
         border-radius: 8px; transition: background 0.2s;
       " onmouseover="this.style.background='rgba(0,0,0,0.03)'" onmouseout="this.style.background='transparent'">
-        <img src="${p.images[0]}" alt="" style="width: 48px; height: 48px; border-radius: 6px; object-fit: cover;" onerror="this.src='/booking/assets/service-hydrogen-session.jpg'" />
+        <img src="${escapeHtml(p.images?.[0] || p.imageUrl || FALLBACK_PRODUCT_IMAGE)}" alt="" style="width: 48px; height: 48px; border-radius: 6px; object-fit: cover;" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
         <div>
           <p style="font-weight: 600; font-size: 14px; margin: 0 0 2px;">${escapeHtml(p.name)}</p>
           <p style="font-size: 13px; color: var(--text-muted); margin: 0;">${getPriceRange(p)}</p>
@@ -1680,25 +1919,31 @@
     });
   }
 
-  function renderCheckoutAddressForm() {
+  function renderCheckoutAddressForm(options = {}) {
+    const profile = options.profile || getMerchantProfile();
+    const helpText = options.helpText || 'Fill in your name, address, phone, and pincode to continue checkout.';
+
     return `
       <form id="checkoutAddAddressForm" class="account-form account-form--address checkout-address-form">
+        <div class="merch-flow-notice">
+          <p>${escapeHtml(helpText)}</p>
+        </div>
         <div class="account-form__grid">
           <label class="account-field">
             <span>Label</span>
             <input name="label" type="text" placeholder="Home" />
           </label>
           <label class="account-field">
-            <span>Recipient</span>
-            <input name="recipientName" type="text" value="${escapeHtml(getMerchantProfile().fullName)}" autocomplete="name" required />
+            <span>Full Name</span>
+            <input name="recipientName" type="text" value="${escapeHtml(profile.fullName)}" autocomplete="name" placeholder="Enter full name" required />
           </label>
           <label class="account-field">
-            <span>Mobile Number</span>
-            <input name="phone" type="tel" value="${escapeHtml(getMerchantProfile().mobile)}" autocomplete="tel" required />
+            <span>Phone Number</span>
+            <input name="phone" type="tel" value="${escapeHtml(profile.mobile)}" autocomplete="tel" placeholder="Enter phone number" required />
           </label>
           <label class="account-field account-field--wide">
-            <span>Address Line 1</span>
-            <input name="line1" type="text" autocomplete="address-line1" required />
+            <span>Address</span>
+            <input name="line1" type="text" autocomplete="address-line1" placeholder="House number, street, area" required />
           </label>
           <label class="account-field account-field--wide">
             <span>Address Line 2</span>
@@ -1713,8 +1958,8 @@
             <input name="state" type="text" autocomplete="address-level1" />
           </label>
           <label class="account-field">
-            <span>Postal Code</span>
-            <input name="postalCode" type="text" autocomplete="postal-code" />
+            <span>Pincode</span>
+            <input name="postalCode" type="text" autocomplete="postal-code" placeholder="Enter pincode" required />
           </label>
           <label class="account-field">
             <span>Country</span>
@@ -1729,10 +1974,13 @@
     `;
   }
 
-  function openCheckoutAddAddressModal() {
+  function openCheckoutAddAddressModal(options = {}) {
     const modal = showMerchModal({
-      title: 'Add shipping address',
-      body: renderCheckoutAddressForm(),
+      title: options.title || 'Add shipping address',
+      body: renderCheckoutAddressForm({
+        profile: options.profile || getAuthenticatedCheckoutCustomer(),
+        helpText: options.helpText,
+      }),
       footer: `
         <button class="btn btn-outline account-action-btn" type="button" data-checkout-back>Back</button>
         <button class="btn btn-primary account-action-btn" type="submit" form="checkoutAddAddressForm">Save & Continue</button>
@@ -1760,6 +2008,7 @@
         body: JSON.stringify(payload),
       });
       state.merchAddresses = Array.isArray(result.addresses) ? result.addresses : state.merchAddresses;
+      syncCheckoutProfileDetails(payload);
     } catch (error) {
       showCheckoutNotice('Address not saved', error.message || 'Please check the address details and try again.', { variant: 'error' });
       return;
@@ -1915,11 +2164,10 @@
     if (state.currentUser) {
       const customer = getAuthenticatedCheckoutCustomer();
       if (!customer.name || !customer.email || !customer.phone) {
-        showCheckoutNotice(
-          'Profile incomplete',
-          'Your merchandise profile needs a full name, email, and mobile number before checkout.',
-          { variant: 'error' }
-        );
+        openCheckoutAddAddressModal({
+          title: 'Complete your details',
+          helpText: 'Add your name, phone, address, and pincode to continue checkout.',
+        });
         return;
       }
 
@@ -1991,6 +2239,7 @@
             saveCart();
             renderCart();
             closeCart();
+            await loadCustomerContext();
             showCheckoutNotice('Payment successful', `Order ${data.orderNumber} confirmed.`);
           } else {
             showCheckoutNotice('Payment verification failed', 'Please contact support with your payment details.', { variant: 'error' });
@@ -2020,6 +2269,10 @@
     try {
       const authResult = await api('/api/auth/me');
       state.currentUser = authResult.user || null;
+      if (state.currentUser && String(state.currentUser.role || '').toLowerCase() === 'admin') {
+    window.location.replace('/merch/admin/index.html');
+    return;
+}
     } catch {
       state.currentUser = null;
     }
@@ -2060,6 +2313,7 @@
     bindEvents();
     setBodyAuthLoading(true);
     renderAccountTrigger();
+    loadMerchProducts();
     loadCustomerContext();
   }
 

@@ -30,8 +30,13 @@
   }
 
   function money(paise) {
-    return '\u20B9' + Number(paise || 0).toLocaleString('en-IN');
-  }
+  const amount = Number(paise || 0) / 100;
+
+  return '\u20B9' + amount.toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
 
   function dateLabel(value) {
     const parsed = new Date(String(value || '').replace(' ', 'T'));
@@ -83,6 +88,7 @@
   }
 
   function getCouponTypeValue(coupon) {
+    if (Number(coupon?.influencerId || 0) > 0 || coupon?.influencerName || coupon?.influencer) return 'influencer';
     const explicitType = String(coupon?.couponType || coupon?.coupon_type || coupon?.ownerType || '').trim().toLowerCase();
     if (explicitType === 'public' || explicitType === 'general') return 'general';
     if (explicitType === 'private' || explicitType === 'influencer') return 'influencer';
@@ -110,6 +116,17 @@
 
   function getInfluencerById(id) {
     return state.influencers.find((item) => Number(item.id) === Number(id)) || null;
+  }
+
+  function getCouponInfluencerLabel(coupon) {
+    const influencer = coupon?.influencer || getInfluencerById(coupon?.influencerId);
+    return String(
+      coupon?.influencerName ||
+      influencer?.name ||
+      coupon?.owner ||
+      coupon?.recipientName ||
+      ''
+    ).trim();
   }
 
   function renderCouponChips(coupons = []) {
@@ -193,7 +210,7 @@
       primarySku: 'HM-HOD-BLK-S',
       categoryId: 1,
       category: 'Hoodies',
-      price: 349900,
+      price: 3499.00,
       priceLabel: '₹3,499',
       stock: 100,
       status: 'published',
@@ -212,7 +229,7 @@
       primarySku: 'HM-HOD-SND-S',
       categoryId: 1,
       category: 'Hoodies',
-      price: 349900,
+      price: 3499.00,
       priceLabel: '₹3,499',
       stock: 83,
       status: 'published',
@@ -231,8 +248,8 @@
       primarySku: 'HM-BTL-300-SLV',
       categoryId: 2,
       category: 'Hydrogen Water Bottles',
-      price: 699900,
-      priceLabel: '₹6,999 - ₹8,499',
+      price: 6499.00,
+      priceLabel: '₹6,499 - ₹8,499',
       stock: 130,
       status: 'published',
       createdAt: '2026-03-15',
@@ -250,7 +267,7 @@
       primarySku: 'HM-SPR-050-WHT',
       categoryId: 3,
       category: 'Hydrogen Mists / Sprays',
-      price: 249900,
+      price: 2499.00,
       priceLabel: '₹2,499 - ₹3,799',
       stock: 155,
       status: 'published',
@@ -277,7 +294,7 @@
     selectedProductIds: [],
     selectedProductId: 101,
     selectedOrderId: 50031,
-    selectedCustomerId: 1,
+    selectedCustomerId: null,
     selectedCouponId: 1,
     selectedInfluencerId: null,
     productsSearch: '',
@@ -285,12 +302,15 @@
     productsSort: 'newest',
     productsStatus: 'all',
     productsPage: 1,
+    ordersLoading: false,
     ordersSearch: '',
     ordersStatus: 'all',
     ordersPage: 1,
     customersSearch: '',
     couponsSearch: '',
     couponsLoading: false,
+    influencersLoading: false,
+    reportsLoading: false,
     influencersSearch: '',
     reportFrom: daysAgo(29),
     reportTo: toISODate(today),
@@ -322,6 +342,8 @@
     modalOpen: false,
     modalType: '',
     modalEntityId: null,
+    customersLoading: false,
+    reports: null,
   };
 
   const els = {
@@ -522,7 +544,7 @@
         <div class="admin-section__head">
           <div>
             <h2 class="admin-section__title">Overview</h2>
-            <p class="admin-section__desc">This shell is wired to the live merch catalog data only. Orders, customers, coupons, and influencer data remain blank until backend APIs are connected.</p>
+            <p class="admin-section__desc">Live merch orders, customers, coupons, and influencer data are synced from the merch API.</p>
           </div>
         </div>
         <div class="admin-section__body">
@@ -551,7 +573,7 @@
             <article class="admin-card">
               <div class="admin-card__head">
                 <h3 class="admin-card__title">Wiring Status</h3>
-                <p class="admin-card__sub">What is connected now versus what still needs APIs</p>
+                <p class="admin-card__sub">What is connected right now</p>
               </div>
               <div class="admin-card__body admin-list">
                 <div class="admin-list__item">
@@ -560,15 +582,15 @@
                 </div>
                 <div class="admin-list__item">
                   <p class="admin-list__item-title">Orders</p>
-                  <p class="admin-list__item-sub">Waiting for the real order management API.</p>
+                  <p class="admin-list__item-sub">Synced from the merch order table and refreshed on admin load.</p>
                 </div>
                 <div class="admin-list__item">
                   <p class="admin-list__item-title">Customers</p>
-                  <p class="admin-list__item-sub">Waiting for customer profile API data.</p>
+                  <p class="admin-list__item-sub">Built from live merch profiles and completed orders.</p>
                 </div>
                 <div class="admin-list__item">
                   <p class="admin-list__item-title">Coupons and Influencers</p>
-                  <p class="admin-list__item-sub">UI is ready, but the backend source is not wired yet.</p>
+                  <p class="admin-list__item-sub">Loaded from the shared coupon store and merch influencer table.</p>
                 </div>
               </div>
             </article>
@@ -1026,6 +1048,23 @@
   }
 
   function renderOrders() {
+    if (state.ordersLoading) {
+      els.ordersView.innerHTML = `
+        <section class="admin-section">
+          <div class="admin-section__head">
+            <div>
+              <h2 class="admin-section__title">Orders</h2>
+              <p class="admin-section__desc">Loading live merch orders from the database...</p>
+            </div>
+          </div>
+          <div class="admin-section__body">
+            ${renderEmptyState('Loading orders', 'Pulling the latest merch checkout activity into the dashboard.')}
+          </div>
+        </section>
+      `;
+      return;
+    }
+
     if (!state.orders.length) {
       els.ordersView.innerHTML = `
         <section class="admin-section">
@@ -1155,7 +1194,18 @@
     if (!customer) {
       return `<p class="admin-table__muted">Select a customer to view profile details.</p>`;
     }
-    const customerOrders = state.orders.filter((order) => order.email === customer.email);
+    const addressList = Array.isArray(customer.addresses) && customer.addresses.length
+      ? customer.addresses.map((address) => `
+          <div style="margin-bottom:0.75rem;">
+            <strong>${escapeHtml(address.label || address.source || 'Address')}</strong><br>
+            <span class="admin-table__muted">${escapeHtml(address.text)}</span>
+          </div>
+        `).join('')
+      : '<p class="admin-table__muted" style="margin:0;">No saved addresses yet.</p>';
+    const registrationDate = customer.registrationDate || customer.registeredAt || '';
+    const lastOrderLabel = customer.lastOrder?.orderNumber
+      ? `${customer.lastOrder.orderNumber}${customer.lastOrder.createdAt ? ` - ${dateLabel(customer.lastOrder.createdAt)}` : ''}`
+      : customer.lastOrderLabel || 'No orders yet';
     return `
       <div class="admin-list">
         <div class="admin-list__item">
@@ -1168,37 +1218,54 @@
           </div>
         </div>
         <div class="admin-list__item">
-          <p class="admin-list__item-title">Personal Details</p>
-          <p class="admin-list__item-sub">${escapeHtml(customer.phone)}<br>Registered: ${escapeHtml(dateLabel(customer.registeredAt))}</p>
+          <p class="admin-list__item-title">Merchandise Orders</p>
+          <p class="admin-list__item-sub">${formatCount(customer.merchandiseOrders)} order(s)</p>
+        </div>
+        <div class="admin-list__item">
+          <p class="admin-list__item-title">Last Order</p>
+          <p class="admin-list__item-sub">${escapeHtml(lastOrderLabel)}</p>
         </div>
         <div class="admin-list__item">
           <p class="admin-list__item-title">Addresses</p>
-          <p class="admin-list__item-sub">${escapeHtml(customer.addresses)} saved address(es)</p>
+          <div class="admin-list__item-sub">${addressList}</div>
         </div>
         <div class="admin-list__item">
-          <p class="admin-list__item-title">Order History</p>
-          <p class="admin-list__item-sub">${escapeHtml(customerOrders.length)} order(s) placed</p>
-        </div>
-        <div class="admin-list__item">
-          <p class="admin-list__item-title">Wishlist and Coupons</p>
-          <p class="admin-list__item-sub">Wishlist items: ${escapeHtml(customer.wishlist)}<br>Coupons used: ${escapeHtml(customer.couponsUsed)}</p>
+          <p class="admin-list__item-title">Registration Date</p>
+          <p class="admin-list__item-sub">${escapeHtml(dateLabel(registrationDate))}</p>
         </div>
       </div>
     `;
   }
 
   function renderCustomers() {
+    if (state.customersLoading && !state.customers.length) {
+      els.customersView.innerHTML = `
+        <section class="admin-section">
+          <div class="admin-section__head">
+            <div>
+              <h2 class="admin-section__title">Customers</h2>
+              <p class="admin-section__desc">Loading live merchandise customer data...</p>
+            </div>
+          </div>
+          <div class="admin-section__body">
+            ${renderEmptyState('Loading customers', 'Pulling live merch profiles, orders, and addresses from the store API.')}
+          </div>
+        </section>
+      `;
+      return;
+    }
+
     if (!state.customers.length) {
       els.customersView.innerHTML = `
         <section class="admin-section">
           <div class="admin-section__head">
             <div>
               <h2 class="admin-section__title">Customers</h2>
-              <p class="admin-section__desc">No live customer data is connected yet.</p>
+              <p class="admin-section__desc">No live merch customer data is connected yet.</p>
             </div>
           </div>
           <div class="admin-section__body">
-            ${renderEmptyState('No customer profiles', 'Connect the customer API to view profiles, addresses, order history, and loyalty details.')}
+            ${renderEmptyState('No customer profiles', 'Connect the customer API to view profiles, orders, addresses, and loyalty details.')}
           </div>
         </section>
       `;
@@ -1208,11 +1275,18 @@
     const query = state.customersSearch.trim().toLowerCase();
     const filtered = state.customers.filter((customer) =>
       !query ||
-      [customer.name, customer.email, customer.phone]
+      [
+        customer.name,
+        customer.email,
+        customer.phone,
+        customer.addressSummary,
+        customer.lastOrderLabel,
+        String(customer.merchandiseOrders || ''),
+      ]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(query))
     );
-    const selectedCustomer = state.customers.find((customer) => Number(customer.id) === Number(state.selectedCustomerId)) || filtered[0] || state.customers[0];
+    const selectedCustomer = state.customers.find((customer) => String(customer.id) === String(state.selectedCustomerId)) || filtered[0] || state.customers[0];
     if (selectedCustomer) state.selectedCustomerId = selectedCustomer.id;
 
     els.customersView.innerHTML = `
@@ -1226,7 +1300,7 @@
         <div class="admin-section__body">
           <div class="admin-toolbar">
             <div class="admin-toolbar__group" style="flex:1 1 420px;">
-              <input class="admin-input" data-input="customersSearch" value="${escapeHtml(state.customersSearch)}" placeholder="Search by name, email, or phone" />
+              <input class="admin-input" data-input="customersSearch" value="${escapeHtml(state.customersSearch)}" placeholder="Search by name, email, phone, address, or last order" />
             </div>
           </div>
 
@@ -1241,20 +1315,24 @@
                   <thead>
                     <tr>
                       <th>Name</th>
+                      <th>Email</th>
                       <th>Phone</th>
-                      <th>Registered</th>
-                      <th>Orders</th>
-                      <th>Spend</th>
+                      <th>Merchandise Orders</th>
+                      <th>Last Order</th>
+                      <th>Addresses</th>
+                      <th>Registration Date</th>
                     </tr>
                   </thead>
                   <tbody>
                     ${filtered.map((customer) => `
                       <tr data-action="select-customer" data-id="${customer.id}" style="cursor:pointer;">
-                        <td><strong>${escapeHtml(customer.name)}</strong><br><span class="admin-table__muted">${escapeHtml(customer.email)}</span></td>
+                        <td><strong>${escapeHtml(customer.name)}</strong></td>
+                        <td>${escapeHtml(customer.email)}</td>
                         <td>${escapeHtml(customer.phone)}</td>
-                        <td>${escapeHtml(dateLabel(customer.registeredAt))}</td>
-                        <td>${escapeHtml(customer.totalOrders)}</td>
-                        <td><strong>${escapeHtml(money(customer.totalSpend))}</strong></td>
+                        <td>${escapeHtml(formatCount(customer.merchandiseOrders))}</td>
+                        <td>${escapeHtml(customer.lastOrder?.orderNumber ? `${customer.lastOrder.orderNumber}${customer.lastOrder.createdAt ? ` - ${dateLabel(customer.lastOrder.createdAt)}` : ''}` : customer.lastOrderLabel || 'No orders yet')}</td>
+                        <td>${escapeHtml(customer.addressSummary || 'No saved addresses')}</td>
+                        <td>${escapeHtml(dateLabel(customer.registrationDate || customer.registeredAt))}</td>
                       </tr>
                     `).join('')}
                   </tbody>
@@ -1265,7 +1343,7 @@
               <article class="admin-card">
                 <div class="admin-card__head">
                   <h3 class="admin-card__title">Customer Profile</h3>
-                  <p class="admin-card__sub">Orders, wishlist, and coupons used</p>
+                  <p class="admin-card__sub">Merchandise orders, addresses, and first interaction date</p>
                 </div>
                 <div class="admin-card__body">
                   ${renderCustomerDetail(selectedCustomer)}
@@ -1294,6 +1372,8 @@
         coupon.description,
         coupon.festivalName,
         coupon.owner,
+        coupon.influencerName,
+        coupon.influencerHandle,
         coupon.recipientEmail,
         coupon.recipientName,
         coupon.appliesTo,
@@ -1387,7 +1467,7 @@
                       ${filtered.map((coupon) => {
                         const typeValue = getCouponTypeValue(coupon);
                         const typeLabel = typeValue === 'influencer' ? 'Influencer Coupon' : 'General Coupon';
-                        const ownerLabel = String(coupon.owner || (typeValue === 'influencer' ? 'Influencer' : 'General')).trim();
+                        const ownerLabel = getCouponInfluencerLabel(coupon) || (typeValue === 'influencer' ? 'Influencer' : 'General');
                         const expiryValue = coupon.validTill || coupon.expiresAt || coupon.expiry || '';
                         const statusValue = Number(coupon.active ?? coupon.isActive ?? 0) === 1 ? 'active' : 'inactive';
                         const usageCount = Number(coupon.totalRedemptions || coupon.usageCount || 0);
@@ -1406,6 +1486,7 @@
                               <div class="admin-actions">
                                 <button class="admin-action-link" type="button" data-action="select-coupon" data-id="${coupon.id}">View</button>
                                 <button class="admin-action-link" type="button" data-action="edit-coupon" data-id="${coupon.id}">Edit</button>
+                                <button class="admin-action-link" type="button" data-action="assign-coupon-owner" data-id="${coupon.id}">Assign Influencer</button>
                                 <button class="admin-action-link" type="button" data-action="toggle-coupon" data-id="${coupon.id}">${statusValue === 'active' ? 'Disable' : 'Enable'}</button>
                                 <button class="admin-action-link" type="button" data-action="copy-coupon" data-id="${coupon.id}">Copy Coupon</button>
                                 <button class="admin-action-link" type="button" data-action="delete-coupon" data-id="${coupon.id}">Delete</button>
@@ -1454,7 +1535,7 @@
                     <div class="admin-list__item">
                       <p class="admin-list__item-title">Owner</p>
                       <p class="admin-list__item-sub">
-                        ${escapeHtml(selectedCoupon.owner || (getCouponTypeValue(selectedCoupon) === 'influencer' ? 'Influencer' : 'General'))}
+                        ${escapeHtml(getCouponInfluencerLabel(selectedCoupon) || 'General')}
                       </p>
                     </div>
                   </div>
@@ -1695,7 +1776,24 @@
   }
 
   function renderReports() {
-    if (!state.orders.length && !state.products.length) {
+    if (state.reportsLoading && !state.reports) {
+      els.reportsView.innerHTML = `
+        <section class="admin-section">
+          <div class="admin-section__head">
+            <div>
+              <h2 class="admin-section__title">Reports</h2>
+              <p class="admin-section__desc">Loading report data...</p>
+            </div>
+          </div>
+          <div class="admin-section__body">
+            ${renderEmptyState('Loading reports', 'Calculating merch orders, revenue, coupon usage, and commission.')}
+          </div>
+        </section>
+      `;
+      return;
+    }
+
+    if (!state.orders.length && !state.products.length && !state.reports) {
       els.reportsView.innerHTML = `
         <section class="admin-section">
           <div class="admin-section__head">
@@ -1721,6 +1819,9 @@
       { title: 'Influencer Report', meta: 'Campaign performance and revenue contribution' },
       { title: 'Revenue Report', meta: 'Payment capture and return impact' },
     ];
+    const summary = state.reports?.summary || {};
+    const influencerReports = Array.isArray(state.reports?.influencerReports) ? state.reports.influencerReports : [];
+    const statusBreakdown = state.reports?.statusBreakdown || {};
 
     els.reportsView.innerHTML = `
       <section class="admin-section">
@@ -1761,14 +1862,14 @@
             <section class="admin-card">
               <div class="admin-card__head">
                 <h3 class="admin-card__title">Revenue Report</h3>
-                <p class="admin-card__sub">Date-filtered summary placeholder</p>
+                <p class="admin-card__sub">Date-filtered merch summary</p>
               </div>
               <div class="admin-card__body admin-mini-chart">
                 ${renderMiniChart([
-                  { label: 'Orders', value: 72, display: '72' },
-                  { label: 'Revenue', value: 90, display: money(4280900) },
-                  { label: 'Refunds', value: 14, display: money(199900) },
-                  { label: 'Net', value: 84, display: money(4081000) },
+                  { label: 'Orders', value: Math.min(100, Number(summary.orderCount || 0)), display: formatCount(summary.orderCount) },
+                  { label: 'Revenue', value: Math.min(100, Math.round(Number(summary.revenue || 0) / 100000)), display: money(summary.revenue) },
+                  { label: 'Coupon Usage', value: Math.min(100, Number(influencerReports.reduce((sum, row) => sum + Number(row.couponUsage || 0), 0))), display: formatCount(influencerReports.reduce((sum, row) => sum + Number(row.couponUsage || 0), 0)) },
+                  { label: 'Commission', value: Math.min(100, Math.round(influencerReports.reduce((sum, row) => sum + Number(row.commission || 0), 0) / 10000)), display: money(influencerReports.reduce((sum, row) => sum + Number(row.commission || 0), 0)) },
                 ])}
               </div>
             </section>
@@ -1781,20 +1882,51 @@
               <div class="admin-card__body" style="display:grid;place-items:center;gap:14px;">
                 <div class="admin-chart-ring">
                   <span>
-                    <strong>${state.orders.length}</strong>
+                    <strong>${formatCount(summary.orderCount || state.orders.length)}</strong>
                     <small>Orders</small>
                   </span>
                 </div>
                 <div class="admin-chip-row">
-                  <span class="admin-chip">Pending 18%</span>
-                  <span class="admin-chip">Processing 28%</span>
-                  <span class="admin-chip">Shipped 22%</span>
-                  <span class="admin-chip">Delivered 24%</span>
-                  <span class="admin-chip">Cancelled 8%</span>
+                  ${Object.entries(statusBreakdown).map(([status, count]) => `<span class="admin-chip">${escapeHtml(getStatusLabel(status))} ${formatCount(count)}</span>`).join('') || '<span class="admin-chip">No status data</span>'}
                 </div>
               </div>
             </section>
           </div>
+
+          <section class="admin-card" style="margin-top:18px;">
+            <div class="admin-card__head">
+              <h3 class="admin-card__title">Influencer Report</h3>
+              <p class="admin-card__sub">Orders, revenue, coupon usage, and commission from stored influencer attribution</p>
+            </div>
+            <div class="admin-card__body admin-table-wrap">
+              ${influencerReports.length ? `
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Influencer</th>
+                      <th>Coupons</th>
+                      <th>Orders</th>
+                      <th>Revenue</th>
+                      <th>Coupon Usage</th>
+                      <th>Commission</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${influencerReports.map((row) => `
+                      <tr>
+                        <td><strong>${escapeHtml(row.name)}</strong><br><span class="admin-table__muted">${escapeHtml(row.handle || '')}</span></td>
+                        <td><div class="admin-chip-row">${renderCouponChips(row.coupons)}</div></td>
+                        <td>${formatCount(row.orders)}</td>
+                        <td><strong>${money(row.revenue)}</strong></td>
+                        <td>${formatCount(row.couponUsage)}</td>
+                        <td>${money(row.commission)}<br><span class="admin-table__muted">${escapeHtml(row.commissionRate)}%</span></td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              ` : renderEmptyState('No influencer attribution yet', 'Assign coupons to influencers and capture merch orders to populate this report.')}
+            </div>
+          </section>
         </div>
       </section>
     `;
@@ -1961,8 +2093,13 @@
               <option value="influencer" ${getCouponTypeValue(entity) === 'influencer' ? 'selected' : ''}>Influencer Coupon</option>
             </select>
           </label>
-          <label class="admin-field"><span>Coupon Owner</span><input class="admin-input" name="recipientName" value="${escapeHtml(entity?.recipientName || entity?.owner || '')}" placeholder="General or influencer name" /></label>
-          <label class="admin-field"><span>Owner Email</span><input class="admin-input" name="recipientEmail" type="email" value="${escapeHtml(entity?.recipientEmail || '')}" placeholder="Optional for assigned coupons" /></label>
+          <label class="admin-field"><span>Assigned Influencer</span>
+            <select class="admin-select" name="influencerId">
+              <option value="">Unassigned</option>
+              ${state.influencers.map((influencer) => `<option value="${influencer.id}" ${Number(entity?.influencerId || 0) === Number(influencer.id) ? 'selected' : ''}>${escapeHtml(influencer.name)}${influencer.handle ? ` (${escapeHtml(influencer.handle)})` : ''}</option>`).join('')}
+            </select>
+          </label>
+          <label class="admin-field"><span>Owner Email</span><input class="admin-input" name="recipientEmail" type="email" value="${escapeHtml(entity?.recipientEmail || '')}" placeholder="Only for private customer coupons" /></label>
           <label class="admin-field"><span>Applies To</span>
             <select class="admin-select" name="appliesTo">
               <option value="merch" ${String(entity?.appliesTo || 'merch') === 'merch' ? 'selected' : ''}>Merch</option>
@@ -1980,11 +2117,9 @@
           <label class="admin-field"><span>Social Handle</span><input class="admin-input" name="handle" value="${escapeHtml(entity?.handle || '')}" required /></label>
           <label class="admin-field"><span>Email</span><input class="admin-input" name="email" value="${escapeHtml(entity?.email || '')}" /></label>
           <label class="admin-field"><span>Phone</span><input class="admin-input" name="phone" value="${escapeHtml(entity?.phone || '')}" /></label>
-          <label class="admin-field admin-field--wide"><span>Assigned Coupons</span><input class="admin-input" name="coupons" value="${escapeHtml((entity?.coupons || []).join(', '))}" placeholder="CODE1, CODE2" /></label>
-          <label class="admin-field"><span>Total Orders</span><input class="admin-input" name="totalOrders" type="number" min="0" value="${escapeHtml(entity?.totalOrders || 0)}" /></label>
-          <label class="admin-field"><span>Revenue Generated</span><input class="admin-input" name="revenue" type="number" min="0" value="${escapeHtml(entity?.revenue || 0)}" /></label>
-          <label class="admin-field"><span>Coupon Usage</span><input class="admin-input" name="couponUsage" type="number" min="0" value="${escapeHtml(entity?.couponUsage || 0)}" /></label>
-          <label class="admin-field"><span>Active Campaigns</span><input class="admin-input" name="activeCampaigns" type="number" min="0" value="${escapeHtml(entity?.activeCampaigns || 0)}" /></label>
+          <label class="admin-field"><span>Commission %</span><input class="admin-input" name="commissionRate" type="number" min="0" max="100" step="0.01" value="${escapeHtml(entity?.commissionRate ?? 10)}" /></label>
+          <label class="admin-field admin-field--wide"><span>Assigned Coupons</span><input class="admin-input" value="${escapeHtml((entity?.coupons || []).join(', '))}" readonly /></label>
+          <label class="admin-field admin-field--wide"><span>Notes</span><textarea class="admin-textarea" name="notes">${escapeHtml(entity?.notes || '')}</textarea></label>
           <label class="admin-check"><input type="checkbox" name="active" ${entity?.active !== false ? 'checked' : ''} /><span>Active influencer</span></label>
         `,
       },
@@ -2054,7 +2189,7 @@
     if (form) form.id = 'influencerCouponForm';
   }
 
-  function updateInfluencerCouponsFromForm(form) {
+  async function updateInfluencerCouponsFromForm(form) {
     const influencerId = Number(form.dataset.influencerId || 0);
     const influencer = getInfluencerById(influencerId);
     if (!influencer) {
@@ -2064,26 +2199,17 @@
 
     const coupons = normalizeCouponCodes(form.querySelector('[name="coupons"]')?.value);
     const notes = String(form.querySelector('[name="notes"]')?.value || '').trim();
-    influencer.coupons = coupons;
-    influencer.notes = notes;
-
-    const couponSet = new Set(coupons);
-    state.coupons = state.coupons.map((coupon) => {
-      const code = String(coupon.code || '').trim().toUpperCase();
-      if (!couponSet.has(code)) return coupon;
-      return {
-        ...coupon,
-        couponType: 'private',
-        ownerType: 'influencer',
-        owner: influencer.name,
-        recipientName: influencer.name,
-        recipientEmail: influencer.email || coupon.recipientEmail || '',
-      };
+    await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencerId)}/coupons`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ couponCodes: coupons, notes }),
     });
 
     toast('Coupons assigned', `${influencer.name} now has ${coupons.length} coupon${coupons.length === 1 ? '' : 's'} assigned.`, 'success');
     closeModal();
-    renderAll();
+    await loadInfluencerData();
+    await loadCouponData();
+    await loadReportData();
   }
 
   function updateProductFromForm(form, existing = null) {
@@ -2125,9 +2251,10 @@
 
   function updateCouponFromForm(form, existing = null) {
     const fd = new FormData(form);
-    const couponType = String(fd.get('couponType') || existing?.couponType || existing?.ownerType || 'general').trim().toLowerCase() === 'influencer'
-      ? 'private'
-      : 'public';
+    const influencerId = Number(fd.get('influencerId') || 0);
+    const recipientEmail = String(fd.get('recipientEmail') || '').trim().toLowerCase();
+    const couponType = recipientEmail ? 'private' : 'public';
+    const influencer = getInfluencerById(influencerId);
     return {
       id: existing?.id || Date.now(),
       code: String(fd.get('code') || '').trim().toUpperCase(),
@@ -2138,11 +2265,12 @@
       expiry: String(fd.get('expiry') || toISODate(today)),
       status: fd.get('status') === 'on' ? 'active' : 'inactive',
       couponType,
-      ownerType: couponType === 'private' ? 'influencer' : 'general',
+      ownerType: influencerId ? 'influencer' : 'general',
       appliesTo: String(fd.get('appliesTo') || 'merch').trim().toLowerCase() === 'all' ? 'all' : 'merch',
-      owner: String(fd.get('recipientName') || '').trim() || (couponType === 'private' ? 'Influencer' : 'General'),
-      recipientName: String(fd.get('recipientName') || '').trim(),
-      recipientEmail: String(fd.get('recipientEmail') || '').trim().toLowerCase(),
+      owner: influencer?.name || (influencerId ? 'Influencer' : 'General'),
+      recipientName: influencer?.name || '',
+      recipientEmail,
+      influencerId,
       festivalName: String(fd.get('festivalName') || '').trim(),
     };
   }
@@ -2155,14 +2283,13 @@
       handle: String(fd.get('handle') || '').trim(),
       email: String(fd.get('email') || '').trim(),
       phone: String(fd.get('phone') || '').trim(),
-      coupons: String(fd.get('coupons') || '')
-        .split(',')
-        .map((value) => value.trim().toUpperCase())
-        .filter(Boolean),
-      totalOrders: Number(fd.get('totalOrders') || 0),
-      revenue: Number(fd.get('revenue') || 0),
-      couponUsage: Number(fd.get('couponUsage') || 0),
-      activeCampaigns: Number(fd.get('activeCampaigns') || 0),
+      notes: String(fd.get('notes') || '').trim(),
+      commissionRate: Number(fd.get('commissionRate') || 10),
+      coupons: existing?.coupons || [],
+      totalOrders: Number(existing?.totalOrders || 0),
+      revenue: Number(existing?.revenue || 0),
+      couponUsage: Number(existing?.couponUsage || 0),
+      activeCampaigns: Number(existing?.activeCampaigns || 0),
       active: fd.get('active') === 'on',
     };
   }
@@ -2190,7 +2317,7 @@
     state.couponsLoading = true;
     renderCoupons();
     try {
-      const result = await apiRequest('/api/admin/coupons');
+      const result = await apiRequest('/api/admin/coupons?portal=merch');
       state.coupons = Array.isArray(result.coupons) ? result.coupons : [];
     } catch (error) {
       state.coupons = [];
@@ -2198,6 +2325,74 @@
     } finally {
       state.couponsLoading = false;
       renderCoupons();
+    }
+  }
+
+  async function loadOrderData() {
+    state.ordersLoading = true;
+    renderOrders();
+    try {
+      const result = await apiRequest('/api/merch/admin/orders');
+      state.orders = Array.isArray(result.orders) ? result.orders : [];
+      if (!state.selectedOrderId && state.orders[0]) {
+        state.selectedOrderId = state.orders[0].id;
+      }
+    } catch (error) {
+      state.orders = [];
+      toast('Orders unavailable', error.message || 'Unable to load merch orders from the admin API.', 'warning');
+    } finally {
+      state.ordersLoading = false;
+      renderOrders();
+      renderDashboard();
+    }
+  }
+
+  async function loadCustomerData() {
+    state.customersLoading = true;
+    renderCustomers();
+    try {
+      const result = await apiRequest('/api/merch/admin/customers');
+      state.customers = Array.isArray(result.customers) ? result.customers : [];
+    } catch (error) {
+      state.customers = [];
+      toast('Customers unavailable', error.message || 'Unable to load merch customer data from the admin API.', 'warning');
+    } finally {
+      state.customersLoading = false;
+      renderCustomers();
+    }
+  }
+
+  async function loadInfluencerData() {
+    state.influencersLoading = true;
+    renderInfluencers();
+    try {
+      const result = await apiRequest('/api/merch/admin/influencers');
+      state.influencers = Array.isArray(result.influencers) ? result.influencers : [];
+      if (!state.selectedInfluencerId && state.influencers[0]) {
+        state.selectedInfluencerId = state.influencers[0].id;
+      }
+    } catch (error) {
+      state.influencers = [];
+      toast('Influencers unavailable', error.message || 'Unable to load influencer data from the admin API.', 'warning');
+    } finally {
+      state.influencersLoading = false;
+      renderInfluencers();
+    }
+  }
+
+  async function loadReportData() {
+    state.reportsLoading = true;
+    try {
+      const params = new URLSearchParams();
+      if (state.reportFrom) params.set('startDate', state.reportFrom);
+      if (state.reportTo) params.set('endDate', state.reportTo);
+      state.reports = await apiRequest(`/api/merch/admin/reports?${params.toString()}`);
+    } catch (error) {
+      state.reports = null;
+      toast('Reports unavailable', error.message || 'Unable to load merch reports from the admin API.', 'warning');
+    } finally {
+      state.reportsLoading = false;
+      renderReports();
     }
   }
 
@@ -2280,12 +2475,25 @@
     renderNotifications();
   }
 
+  async function updateOrderOnServer(order, payload) {
+    const response = await apiRequest(`/api/merch/admin/orders/${encodeURIComponent(order.id)}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    await loadOrderData();
+    await loadCustomerData();
+    await loadReportData();
+    return response;
+  }
+
   async function handleAction(action, target) {
-    const id = Number(target?.dataset?.id || target?.closest?.('[data-id]')?.dataset?.id || 0);
+    const rawId = String(target?.dataset?.id || target?.closest?.('[data-id]')?.dataset?.id || '');
+    const id = Number(rawId || 0);
     const product = state.products.find((item) => Number(item.id) === id);
     const category = state.categories.find((item) => Number(item.id) === id);
     const order = state.orders.find((item) => Number(item.id) === id);
-    const customer = state.customers.find((item) => Number(item.id) === id);
+    const customer = state.customers.find((item) => String(item.id) === rawId);
     const coupon = state.coupons.find((item) => Number(item.id) === id);
     const influencer = state.influencers.find((item) => Number(item.id) === id);
 
@@ -2303,12 +2511,28 @@
         closeModal();
         return;
       case 'logout':
-        closeModal();
-        toast('Logging out', 'Redirecting to merch login.', 'warning');
-        window.setTimeout(() => {
-          window.location.href = '/merch/auth.html?returnTo=%2Fmerch%2F';
-        }, 500);
-        return;
+  closeModal();
+
+  try {
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      credentials: 'include'
+    });
+  } catch (err) {
+    console.error(err);
+  }
+
+  try {
+    localStorage.removeItem('booking_portal_auth_token');
+  } catch {}
+
+  toast('Logged out', 'Redirecting to login...', 'success');
+
+  window.setTimeout(() => {
+    window.location.replace('/merch/auth.html');
+  }, 500);
+
+  return;
       case 'change-password':
         toast('Placeholder', 'Password reset flow can be wired to the auth API later.', 'default');
         return;
@@ -2447,26 +2671,48 @@
       case 'ship-order':
       case 'deliver-order':
         if (order) {
-          if (action === 'advance-order') advanceOrderStatus(order, 'next');
-          if (action === 'ship-order') {
-            order.status = 'shipped';
-            order.timeline.unshift({ label: 'Shipped', note: 'Manually advanced from admin dashboard', time: `${toISODate(today)}T${pad(today.getHours())}:${pad(today.getMinutes())}:00` });
-            toast('Order shipped', `${order.orderNumber} marked as shipped.`, 'success');
-            renderAll();
+          const flow = ['pending', 'processing', 'shipped', 'delivered'];
+          const currentIndex = flow.indexOf(String(order.status || 'pending'));
+          let nextStatus = order.status;
+          if (action === 'advance-order') {
+            nextStatus = flow[Math.min(flow.length - 1, Math.max(0, currentIndex + 1))];
           }
-          if (action === 'deliver-order') {
-            order.status = 'delivered';
-            order.timeline.unshift({ label: 'Delivered', note: 'Manually marked as delivered', time: `${toISODate(today)}T${pad(today.getHours())}:${pad(today.getMinutes())}:00` });
-            toast('Order delivered', `${order.orderNumber} marked as delivered.`, 'success');
-            renderAll();
+          if (action === 'ship-order') nextStatus = 'shipped';
+          if (action === 'deliver-order') nextStatus = 'delivered';
+
+          const payload = { status: nextStatus };
+          if (nextStatus === 'shipped' && !order.trackingNumber) {
+            payload.tracking_number = `TRK-${Math.floor(10000 + Math.random() * 90000)}-HM`;
+            payload.carrier_name = order.carrier || 'Shiprocket';
+          }
+
+          try {
+            await updateOrderOnServer(order, payload);
+            toast('Order updated', `${order.orderNumber} moved to ${getStatusLabel(nextStatus)}.`, 'success');
+          } catch (error) {
+            toast('Order update failed', error.message || 'Unable to update the order status.', 'warning');
           }
         }
         return;
       case 'cancel-order':
-        if (order) cancelOrder(order);
+        if (order) {
+          try {
+            await updateOrderOnServer(order, { status: 'cancelled', payment_status: 'refunded' });
+            toast('Order cancelled', `${order.orderNumber} has been marked cancelled.`, 'warning');
+          } catch (error) {
+            toast('Order update failed', error.message || 'Unable to cancel the order.', 'warning');
+          }
+        }
         return;
       case 'refund-order':
-        if (order) refundOrder(order);
+        if (order) {
+          try {
+            await updateOrderOnServer(order, { status: order.status || 'processing', payment_status: 'refunded' });
+            toast('Refund recorded', `${order.orderNumber} has been flagged for refund.`, 'success');
+          } catch (error) {
+            toast('Refund failed', error.message || 'Unable to record the refund.', 'warning');
+          }
+        }
         return;
       case 'orders-prev':
         state.ordersPage = Math.max(1, state.ordersPage - 1);
@@ -2498,6 +2744,9 @@
         renderEntityFormModal('coupon');
         return;
       case 'edit-coupon':
+        renderEntityFormModal('coupon', coupon);
+        return;
+      case 'assign-coupon-owner':
         renderEntityFormModal('coupon', coupon);
         return;
       case 'toggle-coupon':
@@ -2551,16 +2800,24 @@
               message: `Deactivate ${influencer.name}? They will remain in the directory but will not receive new campaign assignment work until reactivated.`,
               confirmLabel: 'Deactivate',
               tone: 'danger',
-              onConfirm: () => {
-                influencer.active = false;
+              onConfirm: async () => {
+                await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencer.id)}/active`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ active: 0 }),
+                });
                 toast('Influencer deactivated', `${influencer.name} is now inactive.`, 'warning');
-                renderAll();
+                await loadInfluencerData();
               },
             });
           } else {
-            influencer.active = true;
+            await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencer.id)}/active`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ active: 1 }),
+            });
             toast('Influencer reactivated', `${influencer.name} is now active again.`, 'success');
-            renderAll();
+            await loadInfluencerData();
           }
         }
         return;
@@ -2613,6 +2870,7 @@
     }
     if (inputKey === 'reportFrom' || inputKey === 'reportTo' || inputKey === 'reportFormat') {
       renderReports();
+      loadReportData();
     }
   }
 
@@ -2672,10 +2930,12 @@
         festivalName: entity.festivalName,
         recipientName: entity.recipientName,
         recipientEmail: entity.recipientEmail,
+        influencerId: entity.influencerId || null,
         validTill: entity.expiry || null,
         singleUse: entity.couponType === 'private',
         sendEmail: false,
         maxRedemptions: entity.couponType === 'private' ? 1 : null,
+        portal: 'merch'
       };
       const method = existingId ? 'PUT' : 'POST';
       const path = existingId ? `/api/admin/coupons/${encodeURIComponent(existingId)}` : '/api/admin/coupons';
@@ -2687,6 +2947,8 @@
       toast('Coupon saved', `${entity.code} ${existingId ? 'updated' : 'created'} successfully.`, 'success');
       closeModal();
       await loadCouponData();
+      await loadInfluencerData();
+      await loadReportData();
       return;
     }
 
@@ -2696,15 +2958,19 @@
         toast('Missing details', 'Influencer name and handle are required.', 'warning');
         return;
       }
-      if (existingId) {
-        state.influencers = state.influencers.map((item) => (Number(item.id) === existingId ? entity : item));
-        toast('Influencer saved', `${entity.name} updated successfully.`, 'success');
-      } else {
-        state.influencers.unshift(entity);
-        toast('Influencer added', `${entity.name} added successfully.`, 'success');
-      }
+      const method = existingId ? 'PUT' : 'POST';
+      const path = existingId
+        ? `/api/merch/admin/influencers/${encodeURIComponent(existingId)}`
+        : '/api/merch/admin/influencers';
+      await apiRequest(path, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(entity),
+      });
+      toast('Influencer saved', `${entity.name} ${existingId ? 'updated' : 'created'} successfully.`, 'success');
       closeModal();
-      renderAll();
+      await loadInfluencerData();
+      await loadCouponData();
       return;
     }
   }
@@ -2803,7 +3069,11 @@
   function init() {
     bindEvents();
     renderAll();
+    loadOrderData();
+    loadCustomerData();
+    loadInfluencerData();
     loadCouponData();
+    loadReportData();
   }
 
   if (document.readyState === 'loading') {
