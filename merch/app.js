@@ -913,6 +913,7 @@
                   <button type="button" data-account-action="view-order" data-order-id="${escapeHtml(String(order.id || ''))}">View Details</button>
                   <button type="button" data-account-action="track-order" data-order-id="${escapeHtml(String(order.id || ''))}">Track Order</button>
                   <button type="button" data-account-action="invoice-order" data-order-id="${escapeHtml(String(order.id || ''))}">Invoice</button>
+                  <button type="button" data-account-action="email-invoice" data-order-id="${escapeHtml(String(order.id || ''))}">Email</button>
                   <button type="button" data-account-action="download-invoice" data-order-id="${escapeHtml(String(order.id || ''))}">Download PDF</button>
                 </div>
               </article>
@@ -1173,6 +1174,11 @@
       return;
     }
 
+    if (action === 'email-invoice') {
+      await emailMerchInvoice(button.dataset.orderId);
+      return;
+    }
+
     if (action === 'view-wishlist') {
       closeAccountDrawer();
       document.getElementById('shopSection')?.scrollIntoView({ behavior: 'smooth' });
@@ -1249,6 +1255,25 @@
       URL.revokeObjectURL(objectUrl);
     } catch (error) {
       showCheckoutNotice('Download unavailable', error.message || 'Unable to download the invoice. Please try again.', { variant: 'error' });
+    }
+  }
+
+  async function emailMerchInvoice(orderId) {
+    try {
+      const id = Number(orderId);
+      if (!Number.isInteger(id) || id <= 0) throw new Error('Order details are unavailable.');
+      const result = await api(`/api/merch/orders/${encodeURIComponent(id)}/invoice-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const recipient = String(result.recipientEmail || state.merchProfile?.email || '').trim();
+      showCheckoutNotice(
+        'Invoice email sent',
+        recipient ? `We sent the invoice to ${recipient}.` : 'We sent the invoice email successfully.'
+      );
+    } catch (error) {
+      showCheckoutNotice('Email unavailable', error.message || 'Unable to email the invoice. Please try again.', { variant: 'error' });
     }
   }
 
