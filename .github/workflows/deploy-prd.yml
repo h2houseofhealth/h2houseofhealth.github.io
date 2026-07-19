@@ -1,0 +1,60 @@
+name: Deploy Production Branch
+
+on:
+  push:
+    branches:
+      - prd
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::881953411973:role/github-actions-h2-deploy
+          aws-region: ap-south-1
+
+      - name: Deploy to EC2 via SSM
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids i-07aebb51afb24f8e2 \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["export HOME=/root","cd /opt/h2house-prd && git fetch origin prd && git reset --hard origin/prd && npm install --omit=dev && sudo systemctl restart h2-booking-prd"]' \
+            --query "Command.CommandId" \
+            --output text)
+          
+          echo "Command ID: $COMMAND_ID"
+          sleep 5
+          
+          for i in $(seq 1 24); do
+            RESULT=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id i-07aebb51afb24f8e2 \
+              --output json 2>&1) || true
+            
+            STATUS=$(echo "$RESULT" | jq -r '.Status // "Pending"' 2>/dev/null || echo "Pending")
+            
+            case "$STATUS" in
+              Success)
+                echo "Deploy succeeded!"
+                exit 0
+                ;;
+              Failed|Cancelled|TimedOut)
+                echo "Deploy failed: $STATUS"
+                echo "$RESULT" | jq -r '.StandardErrorContent // ""' 2>/dev/null
+                exit 1
+                ;;
+              *)
+                echo "Status: $STATUS - waiting... ($i/24)"
+                sleep 10
+                ;;
+            esac
+          done
+          
+          echo "Timed out waiting for deploy"
+          exit 1
