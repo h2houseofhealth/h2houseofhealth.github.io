@@ -80,6 +80,7 @@
     merchAddresses: [],
     merchWishlistItems: [],
     merchCartItems: [],
+    merchCouponHistory: [],
     accountDrawerOpen: false,
     accountDrawerTrigger: null,
     accountProfileEditing: false,
@@ -793,6 +794,7 @@
     const orders = Array.isArray(state.merchOrders) ? state.merchOrders : [];
     const addresses = Array.isArray(state.merchAddresses) ? state.merchAddresses : [];
     const wishlistItems = Array.isArray(state.merchWishlistItems) ? state.merchWishlistItems : [];
+    const couponHistory = Array.isArray(state.merchCouponHistory) ? state.merchCouponHistory : [];
     const visibleOrders = state.accountOrdersExpanded ? orders : orders.slice(0, 4);
     const editingAddress = addresses.find((address) => getAddressId(address) === String(state.accountEditingAddressId || ''));
     const accountInitials = escapeHtml(getInitials(profile.fullName));
@@ -923,6 +925,37 @@
           <div class="account-empty-state">
             <p>No orders yet.</p>
             <span>Your first merch order will appear here after checkout.</span>
+          </div>
+        `}
+      </section>
+
+      <section class="account-section">
+        <div class="account-section__head">
+          <div>
+            <p class="account-section__eyebrow">Coupon History</p>
+            <h4>Applied discounts</h4>
+          </div>
+          <span class="account-section__count">${couponHistory.length}</span>
+        </div>
+        ${couponHistory.length ? `
+          <div class="account-list">
+            ${couponHistory.map((entry) => `
+              <article class="account-list__item account-list__item--stacked">
+                <div class="account-list__row">
+                  <strong>${escapeHtml(entry.couponCode || entry.influencerCoupon || `Order #${entry.orderId}`)}</strong>
+                  <span>${escapeHtml(formatDateLabel(entry.createdAt))}</span>
+                </div>
+                <p>${escapeHtml(entry.influencerCoupon || entry.couponCode || 'Discount applied')}</p>
+                <div class="account-item-actions account-item-actions--inline">
+                  <button type="button" data-account-action="view-order" data-order-id="${escapeHtml(String(entry.orderId || ''))}">View Order</button>
+                </div>
+              </article>
+            `).join('')}
+          </div>
+        ` : `
+          <div class="account-empty-state">
+            <p>No coupon history yet.</p>
+            <span>Any merch coupon you used will appear here automatically.</span>
           </div>
         `}
       </section>
@@ -1134,6 +1167,10 @@
                <strong>${formatDateLabel(order.createdAt)}</strong>
              </div>
              <div class="order-detail-row">
+               <span>Customer Type</span>
+               <strong>${order.isGuest ? 'Guest linked to account' : 'Registered customer'}</strong>
+             </div>
+             <div class="order-detail-row">
                <span>Order Status</span>
                <strong>${formatOrderStatus(order.status)}</strong>
              </div>
@@ -1144,6 +1181,18 @@
              <div class="order-detail-row">
                <span>Payment Method</span>
                <strong>${order.paymentMethod || 'Online'}</strong>
+             </div>
+             <div class="order-detail-row">
+               <span>Coupon</span>
+               <strong>${escapeHtml(order.influencerCoupon || order.couponCode || 'No coupon used')}</strong>
+             </div>
+             <div class="order-detail-row">
+               <span>Shipping</span>
+               <strong>${escapeHtml(order.shippingAddress || 'Unavailable')}</strong>
+             </div>
+             <div class="order-detail-row">
+               <span>Billing</span>
+               <strong>${escapeHtml(order.billingAddress || order.shippingAddress || 'Unavailable')}</strong>
              </div>
              <div class="order-detail-row">
                <span>Total</span>
@@ -2310,12 +2359,14 @@
         state.merchAddresses = Array.isArray(profileResult.addresses) ? profileResult.addresses : [];
         state.merchWishlistItems = Array.isArray(profileResult.wishlistItems) ? profileResult.wishlistItems : [];
         state.merchCartItems = Array.isArray(profileResult.cartItems) ? profileResult.cartItems : [];
+        state.merchCouponHistory = Array.isArray(profileResult.couponHistory) ? profileResult.couponHistory : [];
       } catch {
         state.merchProfile = null;
         state.merchOrders = [];
         state.merchAddresses = [];
         state.merchWishlistItems = [];
         state.merchCartItems = [];
+        state.merchCouponHistory = [];
       }
     } else {
       state.merchProfile = null;
@@ -2323,6 +2374,7 @@
       state.merchAddresses = [];
       state.merchWishlistItems = [];
       state.merchCartItems = [];
+      state.merchCouponHistory = [];
     }
 
     state.authResolved = true;
