@@ -583,6 +583,479 @@ body.is-auth-loading .merch-auth-cta {
   font-weight: 600;
 }
 
+.account-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.account-badge--live {
+  background: rgba(29, 103, 74, 0.12);
+  color: #1d674a;
+}
+
+.account-badge--muted {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text-muted);
+}
+
+.account-section--influencer {
+  background: linear-gradient(180deg, #fffdf9 0%, #ffffff 100%);
+}
+
+.influencer-coupon-hero {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  padding: 16px 18px;
+  margin: 16px 0 18px;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, rgba(200, 101, 45, 0.08), rgba(255, 248, 241, 0.96));
+  border: 1px solid rgba(200, 101, 45, 0.12);
+}
+
+.influencer-coupon-hero__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.influencer-coupon-hero__copy {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.influencer-coupon-hero__copy h4 {
+  margin: 0;
+  color: var(--text-dark);
+  font-size: 22px;
+  line-height: 1.15;
+  letter-spacing: 0.02em;
+}
+
+.influencer-coupon-hero__copy p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.influencer-coupon-hero__meta {
+  display: none;
+}
+
+.influencer-coupon-hero__stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+.influencer-coupon-hero__stat {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  display: grid;
+  gap: 4px;
+}
+
+.influencer-coupon-hero__stat small {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.influencer-coupon-hero__stat strong {
+  color: var(--text-dark);
+  font-size: 14px;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.influencer-coupon-hero__actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.influencer-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0 16px;
+}
+
+.influencer-kpi {
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, rgba(200, 101, 45, 0.06), rgba(255, 255, 255, 0.96));
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  display: grid;
+  gap: 6px;
+}
+
+.influencer-kpi p,
+.influencer-kpi span {
+  margin: 0;
+}
+
+.influencer-kpi p {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.influencer-kpi strong {
+  color: var(--text-dark);
+  font-size: 18px;
+  line-height: 1.15;
+}
+
+.influencer-kpi span {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.influencer-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.influencer-grid--charts,
+.influencer-grid--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.influencer-panel {
+  padding: 16px;
+  border-radius: var(--radius-sm);
+  background: #faf7f3;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.influencer-chart {
+  display: grid;
+  gap: 10px;
+}
+
+.influencer-chart__row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.influencer-chart__label,
+.influencer-chart__value {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.influencer-chart__value {
+  color: var(--text-dark);
+  white-space: nowrap;
+}
+
+.influencer-chart__bar {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.influencer-chart__bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(200, 101, 45, 0.75), rgba(200, 101, 45, 0.95));
+}
+
+.influencer-insight-list {
+  margin-bottom: 12px;
+}
+
+.influencer-mini-list {
+  display: grid;
+  gap: 8px;
+}
+
+.influencer-mini-list__item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.influencer-mini-list__item strong,
+.influencer-mini-list__item span {
+  font-size: 12px;
+  color: var(--text-dark);
+}
+
+.influencer-coupon-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.influencer-coupon-card {
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  display: grid;
+  gap: 10px;
+}
+
+.influencer-coupon-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.influencer-coupon-card__head strong {
+  display: block;
+  color: var(--text-dark);
+  font-size: 15px;
+  letter-spacing: 0.03em;
+}
+
+.influencer-coupon-card__head span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.influencer-coupon-card p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.influencer-coupon-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.influencer-coupon-card__meta span {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(200, 101, 45, 0.08);
+  color: var(--text-dark);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.influencer-details {
+  padding: 0;
+  border-radius: var(--radius);
+  background: #ffffff;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.influencer-details > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 16px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-dark);
+  font-weight: 700;
+}
+
+.influencer-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.influencer-details > summary small {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.influencer-details > *:not(summary) {
+  padding: 0 18px 18px;
+}
+
+.influencer-toolbar {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.influencer-toolbar .account-field span {
+  font-size: 9px;
+}
+
+.influencer-toolbar input,
+.influencer-toolbar select,
+.influencer-profile-form input,
+.influencer-profile-form textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  color: var(--text-dark);
+  font: inherit;
+  font-size: 14px;
+  padding: 10px 11px;
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.influencer-toolbar input:focus,
+.influencer-toolbar select:focus,
+.influencer-profile-form input:focus,
+.influencer-profile-form textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(200, 101, 45, 0.12);
+}
+
+.influencer-table-wrap {
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+}
+
+.influencer-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 860px;
+}
+
+.influencer-table th,
+.influencer-table td {
+  padding: 12px 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  text-align: left;
+  vertical-align: top;
+  font-size: 13px;
+}
+
+.influencer-table th {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.influencer-table td {
+  color: var(--text-dark);
+}
+
+.influencer-table--compact {
+  min-width: 680px;
+}
+
+.influencer-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.influencer-pagination span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.influencer-pagination > div {
+  display: flex;
+  gap: 8px;
+}
+
+.influencer-commission-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.influencer-commission-card {
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: #faf7f3;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  display: grid;
+  gap: 6px;
+}
+
+.influencer-commission-card span {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.influencer-commission-card strong {
+  color: var(--text-dark);
+  font-size: 15px;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.influencer-notifications {
+  display: grid;
+  gap: 10px;
+}
+
+.influencer-notification {
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: #faf7f3;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  display: grid;
+  gap: 4px;
+}
+
+.influencer-notification strong {
+  color: var(--text-dark);
+  font-size: 13px;
+}
+
+.influencer-notification p,
+.influencer-notification span {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .account-logout-btn {
   margin-top: 2px;
 }
@@ -1607,6 +2080,50 @@ body.is-auth-loading .merch-auth-cta {
     width: 52px;
     height: 52px;
   }
+
+  .influencer-kpi-grid,
+  .influencer-coupon-hero,
+  .influencer-grid--charts,
+  .influencer-grid--two,
+  .influencer-coupon-grid,
+  .influencer-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .influencer-chart__row {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+
+  .influencer-chart__value {
+    grid-column: 2;
+    justify-self: end;
+  }
+
+  .influencer-pagination {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .influencer-pagination > div {
+    width: 100%;
+  }
+
+  .influencer-pagination .account-action-btn {
+    flex: 1 1 0;
+  }
+
+  .influencer-coupon-hero__top {
+    flex-direction: column;
+  }
+
+  .influencer-coupon-hero__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .influencer-details > *:not(summary) {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
 }
 
 .merch-footer__brand img {
@@ -1628,6 +2145,39 @@ body.is-auth-loading .merch-auth-cta {
 
 @media (max-width: 480px) {
   .merch-footer__links {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .influencer-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .influencer-coupon-card__head {
+    flex-direction: column;
+  }
+
+  .influencer-coupon-card__meta {
+    gap: 6px;
+  }
+
+  .influencer-coupon-hero {
+    padding: 14px;
+  }
+
+  .influencer-coupon-hero__copy h4 {
+    font-size: 18px;
+  }
+
+  .influencer-coupon-hero__actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .influencer-coupon-hero__actions .account-action-btn {
+    width: 100%;
+  }
+
+  .influencer-coupon-hero__stats {
     grid-template-columns: 1fr 1fr;
   }
 }

@@ -25,6 +25,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       email TEXT,
       phone TEXT,
       notes TEXT,
+      avatar_url TEXT,
+      bio TEXT,
+      social_links_json TEXT,
+      preferred_payment_details TEXT,
       commission_rate REAL NOT NULL DEFAULT 10,
       active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -105,6 +109,19 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       unit_price INTEGER NOT NULL,
       quantity INTEGER NOT NULL,
       line_total INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS merch_influencer_commission_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      influencer_id INTEGER NOT NULL REFERENCES merch_influencers(id) ON DELETE CASCADE,
+      amount_paise INTEGER NOT NULL,
+      payment_method TEXT,
+      reference_number TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      paid_at TEXT,
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
 
@@ -198,8 +215,41 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     db.exec('ALTER TABLE merch_orders ADD COLUMN billing_address TEXT');
   }
 
+  if (!hasColumn('merch_influencers', 'avatar_url')) {
+    db.exec('ALTER TABLE merch_influencers ADD COLUMN avatar_url TEXT');
+  }
+  if (!hasColumn('merch_influencers', 'bio')) {
+    db.exec('ALTER TABLE merch_influencers ADD COLUMN bio TEXT');
+  }
+  if (!hasColumn('merch_influencers', 'social_links_json')) {
+    db.exec('ALTER TABLE merch_influencers ADD COLUMN social_links_json TEXT');
+  }
+  if (!hasColumn('merch_influencers', 'preferred_payment_details')) {
+    db.exec('ALTER TABLE merch_influencers ADD COLUMN preferred_payment_details TEXT');
+  }
+
   if (hasTable('coupons') && !hasColumn('coupons', 'influencer_id')) {
     db.exec('ALTER TABLE coupons ADD COLUMN influencer_id INTEGER REFERENCES merch_influencers(id)');
+  }
+
+  if (!hasTable('merch_influencer_commission_payments')) {
+    db.exec(`
+      CREATE TABLE merch_influencer_commission_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        influencer_id INTEGER NOT NULL REFERENCES merch_influencers(id) ON DELETE CASCADE,
+        amount_paise INTEGER NOT NULL,
+        payment_method TEXT,
+        reference_number TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        paid_at TEXT,
+        note TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+  }
+  if (!hasColumn('merch_influencer_commission_payments', 'note')) {
+    db.exec('ALTER TABLE merch_influencer_commission_payments ADD COLUMN note TEXT');
   }
 
   db.exec(`
@@ -208,6 +258,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     CREATE INDEX IF NOT EXISTS idx_coupons_influencer_portal
       ON coupons(influencer_id, portal);
+
+    CREATE INDEX IF NOT EXISTS idx_merch_influencers_email
+      ON merch_influencers(email);
+
+    CREATE INDEX IF NOT EXISTS idx_merch_influencer_commission_payments_influencer
+      ON merch_influencer_commission_payments(influencer_id, datetime(COALESCE(paid_at, created_at)) DESC);
   `);
 
   function hasTable(tableName) {
@@ -238,26 +294,58 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function normalizeInfluencerPayload(body = {}) {
     const commissionRate = Number(body.commissionRate ?? body.commission_rate ?? 10);
+    const rawSocialLinks = Array.isArray(body.socialLinks)
+      ? body.socialLinks
+      : Array.isArray(body.social_links)
+        ? body.social_links
+        : String(body.socialLinks || body.social_links || '')
+            .split(/[\n,]/)
+            .map((item) => String(item || '').trim())
+            .filter(Boolean);
     return {
       name: String(body.name || '').trim(),
       handle: String(body.handle || '').trim(),
       email: String(body.email || '').trim().toLowerCase(),
       phone: String(body.phone || '').trim(),
       notes: String(body.notes || '').trim(),
+      avatarUrl: String(body.avatarUrl || body.avatar_url || '').trim(),
+      bio: String(body.bio || '').trim(),
+      socialLinks: Array.from(new Set(rawSocialLinks.map((item) => String(item || '').trim()).filter(Boolean))),
+      preferredPaymentDetails: String(body.preferredPaymentDetails || body.preferred_payment_details || '').trim(),
       commissionRate: Number.isFinite(commissionRate) ? Math.min(Math.max(commissionRate, 0), 100) : 10,
       active: body.active === false || Number(body.active) === 0 ? 0 : 1,
     };
+  }
+
+  function normalizeInfluencerEmail(email) {
+    return String(email || '').trim().toLowerCase();
   }
 
   function getInfluencerById(influencerId) {
     const id = Number(influencerId);
     if (!Number.isInteger(id) || id <= 0) return null;
     return db.prepare(`
-      SELECT id, name, handle, email, phone, notes, commission_rate AS commissionRate,
-             active, created_at AS createdAt, updated_at AS updatedAt
+      SELECT id, name, handle, email, phone, notes, avatar_url AS avatarUrl, bio,
+             social_links_json AS socialLinksJson, preferred_payment_details AS preferredPaymentDetails,
+             commission_rate AS commissionRate, active,
+             created_at AS createdAt, updated_at AS updatedAt
       FROM merch_influencers
       WHERE id = ?
     `).get(id);
+  }
+
+  function getInfluencerByEmail(email) {
+    const normalizedEmail = normalizeInfluencerEmail(email);
+    if (!normalizedEmail) return null;
+    return db.prepare(`
+      SELECT id, name, handle, email, phone, notes, avatar_url AS avatarUrl, bio,
+             social_links_json AS socialLinksJson, preferred_payment_details AS preferredPaymentDetails,
+             commission_rate AS commissionRate, active,
+             created_at AS createdAt, updated_at AS updatedAt
+      FROM merch_influencers
+      WHERE LOWER(TRIM(email)) = ?
+      LIMIT 1
+    `).get(normalizedEmail);
   }
 
   function getMerchCouponByCode(code) {
@@ -311,7 +399,32 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     `).all(...ids);
   }
 
-  function serializeInfluencer(row, coupons = [], stats = {}) {
+  function parseInfluencerSocialLinks(rawValue) {
+    if (!rawValue) return [];
+    if (Array.isArray(rawValue)) {
+      return Array.from(new Set(rawValue.map((item) => String(item || '').trim()).filter(Boolean)));
+    }
+    const text = String(rawValue || '').trim();
+    if (!text) return [];
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) {
+        return Array.from(new Set(parsed.map((item) => String(item || '').trim()).filter(Boolean)));
+      }
+    } catch {
+      // Fall back to line-based parsing.
+    }
+    return Array.from(
+      new Set(
+        text
+          .split(/[\n,]/)
+          .map((item) => String(item || '').trim())
+          .filter(Boolean)
+      )
+    );
+  }
+
+  function serializeInfluencer(row, coupons = [], stats = {}, payments = []) {
     const commissionRate = Number(row.commissionRate ?? row.commission_rate ?? 10);
     const revenue = Number(stats.revenue || 0);
     return {
@@ -321,6 +434,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       email: String(row.email || ''),
       phone: String(row.phone || ''),
       notes: String(row.notes || ''),
+      avatarUrl: String(row.avatarUrl || row.avatar_url || ''),
+      bio: String(row.bio || ''),
+      socialLinks: parseInfluencerSocialLinks(row.socialLinksJson || row.social_links_json),
+      preferredPaymentDetails: String(row.preferredPaymentDetails || row.preferred_payment_details || ''),
       commissionRate,
       active: Number(row.active ?? 1) === 1,
       coupons: coupons.map((coupon) => String(coupon.code || '')).filter(Boolean),
@@ -339,6 +456,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       couponUsage: Number(stats.couponUsage || 0),
       activeCampaigns: coupons.filter((coupon) => Number(coupon.isActive ?? coupon.active ?? 0) === 1).length,
       commission: Math.round(revenue * (commissionRate / 100)),
+      paidCommission: payments
+        .filter((payment) => ['paid', 'processed', 'completed', 'settled'].includes(String(payment.status || '').toLowerCase()))
+        .reduce((sum, payment) => sum + Number(payment.amountPaise || 0), 0),
       createdAt: row.createdAt || row.created_at || null,
       updatedAt: row.updatedAt || row.updated_at || null,
     };
@@ -346,16 +466,27 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function loadMerchInfluencers() {
     const rows = db.prepare(`
-      SELECT id, name, handle, email, phone, notes, commission_rate AS commissionRate,
-             active, created_at AS createdAt, updated_at AS updatedAt
+      SELECT id, name, handle, email, phone, notes, avatar_url AS avatarUrl, bio,
+             social_links_json AS socialLinksJson, preferred_payment_details AS preferredPaymentDetails,
+             commission_rate AS commissionRate, active, created_at AS createdAt, updated_at AS updatedAt
       FROM merch_influencers
       ORDER BY active DESC, datetime(created_at) DESC, id DESC
     `).all();
     const ids = rows.map((row) => Number(row.id));
     const couponRows = getInfluencerCouponRows(ids);
     const statRows = getInfluencerStatsRows(ids);
+    const paymentRows = ids.length
+      ? db.prepare(`
+          SELECT id, influencer_id AS influencerId, amount_paise AS amountPaise, payment_method AS paymentMethod,
+                 reference_number AS referenceNumber, status, paid_at AS paidAt, note, created_at AS createdAt, updated_at AS updatedAt
+          FROM merch_influencer_commission_payments
+          WHERE influencer_id IN (${ids.map(() => '?').join(', ')})
+          ORDER BY datetime(COALESCE(paid_at, created_at)) DESC, id DESC
+        `).all(...ids)
+      : [];
     const couponsByInfluencer = new Map();
     const statsByInfluencer = new Map();
+    const paymentsByInfluencer = new Map();
 
     for (const coupon of couponRows) {
       const influencerId = Number(coupon.influencerId);
@@ -365,12 +496,356 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     for (const stats of statRows) {
       statsByInfluencer.set(Number(stats.influencerId), stats);
     }
+    for (const payment of paymentRows) {
+      const influencerId = Number(payment.influencerId);
+      if (!paymentsByInfluencer.has(influencerId)) paymentsByInfluencer.set(influencerId, []);
+      paymentsByInfluencer.get(influencerId).push(payment);
+    }
 
     return rows.map((row) => serializeInfluencer(
       row,
       couponsByInfluencer.get(Number(row.id)) || [],
-      statsByInfluencer.get(Number(row.id)) || {}
+      statsByInfluencer.get(Number(row.id)) || {},
+      paymentsByInfluencer.get(Number(row.id)) || []
     ));
+  }
+
+  function getInfluencerCommissionPayments(influencerId) {
+    const id = Number(influencerId);
+    if (!Number.isInteger(id) || id <= 0) return [];
+    return db.prepare(`
+      SELECT id, influencer_id AS influencerId, amount_paise AS amountPaise, payment_method AS paymentMethod,
+             reference_number AS referenceNumber, status, paid_at AS paidAt, note, created_at AS createdAt, updated_at AS updatedAt
+      FROM merch_influencer_commission_payments
+      WHERE influencer_id = ?
+      ORDER BY datetime(COALESCE(paid_at, created_at)) DESC, id DESC
+    `).all(id);
+  }
+
+  function maskCustomerName(name = '', isGuest = false) {
+    const value = String(name || '').trim();
+    if (!value) return isGuest ? 'Guest customer' : 'Customer';
+    const parts = value.split(/\s+/).filter(Boolean);
+    if (parts.length === 1) return parts[0];
+    return `${parts[0]} ${parts[parts.length - 1][0]?.toUpperCase() || ''}.`;
+  }
+
+  function buildInfluencerNotifications({ coupons = [], orders = [], payments = [] } = {}) {
+    const notifications = [];
+    const now = Date.now();
+    const expiryWindowMs = 14 * 24 * 60 * 60 * 1000;
+
+    for (const order of orders.slice(0, 6)) {
+      notifications.push({
+        id: `sale-${order.id}`,
+        type: 'sale',
+        title: 'New sale made',
+        message: `${order.orderNumber} used ${order.couponUsed || 'an assigned coupon'}.`,
+        time: order.orderDate || null,
+      });
+    }
+
+    for (const coupon of coupons) {
+      const expiry = String(coupon.expiresAt || coupon.validTill || '').trim();
+      if (!expiry) continue;
+      const expiryTime = new Date(expiry.replace(' ', 'T')).getTime();
+      if (!Number.isFinite(expiryTime)) continue;
+      const remainingMs = expiryTime - now;
+      if (remainingMs > 0 && remainingMs <= expiryWindowMs) {
+        notifications.push({
+          id: `expiry-${coupon.id}`,
+          type: 'warning',
+          title: 'Coupon nearing expiry',
+          message: `${coupon.code} expires on ${expiry}.`,
+          time: expiry,
+        });
+      }
+      if (Number(coupon.usageCount || 0) === 0) {
+        notifications.push({
+          id: `assigned-${coupon.id}`,
+          type: 'info',
+          title: 'New coupon assigned',
+          message: `${coupon.code} is ready to share.`,
+          time: coupon.createdAt || null,
+        });
+      }
+    }
+
+    for (const payment of payments.slice(0, 4)) {
+      const paidLike = ['paid', 'processed', 'completed', 'settled'].includes(String(payment.status || '').toLowerCase());
+      notifications.push({
+        id: `payment-${payment.id}`,
+        type: paidLike ? 'success' : 'info',
+        title: paidLike ? 'Commission payment processed' : 'Commission credited',
+        message: `${formatMerchPrice(payment.amountPaise || 0)}${payment.referenceNumber ? ` • Ref ${payment.referenceNumber}` : ''}`,
+        time: payment.paidAt || payment.createdAt || null,
+      });
+    }
+
+    return notifications
+      .sort((left, right) => String(right.time || '').localeCompare(String(left.time || '')))
+      .slice(0, 10);
+  }
+
+  function buildInfluencerDashboard(influencer, { page = 1, pageSize = 8, search = '', status = '', startDate = '', endDate = '' } = {}) {
+    if (!influencer || !Number(influencer.id)) return null;
+    const influencerId = Number(influencer.id);
+    const commissionRate = Number(influencer.commissionRate || influencer.commission_rate || 0);
+
+    const coupons = db.prepare(`
+      SELECT c.id, c.code, c.description, c.discount_type AS discountType, c.discount_value AS discountValue,
+             c.applies_to AS appliesTo, c.max_redemptions AS maxRedemptions, c.per_user_limit AS perUserLimit,
+             c.expires_at AS expiresAt, c.active, c.coupon_type AS couponType,
+             c.is_active AS isActive, c.valid_from AS validFrom, c.valid_till AS validTill,
+             c.created_at AS createdAt
+      FROM coupons c
+      WHERE c.portal = 'merch' AND c.influencer_id = ?
+      ORDER BY c.active DESC, datetime(c.created_at) DESC, c.id DESC
+    `).all(influencerId).map((coupon) => {
+      const usageStats = db.prepare(`
+        SELECT COUNT(*) AS total,
+               COALESCE(SUM(CASE WHEN mo.payment_status IN ('paid', 'cod_pending') THEN mo.total_amount ELSE 0 END), 0) AS revenue,
+               COALESCE(COUNT(CASE WHEN mo.payment_status IN ('paid', 'cod_pending') THEN 1 END), 0) AS orders
+        FROM merch_orders mo
+        WHERE mo.influencer_id = ?
+          AND (mo.coupon_id = ? OR LOWER(TRIM(mo.coupon_code)) = LOWER(TRIM(?)))
+      `).get(influencerId, Number(coupon.id), String(coupon.code || ''));
+      const maxRedemptions = Number(coupon.maxRedemptions || 0);
+      const usageCount = Number(usageStats.total || 0);
+      return {
+        id: Number(coupon.id),
+        code: String(coupon.code || ''),
+        description: String(coupon.description || ''),
+        discountType: String(coupon.discountType || ''),
+        discountValue: Number(coupon.discountValue || 0),
+        appliesTo: String(coupon.appliesTo || 'all'),
+        maxRedemptions: Number.isFinite(maxRedemptions) && maxRedemptions > 0 ? maxRedemptions : null,
+        perUserLimit: Number(coupon.perUserLimit || 1),
+        expiresAt: coupon.expiresAt || coupon.validTill || null,
+        active: Number(coupon.active ?? coupon.isActive ?? 0) === 1,
+        usageCount,
+        remainingUsage: Number.isFinite(maxRedemptions) && maxRedemptions > 0 ? Math.max(0, maxRedemptions - usageCount) : null,
+        revenueGenerated: Number(usageStats.revenue || 0),
+        ordersGenerated: Number(usageStats.orders || 0),
+        createdAt: coupon.createdAt || null,
+      };
+    });
+
+    const orderRows = db.prepare(`
+      SELECT mo.id, mo.order_number AS orderNumber, mo.customer_name AS customerName, mo.customer_email AS customerEmail,
+             mo.is_guest AS isGuest, mo.status, mo.payment_status AS paymentStatus,
+             mo.payment_method AS paymentMethod, mo.razorpay_payment_id AS paymentReference,
+             mo.total_amount AS totalAmount, mo.discount_amount AS discountAmount,
+             mo.coupon_id AS couponId, mo.coupon_code AS couponCode, mo.created_at AS createdAt
+      FROM merch_orders mo
+      WHERE mo.influencer_id = ?
+      ORDER BY datetime(mo.created_at) DESC, mo.id DESC
+    `).all(influencerId);
+    const orderIds = orderRows.map((order) => Number(order.id));
+    const itemRows = orderIds.length
+      ? db.prepare(`
+          SELECT order_id AS orderId, product_name AS productName, quantity, line_total AS lineTotal
+          FROM merch_order_items
+          WHERE order_id IN (${orderIds.map(() => '?').join(', ')})
+        `).all(...orderIds)
+      : [];
+    const itemsByOrderId = new Map();
+    for (const item of itemRows) {
+      const id = Number(item.orderId);
+      if (!itemsByOrderId.has(id)) itemsByOrderId.set(id, []);
+      itemsByOrderId.get(id).push(item);
+    }
+
+    const monthlyMap = new Map();
+    const productMap = new Map();
+    const customerEmailCounts = new Map();
+    const allOrders = orderRows.map((order) => {
+      const items = itemsByOrderId.get(Number(order.id)) || [];
+      const commissionEarned = Math.round(Number(order.totalAmount || 0) * (commissionRate / 100));
+      const productSummary = items.length
+        ? items.map((item) => `${String(item.productName || 'Item')} x${Number(item.quantity || 0)}`).join(', ')
+        : 'Merch order';
+      const orderDate = order.createdAt || null;
+      const monthKey = String(orderDate || '').slice(0, 7);
+      if (monthKey) {
+        const entry = monthlyMap.get(monthKey) || { sales: 0, commission: 0, orders: 0 };
+        entry.sales += Number(order.totalAmount || 0);
+        entry.commission += commissionEarned;
+        entry.orders += 1;
+        monthlyMap.set(monthKey, entry);
+      }
+      const normalizedEmail = normalizeMerchCustomerEmail(order.customerEmail);
+      if (normalizedEmail) {
+        customerEmailCounts.set(normalizedEmail, (customerEmailCounts.get(normalizedEmail) || 0) + 1);
+      }
+      for (const item of items) {
+        const key = String(item.productName || 'Merch Product');
+        const stats = productMap.get(key) || { name: key, quantity: 0, revenue: 0 };
+        stats.quantity += Number(item.quantity || 0);
+        stats.revenue += Number(item.lineTotal || 0);
+        productMap.set(key, stats);
+      }
+      return {
+        id: Number(order.id),
+        orderNumber: String(order.orderNumber || ''),
+        orderDate,
+        productSummary,
+        customerName: maskCustomerName(order.customerName, Boolean(Number(order.isGuest || 0))),
+        couponUsed: String(order.couponCode || ''),
+        orderAmount: Number(order.totalAmount || 0),
+        commissionEarned,
+        orderStatus: String(order.status || 'pending'),
+        paymentStatus: String(order.paymentStatus || 'pending'),
+      };
+    });
+
+    const searchTerm = String(search || '').trim().toLowerCase();
+    const statusTerm = String(status || '').trim().toLowerCase();
+    const start = String(startDate || '').trim();
+    const end = String(endDate || '').trim();
+    const filteredOrders = allOrders.filter((order) => {
+      if (statusTerm && statusTerm !== 'all' && String(order.orderStatus || '').toLowerCase() !== statusTerm && String(order.paymentStatus || '').toLowerCase() !== statusTerm) {
+        return false;
+      }
+      if (start && String(order.orderDate || '').slice(0, 10) < start) return false;
+      if (end && String(order.orderDate || '').slice(0, 10) > end) return false;
+      if (!searchTerm) return true;
+      return [order.orderNumber, order.productSummary, order.customerName, order.couponUsed, order.orderStatus, order.paymentStatus]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(searchTerm));
+    });
+
+    const pageNumber = Math.max(1, Number(page || 1));
+    const pageLimit = Math.max(1, Math.min(20, Number(pageSize || 8)));
+    const pageCount = Math.max(1, Math.ceil(filteredOrders.length / pageLimit));
+    const currentPage = Math.min(pageNumber, pageCount);
+    const offset = (currentPage - 1) * pageLimit;
+    const pagedOrders = filteredOrders.slice(offset, offset + pageLimit);
+
+    const paidOrders = allOrders.filter((order) => ['paid', 'cod_pending'].includes(String(order.paymentStatus || '').toLowerCase()));
+    const activeOrders = allOrders.filter((order) => !['cancelled', 'refunded'].includes(String(order.orderStatus || '').toLowerCase()));
+    const salesGenerated = paidOrders.reduce((sum, order) => sum + Number(order.orderAmount || 0), 0);
+    const totalOrdersReferred = activeOrders.length;
+    const commissionEarned = Math.round(salesGenerated * (commissionRate / 100));
+    const commissionPayments = getInfluencerCommissionPayments(influencerId);
+    const commissionPaid = commissionPayments
+      .filter((payment) => ['paid', 'processed', 'completed', 'settled'].includes(String(payment.status || '').toLowerCase()))
+      .reduce((sum, payment) => sum + Number(payment.amountPaise || 0), 0);
+    const commissionPending = Math.max(0, commissionEarned - commissionPaid);
+    const activeCoupons = coupons.filter((coupon) => Number(coupon.active) === 1).length;
+    const couponUsage = allOrders.filter((order) => Boolean(order.couponUsed)).length;
+    const conversionRate = totalOrdersReferred ? Math.round((paidOrders.length / totalOrdersReferred) * 1000) / 10 : 0;
+    const averageOrderValue = paidOrders.length ? Math.round(salesGenerated / paidOrders.length) : 0;
+    const repeatCustomerCount = [...customerEmailCounts.values()].filter((count) => count > 1).length;
+    const repeatCustomerPercentage = allOrders.length ? Math.round((repeatCustomerCount / allOrders.length) * 1000) / 10 : 0;
+
+    const monthlyTrend = [...monthlyMap.entries()]
+      .sort(([left], [right]) => String(left).localeCompare(String(right)))
+      .map(([month, values]) => ({
+        month,
+        label: new Intl.DateTimeFormat('en-IN', { month: 'short', year: 'numeric' }).format(new Date(`${month}-01T00:00:00`)),
+        sales: Number(values.sales || 0),
+        commission: Number(values.commission || 0),
+        orders: Number(values.orders || 0),
+      }))
+      .slice(-12);
+
+    const topProducts = [...productMap.values()]
+      .sort((left, right) => right.revenue - left.revenue || right.quantity - left.quantity)
+      .slice(0, 5);
+
+    const bestCoupon = coupons.slice().sort((left, right) => right.revenueGenerated - left.revenueGenerated || right.usageCount - left.usageCount)[0] || null;
+    const highestSalesMonth = monthlyTrend.slice().sort((left, right) => right.sales - left.sales)[0] || null;
+    const lastPayment = commissionPayments.find((payment) => ['paid', 'processed', 'completed', 'settled'].includes(String(payment.status || '').toLowerCase())) || null;
+    const upcomingPaymentDate = commissionPending > 0 && (lastPayment?.paidAt || lastPayment?.createdAt)
+      ? new Date(String(lastPayment.paidAt || lastPayment.createdAt).replace(' ', 'T'))
+      : null;
+    if (upcomingPaymentDate && !Number.isNaN(upcomingPaymentDate.getTime())) {
+      upcomingPaymentDate.setDate(upcomingPaymentDate.getDate() + 14);
+    }
+
+    const notifications = buildInfluencerNotifications({
+      coupons,
+      orders: allOrders,
+      payments: commissionPayments,
+    });
+
+    return {
+      influencer: serializeInfluencer(influencer, coupons, {
+        totalOrders: totalOrdersReferred,
+        revenue: salesGenerated,
+        couponUsage,
+      }, commissionPayments),
+      summary: {
+        totalSalesGenerated: salesGenerated,
+        totalOrdersReferred,
+        totalCommissionEarned: commissionEarned,
+        commissionPending,
+        commissionPaid,
+        activeCoupons,
+        couponUsage,
+        conversionRate,
+        averageOrderValue,
+      },
+      analytics: {
+        monthlyTrend,
+        topProducts,
+        bestCoupon: bestCoupon ? {
+          code: bestCoupon.code,
+          revenueGenerated: bestCoupon.revenueGenerated,
+          usageCount: bestCoupon.usageCount,
+        } : null,
+        highestSalesMonth: highestSalesMonth ? {
+          month: highestSalesMonth.month,
+          label: highestSalesMonth.label,
+          sales: highestSalesMonth.sales,
+        } : null,
+        repeatCustomerPercentage,
+      },
+      couponPerformance: coupons,
+      salesHistory: {
+        page: currentPage,
+        pageSize: pageLimit,
+        total: filteredOrders.length,
+        pageCount,
+        items: pagedOrders,
+      },
+      commission: {
+        totalEarned: commissionEarned,
+        totalPaid: commissionPaid,
+        pending: commissionPending,
+        lastPaymentDate: lastPayment?.paidAt || lastPayment?.createdAt || null,
+        upcomingPayment: upcomingPaymentDate && !Number.isNaN(upcomingPaymentDate.getTime())
+          ? upcomingPaymentDate.toISOString()
+          : null,
+      },
+      commissionHistory: commissionPayments.map((payment) => ({
+        id: Number(payment.id),
+        paymentDate: payment.paidAt || payment.createdAt || null,
+        amount: Number(payment.amountPaise || 0),
+        paymentMethod: String(payment.paymentMethod || 'manual'),
+        referenceNumber: String(payment.referenceNumber || ''),
+        status: String(payment.status || 'pending'),
+        note: String(payment.note || ''),
+      })),
+      performance: {
+        bestCoupon: bestCoupon ? {
+          code: bestCoupon.code,
+          revenueGenerated: bestCoupon.revenueGenerated,
+          usageCount: bestCoupon.usageCount,
+        } : null,
+        highestSalesMonth: highestSalesMonth ? {
+          month: highestSalesMonth.month,
+          label: highestSalesMonth.label,
+          sales: highestSalesMonth.sales,
+        } : null,
+        topSellingProducts: topProducts,
+        averageOrderValue,
+        repeatCustomerPercentage,
+        conversionRate,
+      },
+      notifications,
+    };
   }
 
   function getMerchProductVariants(productIds = [], { includeInactive = false } = {}) {
@@ -1815,6 +2290,24 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     res.json({ profile, addresses, cartItems, wishlistItems, orders, couponHistory });
   });
 
+  app.get('/api/merch/influencer-dashboard', requireMerchAuth, (req, res) => {
+    const influencer = getInfluencerByEmail(req.user?.email);
+    if (!influencer || Number(influencer.active ?? 1) !== 1) {
+      return res.status(403).json({ message: 'influencer access is not available for this account' });
+    }
+
+    const dashboard = buildInfluencerDashboard(influencer, {
+      page: req.query?.page || 1,
+      pageSize: req.query?.pageSize || 8,
+      search: req.query?.search || '',
+      status: req.query?.status || '',
+      startDate: req.query?.startDate || '',
+      endDate: req.query?.endDate || '',
+    });
+
+    return res.json(dashboard);
+  });
+
   app.patch('/api/merch/profile', requireMerchAuth, (req, res) => {
     const profile = syncMerchGuestOrdersForUser(req.user) || ensureMerchCustomerProfileForUser(req.user);
     if (!profile) {
@@ -1862,6 +2355,67 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     const nextProfile = getMerchCustomerProfileByUserId(req.user.id);
     res.json({ profile: nextProfile || profile });
+  });
+
+  app.patch('/api/merch/influencer-profile', requireMerchAuth, (req, res) => {
+    const influencer = getInfluencerByEmail(req.user?.email);
+    if (!influencer || Number(influencer.active ?? 1) !== 1) {
+      return res.status(403).json({ message: 'influencer access is not available for this account' });
+    }
+
+    const updates = [];
+    const params = [];
+    const name = String(req.body?.name || '').trim();
+    const phone = String(req.body?.phone || '').trim();
+    const avatarUrl = String(req.body?.avatarUrl || req.body?.avatar_url || '').trim();
+    const bio = String(req.body?.bio || '').trim();
+    const preferredPaymentDetails = String(req.body?.preferredPaymentDetails || req.body?.preferred_payment_details || '').trim();
+    const socialLinks = normalizeInfluencerPayload(req.body).socialLinks;
+
+    if (phone && !/^[0-9+\-\s()]{7,20}$/.test(phone)) {
+      return res.status(400).json({ message: 'invalid phone number' });
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'name') && name) {
+      updates.push('name = ?');
+      params.push(name);
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'phone')) {
+      updates.push('phone = ?');
+      params.push(phone || null);
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'avatarUrl') || Object.prototype.hasOwnProperty.call(req.body || {}, 'avatar_url')) {
+      updates.push('avatar_url = ?');
+      params.push(avatarUrl || null);
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'bio')) {
+      updates.push('bio = ?');
+      params.push(bio || null);
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'socialLinks') || Object.prototype.hasOwnProperty.call(req.body || {}, 'social_links')) {
+      updates.push('social_links_json = ?');
+      params.push(JSON.stringify(socialLinks || []));
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'preferredPaymentDetails') || Object.prototype.hasOwnProperty.call(req.body || {}, 'preferred_payment_details')) {
+      updates.push('preferred_payment_details = ?');
+      params.push(preferredPaymentDetails || null);
+    }
+
+    if (updates.length) {
+      updates.push("updated_at = datetime('now')");
+      db.prepare(`UPDATE merch_influencers SET ${updates.join(', ')} WHERE id = ?`).run(...params, influencer.id);
+    }
+
+    const updated = getInfluencerById(influencer.id);
+    const dashboard = buildInfluencerDashboard(updated, { page: 1, pageSize: 8 });
+    return res.json({
+      influencer: serializeInfluencer(updated, dashboard?.couponPerformance || [], {
+        totalOrders: dashboard?.summary?.totalOrdersReferred || 0,
+        revenue: dashboard?.summary?.totalSalesGenerated || 0,
+        couponUsage: dashboard?.summary?.couponUsage || 0,
+      }, getInfluencerCommissionPayments(updated.id)),
+      dashboard,
+    });
   });
 
   function getMerchCustomerAddresses(customerId) {
@@ -2268,22 +2822,51 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!influencer.name) {
       return res.status(400).json({ message: 'Influencer name is required' });
     }
+    if (influencer.email) {
+      const existingByEmail = getInfluencerByEmail(influencer.email);
+      if (existingByEmail) {
+        db.prepare(`
+          UPDATE merch_influencers
+          SET name = ?, handle = ?, phone = ?, notes = ?, avatar_url = ?, bio = ?, social_links_json = ?,
+              preferred_payment_details = ?, commission_rate = ?, active = ?, updated_at = datetime('now')
+          WHERE id = ?
+        `).run(
+          influencer.name,
+          influencer.handle || null,
+          influencer.phone || null,
+          influencer.notes || null,
+          influencer.avatarUrl || null,
+          influencer.bio || null,
+          influencer.socialLinks.length ? JSON.stringify(influencer.socialLinks) : null,
+          influencer.preferredPaymentDetails || null,
+          influencer.commissionRate,
+          influencer.active,
+          existingByEmail.id
+        );
+        const updated = getInfluencerById(existingByEmail.id);
+        return res.status(200).json({ influencer: serializeInfluencer(updated, [], {}, []) });
+      }
+    }
 
     const result = db.prepare(`
-      INSERT INTO merch_influencers (name, handle, email, phone, notes, commission_rate, active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      INSERT INTO merch_influencers (name, handle, email, phone, notes, avatar_url, bio, social_links_json, preferred_payment_details, commission_rate, active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
     `).run(
       influencer.name,
       influencer.handle || null,
       influencer.email || null,
       influencer.phone || null,
       influencer.notes || null,
+      influencer.avatarUrl || null,
+      influencer.bio || null,
+      influencer.socialLinks.length ? JSON.stringify(influencer.socialLinks) : null,
+      influencer.preferredPaymentDetails || null,
       influencer.commissionRate,
       influencer.active
     );
 
     const created = getInfluencerById(result.lastInsertRowid);
-    res.status(201).json({ influencer: serializeInfluencer(created, [], {}) });
+    res.status(201).json({ influencer: serializeInfluencer(created, [], {}, []) });
   });
 
   app.put('/api/merch/admin/influencers/:id', requireAdmin, (req, res) => {
@@ -2304,11 +2887,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!influencer.name) {
       return res.status(400).json({ message: 'Influencer name is required' });
     }
+    if (influencer.email) {
+      const existingByEmail = getInfluencerByEmail(influencer.email);
+      if (existingByEmail && Number(existingByEmail.id) !== influencerId) {
+        return res.status(409).json({ message: 'An influencer with this email already exists.' });
+      }
+    }
 
     db.prepare(`
       UPDATE merch_influencers
-      SET name = ?, handle = ?, email = ?, phone = ?, notes = ?, commission_rate = ?,
-          active = ?, updated_at = datetime('now')
+      SET name = ?, handle = ?, email = ?, phone = ?, notes = ?, avatar_url = ?, bio = ?, social_links_json = ?,
+          preferred_payment_details = ?, commission_rate = ?, active = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(
       influencer.name,
@@ -2316,6 +2905,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       influencer.email || null,
       influencer.phone || null,
       influencer.notes || null,
+      influencer.avatarUrl || null,
+      influencer.bio || null,
+      influencer.socialLinks.length ? JSON.stringify(influencer.socialLinks) : null,
+      influencer.preferredPaymentDetails || null,
       influencer.commissionRate,
       influencer.active,
       influencerId

@@ -81,6 +81,13 @@
     merchWishlistItems: [],
     merchCartItems: [],
     merchCouponHistory: [],
+    influencerDashboard: null,
+    influencerDashboardLoading: false,
+    influencerSalesSearch: '',
+    influencerSalesStatus: 'all',
+    influencerSalesFrom: '',
+    influencerSalesTo: '',
+    influencerSalesPage: 1,
     accountDrawerOpen: false,
     accountDrawerTrigger: null,
     accountProfileEditing: false,
@@ -784,7 +791,430 @@
     `;
 
     const button = document.getElementById('merchAccountBtn');
-    button?.addEventListener('click', openAccountDrawer);
+    button?.addEventListener('click', () => {
+      openAccountDrawer();
+    });
+  }
+
+  function getInfluencerDashboardData() {
+    return state.influencerDashboard || null;
+  }
+
+  function getInfluencerSalesRows() {
+    const dashboard = getInfluencerDashboardData();
+    const rows = Array.isArray(dashboard?.salesHistory?.items) ? [...dashboard.salesHistory.items] : [];
+    const search = String(state.influencerSalesSearch || '').trim().toLowerCase();
+    const status = String(state.influencerSalesStatus || 'all').trim().toLowerCase();
+    const from = String(state.influencerSalesFrom || '').trim();
+    const to = String(state.influencerSalesTo || '').trim();
+
+    return rows.filter((row) => {
+      const rowStatus = String(row.orderStatus || row.paymentStatus || '').trim().toLowerCase();
+      if (status && status !== 'all' && rowStatus !== status) return false;
+      if (from && String(row.orderDate || '').slice(0, 10) < from) return false;
+      if (to && String(row.orderDate || '').slice(0, 10) > to) return false;
+      if (!search) return true;
+      return [row.orderNumber, row.productSummary, row.customerName, row.couponUsed, row.orderStatus, row.paymentStatus]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(search));
+    });
+  }
+
+  function renderSparklineBars(rows = [], valueKey = 'value', labelKey = 'label', formatter = null) {
+    const items = Array.isArray(rows) ? rows : [];
+    const maxValue = items.reduce((max, item) => Math.max(max, Number(item?.[valueKey] || 0)), 0) || 1;
+    return items.map((item) => {
+      const value = Number(item?.[valueKey] || 0);
+      const width = Math.max(8, Math.round((value / maxValue) * 100));
+      const formattedValue = typeof formatter === 'function' ? formatter(value, item) : formatPrice(value || 0);
+      return `
+        <div class="influencer-chart__row">
+          <span class="influencer-chart__label">${escapeHtml(item?.[labelKey] || '')}</span>
+          <span class="influencer-chart__bar"><span style="width:${width}%"></span></span>
+          <strong class="influencer-chart__value">${escapeHtml(formattedValue)}</strong>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderInfluencerDashboardSection() {
+    const dashboard = getInfluencerDashboardData();
+    if (!state.currentUser) return '';
+
+    if (!dashboard || !dashboard.influencer) {
+      return `
+        <section class="account-section account-section--influencer">
+          <div class="account-section__head">
+            <div>
+              <p class="account-section__eyebrow">Influencer Dashboard</p>
+              <h4>Creator access</h4>
+            </div>
+            <span class="account-badge account-badge--muted">Not available</span>
+          </div>
+          <div class="account-empty-state">
+            <p>No influencer dashboard for this account.</p>
+            <span>Your logged-in email must match an active influencer record in Merch Admin → Influencers.</span>
+          </div>
+        </section>
+      `;
+    }
+
+    const influencer = dashboard.influencer || {};
+    const summary = dashboard.summary || {};
+    const analytics = dashboard.analytics || {};
+    const coupons = Array.isArray(dashboard.couponPerformance) ? dashboard.couponPerformance : [];
+    const commissions = Array.isArray(dashboard.commissionHistory) ? dashboard.commissionHistory : [];
+    const notifications = Array.isArray(dashboard.notifications) ? dashboard.notifications : [];
+    const filteredSales = getInfluencerSalesRows();
+    const pageSize = 5;
+    const pageCount = Math.max(1, Math.ceil(filteredSales.length / pageSize));
+    const currentPage = Math.min(Math.max(1, Number(state.influencerSalesPage || 1)), pageCount);
+    const pageSlice = filteredSales.slice((currentPage - 1) * pageSize, (currentPage - 1) * pageSize + pageSize);
+
+    const kpis = [
+      { label: 'Total Sales Generated', value: formatPrice(summary.totalSalesGenerated || 0), note: 'Live merch sales linked to your coupons.' },
+      { label: 'Total Orders Referred', value: Number(summary.totalOrdersReferred || 0).toLocaleString('en-IN'), note: 'Attributed orders across merch checkout.' },
+      { label: 'Total Commission Earned', value: formatPrice(summary.totalCommissionEarned || 0), note: 'Calculated from active influencer commission.' },
+      { label: 'Commission Pending', value: formatPrice(summary.commissionPending || 0), note: 'Awaiting payout from the admin team.' },
+      { label: 'Commission Paid', value: formatPrice(summary.commissionPaid || 0), note: 'Already processed and recorded.' },
+      { label: 'Active Coupons', value: Number(summary.activeCoupons || coupons.filter((coupon) => coupon.active).length || 0).toLocaleString('en-IN'), note: 'Assignable and currently live.' },
+      { label: 'Coupon Usage', value: Number(summary.couponUsage || 0).toLocaleString('en-IN'), note: 'Orders captured through your codes.' },
+      { label: 'Conversion Rate', value: `${Number(summary.conversionRate || 0).toFixed(1)}%`, note: 'Paid orders from referred traffic.' },
+    ];
+
+    const socialLinksText = Array.isArray(influencer.socialLinks) ? influencer.socialLinks.join('\n') : '';
+    const bestCoupon = analytics.bestCoupon || dashboard.performance?.bestCoupon || null;
+    const highestSalesMonth = analytics.highestSalesMonth || dashboard.performance?.highestSalesMonth || null;
+    const topProducts = Array.isArray(analytics.topProducts) ? analytics.topProducts : Array.isArray(dashboard.performance?.topSellingProducts) ? dashboard.performance.topSellingProducts : [];
+    const averageOrderValue = dashboard.performance?.averageOrderValue ?? summary.averageOrderValue ?? 0;
+    const repeatCustomerPercentage = dashboard.performance?.repeatCustomerPercentage ?? analytics.repeatCustomerPercentage ?? 0;
+    const conversionRate = dashboard.performance?.conversionRate ?? summary.conversionRate ?? 0;
+    const upcomingPayment = dashboard.commission?.upcomingPayment ? formatDateLabel(dashboard.commission.upcomingPayment) : 'No payout scheduled';
+    const lastPayment = dashboard.commission?.lastPaymentDate ? formatDateLabel(dashboard.commission.lastPaymentDate) : 'No payments yet';
+    const monthlyTrend = Array.isArray(analytics.monthlyTrend) ? analytics.monthlyTrend : [];
+    const primaryCoupon = coupons.find((coupon) => coupon && coupon.active) || coupons[0] || null;
+
+    return `
+      <section class="account-section account-section--influencer">
+        <div class="account-section__head">
+          <div>
+            <p class="account-section__eyebrow">Influencer Dashboard</p>
+            <h4>Premium creator analytics</h4>
+          </div>
+          <span class="account-badge account-badge--live">Live</span>
+        </div>
+        <p class="account-card__note">Your dashboard updates from live merch sales, assigned coupons, and commission payments.</p>
+
+        <article class="influencer-coupon-hero">
+          <div class="influencer-coupon-hero__top">
+            <div class="influencer-coupon-hero__copy">
+              <p class="account-section__eyebrow">Assigned Coupon</p>
+              <h4>${escapeHtml(primaryCoupon?.code || 'Not assigned yet')}</h4>
+              <p>${escapeHtml(primaryCoupon ? (primaryCoupon.description || 'This coupon is linked to your influencer account.') : 'No coupon has been assigned yet. Once the admin assigns one, it will appear here automatically.')}</p>
+            </div>
+            <div class="influencer-coupon-hero__actions">
+              <span class="account-badge ${primaryCoupon && primaryCoupon.active ? 'account-badge--live' : 'account-badge--muted'}">${escapeHtml(primaryCoupon ? (primaryCoupon.active ? 'Active' : 'Inactive') : 'No coupon')}</span>
+              <button type="button" class="btn btn-outline account-action-btn" data-account-action="copy-influencer-coupon" data-coupon-code="${escapeHtml(primaryCoupon?.code || '')}" ${primaryCoupon?.code ? '' : 'disabled'}>Copy code</button>
+            </div>
+          </div>
+          <div class="influencer-coupon-hero__stats">
+            <div class="influencer-coupon-hero__stat">
+              <small>Type</small>
+              <strong>${escapeHtml(primaryCoupon ? (primaryCoupon.discountType || 'flat') : 'Discount')}</strong>
+            </div>
+            <div class="influencer-coupon-hero__stat">
+              <small>Value</small>
+              <strong>${escapeHtml(primaryCoupon ? String(primaryCoupon.discountValue || 0) : '0')}</strong>
+            </div>
+            <div class="influencer-coupon-hero__stat">
+              <small>Expires</small>
+              <strong>${escapeHtml(primaryCoupon ? formatDateLabel(primaryCoupon.expiresAt) : 'No expiry')}</strong>
+            </div>
+            <div class="influencer-coupon-hero__stat">
+              <small>Usage</small>
+              <strong>${escapeHtml(primaryCoupon ? Number(primaryCoupon.usageCount || 0).toLocaleString('en-IN') : '0')}</strong>
+            </div>
+          </div>
+        </article>
+
+        <div class="influencer-kpi-grid">
+          ${kpis.map((item) => `
+            <article class="influencer-kpi">
+              <p>${escapeHtml(item.label)}</p>
+              <strong>${escapeHtml(item.value)}</strong>
+              <span>${escapeHtml(item.note)}</span>
+            </article>
+          `).join('')}
+        </div>
+
+        <div class="influencer-grid influencer-grid--charts">
+          <article class="influencer-panel">
+            <div class="account-section__head">
+              <div>
+                <p class="account-section__eyebrow">Monthly Sales Trend</p>
+                <h4>Sales generated</h4>
+              </div>
+            </div>
+            <div class="influencer-chart">
+              ${monthlyTrend.length ? renderSparklineBars(monthlyTrend, 'sales', 'label') : '<p class="account-empty-state">No sales trend data yet.</p>'}
+            </div>
+          </article>
+          <article class="influencer-panel">
+            <div class="account-section__head">
+              <div>
+                <p class="account-section__eyebrow">Monthly Commission Trend</p>
+                <h4>Commission earned</h4>
+              </div>
+            </div>
+            <div class="influencer-chart">
+              ${monthlyTrend.length ? renderSparklineBars(monthlyTrend, 'commission', 'label') : '<p class="account-empty-state">No commission trend data yet.</p>'}
+            </div>
+          </article>
+        </div>
+
+        <div class="influencer-grid influencer-grid--analytics">
+          <article class="influencer-panel">
+            <div class="account-section__head">
+              <div>
+                <p class="account-section__eyebrow">Orders Per Month</p>
+                <h4>Fulfillment activity</h4>
+              </div>
+            </div>
+            <div class="influencer-chart">
+              ${monthlyTrend.length ? renderSparklineBars(monthlyTrend, 'orders', 'label', (value) => Number(value || 0).toLocaleString('en-IN')) : '<p class="account-empty-state">No order activity yet.</p>'}
+            </div>
+          </article>
+          <article class="influencer-panel">
+            <div class="account-section__head">
+              <div>
+                <p class="account-section__eyebrow">Performance Insights</p>
+                <h4>Quick wins</h4>
+              </div>
+            </div>
+            <div class="account-chip-list influencer-insight-list">
+              <span class="account-chip">Best coupon: ${escapeHtml(bestCoupon?.code || 'N/A')}</span>
+              <span class="account-chip">Highest sales month: ${escapeHtml(highestSalesMonth?.label || 'N/A')}</span>
+              <span class="account-chip">Average order value: ${escapeHtml(formatPrice(averageOrderValue || 0))}</span>
+              <span class="account-chip">Repeat customers: ${escapeHtml(`${repeatCustomerPercentage.toFixed ? repeatCustomerPercentage.toFixed(1) : repeatCustomerPercentage}%`)}</span>
+              <span class="account-chip">Conversion rate: ${escapeHtml(`${Number(conversionRate || 0).toFixed(1)}%`)}</span>
+            </div>
+            <div class="influencer-mini-list">
+              ${topProducts.length ? topProducts.map((product) => `
+                <div class="influencer-mini-list__item">
+                  <strong>${escapeHtml(product.name || 'Product')}</strong>
+                  <span>${escapeHtml(`${Number(product.quantity || 0).toLocaleString('en-IN')} sold`)}</span>
+                </div>
+              `).join('') : '<p class="account-empty-state">Top products will appear once customers start buying through your codes.</p>'}
+            </div>
+          </article>
+        </div>
+
+        <article class="influencer-panel">
+          <div class="account-section__head">
+            <div>
+              <p class="account-section__eyebrow">Coupon Performance</p>
+              <h4>Assigned coupon details</h4>
+            </div>
+            <span class="account-section__count">${coupons.length}</span>
+          </div>
+          <div class="influencer-coupon-grid">
+            ${coupons.length ? coupons.map((coupon) => `
+              <article class="influencer-coupon-card">
+                <div class="influencer-coupon-card__head">
+                  <div>
+                    <strong>${escapeHtml(coupon.code || '')}</strong>
+                    <span>${escapeHtml(coupon.active ? 'Active' : 'Inactive')}</span>
+                  </div>
+                  <button type="button" class="btn btn-outline account-action-btn" data-account-action="copy-influencer-coupon" data-coupon-code="${escapeHtml(coupon.code || '')}">Copy</button>
+                </div>
+                <p>${escapeHtml(coupon.description || 'No description')}</p>
+                <div class="influencer-coupon-card__meta">
+                  <span>${escapeHtml(coupon.discountType || 'flat')} ${escapeHtml(String(coupon.discountValue || 0))}</span>
+                  <span>Expires ${escapeHtml(coupon.expiresAt ? formatDateLabel(coupon.expiresAt) : 'No expiry')}</span>
+                  <span>Usage ${escapeHtml(`${Number(coupon.usageCount || 0)} / ${coupon.remainingUsage == null ? '∞' : coupon.maxRedemptions}`)}</span>
+                  <span>Revenue ${escapeHtml(formatPrice(coupon.revenueGenerated || 0))}</span>
+                  <span>Orders ${escapeHtml(Number(coupon.ordersGenerated || 0).toLocaleString('en-IN'))}</span>
+                </div>
+              </article>
+            `).join('') : '<div class="account-empty-state"><p>No coupons assigned yet.</p><span>Assigned coupon performance will appear here automatically.</span></div>'}
+          </div>
+        </article>
+
+        <details class="influencer-details" open>
+          <summary>
+            <span>Sales History</span>
+            <small>${filteredSales.length} records</small>
+          </summary>
+          <div class="influencer-toolbar">
+            <label class="account-field">
+              <span>Search</span>
+              <input type="search" data-influencer-filter="search" value="${escapeHtml(state.influencerSalesSearch)}" placeholder="Order number, coupon, customer, product" />
+            </label>
+            <label class="account-field">
+              <span>Status</span>
+              <select data-influencer-filter="status">
+                <option value="all" ${state.influencerSalesStatus === 'all' ? 'selected' : ''}>All</option>
+                <option value="paid" ${state.influencerSalesStatus === 'paid' ? 'selected' : ''}>Paid</option>
+                <option value="cod_pending" ${state.influencerSalesStatus === 'cod_pending' ? 'selected' : ''}>COD Pending</option>
+                <option value="processing" ${state.influencerSalesStatus === 'processing' ? 'selected' : ''}>Processing</option>
+                <option value="shipped" ${state.influencerSalesStatus === 'shipped' ? 'selected' : ''}>Shipped</option>
+                <option value="delivered" ${state.influencerSalesStatus === 'delivered' ? 'selected' : ''}>Delivered</option>
+                <option value="cancelled" ${state.influencerSalesStatus === 'cancelled' ? 'selected' : ''}>Cancelled</option>
+              </select>
+            </label>
+            <label class="account-field">
+              <span>From</span>
+              <input type="date" data-influencer-filter="from" value="${escapeHtml(state.influencerSalesFrom)}" />
+            </label>
+            <label class="account-field">
+              <span>To</span>
+              <input type="date" data-influencer-filter="to" value="${escapeHtml(state.influencerSalesTo)}" />
+            </label>
+          </div>
+          <div class="influencer-table-wrap">
+            ${pageSlice.length ? `
+              <table class="influencer-table">
+                <thead>
+                  <tr>
+                    <th>Order</th>
+                    <th>Date</th>
+                    <th>Product Summary</th>
+                    <th>Customer</th>
+                    <th>Coupon</th>
+                    <th>Amount</th>
+                    <th>Commission</th>
+                    <th>Status</th>
+                    <th>Payment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${pageSlice.map((order) => `
+                    <tr>
+                      <td><strong>${escapeHtml(order.orderNumber || '')}</strong></td>
+                      <td>${escapeHtml(formatDateLabel(order.orderDate))}</td>
+                      <td>${escapeHtml(order.productSummary || 'Merch order')}</td>
+                      <td>${escapeHtml(order.customerName || 'Customer')}</td>
+                      <td>${escapeHtml(order.couponUsed || '—')}</td>
+                      <td>${escapeHtml(formatPrice(order.orderAmount || 0))}</td>
+                      <td>${escapeHtml(formatPrice(order.commissionEarned || 0))}</td>
+                      <td>${escapeHtml(order.orderStatus || 'pending')}</td>
+                      <td>${escapeHtml(order.paymentStatus || 'pending')}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+              <div class="influencer-pagination">
+                <span>Page ${currentPage} of ${pageCount}</span>
+                <div>
+                  <button type="button" class="btn btn-outline account-action-btn" data-account-action="influencer-history-page" data-direction="prev" ${currentPage <= 1 ? 'disabled' : ''}>Previous</button>
+                  <button type="button" class="btn btn-outline account-action-btn" data-account-action="influencer-history-page" data-direction="next" ${currentPage >= pageCount ? 'disabled' : ''}>Next</button>
+                </div>
+              </div>
+            ` : '<div class="account-empty-state"><p>No sales match your filters.</p><span>Try a wider date range or clear the search.</span></div>'}
+          </div>
+        </details>
+
+        <div class="influencer-grid influencer-grid--two">
+          <details class="influencer-details" open>
+            <summary>
+              <span>Commission</span>
+              <small>${formatPrice(dashboard.commission?.pending || 0)} pending</small>
+            </summary>
+            <div class="influencer-commission-grid">
+              <article class="influencer-commission-card"><span>Total Earned</span><strong>${escapeHtml(formatPrice(dashboard.commission?.totalEarned || 0))}</strong></article>
+              <article class="influencer-commission-card"><span>Total Paid</span><strong>${escapeHtml(formatPrice(dashboard.commission?.totalPaid || 0))}</strong></article>
+              <article class="influencer-commission-card"><span>Pending</span><strong>${escapeHtml(formatPrice(dashboard.commission?.pending || 0))}</strong></article>
+              <article class="influencer-commission-card"><span>Last Payment</span><strong>${escapeHtml(lastPayment)}</strong></article>
+              <article class="influencer-commission-card"><span>Upcoming Payment</span><strong>${escapeHtml(upcomingPayment)}</strong></article>
+            </div>
+            <div class="influencer-table-wrap">
+              ${commissions.length ? `
+                <table class="influencer-table influencer-table--compact">
+                  <thead>
+                    <tr>
+                      <th>Payment Date</th>
+                      <th>Amount</th>
+                      <th>Method</th>
+                      <th>Reference Number</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${commissions.map((payment) => `
+                      <tr>
+                        <td>${escapeHtml(formatDateLabel(payment.paymentDate))}</td>
+                        <td>${escapeHtml(formatPrice(payment.amount || 0))}</td>
+                        <td>${escapeHtml(payment.paymentMethod || 'Manual')}</td>
+                        <td>${escapeHtml(payment.referenceNumber || '—')}</td>
+                        <td>${escapeHtml(payment.status || 'pending')}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              ` : '<div class="account-empty-state"><p>No commission history yet.</p><span>Processed payouts will show up here automatically.</span></div>'}
+            </div>
+          </details>
+
+          <details class="influencer-details" open>
+            <summary>
+              <span>Notifications</span>
+              <small>${notifications.length} items</small>
+            </summary>
+            <div class="influencer-notifications">
+              ${notifications.length ? notifications.map((note) => `
+                <article class="influencer-notification">
+                  <strong>${escapeHtml(note.title || '')}</strong>
+                  <p>${escapeHtml(note.message || '')}</p>
+                  <span>${escapeHtml(formatDateLabel(note.time))}</span>
+                </article>
+              `).join('') : '<div class="account-empty-state"><p>No notifications yet.</p><span>Sale, coupon, and payment alerts will appear here.</span></div>'}
+            </div>
+          </details>
+        </div>
+
+        <details class="influencer-details">
+          <summary>
+            <span>Profile</span>
+            <small>Manage creator details</small>
+          </summary>
+          <form class="influencer-profile-form" id="influencerProfileForm">
+            <div class="account-form__grid">
+              <label class="account-field account-field--wide">
+                <span>Profile Picture</span>
+                <input name="avatarUrl" type="url" value="${escapeHtml(influencer.avatarUrl || '')}" placeholder="https://..." />
+              </label>
+              <label class="account-field">
+                <span>Name</span>
+                <input name="name" type="text" value="${escapeHtml(influencer.name || '')}" required />
+              </label>
+              <label class="account-field">
+                <span>Email</span>
+                <input type="email" value="${escapeHtml(influencer.email || '')}" readonly aria-readonly="true" />
+              </label>
+              <label class="account-field">
+                <span>Phone Number</span>
+                <input name="phone" type="tel" value="${escapeHtml(influencer.phone || '')}" />
+              </label>
+              <label class="account-field account-field--wide">
+                <span>Social Media Links</span>
+                <textarea name="socialLinks" rows="3" placeholder="One URL per line">${escapeHtml(socialLinksText)}</textarea>
+              </label>
+              <label class="account-field account-field--wide">
+                <span>Bio</span>
+                <textarea name="bio" rows="3" placeholder="Short creator bio">${escapeHtml(influencer.bio || '')}</textarea>
+              </label>
+              <label class="account-field account-field--wide">
+                <span>Preferred Payment Details</span>
+                <textarea name="preferredPaymentDetails" rows="3" placeholder="UPI ID, bank details, or payout instructions">${escapeHtml(influencer.preferredPaymentDetails || '')}</textarea>
+              </label>
+            </div>
+            <div class="account-form__actions">
+              <button class="btn btn-primary account-action-btn" type="submit">Save Profile</button>
+            </div>
+          </form>
+        </details>
+      </section>
+    `;
   }
 
   function renderAccountDrawer() {
@@ -960,6 +1390,8 @@
         `}
       </section>
 
+      ${renderInfluencerDashboardSection()}
+
       <section class="account-section">
         <div class="account-section__head">
           <div>
@@ -1088,9 +1520,23 @@
   function bindAccountDrawerActions() {
     document.getElementById('accountProfileForm')?.addEventListener('submit', handleProfileSubmit);
     document.getElementById('accountAddressForm')?.addEventListener('submit', handleAddressSubmit);
+    document.getElementById('influencerProfileForm')?.addEventListener('submit', handleInfluencerProfileSubmit);
 
     els.accountDrawerContent?.querySelectorAll('[data-account-action]').forEach((button) => {
       button.addEventListener('click', () => handleAccountAction(button));
+    });
+
+    els.accountDrawerContent?.querySelectorAll('[data-influencer-filter]').forEach((input) => {
+      const eventName = input.tagName === 'SELECT' ? 'change' : 'input';
+      input.addEventListener(eventName, () => {
+        const key = input.dataset.influencerFilter;
+        if (key === 'search') state.influencerSalesSearch = String(input.value || '');
+        if (key === 'status') state.influencerSalesStatus = String(input.value || 'all');
+        if (key === 'from') state.influencerSalesFrom = String(input.value || '');
+        if (key === 'to') state.influencerSalesTo = String(input.value || '');
+        state.influencerSalesPage = 1;
+        renderAccountDrawer();
+      });
     });
   }
 
@@ -1242,6 +1688,40 @@
 
     if (action === 'wishlist-move') {
       showCheckoutNotice('Wishlist', 'Move to Cart is ready for the wishlist service connection.');
+      return;
+    }
+
+    if (action === 'copy-influencer-coupon') {
+      const code = String(button.dataset.couponCode || '').trim();
+      if (!code) return;
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(code);
+        }
+        showCheckoutNotice('Copied', `${code} copied to clipboard.`);
+      } catch {
+        showCheckoutNotice('Copy failed', 'Unable to copy the coupon code right now.', { variant: 'error' });
+      }
+      return;
+    }
+
+    if (action === 'influencer-history-page') {
+      const direction = String(button.dataset.direction || '').trim();
+      const totalRows = getInfluencerSalesRows();
+      const pageCount = Math.max(1, Math.ceil(totalRows.length / 5));
+      if (direction === 'prev') {
+        state.influencerSalesPage = Math.max(1, Number(state.influencerSalesPage || 1) - 1);
+      } else if (direction === 'next') {
+        state.influencerSalesPage = Math.min(pageCount, Number(state.influencerSalesPage || 1) + 1);
+      }
+      renderAccountDrawer();
+      return;
+    }
+
+    if (action === 'save-influencer-profile') {
+      const form = document.getElementById('influencerProfileForm');
+      if (form) form.requestSubmit();
+      return;
     }
   }
 
@@ -1354,6 +1834,60 @@
     renderAccountDrawer();
   }
 
+  async function handleInfluencerProfileSubmit(event) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const socialLinks = String(formData.get('socialLinks') || '')
+      .split(/\n+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const payload = {
+      name: String(formData.get('name') || '').trim(),
+      phone: String(formData.get('phone') || '').trim(),
+      avatarUrl: String(formData.get('avatarUrl') || '').trim(),
+      socialLinks,
+      bio: String(formData.get('bio') || '').trim(),
+      preferredPaymentDetails: String(formData.get('preferredPaymentDetails') || '').trim(),
+    };
+
+    try {
+      const result = await api('/api/merch/influencer-profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      state.influencerDashboard = result.dashboard || state.influencerDashboard;
+      if (result.influencer) {
+        state.influencerDashboard = {
+          ...(state.influencerDashboard || {}),
+          influencer: result.influencer,
+        };
+      }
+      if (state.merchProfile) {
+        state.merchProfile = {
+          ...state.merchProfile,
+          ...(payload.name ? { fullName: payload.name } : {}),
+          ...(payload.phone ? { mobile: payload.phone } : {}),
+          ...(payload.avatarUrl ? { avatarUrl: payload.avatarUrl } : {}),
+        };
+      }
+      if (state.currentUser) {
+        state.currentUser = {
+          ...state.currentUser,
+          ...(payload.name ? { name: payload.name } : {}),
+          ...(payload.phone ? { mobile: payload.phone } : {}),
+          ...(payload.avatarUrl ? { avatarUrl: payload.avatarUrl } : {}),
+        };
+      }
+      showCheckoutNotice('Profile saved', 'Your influencer profile was updated.');
+    } catch (error) {
+      showCheckoutNotice('Profile not saved', error.message || 'Unable to update influencer profile.', { variant: 'error' });
+      return;
+    }
+
+    renderAccountDrawer();
+  }
+
   function getAddressPayload(form) {
     const formData = new FormData(form);
     return {
@@ -1425,11 +1959,12 @@
     renderAccountDrawer();
   }
 
-  function openAccountDrawer() {
+  async function openAccountDrawer() {
     if (!els.accountDrawer) return;
 
     state.accountDrawerOpen = true;
     state.accountDrawerTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    await loadInfluencerDashboard();
     renderAccountDrawer();
     els.accountDrawer.hidden = false;
     els.accountDrawerOverlay.hidden = false;
@@ -1470,6 +2005,13 @@
     state.merchAddresses = [];
     state.merchWishlistItems = [];
     state.merchCartItems = [];
+    state.merchCouponHistory = [];
+    state.influencerDashboard = null;
+    state.influencerSalesSearch = '';
+    state.influencerSalesStatus = 'all';
+    state.influencerSalesFrom = '';
+    state.influencerSalesTo = '';
+    state.influencerSalesPage = 1;
     state.accountDrawerTrigger = null;
     closeAccountDrawer();
     renderAccountTrigger();
@@ -2339,6 +2881,26 @@
     });
   }
 
+  async function loadInfluencerDashboard() {
+    if (!state.currentUser) {
+      state.influencerDashboard = null;
+      return;
+    }
+
+    try {
+      state.influencerDashboardLoading = true;
+      const result = await api('/api/merch/influencer-dashboard?page=1&pageSize=500');
+      state.influencerDashboard = result || null;
+    } catch (error) {
+      state.influencerDashboard = null;
+      if (Number(error?.status || 0) !== 403) {
+        console.warn('Unable to load influencer dashboard:', error?.message || error);
+      }
+    } finally {
+      state.influencerDashboardLoading = false;
+    }
+  }
+
   async function loadCustomerContext() {
     try {
       const authResult = await api('/api/auth/me');
@@ -2368,6 +2930,7 @@
         state.merchCartItems = [];
         state.merchCouponHistory = [];
       }
+      await loadInfluencerDashboard();
     } else {
       state.merchProfile = null;
       state.merchOrders = [];
@@ -2375,6 +2938,7 @@
       state.merchWishlistItems = [];
       state.merchCartItems = [];
       state.merchCouponHistory = [];
+      state.influencerDashboard = null;
     }
 
     state.authResolved = true;
