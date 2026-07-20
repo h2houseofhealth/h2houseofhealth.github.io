@@ -856,6 +856,7 @@ app.get('/auth/google/callback', ensureGoogleOAuthConfigured, (req, res, next) =
       }
 
       const token = setAuthCookie(req, res, user);
+      app.locals.merchGuestOrderSync?.(user);
       return res.redirect(`/booking/#auth_token=${encodeURIComponent(token)}`);
     });
   })(req, res, next);
@@ -1058,6 +1059,7 @@ app.post('/api/auth/register/complete', (req, res) => {
     membershipPeopleCount: null,
     membershipSubscriptionId: null,
   };
+  app.locals.merchGuestOrderSync?.(user);
   transferGuestBookingsToUserByEmail(email, user.id);
   const token = setAuthCookie(req, res, user);
   return res.status(201).json({ user, token });
@@ -1123,6 +1125,7 @@ app.post('/api/auth/login', (req, res) => {
     } catch {
       syncedUser = null;
     }
+    app.locals.merchGuestOrderSync?.(syncedUser || user);
     transferGuestBookingsToUserByEmail(normalizedEmail, Number(user.id));
 
     const authSource = syncedUser || user;
@@ -2362,6 +2365,7 @@ app.get('/api/membership-orders/:orderId/invoice-link', requireAuth, (req, res) 
 });
 
 app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
+  app.locals.merchGuestOrderSync?.(req.user);
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId) || orderId <= 0) {
     return res.status(400).json({ message: 'order id is required' });
@@ -2421,6 +2425,7 @@ app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
 });
 
 app.post('/api/merch/orders/:id/invoice-email', requireAuth, async (req, res) => {
+  app.locals.merchGuestOrderSync?.(req.user);
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId) || orderId <= 0) {
     return res.status(400).json({ message: 'order id is required' });
@@ -12838,7 +12843,9 @@ function findOrCreateGoogleUser(profile) {
   const existingUser = getUserProfileByEmail(email);
   if (existingUser) {
     db.prepare('UPDATE users SET google_id = ? WHERE id = ?').run(googleId, Number(existingUser.id));
-    return syncMembershipForUser({ userId: Number(existingUser.id), email }) || getUserProfileById(Number(existingUser.id));
+    const user = syncMembershipForUser({ userId: Number(existingUser.id), email }) || getUserProfileById(Number(existingUser.id));
+    app.locals.merchGuestOrderSync?.(user);
+    return user;
   }
 
   const result = db
@@ -12849,7 +12856,9 @@ function findOrCreateGoogleUser(profile) {
     .run(name || 'User', email, googleId);
 
   const userId = Number(result.lastInsertRowid);
-  return syncMembershipForUser({ userId, email }) || getUserProfileById(userId);
+  const user = syncMembershipForUser({ userId, email }) || getUserProfileById(userId);
+  app.locals.merchGuestOrderSync?.(user);
+  return user;
 }
 
 function setAuthCookie(req, res, user) {

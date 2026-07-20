@@ -68,6 +68,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       customer_name TEXT NOT NULL,
       customer_email TEXT NOT NULL,
       customer_phone TEXT NOT NULL,
+      guest_name TEXT,
+      guest_email TEXT,
+      guest_phone TEXT,
+      is_guest INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'pending',
       subtotal INTEGER NOT NULL,
       gst_amount INTEGER NOT NULL DEFAULT 0,
@@ -82,6 +86,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       razorpay_order_id TEXT,
       razorpay_payment_id TEXT,
       shipping_address TEXT,
+      billing_address TEXT,
       tracking_number TEXT,
       carrier_name TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -161,6 +166,22 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     db.exec('ALTER TABLE merch_orders ADD COLUMN customer_id INTEGER');
   }
 
+  if (!hasColumn('merch_orders', 'guest_name')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN guest_name TEXT');
+  }
+
+  if (!hasColumn('merch_orders', 'guest_email')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN guest_email TEXT');
+  }
+
+  if (!hasColumn('merch_orders', 'guest_phone')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN guest_phone TEXT');
+  }
+
+  if (!hasColumn('merch_orders', 'is_guest')) {
+    db.exec("ALTER TABLE merch_orders ADD COLUMN is_guest INTEGER NOT NULL DEFAULT 0");
+  }
+
   if (!hasColumn('merch_orders', 'coupon_id')) {
     db.exec('ALTER TABLE merch_orders ADD COLUMN coupon_id INTEGER REFERENCES coupons(id)');
   }
@@ -171,6 +192,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   if (!hasColumn('merch_orders', 'influencer_id')) {
     db.exec('ALTER TABLE merch_orders ADD COLUMN influencer_id INTEGER REFERENCES merch_influencers(id)');
+  }
+
+  if (!hasColumn('merch_orders', 'billing_address')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN billing_address TEXT');
   }
 
   if (hasTable('coupons') && !hasColumn('coupons', 'influencer_id')) {
@@ -555,12 +580,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function buildMerchOrderRecord(order, items = []) {
     const shippingAddress = parseMerchShippingAddress(order.shippingAddress);
+    const billingAddress = parseMerchShippingAddress(order.billingAddress) || shippingAddress;
     return {
       id: Number(order.id),
       orderNumber: String(order.orderNumber || ''),
       customerName: String(order.customerName || ''),
       customerEmail: String(order.customerEmail || ''),
       customerPhone: String(order.customerPhone || ''),
+      guestName: String(order.guestName || ''),
+      guestEmail: String(order.guestEmail || ''),
+      guestPhone: String(order.guestPhone || ''),
+      isGuest: Number(order.isGuest || 0) === 1,
       email: String(order.customerEmail || ''),
       phone: String(order.customerPhone || ''),
       status: String(order.status || 'pending'),
@@ -582,7 +612,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       razorpayOrderId: String(order.razorpayOrderId || order.razorpay_order_id || ''),
       razorpayPaymentId: String(order.razorpayPaymentId || order.razorpay_payment_id || ''),
       shippingAddress: shippingAddress ? formatMerchAddressLine(shippingAddress) : String(order.shippingAddress || ''),
-      billingAddress: shippingAddress ? formatMerchAddressLine(shippingAddress) : String(order.shippingAddress || ''),
+      billingAddress: billingAddress ? formatMerchAddressLine(billingAddress) : String(order.billingAddress || order.shippingAddress || ''),
       trackingNumber: String(order.trackingNumber || order.tracking_number || ''),
       carrier: String(order.carrierName || order.carrier_name || ''),
       createdAt: order.createdAt || order.created_at || null,
@@ -650,12 +680,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     let sql = `
       SELECT mo.id, mo.order_number AS orderNumber, mo.customer_name AS customerName, mo.customer_email AS customerEmail,
-             mo.customer_phone AS customerPhone, mo.status, mo.subtotal, mo.gst_amount AS gstAmount,
+             mo.customer_phone AS customerPhone, mo.guest_name AS guestName, mo.guest_email AS guestEmail,
+             mo.guest_phone AS guestPhone, mo.is_guest AS isGuest, mo.status, mo.subtotal, mo.gst_amount AS gstAmount,
              mo.shipping_charge AS shippingCharge, mo.discount_amount AS discountAmount, mo.coupon_id AS couponId,
              mo.coupon_code AS couponCode, mo.influencer_id AS influencerId, mi.name AS influencerName,
              mi.handle AS influencerHandle, mo.total_amount AS totalAmount, mo.payment_method AS paymentMethod,
              mo.payment_status AS paymentStatus, mo.razorpay_order_id AS razorpayOrderId,
              mo.razorpay_payment_id AS razorpayPaymentId, mo.shipping_address AS shippingAddress,
+             mo.billing_address AS billingAddress,
              mo.tracking_number AS trackingNumber, mo.carrier_name AS carrierName,
              mo.created_at AS createdAt, mo.updated_at AS updatedAt,
              mo.customer_user_id AS customerUserId, mo.customer_id AS customerId
@@ -986,7 +1018,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const state = String(address.state || '').trim();
     const postalCode = String(address.postalCode || address.postal_code || '').trim();
     const country = String(address.country || '').trim();
+    const fullAddress = String(address.full || address.address || address.value || '').trim();
     const locationParts = [line1, line2, city, state, postalCode, country].filter(Boolean);
+    if (!locationParts.length && fullAddress) {
+      locationParts.push(fullAddress);
+    }
     const prefixParts = [label || recipientName, phone].filter(Boolean);
     return [prefixParts.join(' - '), locationParts.join(', ')].filter(Boolean).join(' - ').trim();
   }
@@ -1003,6 +1039,282 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   function normalizeMerchCustomerPhone(value) {
     return String(value || '').trim().replace(/\D+/g, '');
   }
+
+  function getMerchCustomerProfileByEmail(email) {
+    const normalizedEmail = normalizeMerchCustomerEmail(email);
+    if (!normalizedEmail) return null;
+    return db
+      .prepare(
+        `SELECT id, user_id AS userId, full_name AS fullName, email, mobile, avatar_url AS avatarUrl,
+                created_at AS createdAt, updated_at AS updatedAt
+         FROM merch_customer_profiles
+         WHERE LOWER(TRIM(email)) = ?
+         LIMIT 1`
+      )
+      .get(normalizedEmail);
+  }
+
+  function normalizeMerchAddressPayload(rawValue = {}, fallback = {}) {
+    const parsed = parseMerchShippingAddress(rawValue) || {};
+    const fullAddress = String(parsed.full || parsed.address || parsed.value || fallback.full || '').trim();
+    return {
+      label: String(parsed.label || parsed.name || fallback.label || '').trim(),
+      recipientName: String(parsed.recipientName || parsed.recipient_name || fallback.recipientName || fallback.recipient_name || '').trim(),
+      phone: String(parsed.phone || fallback.phone || '').trim(),
+      line1: String(parsed.line1 || parsed.addressLine1 || fallback.line1 || fullAddress || '').trim(),
+      line2: String(parsed.line2 || parsed.addressLine2 || fallback.line2 || '').trim(),
+      city: String(parsed.city || fallback.city || '').trim(),
+      state: String(parsed.state || fallback.state || '').trim(),
+      postalCode: String(parsed.postalCode || parsed.postal_code || fallback.postalCode || fallback.postal_code || '').trim(),
+      country: String(parsed.country || fallback.country || 'India').trim() || 'India',
+      full: fullAddress,
+    };
+  }
+
+  function normalizeMerchAddressKey(address = {}) {
+    const normalized = normalizeMerchAddressPayload(address);
+    return [
+      normalized.label,
+      normalized.recipientName,
+      normalized.phone,
+      normalized.line1,
+      normalized.line2,
+      normalized.city,
+      normalized.state,
+      normalized.postalCode,
+      normalized.country,
+      normalized.full,
+    ]
+      .map((value) => String(value || '').trim().toLowerCase())
+      .filter(Boolean)
+      .join('|');
+  }
+
+  function getMerchCustomerAddresses(customerId) {
+    return db
+      .prepare(
+        `SELECT id, customer_id AS customerId, label, recipient_name AS recipientName, phone, line1, line2,
+                city, state, postal_code AS postalCode, country, is_default AS isDefault,
+                created_at AS createdAt, updated_at AS updatedAt
+         FROM merch_customer_addresses
+         WHERE customer_id = ?
+         ORDER BY isDefault DESC, datetime(createdAt) DESC, id DESC`
+      )
+      .all(customerId);
+  }
+
+  function getMerchCustomerAddressKeySet(customerId) {
+    const existingAddresses = getMerchCustomerAddresses(customerId);
+    return new Set(existingAddresses.map((address) => normalizeMerchAddressKey(address)));
+  }
+
+  function saveMerchCustomerAddress(customerId, address, { isDefault = false, addressKeySet = null } = {}) {
+    const normalized = normalizeMerchAddressPayload(address);
+    if (!normalized.recipientName || !normalized.phone || !normalized.line1) {
+      return false;
+    }
+
+    const key = normalizeMerchAddressKey(normalized);
+    if (!key) return false;
+    if (addressKeySet?.has(key)) return false;
+
+    if (addressKeySet) {
+      addressKeySet.add(key);
+    }
+
+    const existingCount = db
+      .prepare('SELECT COUNT(*) AS count FROM merch_customer_addresses WHERE customer_id = ?')
+      .get(customerId).count;
+    const shouldSetDefault = Boolean(isDefault) || existingCount === 0;
+
+    if (shouldSetDefault) {
+      db.prepare('UPDATE merch_customer_addresses SET is_default = 0 WHERE customer_id = ?').run(customerId);
+    }
+
+    db
+      .prepare(
+        `INSERT INTO merch_customer_addresses
+          (customer_id, label, recipient_name, phone, line1, line2, city, state, postal_code, country, is_default, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+      )
+      .run(
+        customerId,
+        normalized.label || null,
+        normalized.recipientName,
+        normalized.phone,
+        normalized.line1,
+        normalized.line2 || null,
+        normalized.city || null,
+        normalized.state || null,
+        normalized.postalCode || null,
+        normalized.country,
+        shouldSetDefault ? 1 : 0
+      );
+
+    return true;
+  }
+
+  function getMerchCustomerProfileByUserIdOrEmail(userId, email) {
+    const byUser = getMerchCustomerProfileByUserId(userId);
+    const byEmail = getMerchCustomerProfileByEmail(email);
+    if (byUser && byEmail && Number(byUser.id) !== Number(byEmail.id)) {
+      return { primary: byUser, duplicate: byEmail };
+    }
+    return { primary: byUser || byEmail || null, duplicate: null };
+  }
+
+  function mergeMerchCustomerProfiles(primaryProfileId, duplicateProfileId) {
+    const primaryId = Number(primaryProfileId);
+    const duplicateId = Number(duplicateProfileId);
+    if (!Number.isInteger(primaryId) || !Number.isInteger(duplicateId) || primaryId <= 0 || duplicateId <= 0 || primaryId === duplicateId) {
+      return false;
+    }
+
+    db.prepare('UPDATE merch_orders SET customer_id = ? WHERE customer_id = ?').run(primaryId, duplicateId);
+    db.prepare('UPDATE merch_customer_addresses SET customer_id = ? WHERE customer_id = ?').run(primaryId, duplicateId);
+    db.prepare('UPDATE merch_customer_cart_items SET customer_id = ? WHERE customer_id = ?').run(primaryId, duplicateId);
+    db.prepare('UPDATE merch_customer_wishlist_items SET customer_id = ? WHERE customer_id = ?').run(primaryId, duplicateId);
+    db.prepare('DELETE FROM merch_customer_profiles WHERE id = ?').run(duplicateId);
+    return true;
+  }
+
+  function getMerchGuestOrdersByEmail(email) {
+    const normalizedEmail = normalizeMerchCustomerEmail(email);
+    if (!normalizedEmail) return [];
+
+    return db.prepare(
+      `SELECT id, order_number AS orderNumber, customer_name AS customerName, customer_email AS customerEmail,
+              customer_phone AS customerPhone, guest_name AS guestName, guest_email AS guestEmail,
+              guest_phone AS guestPhone, is_guest AS isGuest, shipping_address AS shippingAddress,
+              billing_address AS billingAddress, created_at AS createdAt, updated_at AS updatedAt,
+              customer_user_id AS customerUserId, customer_id AS customerId
+       FROM merch_orders
+       WHERE LOWER(TRIM(customer_email)) = ?
+         AND (COALESCE(customer_user_id, 0) = 0 OR COALESCE(is_guest, 0) = 1)
+       ORDER BY datetime(created_at) DESC, id DESC`
+    ).all(normalizedEmail);
+  }
+
+  function syncMerchGuestOrdersForUser(user) {
+    const bookingUser = user?.id ? getBookingUserById(user.id) : null;
+    const normalizedUserId = Number(bookingUser?.id || user?.id || 0);
+    const normalizedEmail = normalizeMerchCustomerEmail(bookingUser?.email || user?.email || '');
+    if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0 || !normalizedEmail) {
+      return null;
+    }
+
+    const guestOrders = getMerchGuestOrdersByEmail(normalizedEmail);
+    const { primary, duplicate } = getMerchCustomerProfileByUserIdOrEmail(normalizedUserId, normalizedEmail);
+    let profile = primary;
+
+    const latestGuestOrder = guestOrders[0] || null;
+    const baseName = String(bookingUser?.name || user?.name || '').trim();
+    const latestName = String(latestGuestOrder?.guestName || latestGuestOrder?.customerName || '').trim();
+    const latestPhone = String(latestGuestOrder?.guestPhone || latestGuestOrder?.customerPhone || '').trim();
+    const latestAvatarUrl = String(bookingUser?.avatarUrl || user?.avatarUrl || '').trim();
+    const latestEmail = normalizedEmail;
+
+    const transaction = db.transaction(() => {
+      if (duplicate && profile && Number(duplicate.id) !== Number(profile.id)) {
+        mergeMerchCustomerProfiles(profile.id, duplicate.id);
+        profile = getMerchCustomerProfileByUserId(normalizedUserId) || getMerchCustomerProfileByEmail(normalizedEmail) || profile;
+      }
+
+      if (!profile) {
+        const seedName = baseName || latestName || 'House of Health Customer';
+        const seedMobile = String(bookingUser?.mobile || user?.mobile || latestPhone || '').trim();
+        const insertResult = db
+          .prepare(
+            `INSERT INTO merch_customer_profiles (user_id, full_name, email, mobile, avatar_url, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+          )
+          .run(
+            normalizedUserId,
+            seedName,
+            latestEmail,
+            seedMobile || null,
+            latestAvatarUrl || null
+          );
+        profile = db
+          .prepare(
+            `SELECT id, user_id AS userId, full_name AS fullName, email, mobile, avatar_url AS avatarUrl,
+                    created_at AS createdAt, updated_at AS updatedAt
+             FROM merch_customer_profiles
+             WHERE id = ?`
+          )
+          .get(insertResult.lastInsertRowid);
+      }
+
+      const updates = [];
+      const params = [];
+      if (Number(profile.userId || 0) !== normalizedUserId) {
+        updates.push('user_id = ?');
+        params.push(normalizedUserId);
+      }
+      if (baseName && baseName !== String(profile.fullName || '').trim()) {
+        updates.push('full_name = ?');
+        params.push(baseName);
+      } else if (!String(profile.fullName || '').trim() && latestName) {
+        updates.push('full_name = ?');
+        params.push(latestName);
+      }
+      if (latestEmail && latestEmail !== normalizeMerchCustomerEmail(profile.email)) {
+        updates.push('email = ?');
+        params.push(latestEmail);
+      }
+      const nextMobile = String(profile.mobile || '').trim() || String(bookingUser?.mobile || user?.mobile || latestPhone || '').trim();
+      if (nextMobile && nextMobile !== String(profile.mobile || '').trim()) {
+        updates.push('mobile = ?');
+        params.push(nextMobile);
+      }
+      if (latestAvatarUrl && latestAvatarUrl !== String(profile.avatarUrl || '').trim()) {
+        updates.push('avatar_url = ?');
+        params.push(latestAvatarUrl);
+      }
+      if (updates.length) {
+        updates.push("updated_at = datetime('now')");
+        db.prepare(`UPDATE merch_customer_profiles SET ${updates.join(', ')} WHERE id = ?`).run(...params, Number(profile.id));
+      }
+
+      const profileId = Number(profile.id);
+      const addressKeySet = getMerchCustomerAddressKeySet(profileId);
+      let markedDefault = false;
+      for (const order of guestOrders) {
+        const shippingAddress = parseMerchShippingAddress(order.shippingAddress);
+        const billingAddress = parseMerchShippingAddress(order.billingAddress);
+        if (shippingAddress) {
+          const saved = saveMerchCustomerAddress(profileId, shippingAddress, {
+            isDefault: !markedDefault,
+            addressKeySet,
+          });
+          if (saved && !markedDefault) {
+            markedDefault = true;
+          }
+        }
+        if (billingAddress) {
+          saveMerchCustomerAddress(profileId, billingAddress, {
+            isDefault: !markedDefault && !shippingAddress,
+            addressKeySet,
+          });
+        }
+      }
+
+      if (guestOrders.length) {
+        db.prepare(
+          `UPDATE merch_orders
+           SET customer_user_id = ?, customer_id = ?, is_guest = 0, updated_at = datetime('now')
+           WHERE LOWER(TRIM(customer_email)) = ?
+             AND (COALESCE(customer_user_id, 0) = 0 OR COALESCE(is_guest, 0) = 1)`
+        ).run(normalizedUserId, profileId, normalizedEmail);
+      }
+    });
+
+    transaction();
+    return profile ? getMerchCustomerProfileByUserId(normalizedUserId) || getMerchCustomerProfileByEmail(normalizedEmail) || profile : null;
+  }
+
+  app.locals.merchGuestOrderSync = syncMerchGuestOrdersForUser;
+  app.locals.merchCustomerProfileSync = ensureMerchCustomerProfileForUser;
 
   function addMerchCustomerAddress(customer, address, source = 'saved') {
     const text = formatMerchAddressLine(address);
@@ -1159,7 +1471,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       return res.status(503).json({ error: 'Payment gateway not configured' });
     }
 
-    const { items, customer, address } = req.body || {};
+    const { items, customer, address, billingAddress } = req.body || {};
     const authUser = getMerchAuthUser(req);
     const merchProfile = authUser ? ensureMerchCustomerProfileForUser(authUser) : null;
     const couponCode = normalizeMerchCouponCode(req.body?.couponCode);
@@ -1221,6 +1533,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const influencerId = Number(couponResult.coupon?.influencerId || 0) > 0 ? Number(couponResult.coupon.influencerId) : null;
     const totalAmount = Math.max(100, subtotal + shippingCharge - discountAmount);
     const orderNumber = generateOrderNumber();
+    const shippingAddressPayload = address || {};
+    const billingAddressPayload = billingAddress || address || {};
+    const isGuestCheckout = !authUser;
+    const guestName = isGuestCheckout ? resolvedCustomer.name : null;
+    const guestEmail = isGuestCheckout ? resolvedCustomer.email : null;
+    const guestPhone = isGuestCheckout ? resolvedCustomer.phone : null;
 
     // Create Razorpay order
     razorpay.orders.create({
@@ -1231,14 +1549,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }).then(rpOrder => {
       // Save order to DB
       const insertOrder = db.prepare(`
-        INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, total_amount, payment_method, payment_status, razorpay_order_id, shipping_address)
-        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, 'online', 'pending', ?, ?)
+        INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, total_amount, payment_method, payment_status, razorpay_order_id, shipping_address, billing_address)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, 'online', 'pending', ?, ?, ?)
       `);
       const result = insertOrder.run(
         orderNumber, resolvedCustomer.name, resolvedCustomer.email, resolvedCustomer.phone,
-        authUser?.id || null, merchProfile?.id || null,
+        guestName, guestEmail, guestPhone, isGuestCheckout ? 1 : 0, authUser?.id || null, merchProfile?.id || null,
         subtotal, gstAmount, shippingCharge, discountAmount, couponResult.coupon?.id || null, couponResult.couponCode || null, influencerId, totalAmount,
-        rpOrder.id, JSON.stringify(address || {})
+        rpOrder.id, JSON.stringify(shippingAddressPayload || {}), JSON.stringify(billingAddressPayload || shippingAddressPayload || {})
       );
       const orderId = result.lastInsertRowid;
 
@@ -1326,7 +1644,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   // ─── COD Checkout ───
   app.post('/api/merch/checkout-cod', (req, res) => {
-    const { items, customer, address } = req.body || {};
+    const { items, customer, address, billingAddress } = req.body || {};
     const authUser = getMerchAuthUser(req);
     const merchProfile = authUser ? ensureMerchCustomerProfileForUser(authUser) : null;
     const couponCode = normalizeMerchCouponCode(req.body?.couponCode);
@@ -1374,15 +1692,25 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const influencerId = Number(couponResult.coupon?.influencerId || 0) > 0 ? Number(couponResult.coupon.influencerId) : null;
     const totalAmount = Math.max(100, subtotal + shippingCharge + codSurcharge - discountAmount);
     const orderNumber = generateOrderNumber();
+    const shippingAddressPayload = address || {};
+    const billingAddressPayload = billingAddress || address || {};
+    const isGuestCheckout = !authUser;
+    const guestName = isGuestCheckout ? resolvedCustomer.name : null;
+    const guestEmail = isGuestCheckout ? resolvedCustomer.email : null;
+    const guestPhone = isGuestCheckout ? resolvedCustomer.phone : null;
 
     const result = db.prepare(`
-      INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, total_amount, payment_method, payment_status, shipping_address)
-      VALUES (?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?, ?, ?, 'cod', 'cod_pending', ?)
+      INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, total_amount, payment_method, payment_status, shipping_address, billing_address)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?, ?, ?, 'cod', 'cod_pending', ?, ?)
     `).run(
       orderNumber,
       resolvedCustomer.name,
       resolvedCustomer.email,
       resolvedCustomer.phone,
+      guestName,
+      guestEmail,
+      guestPhone,
+      isGuestCheckout ? 1 : 0,
       authUser?.id || null,
       merchProfile?.id || null,
       subtotal,
@@ -1393,7 +1721,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       couponResult.couponCode || null,
       influencerId,
       totalAmount,
-      JSON.stringify(address || {})
+      JSON.stringify(shippingAddressPayload || {}),
+      JSON.stringify(billingAddressPayload || shippingAddressPayload || {})
     );
 
     const orderId = result.lastInsertRowid;
@@ -1428,7 +1757,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   // ─── ADMIN: Get all orders ───
   app.get('/api/merch/profile', requireMerchAuth, (req, res) => {
-    const profile = ensureMerchCustomerProfileForUser(req.user);
+    const profile = syncMerchGuestOrdersForUser(req.user) || ensureMerchCustomerProfileForUser(req.user);
     if (!profile) {
       return res.status(404).json({ message: 'Merch profile could not be created' });
     }
@@ -1462,26 +1791,32 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       )
       .all(profile.id);
 
-    const orders = db
-      .prepare(
-        `SELECT id, order_number AS orderNumber, status, subtotal, gst_amount AS gstAmount,
-                shipping_charge AS shippingCharge, discount_amount AS discountAmount, total_amount AS totalAmount,
-                coupon_id AS couponId, coupon_code AS couponCode,
-                payment_method AS paymentMethod, payment_status AS paymentStatus, razorpay_order_id AS razorpayOrderId,
-                razorpay_payment_id AS razorpayPaymentId, shipping_address AS shippingAddress,
-                tracking_number AS trackingNumber, carrier_name AS carrierName,
-                created_at AS createdAt, updated_at AS updatedAt
-         FROM merch_orders
-         WHERE customer_user_id = ? OR customer_id = ?
-         ORDER BY datetime(createdAt) DESC, id DESC`
-      )
-      .all(Number(req.user.id), Number(profile.id));
+    const orders = loadMerchOrders({
+      customerUserId: Number(req.user.id),
+      customerId: Number(profile.id),
+      includeUnconfirmed: true,
+    });
 
-    res.json({ profile, addresses, cartItems, wishlistItems, orders });
+    const couponHistory = orders
+      .filter((order) => Number(order.couponId || 0) > 0 || String(order.couponCode || '').trim() || String(order.influencerName || '').trim())
+      .map((order) => ({
+        orderId: Number(order.id),
+        orderNumber: order.orderNumber || '',
+        couponId: order.couponId == null ? null : Number(order.couponId),
+        couponCode: String(order.couponCode || ''),
+        influencerName: String(order.influencerName || ''),
+        influencerCoupon: String(order.influencerName || '').trim()
+          ? `${String(order.influencerName || '').trim()}${String(order.couponCode || '').trim() ? ` (${String(order.couponCode || '').trim()})` : ''}`
+          : String(order.couponCode || '').trim(),
+        discountAmount: Number(order.discountAmount || 0),
+        createdAt: order.createdAt || null,
+      }));
+
+    res.json({ profile, addresses, cartItems, wishlistItems, orders, couponHistory });
   });
 
   app.patch('/api/merch/profile', requireMerchAuth, (req, res) => {
-    const profile = ensureMerchCustomerProfileForUser(req.user);
+    const profile = syncMerchGuestOrdersForUser(req.user) || ensureMerchCustomerProfileForUser(req.user);
     if (!profile) {
       return res.status(404).json({ message: 'Merch profile could not be created' });
     }
@@ -1558,7 +1893,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
 
   app.post('/api/merch/addresses', requireMerchAuth, (req, res) => {
-    const profile = ensureMerchCustomerProfileForUser(req.user);
+    const profile = syncMerchGuestOrdersForUser(req.user) || ensureMerchCustomerProfileForUser(req.user);
     if (!profile) {
       return res.status(404).json({ message: 'Merch profile could not be created' });
     }
@@ -1601,7 +1936,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   });
 
   app.patch('/api/merch/addresses/:id', requireMerchAuth, (req, res) => {
-    const profile = ensureMerchCustomerProfileForUser(req.user);
+    const profile = syncMerchGuestOrdersForUser(req.user) || ensureMerchCustomerProfileForUser(req.user);
     if (!profile) {
       return res.status(404).json({ message: 'Merch profile could not be created' });
     }
@@ -1654,7 +1989,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   });
 
   app.patch('/api/merch/addresses/:id/default', requireMerchAuth, (req, res) => {
-    const profile = ensureMerchCustomerProfileForUser(req.user);
+    const profile = syncMerchGuestOrdersForUser(req.user) || ensureMerchCustomerProfileForUser(req.user);
     if (!profile) {
       return res.status(404).json({ message: 'Merch profile could not be created' });
     }
@@ -1680,7 +2015,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   });
 
   app.delete('/api/merch/addresses/:id', requireMerchAuth, (req, res) => {
-    const profile = ensureMerchCustomerProfileForUser(req.user);
+    const profile = syncMerchGuestOrdersForUser(req.user) || ensureMerchCustomerProfileForUser(req.user);
     if (!profile) {
       return res.status(404).json({ message: 'Merch profile could not be created' });
     }
@@ -1709,7 +2044,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   });
 
   app.get('/api/merch/orders', requireMerchAuth, (req, res) => {
-    const profile = ensureMerchCustomerProfileForUser(req.user);
+    const profile = syncMerchGuestOrdersForUser(req.user) || ensureMerchCustomerProfileForUser(req.user);
     const orders = loadMerchOrders({
       customerUserId: Number(req.user.id),
       customerId: Number(profile?.id || 0),
@@ -1766,7 +2101,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       .prepare(
         `SELECT id, order_number AS orderNumber, customer_name AS customerName, customer_email AS customerEmail,
                 customer_phone AS customerPhone, customer_user_id AS customerUserId, customer_id AS customerId,
-                total_amount AS totalAmount, status, created_at AS createdAt, shipping_address AS shippingAddress
+                total_amount AS totalAmount, status, created_at AS createdAt, shipping_address AS shippingAddress,
+                billing_address AS billingAddress
          FROM merch_orders
          ORDER BY datetime(created_at) ASC, id ASC`
       )
@@ -1902,8 +2238,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       }
 
       const shippingAddress = parseMerchShippingAddress(order.shippingAddress);
+      const billingAddress = parseMerchShippingAddress(order.billingAddress);
       if (shippingAddress) {
         addMerchCustomerAddress(customer, shippingAddress, 'order');
+      }
+      if (billingAddress) {
+        addMerchCustomerAddress(customer, billingAddress, 'order');
       }
     }
 
