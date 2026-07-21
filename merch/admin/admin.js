@@ -3044,7 +3044,7 @@
           <label class="admin-field"><span>Email</span><input class="admin-input" name="email" value="${escapeHtml(entity?.email || '')}" /></label>
           <label class="admin-field"><span>Phone</span><input class="admin-input" name="phone" value="${escapeHtml(entity?.phone || '')}" /></label>
           <label class="admin-field"><span>Commission %</span><input class="admin-input" name="commissionRate" type="number" min="0" max="100" step="0.01" value="${escapeHtml(entity?.commissionRate ?? 10)}" /></label>
-          <label class="admin-field"><span>Commission Paid</span><input class="admin-input" name="paidCommission" type="number" min="0" step="0.01" value="${escapeHtml(entity?.paidCommission ?? 0)}" /></label>
+          <label class="admin-field"><span>Commission Paid (rupees)</span><input class="admin-input" name="paidCommission" type="number" min="0" step="1" value="${escapeHtml(Math.round(Number(entity?.paidCommission || 0) / 100))}" /></label>
           <label class="admin-field admin-field--wide"><span>Assigned Coupons</span><input class="admin-input" value="${escapeHtml((entity?.coupons || []).join(', '))}" readonly /></label>
           <label class="admin-field admin-field--wide"><span>Notes</span><textarea class="admin-textarea" name="notes">${escapeHtml(entity?.notes || '')}</textarea></label>
           <label class="admin-check"><input type="checkbox" name="active" ${entity?.active !== false ? 'checked' : ''} /><span>Active influencer</span></label>
@@ -3288,7 +3288,7 @@
       phone: String(fd.get('phone') || '').trim(),
       notes: String(fd.get('notes') || '').trim(),
       commissionRate: Number(fd.get('commissionRate') || 10),
-      paidCommission: Number(fd.get('paidCommission') || existing?.paidCommission || 0),
+      paidCommission: Math.max(0, Math.round(Number(fd.get('paidCommission') || existing?.paidCommission || 0) * 100)),
       coupons: existing?.coupons || [],
       totalOrders: Number(existing?.totalOrders || 0),
       revenue: Number(existing?.revenue || 0),
