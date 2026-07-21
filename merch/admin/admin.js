@@ -91,12 +91,16 @@
     if (Number(coupon?.influencerId || 0) > 0 || coupon?.influencerName || coupon?.influencer) return 'influencer';
     const explicitType = String(coupon?.couponType || coupon?.coupon_type || coupon?.ownerType || '').trim().toLowerCase();
     if (explicitType === 'public' || explicitType === 'general') return 'general';
-    if (explicitType === 'private' || explicitType === 'influencer') return 'influencer';
+    if (explicitType === 'private') return 'private';
+    if (explicitType === 'influencer') return 'influencer';
     return 'general';
   }
 
   function getCouponTypeLabel(coupon) {
-    return getCouponTypeValue(coupon) === 'influencer' ? 'Influencer Coupon' : 'General Coupon';
+    const typeValue = getCouponTypeValue(coupon);
+    if (typeValue === 'influencer') return 'Influencer Coupon';
+    if (typeValue === 'private') return 'Private Coupon';
+    return 'General Coupon';
   }
 
   function formatCount(value) {
@@ -114,6 +118,10 @@
     );
   }
 
+  function isLikelyEmail(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+  }
+
   function getInfluencerById(id) {
     return state.influencers.find((item) => Number(item.id) === Number(id)) || null;
   }
@@ -129,6 +137,94 @@
     ).trim();
   }
 
+  const COUPON_CATEGORY_OPTIONS = [
+    { value: 'public', label: 'Public Coupon' },
+    { value: 'seasonal', label: 'Seasonal Coupon' },
+    { value: 'festival', label: 'Festival Coupon' },
+    { value: 'first_purchase', label: 'First Purchase Coupon' },
+    { value: 'influencer', label: 'Influencer Coupon' },
+    { value: 'private', label: 'Private Coupon' },
+  ];
+
+  const COUPON_CATEGORY_DEFAULTS = {
+    public: {
+      codePrefix: 'MERCH',
+      campaignName: 'Public Merch Coupon',
+      description: 'Public merch offer for all eligible customers.',
+      discount: 100,
+      usageCount: 100,
+      expiryDays: 30,
+    },
+    seasonal: {
+      codePrefix: 'SEASON',
+      campaignName: 'Seasonal Merch Coupon',
+      description: 'Seasonal merch offer for a limited period.',
+      discount: 100,
+      usageCount: 100,
+      expiryDays: 45,
+    },
+    festival: {
+      codePrefix: 'FEST',
+      campaignName: 'Festival Merch Coupon',
+      description: 'Festival merch offer for a limited period.',
+      discount: 100,
+      usageCount: 100,
+      expiryDays: 21,
+    },
+    first_purchase: {
+      codePrefix: 'FIRST',
+      campaignName: 'First Purchase Coupon',
+      description: 'First merch purchase offer for eligible customers.',
+      discount: 100,
+      usageCount: 1,
+      expiryDays: 30,
+    },
+    influencer: {
+      codePrefix: 'INFL',
+      campaignName: 'Influencer Merch Coupon',
+      description: 'Influencer merch campaign coupon.',
+      discount: 100,
+      usageCount: 100,
+      expiryDays: 30,
+    },
+    private: {
+      codePrefix: 'PRIVATE',
+      campaignName: 'Private Merch Coupon',
+      description: 'Private merch offer for one customer.',
+      discount: 100,
+      usageCount: 1,
+      expiryDays: 30,
+    },
+  };
+
+  function addDaysIso(days) {
+    const date = new Date(today);
+    date.setDate(date.getDate() + Number(days || 0));
+    return toISODate(date);
+  }
+
+  function getCouponCategoryValue(coupon) {
+    const explicitCategory = String(coupon?.couponCategory || coupon?.category || '').trim().toLowerCase();
+    if (COUPON_CATEGORY_DEFAULTS[explicitCategory]) return explicitCategory;
+    if (Number(coupon?.influencerId || 0) > 0 || coupon?.influencerName || coupon?.influencer) return 'influencer';
+    if (String(coupon?.couponType || coupon?.coupon_type || '').trim().toLowerCase() === 'private') return 'private';
+    const campaignName = String(coupon?.festivalName || '').trim().toLowerCase();
+    if (campaignName.includes('first')) return 'first_purchase';
+    if (campaignName.includes('festival')) return 'festival';
+    if (campaignName.includes('season')) return 'seasonal';
+    return 'public';
+  }
+
+  function getCouponCategoryDefaults(categoryValue) {
+    return COUPON_CATEGORY_DEFAULTS[categoryValue] || COUPON_CATEGORY_DEFAULTS.public;
+  }
+
+  function normalizeCouponDateValue(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    return raw.slice(0, 10);
+  }
+
   function renderCouponChips(coupons = []) {
     if (!Array.isArray(coupons) || !coupons.length) {
       return '<p class="admin-table__muted" style="margin:0;">No coupons assigned yet.</p>';
@@ -138,6 +234,21 @@
 
   function uniqueId(prefix) {
     return `${prefix}-${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-4)}`;
+  }
+
+  async function fetchGeneratedCouponCode(prefixValue = 'H2') {
+    const params = new URLSearchParams({
+      prefix: String(prefixValue || 'H2'),
+      _ts: String(Date.now()),
+    });
+    const result = await apiRequest(`/api/admin/coupons/generate-code?${params.toString()}`, {
+      cache: 'no-store',
+    });
+    const code = String(result?.code || '').trim().toUpperCase();
+    if (!code) {
+      throw new Error('The coupon generator did not return a code.');
+    }
+    return code;
   }
 
   async function copyTextToClipboard(text) {
@@ -1466,7 +1577,6 @@
                         <th>Coupon Type</th>
                         <th>Discount</th>
                         <th>Usage</th>
-                        <th>Session Limit</th>
                         <th>Expiry Date</th>
                         <th>Status</th>
                         <th>Owner</th>
@@ -1477,18 +1587,20 @@
                     <tbody>
                       ${filtered.map((coupon) => {
                         const typeValue = getCouponTypeValue(coupon);
-                        const typeLabel = typeValue === 'influencer' ? 'Influencer Coupon' : 'General Coupon';
-                        const ownerLabel = getCouponInfluencerLabel(coupon) || (typeValue === 'influencer' ? 'Influencer' : 'General');
+                        const typeLabel = getCouponTypeLabel(coupon);
+                        const ownerLabel =
+                          typeValue === 'private'
+                            ? coupon.recipientEmail || 'Private'
+                            : getCouponInfluencerLabel(coupon) || (typeValue === 'influencer' ? 'Influencer' : 'General');
                         const expiryValue = coupon.validTill || coupon.expiresAt || coupon.expiry || '';
                         const statusValue = Number(coupon.active ?? coupon.isActive ?? 0) === 1 ? 'active' : 'inactive';
                         const usageCount = Number(coupon.totalRedemptions || coupon.usageCount || 0);
                         return `
                           <tr data-action="select-coupon" data-id="${coupon.id}" style="cursor:pointer;">
                             <td><strong>${escapeHtml(coupon.code || '-')}</strong></td>
-                            <td><span class="admin-badge ${typeValue === 'influencer' ? 'admin-badge--influencer' : 'admin-badge--general'}">${escapeHtml(typeLabel)}</span></td>
+                            <td><span class="admin-badge ${typeValue === 'influencer' ? 'admin-badge--influencer' : typeValue === 'private' ? 'admin-badge--private' : 'admin-badge--general'}">${escapeHtml(typeLabel)}</span></td>
                             <td>${escapeHtml(coupon.discount || coupon.discountValue || '-')}</td>
                             <td>${escapeHtml(String(usageCount))}</td>
-                            <td>${escapeHtml(String(coupon.sessionLimit || coupon.perUserLimit || 1))}</td>
                             <td>${escapeHtml(expiryValue ? dateLabel(expiryValue) : 'No expiry')}</td>
                             <td><span class="admin-badge ${statusClass(statusValue)}">${escapeHtml(getStatusLabel(statusValue))}</span></td>
                             <td>${escapeHtml(ownerLabel)}</td>
@@ -1531,8 +1643,7 @@
                       <p class="admin-list__item-title">Usage Statistics</p>
                       <p class="admin-list__item-sub">
                         Times used: ${escapeHtml(String(selectedCoupon.totalRedemptions || selectedCoupon.usageCount || 0))}<br>
-                        Remaining usage: ${escapeHtml(selectedCoupon.maxRedemptions == null ? 'Unlimited' : String(Math.max(0, Number(selectedCoupon.maxRedemptions || 0) - Number(selectedCoupon.totalRedemptions || 0))))}<br>
-                        Remaining session limit: ${escapeHtml(selectedCoupon.sessionLimit == null ? '—' : String(selectedCoupon.sessionLimit))}
+                        Remaining usage: ${escapeHtml(selectedCoupon.maxRedemptions == null ? 'Unlimited' : String(Math.max(0, Number(selectedCoupon.maxRedemptions || 0) - Number(selectedCoupon.totalRedemptions || 0))))}
                       </p>
                     </div>
                     <div class="admin-list__item">
@@ -2091,26 +2202,29 @@
         title: entity ? 'Edit Coupon' : 'Create Coupon',
         subtitle: 'Coupons',
         fields: `
-          <label class="admin-field"><span>Coupon Code</span><input class="admin-input" name="code" value="${escapeHtml(entity?.code || '')}" required /></label>
-          <label class="admin-field"><span>Campaign / Offer Name</span><input class="admin-input" name="festivalName" value="${escapeHtml(entity?.festivalName || '')}" placeholder="Seasonal, Festival, First Purchase" /></label>
-          <label class="admin-field"><span>Description</span><input class="admin-input" name="description" value="${escapeHtml(entity?.description || '')}" placeholder="Coupon notes or offer details" /></label>
-          <label class="admin-field"><span>Discount</span><input class="admin-input" name="discount" value="${escapeHtml(entity?.discount || '')}" required /></label>
-          <label class="admin-field"><span>Usage Count</span><input class="admin-input" name="usageCount" type="number" min="0" value="${escapeHtml(entity?.usageCount || 0)}" /></label>
-          <label class="admin-field"><span>Session Limit</span><input class="admin-input" name="sessionLimit" type="number" min="1" value="${escapeHtml(entity?.sessionLimit || 1)}" /></label>
-          <label class="admin-field"><span>Expiry</span><input class="admin-input" name="expiry" type="date" value="${escapeHtml(entity?.expiry || toISODate(today))}" /></label>
-          <label class="admin-field"><span>Coupon Type</span>
-            <select class="admin-select" name="couponType">
-              <option value="general" ${getCouponTypeValue(entity) === 'general' ? 'selected' : ''}>General Coupon</option>
-              <option value="influencer" ${getCouponTypeValue(entity) === 'influencer' ? 'selected' : ''}>Influencer Coupon</option>
+          <label class="admin-field admin-field--wide"><span>Coupon Category</span>
+            <select class="admin-select" name="couponCategory" data-coupon-category>
+              ${COUPON_CATEGORY_OPTIONS.map((option) => `<option value="${option.value}" ${getCouponCategoryValue(entity) === option.value ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}
             </select>
           </label>
-          <label class="admin-field"><span>Assigned Influencer</span>
+          <label class="admin-field"><span>Coupon Code</span>
+            <span class="admin-input-action">
+              <input class="admin-input" name="code" value="${escapeHtml(entity?.code || '')}" required />
+              <button class="admin-btn admin-btn--soft" type="button" data-coupon-generate-code>Generate</button>
+            </span>
+          </label>
+          <label class="admin-field"><span>Campaign Name</span><input class="admin-input" name="festivalName" value="${escapeHtml(entity?.festivalName || '')}" /></label>
+          <label class="admin-field admin-field--wide"><span>Description</span><input class="admin-input" name="description" value="${escapeHtml(entity?.description || '')}" /></label>
+          <label class="admin-field"><span>Discount</span><input class="admin-input" name="discount" type="number" min="1" step="1" value="${escapeHtml(entity?.discount || entity?.discountValue || '')}" required /></label>
+          <label class="admin-field"><span>Usage Count</span><input class="admin-input" name="usageCount" type="number" min="1" value="${escapeHtml(entity?.maxRedemptions || entity?.usageCount || '')}" /></label>
+          <label class="admin-field"><span>Expiry</span><input class="admin-input" name="expiry" type="date" value="${escapeHtml(normalizeCouponDateValue(entity?.validTill || entity?.expiresAt || entity?.expiry))}" /></label>
+          <label class="admin-field" data-coupon-influencer-field><span>Assigned Influencer</span>
             <select class="admin-select" name="influencerId">
               <option value="">Unassigned</option>
               ${state.influencers.map((influencer) => `<option value="${influencer.id}" ${Number(entity?.influencerId || 0) === Number(influencer.id) ? 'selected' : ''}>${escapeHtml(influencer.name)}${influencer.handle ? ` (${escapeHtml(influencer.handle)})` : ''}</option>`).join('')}
             </select>
           </label>
-          <label class="admin-field"><span>Owner Email</span><input class="admin-input" name="recipientEmail" type="email" value="${escapeHtml(entity?.recipientEmail || '')}" placeholder="Only for private customer coupons" /></label>
+          <label class="admin-field" data-coupon-owner-field><span>Owner Email</span><input class="admin-input" name="recipientEmail" type="email" value="${escapeHtml(entity?.recipientEmail || '')}" placeholder="customer@example.com" /></label>
           <label class="admin-field"><span>Applies To</span>
             <select class="admin-select" name="appliesTo">
               <option value="merch" ${String(entity?.appliesTo || 'merch') === 'merch' ? 'selected' : ''}>Merch</option>
@@ -2157,7 +2271,81 @@
     });
 
     const form = els.adminModalDialog.querySelector(`[data-entity-form="${type}"]`);
-    if (form) form.id = 'entityFormSubmit';
+    if (form) {
+      form.id = 'entityFormSubmit';
+      if (type === 'coupon') {
+        initializeCouponCategoryForm(form, entity);
+      }
+    }
+  }
+
+  function initializeCouponCategoryForm(form, entity = null) {
+    const categorySelect = form.querySelector('[name="couponCategory"]');
+    const codeInput = form.querySelector('[name="code"]');
+    const generateButton = form.querySelector('[data-coupon-generate-code]');
+    const influencerField = form.querySelector('[data-coupon-influencer-field]');
+    const ownerField = form.querySelector('[data-coupon-owner-field]');
+    const influencerSelect = form.querySelector('[name="influencerId"]');
+    const ownerEmailInput = form.querySelector('[name="recipientEmail"]');
+    const activeInput = form.querySelector('[name="status"]');
+
+    const generateCodeForCategory = async () => {
+      if (!codeInput) return;
+      const category = String(categorySelect?.value || 'public').trim().toLowerCase();
+      const defaults = getCouponCategoryDefaults(category);
+      const originalLabel = generateButton?.textContent || 'Generate';
+      if (generateButton) {
+        generateButton.disabled = true;
+        generateButton.textContent = 'Generating...';
+      }
+      try {
+        const code = await fetchGeneratedCouponCode(defaults.codePrefix);
+        codeInput.value = code;
+      } catch (error) {
+        toast('Code unavailable', error.message || 'Unable to generate a coupon code.', 'danger');
+      } finally {
+        if (generateButton) {
+          generateButton.disabled = false;
+          generateButton.textContent = originalLabel;
+        }
+      }
+    };
+
+    const applyCategory = ({ overwriteDefaults = false, regenerateCode = false } = {}) => {
+      const category = String(categorySelect?.value || 'public').trim().toLowerCase();
+      const defaults = getCouponCategoryDefaults(category);
+      const isInfluencer = category === 'influencer';
+      const isPrivate = category === 'private';
+
+      if (influencerField) influencerField.hidden = !isInfluencer;
+      if (ownerField) ownerField.hidden = !isPrivate;
+      if (!isInfluencer && influencerSelect) influencerSelect.value = '';
+      if (!isPrivate && ownerEmailInput) ownerEmailInput.value = '';
+
+      const defaultValues = {
+        festivalName: defaults.campaignName,
+        description: defaults.description,
+        discount: defaults.discount,
+        usageCount: defaults.usageCount,
+        expiry: addDaysIso(defaults.expiryDays),
+        appliesTo: 'merch',
+      };
+
+      Object.entries(defaultValues).forEach(([name, value]) => {
+        const input = form.querySelector(`[name="${name}"]`);
+        if (!input) return;
+        if (overwriteDefaults || !String(input.value || '').trim()) {
+          input.value = value;
+        }
+      });
+
+      if (activeInput && !entity) activeInput.checked = true;
+      if (regenerateCode) generateCodeForCategory();
+    };
+
+    applyCategory({ overwriteDefaults: !entity, regenerateCode: !entity });
+    categorySelect?.addEventListener('change', () => applyCategory({ overwriteDefaults: true, regenerateCode: true }));
+    generateButton?.addEventListener('click', () => generateCodeForCategory());
   }
 
   function renderInfluencerAssignmentModal(influencer) {
@@ -2262,27 +2450,29 @@
 
   function updateCouponFromForm(form, existing = null) {
     const fd = new FormData(form);
+    const couponCategory = String(fd.get('couponCategory') || 'public').trim().toLowerCase();
     const influencerId = Number(fd.get('influencerId') || 0);
     const recipientEmail = String(fd.get('recipientEmail') || '').trim().toLowerCase();
-    const couponType = recipientEmail ? 'private' : 'public';
+    const couponType = couponCategory === 'private' ? 'private' : 'public';
     const influencer = getInfluencerById(influencerId);
+    const usageCount = Number(fd.get('usageCount') || 0);
     return {
       id: existing?.id || Date.now(),
       code: String(fd.get('code') || '').trim().toUpperCase(),
       description: String(fd.get('description') || '').trim(),
       discount: String(fd.get('discount') || '').trim(),
-      usageCount: Number(fd.get('usageCount') || 0),
-      sessionLimit: Number(fd.get('sessionLimit') || 1),
-      expiry: String(fd.get('expiry') || toISODate(today)),
+      usageCount: Number.isFinite(usageCount) && usageCount > 0 ? usageCount : null,
+      expiry: String(fd.get('expiry') || '').trim(),
       status: fd.get('status') === 'on' ? 'active' : 'inactive',
       couponType,
-      ownerType: influencerId ? 'influencer' : 'general',
+      ownerType: couponCategory === 'influencer' ? 'influencer' : couponCategory === 'private' ? 'private' : 'general',
       appliesTo: String(fd.get('appliesTo') || 'merch').trim().toLowerCase() === 'all' ? 'all' : 'merch',
-      owner: influencer?.name || (influencerId ? 'Influencer' : 'General'),
-      recipientName: influencer?.name || '',
-      recipientEmail,
-      influencerId,
+      owner: couponCategory === 'influencer' ? influencer?.name || 'Influencer' : couponCategory === 'private' ? recipientEmail : 'General',
+      recipientName: couponCategory === 'influencer' ? influencer?.name || '' : '',
+      recipientEmail: couponCategory === 'private' ? recipientEmail : '',
+      influencerId: couponCategory === 'influencer' ? influencerId : 0,
       festivalName: String(fd.get('festivalName') || '').trim(),
+      couponCategory,
     };
   }
 
@@ -3024,6 +3214,14 @@
         toast('Missing details', 'Coupon code and discount are required.', 'warning');
         return;
       }
+      if (entity.couponCategory === 'influencer' && !entity.influencerId) {
+        toast('Missing influencer', 'Choose an assigned influencer for this coupon.', 'warning');
+        return;
+      }
+      if (entity.couponCategory === 'private' && (!entity.recipientEmail || !isLikelyEmail(entity.recipientEmail))) {
+        toast('Missing owner email', 'Enter a valid owner email for this private coupon.', 'warning');
+        return;
+      }
       const payload = {
         code: entity.code,
         description: entity.description,
@@ -3037,7 +3235,9 @@
         validTill: entity.expiry || null,
         singleUse: entity.couponType === 'private',
         sendEmail: false,
-        maxRedemptions: entity.couponType === 'private' ? 1 : null,
+        maxRedemptions: entity.usageCount,
+        perUserLimit: 1,
+        active: entity.status === 'active' ? 1 : 0,
         portal: 'merch'
       };
       const method = existingId ? 'PUT' : 'POST';

@@ -819,14 +819,6 @@
       return;
     }
 
-    if (!state.currentUser) {
-      state.merchCouponPreview = null;
-      state.merchCouponError = 'Sign in to apply merch coupons.';
-      showCheckoutNotice('Sign in required', 'Sign in to apply a merch coupon.', { variant: 'error' });
-      renderMerchCouponPreview();
-      return;
-    }
-
     state.merchCouponLoading = true;
     try {
       const result = await api('/api/merch/preview-coupon', {
@@ -1264,11 +1256,10 @@
     const avatarStyle = profile.avatarUrl
       ? ` style="background-image:url('${escapeHtml(profile.avatarUrl)}')"`
       : '';
-
     if (!state.currentUser) {
       els.merchAuthCta.innerHTML = `
         <a href="/merch/auth.html?returnTo=%2Fmerch%2F" class="header-book-now-btn">
-          Sign Up / Login
+           Sign Up / Login
         </a>
       `;
       return;

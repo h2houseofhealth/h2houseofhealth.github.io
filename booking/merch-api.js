@@ -1921,7 +1921,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   });
 
   // ─── PUBLIC: Create Razorpay order for checkout ───
-  app.post('/api/merch/preview-coupon', requireMerchAuth, (req, res) => {
+  app.post('/api/merch/preview-coupon',(req, res) => {
+    const authUser = getMerchAuthUser(req);
     const couponCode = normalizeMerchCouponCode(req.body?.couponCode);
     if (!couponCode) {
       return res.status(400).json({ error: 'couponCode is required' });
@@ -1930,7 +1931,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const subtotalAmountPaise = Number(req.body?.subtotalAmountPaise || 0);
     const couponResult = validateMerchCouponForUser({
       code: couponCode,
-      userId: req.user?.id,
+      userId: authUser?.id ?? null,
       subtotalAmountPaise,
     });
 
@@ -1952,9 +1953,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const couponCode = normalizeMerchCouponCode(req.body?.couponCode);
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Cart is empty' });
-    }
-    if (couponCode && !authUser) {
-      return res.status(401).json({ error: 'Sign in to apply a coupon.' });
     }
     const resolvedCustomer = {
       name: String(customer?.name || merchProfile?.fullName || authUser?.name || '').trim(),
