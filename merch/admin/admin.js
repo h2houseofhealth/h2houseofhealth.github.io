@@ -325,6 +325,15 @@
     return COUPON_CATEGORY_DEFAULTS[categoryValue] || COUPON_CATEGORY_DEFAULTS.public;
   }
 
+  function getCouponUsageTypeValue(coupon) {
+    const explicitType = String(coupon?.usageType || '').trim().toLowerCase();
+    if (explicitType === 'unlimited') return 'unlimited';
+    if (explicitType === 'limited') return 'limited';
+    const hasLimit = coupon?.maxRedemptions != null || coupon?.usageCount != null;
+    const hasExpiry = Boolean(String(coupon?.validTill || coupon?.expiresAt || coupon?.expiry || '').trim());
+    return hasLimit || hasExpiry ? 'limited' : 'unlimited';
+  }
+
   function normalizeCouponDateValue(value) {
     const raw = String(value || '').trim();
     if (!raw) return '';
@@ -3017,8 +3026,14 @@
           <label class="admin-field"><span>Campaign Name</span><input class="admin-input" name="festivalName" value="${escapeHtml(entity?.festivalName || '')}" /></label>
           <label class="admin-field admin-field--wide"><span>Description</span><input class="admin-input" name="description" value="${escapeHtml(entity?.description || '')}" /></label>
           <label class="admin-field"><span>Discount</span><input class="admin-input" name="discount" type="number" min="1" step="1" value="${escapeHtml(entity?.discount || entity?.discountValue || '')}" required /></label>
-          <label class="admin-field"><span>Usage Count</span><input class="admin-input" name="usageCount" type="number" min="1" value="${escapeHtml(entity?.maxRedemptions || entity?.usageCount || '')}" /></label>
-          <label class="admin-field"><span>Expiry</span><input class="admin-input" name="expiry" type="date" value="${escapeHtml(normalizeCouponDateValue(entity?.validTill || entity?.expiresAt || entity?.expiry))}" /></label>
+          <label class="admin-field" data-coupon-usage-type-field hidden><span>Usage Type</span>
+            <select class="admin-select" name="usageType" data-coupon-usage-type>
+              <option value="limited" ${getCouponUsageTypeValue(entity) === 'limited' ? 'selected' : ''}>Limited</option>
+              <option value="unlimited" ${getCouponUsageTypeValue(entity) === 'unlimited' ? 'selected' : ''}>Unlimited</option>
+            </select>
+          </label>
+          <label class="admin-field" data-coupon-usage-limit-field><span>Usage Limit</span><input class="admin-input" name="usageCount" type="number" min="1" value="${escapeHtml(entity?.maxRedemptions || entity?.usageCount || '')}" /></label>
+          <label class="admin-field" data-coupon-expiry-field><span>Expiry Date</span><input class="admin-input" name="expiry" type="date" value="${escapeHtml(normalizeCouponDateValue(entity?.validTill || entity?.expiresAt || entity?.expiry))}" /></label>
           <label class="admin-field" data-coupon-influencer-field><span>Assigned Influencer</span>
             <select class="admin-select" name="influencerId">
               <option value="">Unassigned</option>
@@ -3087,6 +3102,10 @@
     const generateButton = form.querySelector('[data-coupon-generate-code]');
     const influencerField = form.querySelector('[data-coupon-influencer-field]');
     const ownerField = form.querySelector('[data-coupon-owner-field]');
+    const usageTypeField = form.querySelector('[data-coupon-usage-type-field]');
+    const usageTypeSelect = form.querySelector('[name="usageType"]');
+    const usageLimitField = form.querySelector('[data-coupon-usage-limit-field]');
+    const expiryField = form.querySelector('[data-coupon-expiry-field]');
     const influencerSelect = form.querySelector('[name="influencerId"]');
     const ownerEmailInput = form.querySelector('[name="recipientEmail"]');
     const activeInput = form.querySelector('[name="status"]');
@@ -3094,6 +3113,7 @@
     const generateCodeForCategory = async () => {
       if (!codeInput) return;
       const category = String(categorySelect?.value || 'public').trim().toLowerCase();
+      if (category === 'influencer') return;
       const defaults = getCouponCategoryDefaults(category);
       const originalLabel = generateButton?.textContent || 'Generate';
       if (generateButton) {
@@ -3121,6 +3141,11 @@
 
       if (influencerField) influencerField.hidden = !isInfluencer;
       if (ownerField) ownerField.hidden = !isPrivate;
+      if (usageTypeField) usageTypeField.hidden = !isInfluencer;
+      if (generateButton) {
+        generateButton.hidden = isInfluencer;
+        generateButton.disabled = isInfluencer;
+      }
       if (!isInfluencer && influencerSelect) influencerSelect.value = '';
       if (!isPrivate && ownerEmailInput) ownerEmailInput.value = '';
 
@@ -3141,12 +3166,26 @@
         }
       });
 
+      if (isInfluencer && usageTypeSelect && (overwriteDefaults || !usageTypeSelect.value)) {
+        usageTypeSelect.value = 'limited';
+      }
+      const isUnlimitedInfluencer = isInfluencer && usageTypeSelect?.value === 'unlimited';
+      if (usageLimitField) usageLimitField.hidden = isUnlimitedInfluencer;
+      if (expiryField) expiryField.hidden = isUnlimitedInfluencer;
+      if (isUnlimitedInfluencer) {
+        const usageInput = form.querySelector('[name="usageCount"]');
+        const expiryInput = form.querySelector('[name="expiry"]');
+        if (usageInput) usageInput.value = '';
+        if (expiryInput) expiryInput.value = '';
+      }
+
       if (activeInput && !entity) activeInput.checked = true;
-      if (regenerateCode) generateCodeForCategory();
+      if (regenerateCode && !isInfluencer) generateCodeForCategory();
     };
 
     applyCategory({ overwriteDefaults: !entity, regenerateCode: !entity });
     categorySelect?.addEventListener('change', () => applyCategory({ overwriteDefaults: true, regenerateCode: true }));
+    usageTypeSelect?.addEventListener('change', () => applyCategory({ overwriteDefaults: false }));
     generateButton?.addEventListener('click', () => generateCodeForCategory());
   }
 
@@ -3256,6 +3295,10 @@
     const influencerId = Number(fd.get('influencerId') || 0);
     const recipientEmail = String(fd.get('recipientEmail') || '').trim().toLowerCase();
     const couponType = couponCategory === 'private' ? 'private' : 'public';
+    const usageType = couponCategory === 'influencer'
+      ? String(fd.get('usageType') || 'limited').trim().toLowerCase()
+      : '';
+    const isUnlimitedInfluencer = couponCategory === 'influencer' && usageType === 'unlimited';
     const influencer = getInfluencerById(influencerId);
     const usageCount = Number(fd.get('usageCount') || 0);
     return {
@@ -3263,8 +3306,9 @@
       code: String(fd.get('code') || '').trim().toUpperCase(),
       description: String(fd.get('description') || '').trim(),
       discount: String(fd.get('discount') || '').trim(),
-      usageCount: Number.isFinite(usageCount) && usageCount > 0 ? usageCount : null,
-      expiry: String(fd.get('expiry') || '').trim(),
+      usageCount: isUnlimitedInfluencer ? null : Number.isFinite(usageCount) && usageCount > 0 ? usageCount : null,
+      expiry: isUnlimitedInfluencer ? '' : String(fd.get('expiry') || '').trim(),
+      usageType,
       status: fd.get('status') === 'on' ? 'active' : 'inactive',
       couponType,
       ownerType: couponCategory === 'influencer' ? 'influencer' : couponCategory === 'private' ? 'private' : 'general',
@@ -4301,4 +4345,3 @@
     init();
   }
 })();
-
