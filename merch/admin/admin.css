@@ -750,6 +750,11 @@ a {
   color: #7b5426;
 }
 
+.admin-badge--private {
+  background: rgba(43, 96, 175, 0.1);
+  color: #2b60af;
+}
+
 .admin-actions {
   display: flex;
   flex-wrap: wrap;
@@ -893,6 +898,13 @@ a {
 .admin-field {
   display: grid;
   gap: 6px;
+}
+
+.admin-input-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
 }
 
 .admin-field--wide {

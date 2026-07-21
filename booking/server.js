@@ -2649,6 +2649,22 @@ app.get('/api/admin/coupons', requireAuth, requireAdmin, (req, res) => {
   res.json({ coupons });
 });
 
+app.get('/api/admin/coupons/generate-code', requireAuth, requireAdmin, (req, res) => {
+  const prefix = String(req.query?.prefix || 'H2')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '')
+    .slice(0, 10) || 'H2';
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    Pragma: 'no-cache',
+    Expires: '0',
+    'Surrogate-Control': 'no-store',
+  });
+  const code = generateUniqueCouponCode(prefix);
+  res.status(200).json({ code });
+});
+
 app.patch('/api/admin/coupons/:id/active', requireAuth, requireAdmin, (req, res) => {
   const couponId = Number(req.params.id);
   if (!Number.isInteger(couponId)) {
@@ -2792,9 +2808,10 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   const recipientEmail = String(req.body?.recipientEmail || '').trim().toLowerCase();
   const influencerId = Number(req.body?.influencerId || req.body?.influencer_id || 0);
   const sendEmail = req.body?.sendEmail !== false;
-  const portal = String(req.body?.portal || 'booking')
+  const portalRaw = String(req.body?.portal || 'booking')
     .trim()
     .toLowerCase();
+  const portal = ['booking', 'merch'].includes(portalRaw) ? portalRaw : 'booking';
   let couponType = String(req.body?.couponType || '').trim().toLowerCase();
   if (!['public', 'private'].includes(couponType)) {
     couponType = recipientEmail ? 'private' : 'public';
@@ -2803,11 +2820,18 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   const maxRedemptionsRaw = req.body?.maxRedemptions;
   let maxRedemptions =
     maxRedemptionsRaw === '' || maxRedemptionsRaw == null ? null : Number(maxRedemptionsRaw);
+  const perUserLimitRaw = req.body?.perUserLimit ?? req.body?.sessionLimit;
+  const perUserLimit = perUserLimitRaw === '' || perUserLimitRaw == null ? 1 : Number(perUserLimitRaw);
+  const active = req.body?.active == null ? 1 : Number(req.body?.active) === 1 ? 1 : 0;
   const validFrom = String(req.body?.validFrom || '').trim();
   const validTill = String(req.body?.validTill || req.body?.expiresAt || '').trim();
 
   if (!code) {
     code = generateUniqueCouponCode();
+  }
+  const existingCouponWithCode = getCouponByCode(code);
+  if (existingCouponWithCode && String(existingCouponWithCode.portal || 'booking').trim().toLowerCase() !== portal) {
+    return res.status(409).json({ message: 'Coupon code already exists in another portal.' });
   }
   if (!Number.isFinite(discountValue) || discountValue <= 0) {
     return res.status(400).json({ message: 'discountValue must be greater than 0.' });
@@ -2832,6 +2856,9 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   }
   if (maxRedemptions != null && (!Number.isInteger(maxRedemptions) || maxRedemptions <= 0)) {
     return res.status(400).json({ message: 'maxRedemptions must be a positive integer.' });
+  }
+  if (!Number.isInteger(perUserLimit) || perUserLimit <= 0) {
+    return res.status(400).json({ message: 'perUserLimit must be a positive integer.' });
   }
   if (validFrom) {
     const parsedStart = new Date(validFrom);
@@ -2872,7 +2899,7 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
       code, description, discount_type, discount_value, applies_to, max_redemptions, per_user_limit, expires_at, active,
       coupon_type, assigned_user_email, used_by, is_active, valid_from, valid_till,
       recipient_email, recipient_name, festival_name, emailed_at, email_status, email_error, portal, influencer_id, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, 1, ?, ?, '[]', 1, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(code) DO UPDATE SET
       description = excluded.description,
       discount_type = excluded.discount_type,
@@ -2892,7 +2919,7 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
       email_status = excluded.email_status,
       email_error = excluded.email_error,
       influencer_id = excluded.influencer_id,
-      active = 1`
+      active = excluded.active`
   ).run(
     code,
     description,
@@ -2900,9 +2927,12 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     discountValue,
     appliesTo,
     maxRedemptions,
+    perUserLimit,
     validTill || null,
+    active,
     couponType,
     assignedUserEmail || null,
+    active,
     validFrom || null,
     validTill || null,
     assignedUserEmail || null,
@@ -2977,9 +3007,10 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
       ? req.body.influencer_id
       : existing.influencerId;
   const influencerId = Number(influencerIdRaw || 0);
-  const portal = String(req.body?.portal || existing.portal || 'booking')
+  const portalRaw = String(req.body?.portal || existing.portal || 'booking')
     .trim()
     .toLowerCase();
+  const portal = ['booking', 'merch'].includes(portalRaw) ? portalRaw : 'booking';
   let couponType = String(req.body?.couponType || existing.couponType || '').trim().toLowerCase();
   if (!['public', 'private'].includes(couponType)) {
     couponType = recipientEmail ? 'private' : 'public';
@@ -2990,6 +3021,11 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
     maxRedemptionsRaw === '' || maxRedemptionsRaw == null
       ? existing.maxRedemptions ?? null
       : Number(maxRedemptionsRaw);
+  const perUserLimitRaw = req.body?.perUserLimit ?? req.body?.sessionLimit;
+  const perUserLimit =
+    perUserLimitRaw === '' || perUserLimitRaw == null
+      ? Number(existing.perUserLimit || 1)
+      : Number(perUserLimitRaw);
   const validFrom = String(req.body?.validFrom || existing.validFrom || '').trim();
   const validTill = String(req.body?.validTill || req.body?.expiresAt || existing.validTill || existing.expiresAt || '').trim();
   const active = req.body?.active == null ? Number(existing.active || existing.isActive || 1) : Number(req.body?.active) === 1 ? 1 : 0;
@@ -3008,6 +3044,9 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   }
   if (maxRedemptions != null && (!Number.isInteger(maxRedemptions) || maxRedemptions <= 0)) {
     return res.status(400).json({ message: 'maxRedemptions must be a positive integer.' });
+  }
+  if (!Number.isInteger(perUserLimit) || perUserLimit <= 0) {
+    return res.status(400).json({ message: 'perUserLimit must be a positive integer.' });
   }
   if (validFrom && Number.isNaN(new Date(validFrom).getTime())) {
     return res.status(400).json({ message: 'validFrom must be a valid date.' });
@@ -3046,7 +3085,7 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
         active = ?,
         portal = ?,
         influencer_id = ?,
-        per_user_limit = 1
+        per_user_limit = ?
        WHERE id = ?`
     ).run(
       code,
@@ -3067,6 +3106,7 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
       active,
       portal,
       portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0 ? influencerId : null,
+      perUserLimit,
       couponId
     );
   } catch (error) {
@@ -10322,12 +10362,17 @@ function getCouponById(couponId) {
   return mapCouponRow(row);
 }
 
-function generateUniqueCouponCode() {
+function generateUniqueCouponCode(prefix = 'H2') {
+  const normalizedPrefix = String(prefix || 'H2')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '')
+    .slice(0, 10) || 'H2';
   for (let attempt = 0; attempt < 6; attempt += 1) {
-    const candidate = generateCouponCode('H2');
+    const candidate = generateCouponCode(normalizedPrefix);
     if (!getCouponByCode(candidate)) return candidate;
   }
-  return generateCouponCode(`H2${Date.now().toString(36).toUpperCase()}`);
+  return generateCouponCode(`${normalizedPrefix}${Date.now().toString(36).toUpperCase()}`);
 }
 
 function getCouponRedemptionStats(couponId, userId) {
