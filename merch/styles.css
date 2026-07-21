@@ -1522,6 +1522,41 @@ body.is-auth-loading .merch-auth-cta {
   border-radius: 4px;
 }
 
+.product-card__badge--low-stock {
+  background: #b45309;
+}
+
+.product-card__badge--sold-out {
+  background: #b91c1c;
+}
+
+.product-card__stock {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.product-card__stock.in-stock {
+  color: #2e7d32;
+}
+
+.product-card__stock.low-stock {
+  color: #b45309;
+}
+
+.product-card__stock.out-of-stock {
+  color: #c62828;
+}
+
+.product-card__stock-details {
+  margin: -4px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
 .product-card__image {
   position: relative;
 }
@@ -1746,8 +1781,44 @@ body.is-auth-loading .merch-auth-cta {
   color: #2e7d32;
 }
 
+.stock-status.low-stock {
+  color: #b45309;
+}
+
 .stock-status.out-of-stock {
   color: #c62828;
+}
+
+.stock-status__detail {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.stock-alert {
+  display: grid;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border-strong);
+  background: #fff7ed;
+}
+
+.stock-alert strong {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.stock-alert span {
+  font-size: 13px;
+  color: #9a3412;
+  line-height: 1.5;
+}
+
+.stock-alert--low {
+  border-color: rgba(180, 83, 9, 0.18);
 }
 
 /* ─── Search Overlay ─── */

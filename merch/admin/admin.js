@@ -14,6 +14,7 @@
   };
 
   const today = new Date();
+  const LOW_STOCK_THRESHOLD = 15;
 
   function pad(num) {
     return String(num).padStart(2, '0');
@@ -37,6 +38,13 @@
     maximumFractionDigits: 2,
   });
 }
+
+  function catalogPrice(value) {
+    return '\u20B9' + Number(value || 0).toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
 
   function dateLabel(value) {
     const parsed = new Date(String(value || '').replace(' ', 'T'));
@@ -105,6 +113,104 @@
 
   function formatCount(value) {
     return Number(value || 0).toLocaleString('en-IN');
+  }
+
+  function getLowStockProducts(products = state.products) {
+    return (Array.isArray(products) ? products : [])
+      .filter((product) => !product.archived && Number(product.stock || 0) > 0 && Number(product.stock || 0) <= LOW_STOCK_THRESHOLD)
+      .sort((a, b) => Number(a.stock || 0) - Number(b.stock || 0));
+  }
+
+  function getLowStockLabel(product) {
+    const stock = Number(product?.stock || 0);
+    if (stock <= 0) return 'Out of stock';
+    if (stock <= LOW_STOCK_THRESHOLD) return `Low stock (${stock} left)`;
+    return `In stock (${stock})`;
+  }
+
+  const ORDER_STATUS_META = {
+    pending: { label: 'Pending', color: '#d97706' },
+    processing: { label: 'Processing', color: '#2563eb' },
+    shipped: { label: 'Shipped', color: '#0f766e' },
+    delivered: { label: 'Delivered', color: '#16a34a' },
+    cancelled: { label: 'Cancelled', color: '#dc2626' },
+    returned: { label: 'Returned', color: '#7c3aed' },
+  };
+
+  function normalizeOrderStatus(status) {
+    const value = String(status || 'pending').trim().toLowerCase().replace(/\s+/g, '_');
+    return ORDER_STATUS_META[value] ? value : 'pending';
+  }
+
+  function buildOrderStatusDistribution(orders) {
+    const breakdown = Object.fromEntries(Object.keys(ORDER_STATUS_META).map((status) => [status, 0]));
+
+    for (const order of Array.isArray(orders) ? orders : []) {
+      const status = normalizeOrderStatus(order?.status);
+      breakdown[status] += 1;
+    }
+
+    const total = Object.values(breakdown).reduce((sum, value) => sum + Number(value || 0), 0);
+    const segments = Object.entries(breakdown)
+      .filter(([, count]) => count > 0)
+      .map(([status, count]) => ({
+        status,
+        label: ORDER_STATUS_META[status].label,
+        color: ORDER_STATUS_META[status].color,
+        count,
+        percent: total ? (count / total) * 100 : 0,
+      }));
+
+    return { total, breakdown, segments };
+  }
+
+  function renderOrderStatusRing(distribution) {
+    const segments = Array.isArray(distribution?.segments) ? distribution.segments : [];
+    const total = Number(distribution?.total || 0);
+
+    if (!segments.length || !total) {
+      return `
+        <div class="admin-chart-ring admin-chart-ring--empty">
+          <span>
+            <strong>0</strong>
+            <small>No orders</small>
+          </span>
+        </div>
+      `;
+    }
+
+    let start = 0;
+    const slices = segments.map((segment) => {
+      const end = start + segment.percent;
+      const slice = `${segment.color} ${start}% ${end}%`;
+      start = end;
+      return slice;
+    });
+
+    return `
+      <div class="admin-chart-ring" style="background: conic-gradient(${slices.join(', ')})">
+        <span>
+          <strong>${formatCount(total)}</strong>
+          <small>Total Orders</small>
+        </span>
+      </div>
+    `;
+  }
+
+  function renderStatusLegend(distribution) {
+    const segments = Array.isArray(distribution?.segments) ? distribution.segments : [];
+    if (!segments.length) {
+      return '<span class="admin-chip">No status data</span>';
+    }
+
+    return segments
+      .map((segment) => `
+        <span class="admin-chip admin-chip--status">
+          <span class="admin-chip__swatch" style="background:${segment.color};"></span>
+          ${escapeHtml(segment.label)} ${formatCount(segment.count)}
+        </span>
+      `)
+      .join('');
   }
 
   function normalizeCouponCodes(value) {
@@ -230,6 +336,401 @@
       return '<p class="admin-table__muted" style="margin:0;">No coupons assigned yet.</p>';
     }
     return coupons.map((coupon) => `<span class="admin-chip">${escapeHtml(coupon)}</span>`).join('');
+  }
+
+  function renderInfluencerActionLinks(influencer) {
+    const id = influencer?.id || '';
+    const canEmail = Boolean(String(influencer?.email || '').trim());
+    const emailTitle = canEmail ? '' : ' title="Add an email address before sending a report."';
+    const emailDisabled = canEmail ? '' : ' disabled';
+
+    return `
+      <button class="admin-action-link" type="button" data-action="edit-influencer" data-id="${id}">Edit Influencer</button>
+      <button class="admin-action-link" type="button" data-action="toggle-influencer" data-id="${id}">${influencer?.active ? 'Deactivate Influencer' : 'Reactivate Influencer'}</button>
+      <button class="admin-action-link" type="button" data-action="assign-coupon" data-id="${id}">Assign Coupons</button>
+      <button class="admin-action-link" type="button" data-action="download-influencer-report" data-id="${id}">Download Report</button>
+      <button class="admin-action-link" type="button" data-action="email-influencer-report" data-id="${id}"${emailTitle}${emailDisabled}>Send to Email</button>
+    `;
+  }
+
+  function csvCell(value) {
+    const text = String(value ?? '');
+    if (/[",\n]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  }
+
+  function reportMonthLabel(monthKey) {
+    const parsed = new Date(`${String(monthKey || '').slice(0, 7)}-01T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return String(monthKey || '');
+    return new Intl.DateTimeFormat('en-IN', { month: 'short', year: 'numeric' }).format(parsed);
+  }
+
+  function buildMerchReportLines(report) {
+    const summary = report?.summary || {};
+    const influencerRows = Array.isArray(report?.influencerReports) ? report.influencerReports : [];
+    const monthlyRows = Array.isArray(report?.monthlyInfluencerReports) ? report.monthlyInfluencerReports : [];
+    const periodLabel = [state.reportFrom, state.reportTo].filter(Boolean).join(' to ') || 'all available dates';
+
+    return {
+      summary,
+      influencerRows,
+      monthlyRows,
+      periodLabel,
+    };
+  }
+
+  function buildMerchReportCsv(report) {
+    const { summary, influencerRows, monthlyRows, periodLabel } = buildMerchReportLines(report);
+    const rows = [
+      ['Merch influencer report'],
+      ['Period', periodLabel],
+      ['Orders', summary.orderCount || 0],
+      ['Revenue', summary.revenue || 0],
+      ['Influencers', influencerRows.length],
+      ['Monthly rows', monthlyRows.length],
+      [],
+      ['Month', 'Influencer', 'Handle', 'Orders', 'Revenue', 'Commission', 'Coupon Usage'],
+      ...monthlyRows.map((row) => [
+        row.monthLabel || reportMonthLabel(row.month),
+        row.name || '',
+        row.handle || '',
+        row.orders || 0,
+        row.revenue || 0,
+        row.commission || 0,
+        row.couponUsage || 0,
+      ]),
+    ];
+
+    return rows.map((row) => row.map(csvCell).join(',')).join('\n');
+  }
+
+  function buildMerchReportTsv(report) {
+    const { summary, influencerRows, monthlyRows, periodLabel } = buildMerchReportLines(report);
+    const rows = [
+      ['Merch influencer report'],
+      ['Period', periodLabel],
+      ['Orders', summary.orderCount || 0],
+      ['Revenue', summary.revenue || 0],
+      ['Influencers', influencerRows.length],
+      ['Monthly rows', monthlyRows.length],
+      [],
+      ['Month', 'Influencer', 'Handle', 'Orders', 'Revenue', 'Commission', 'Coupon Usage'],
+      ...monthlyRows.map((row) => [
+        row.monthLabel || reportMonthLabel(row.month),
+        row.name || '',
+        row.handle || '',
+        row.orders || 0,
+        row.revenue || 0,
+        row.commission || 0,
+        row.couponUsage || 0,
+      ]),
+    ];
+
+    return rows.map((row) => row.join('\t')).join('\n');
+  }
+
+  function buildMerchReportHtml(report) {
+    const { summary, monthlyRows, periodLabel } = buildMerchReportLines(report);
+    const rows = monthlyRows.map((row) => `
+      <tr>
+        <td>${escapeHtml(row.monthLabel || reportMonthLabel(row.month))}</td>
+        <td>${escapeHtml(row.name || '')}</td>
+        <td>${escapeHtml(row.handle || '')}</td>
+        <td>${formatCount(row.orders)}</td>
+        <td>${money(row.revenue)}</td>
+        <td>${money(row.commission)}</td>
+        <td>${formatCount(row.couponUsage)}</td>
+      </tr>
+    `).join('');
+
+    return `
+      <!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>Merch Influencer Report</title>
+          <style>
+            body { font-family: Arial, sans-serif; color: #1f2937; margin: 24px; }
+            h1, h2, p { margin: 0 0 12px; }
+            .meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-width: 720px; margin-bottom: 20px; }
+            .meta div { border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px 14px; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #e5e7eb; padding: 10px 12px; text-align: left; }
+            th { background: #f9fafb; }
+          </style>
+        </head>
+        <body>
+          <h1>Merch influencer report</h1>
+          <p>Period: ${escapeHtml(periodLabel)}</p>
+          <div class="meta">
+            <div><strong>Orders</strong><br />${escapeHtml(String(summary.orderCount || 0))}</div>
+            <div><strong>Revenue</strong><br />${escapeHtml(money(summary.revenue || 0))}</div>
+            <div><strong>Influencers</strong><br />${escapeHtml(String((report?.influencerReports || []).length))}</div>
+            <div><strong>Monthly rows</strong><br />${escapeHtml(String(monthlyRows.length))}</div>
+          </div>
+          <h2>Monthly Influencer Breakdown</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Month</th>
+                <th>Influencer</th>
+                <th>Handle</th>
+                <th>Orders</th>
+                <th>Revenue</th>
+                <th>Commission</th>
+                <th>Coupon Usage</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows || '<tr><td colspan="7">No monthly rows available.</td></tr>'}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+  }
+
+  function buildInfluencerReportHtml(report) {
+    const influencer = report?.influencer || {};
+    const summary = report?.summary || {};
+    const analytics = report?.analytics || {};
+    const performance = report?.performance || {};
+    const commission = report?.commission || {};
+    const couponRows = Array.isArray(report?.couponPerformance) ? report.couponPerformance : [];
+    const orderRows = Array.isArray(report?.salesHistory?.items) ? report.salesHistory.items : [];
+    const commissionRows = Array.isArray(report?.commissionHistory) ? report.commissionHistory : [];
+    const trendRows = Array.isArray(analytics.monthlyTrend) ? analytics.monthlyTrend : [];
+    const productRows = Array.isArray(performance.topSellingProducts) ? performance.topSellingProducts : [];
+    const notificationRows = Array.isArray(report?.notifications) ? report.notifications : [];
+    const generatedAt = report?.generatedAt ? `${dateLabel(report.generatedAt)} ${timeLabel(report.generatedAt)}` : timeLabel(new Date().toISOString());
+
+    return `
+      <!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>${escapeHtml(influencer.name || 'Influencer')} report</title>
+          <style>
+            :root { color-scheme: light; }
+            body { font-family: Arial, sans-serif; color: #1f2937; margin: 24px; background: #fff; font-size: 13px; line-height: 1.45; }
+            h1, h2, h3, p { margin: 0 0 10px; }
+            h1 { font-size: 26px; line-height: 1.1; }
+            h2 { font-size: 18px; line-height: 1.15; }
+            h3 { font-size: 15px; line-height: 1.2; }
+            .hero { display: grid; gap: 12px; margin-bottom: 20px; }
+            .meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+            .meta div, .panel { border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px 14px; background: #fff; }
+            .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+            .stats div { border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px 14px; }
+            .stats strong { display: block; font-size: 14px; margin-top: 4px; }
+            table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+            th, td { border: 1px solid #e5e7eb; padding: 8px 10px; text-align: left; vertical-align: top; font-size: 12px; }
+            th { background: #f9fafb; }
+            .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; }
+            .muted { color: #6b7280; font-size: 13px; }
+            .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+            .chip { display: inline-flex; border: 1px solid #e5e7eb; border-radius: 999px; padding: 5px 9px; font-size: 11px; background: #fafafa; }
+            .section { margin-bottom: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="hero">
+            <div class="muted">Generated ${escapeHtml(generatedAt)}</div>
+            <h1>Influencer report</h1>
+            <p class="muted">${escapeHtml(influencer.name || 'Unnamed influencer')} ${influencer.handle ? `• ${escapeHtml(influencer.handle)}` : ''}</p>
+          </div>
+
+          <div class="meta">
+            <div><strong>Profile</strong><br />${escapeHtml([influencer.email, influencer.phone].filter(Boolean).join(' • ') || 'No contact info')}</div>
+            <div><strong>Status</strong><br />${escapeHtml(Number(influencer.active ?? 1) === 1 ? 'Active' : 'Inactive')}</div>
+            <div><strong>Commission Rate</strong><br />${escapeHtml(`${Number(influencer.commissionRate ?? 0)}%`)}</div>
+            <div><strong>Coupons</strong><br />${escapeHtml(String(couponRows.length))}</div>
+          </div>
+
+          <div class="stats">
+            <div><span>Orders</span><strong>${escapeHtml(String(summary.totalOrdersReferred || influencer.totalOrders || 0))}</strong></div>
+            <div><span>Revenue</span><strong>${escapeHtml(money(summary.totalSalesGenerated || influencer.revenue || 0))}</strong></div>
+            <div><span>Commission Earned</span><strong>${escapeHtml(money(summary.totalCommissionEarned || commission.totalEarned || influencer.commission || 0))}</strong></div>
+            <div><span>Commission Paid</span><strong>${escapeHtml(money(summary.commissionPaid || commission.totalPaid || influencer.paidCommission || 0))}</strong></div>
+          </div>
+
+          <div class="grid-2">
+            <section class="panel">
+              <h2>Coupon Performance</h2>
+              <div class="chips">
+                ${couponRows.length ? couponRows.map((coupon) => `<span class="chip">${escapeHtml(coupon.code || '')}${coupon.usageCount != null ? ` · ${formatCount(coupon.usageCount)} uses` : ''}</span>`).join('') : '<span class="muted">No coupon history yet.</span>'}
+              </div>
+            </section>
+            <section class="panel">
+              <h2>Notifications</h2>
+              <div class="chips">
+                ${notificationRows.length ? notificationRows.slice(0, 6).map((note) => `<span class="chip">${escapeHtml(note.title || 'Update')}</span>`).join('') : '<span class="muted">No recent activity.</span>'}
+              </div>
+            </section>
+          </div>
+
+          <section class="section">
+            <h2>Monthly Trend</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Month</th>
+                  <th>Orders</th>
+                  <th>Sales</th>
+                  <th>Commission</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${trendRows.length ? trendRows.map((row) => `
+                  <tr>
+                    <td>${escapeHtml(row.label || reportMonthLabel(row.month))}</td>
+                    <td>${formatCount(row.orders)}</td>
+                    <td>${escapeHtml(money(row.sales || row.revenue || 0))}</td>
+                    <td>${escapeHtml(money(row.commission || 0))}</td>
+                  </tr>
+                `).join('') : '<tr><td colspan="4">No monthly activity yet.</td></tr>'}
+              </tbody>
+            </table>
+          </section>
+
+          <section class="section">
+            <h2>Top Products</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Qty</th>
+                  <th>Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${productRows.length ? productRows.map((row) => `
+                  <tr>
+                    <td>${escapeHtml(row.name || '')}</td>
+                    <td>${formatCount(row.quantity)}</td>
+                    <td>${escapeHtml(money(row.revenue || 0))}</td>
+                  </tr>
+                `).join('') : '<tr><td colspan="3">No product breakdown yet.</td></tr>'}
+              </tbody>
+            </table>
+          </section>
+
+          <section class="section">
+            <h2>Recent Orders</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Order</th>
+                  <th>Date</th>
+                  <th>Customer</th>
+                  <th>Coupon</th>
+                  <th>Status</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${orderRows.length ? orderRows.map((row) => `
+                  <tr>
+                    <td>${escapeHtml(row.orderNumber || row.id || '')}</td>
+                    <td>${escapeHtml(dateLabel(row.orderDate || row.createdAt || ''))}</td>
+                    <td>${escapeHtml(row.customerName || '-')}</td>
+                    <td>${escapeHtml(row.couponUsed || '-')}</td>
+                    <td>${escapeHtml(row.paymentStatus || row.orderStatus || '-')}</td>
+                    <td>${escapeHtml(money(row.orderAmount || 0))}</td>
+                  </tr>
+                `).join('') : '<tr><td colspan="6">No order history yet.</td></tr>'}
+              </tbody>
+            </table>
+          </section>
+
+          <section class="section">
+            <h2>Commission History</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th>Reference</th>
+                  <th>Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${commissionRows.length ? commissionRows.map((row) => `
+                  <tr>
+                    <td>${escapeHtml(dateLabel(row.paymentDate || ''))}</td>
+                    <td>${escapeHtml(money(row.amount || 0))}</td>
+                    <td>${escapeHtml(row.status || '')}</td>
+                    <td>${escapeHtml(row.referenceNumber || '-')}</td>
+                    <td>${escapeHtml(row.note || '-')}</td>
+                  </tr>
+                `).join('') : '<tr><td colspan="5">No commission payments recorded yet.</td></tr>'}
+              </tbody>
+            </table>
+          </section>
+        </body>
+      </html>
+    `;
+  }
+
+  function downloadMerchReportFile(filename, content, mimeType) {
+    const blob = new Blob([content], { type: mimeType });
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(objectUrl);
+  }
+
+  async function fetchInfluencerReport(influencerId) {
+    return apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencerId)}/report`);
+  }
+
+  function buildInfluencerReportFilename(influencer, extension = 'html') {
+    const slug = slugify(influencer?.name || influencer?.handle || `influencer-${influencer?.id || 'report'}`) || `influencer-${influencer?.id || 'report'}`;
+    return `merch-influencer-report-${slug}.${extension}`;
+  }
+
+  async function downloadInfluencerReport(influencer) {
+    if (!influencer) return;
+    try {
+      const result = await fetchInfluencerReport(influencer.id);
+      const report = result?.report || result;
+      downloadMerchReportFile(
+        buildInfluencerReportFilename(influencer, 'html'),
+        buildInfluencerReportHtml(report),
+        'text/html;charset=utf-8'
+      );
+      toast('Download ready', `${influencer.name}'s detailed report has been downloaded.`, 'success');
+    } catch (error) {
+      toast('Download failed', error.message || 'Unable to download the influencer report.', 'warning');
+    }
+  }
+
+  async function emailInfluencerReport(influencer) {
+    if (!influencer) return;
+    if (!String(influencer.email || '').trim()) {
+      toast('Email unavailable', `${influencer.name} does not have an email address on file.`, 'warning');
+      return;
+    }
+
+    try {
+      await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencer.id)}/report/email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      toast('Report emailed', `A detailed report was sent to ${influencer.email}.`, 'success');
+    } catch (error) {
+      toast('Email failed', error.message || 'Unable to send the influencer report email.', 'danger');
+    }
   }
 
   function uniqueId(prefix) {
@@ -404,9 +905,9 @@
     notificationsOpen: false,
     selectedProductIds: [],
     selectedProductId: 101,
-    selectedOrderId: 50031,
+    selectedOrderId: null,
     selectedCustomerId: null,
-    selectedCouponId: 1,
+    selectedCouponId: null,
     selectedInfluencerId: null,
     productsSearch: '',
     productsCategory: 'all',
@@ -454,6 +955,7 @@
     modalType: '',
     modalEntityId: null,
     customersLoading: false,
+    dashboardStats: null,
     reports: null,
   };
 
@@ -590,7 +1092,7 @@
     const delivered = state.orders.filter((order) => order.status === 'delivered').length;
     const cancelled = state.orders.filter((order) => order.status === 'cancelled').length;
     const returned = state.orders.filter((order) => order.status === 'returned').length;
-    const lowStock = state.products.filter((product) => Number(product.stock) <= Number(product.lowStockThreshold || 10) && product.status !== 'archived').length;
+    const lowStock = state.products.filter((product) => product.status !== 'archived' && Number(product.stock || 0) > 0 && Number(product.stock || 0) <= LOW_STOCK_THRESHOLD).length;
 
     return [
       { label: "Today's Orders", value: todayOrders, note: 'Placed since midnight', trend: '+18%', up: true },
@@ -602,7 +1104,7 @@
       { label: 'Delivered Orders', value: delivered, note: `${cancelled} cancelled`, trend: '+14%', up: true },
       { label: 'Cancelled Orders', value: cancelled, note: `${returned} returned`, trend: '-2%', up: false },
       { label: 'Returned Orders', value: returned, note: 'Post-delivery returns', trend: '-1%', up: false },
-      { label: 'Low Stock Products', value: lowStock, note: 'Needs replenishment', trend: '-5%', up: false },
+      { label: 'Low Stock Products', value: lowStock, note: `At or below ${LOW_STOCK_THRESHOLD} units remaining`, trend: '-5%', up: false },
     ];
   }
 
@@ -639,6 +1141,128 @@
       .join('');
   }
 
+  function formatMonthLabel(monthKey) {
+    if (!monthKey) return 'Unknown';
+    const parsed = new Date(`${String(monthKey)}-01T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return String(monthKey);
+    return new Intl.DateTimeFormat('en-IN', {
+      month: 'short',
+      year: 'numeric',
+    }).format(parsed);
+  }
+
+  function buildMonthlyRevenueSeries(orders = []) {
+    const monthlyMap = new Map();
+    for (const order of Array.isArray(orders) ? orders : []) {
+      const paymentStatus = String(order.paymentStatus || '').toLowerCase();
+      if (!['paid', 'cod_pending'].includes(paymentStatus)) continue;
+      const monthKey = String(order.createdAt || '').slice(0, 7);
+      if (!monthKey) continue;
+      const entry = monthlyMap.get(monthKey) || { month: monthKey, revenue: 0, orders: 0 };
+      entry.revenue += Number(order.totalAmount || 0);
+      entry.orders += 1;
+      monthlyMap.set(monthKey, entry);
+    }
+    return [...monthlyMap.values()]
+      .sort((left, right) => String(left.month).localeCompare(String(right.month)))
+      .map((row) => ({
+        month: row.month,
+        monthLabel: formatMonthLabel(row.month),
+        revenue: row.revenue,
+        orders: row.orders,
+        display: money(row.revenue),
+      }));
+  }
+
+  function buildRecentPayments(orders = []) {
+    return [...(Array.isArray(orders) ? orders : [])]
+      .filter((order) => ['paid', 'cod_pending', 'refunded'].includes(String(order.paymentStatus || '').toLowerCase()) || Number(order.totalAmount || 0) > 0)
+      .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')))
+      .slice(0, 5)
+      .map((order) => ({
+        id: order.id,
+        orderNumber: order.orderNumber || '',
+        customerName: order.customerName || '',
+        amount: Number(order.totalAmount || 0),
+        paymentMethod: String(order.paymentMethod || 'online'),
+        paymentStatus: String(order.paymentStatus || 'pending'),
+        createdAt: order.createdAt || null,
+      }));
+  }
+
+  function buildRecentCouponUsage(orders = []) {
+    return [...(Array.isArray(orders) ? orders : [])]
+      .filter((order) => String(order.couponCode || '').trim())
+      .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')))
+      .slice(0, 5)
+      .map((order) => ({
+        id: order.id,
+        orderNumber: order.orderNumber || '',
+        customerName: order.customerName || '',
+        couponCode: String(order.couponCode || ''),
+        influencerName: String(order.influencerName || ''),
+        amount: Number(order.totalAmount || 0),
+        createdAt: order.createdAt || null,
+      }));
+  }
+
+  function buildLatestCustomers(customers = []) {
+    return [...(Array.isArray(customers) ? customers : [])]
+      .sort((left, right) => {
+        const leftKey = String(left.registrationDate || left.lastOrder?.createdAt || left.createdAt || '');
+        const rightKey = String(right.registrationDate || right.lastOrder?.createdAt || right.createdAt || '');
+        return rightKey.localeCompare(leftKey);
+      })
+      .slice(0, 5);
+  }
+
+  function getDashboardSnapshot() {
+    const stats = state.dashboardStats || {};
+    const report = state.reports || {};
+    const orders = Array.isArray(state.orders) ? state.orders : [];
+    const customers = Array.isArray(state.customers) ? state.customers : [];
+    const monthlyRevenueSeries = Array.isArray(stats.monthlyRevenueSeries) && stats.monthlyRevenueSeries.length
+      ? stats.monthlyRevenueSeries
+      : Array.isArray(report.monthlyRevenueSeries) && report.monthlyRevenueSeries.length
+        ? report.monthlyRevenueSeries
+        : buildMonthlyRevenueSeries(orders);
+    const recentOrders = Array.isArray(stats.recentOrders) && stats.recentOrders.length
+      ? stats.recentOrders
+      : Array.isArray(report.recentOrders) && report.recentOrders.length
+        ? report.recentOrders
+        : orders.slice(0, 5);
+    const recentPayments = Array.isArray(stats.recentPayments) && stats.recentPayments.length
+      ? stats.recentPayments
+      : Array.isArray(report.recentPayments) && report.recentPayments.length
+        ? report.recentPayments
+        : buildRecentPayments(orders);
+    const recentCouponUsage = Array.isArray(stats.recentCouponUsage) && stats.recentCouponUsage.length
+      ? stats.recentCouponUsage
+      : Array.isArray(report.recentCouponUsage) && report.recentCouponUsage.length
+        ? report.recentCouponUsage
+        : buildRecentCouponUsage(orders);
+    const latestCustomers = Array.isArray(stats.recentCustomers) && stats.recentCustomers.length
+      ? stats.recentCustomers
+      : buildLatestCustomers(customers);
+
+    return {
+      summary: stats.summary || report.summary || {},
+      monthlyRevenueSeries,
+      recentOrders,
+      recentPayments,
+      recentCouponUsage,
+      latestCustomers,
+      statusBreakdown: stats.statusBreakdown || report.statusBreakdown || {},
+    };
+  }
+
+  function renderFeedList(items, emptyTitle, emptyMessage, renderItem) {
+    if (!Array.isArray(items) || !items.length) {
+      return renderEmptyState(emptyTitle, emptyMessage);
+    }
+    return items.map((item) => renderItem(item)).join('');
+  }
+
   function renderEmptyState(title, message, actionLabel = '', actionId = '') {
     return `
       <div class="admin-list__item" style="padding:18px;">
@@ -650,6 +1274,24 @@
   }
 
   function renderDashboard() {
+    const dashboard = getDashboardSnapshot();
+    const summary = dashboard.summary || {};
+    const monthlyRevenueSeries = Array.isArray(dashboard.monthlyRevenueSeries) ? dashboard.monthlyRevenueSeries : [];
+    const recentOrders = Array.isArray(dashboard.recentOrders) ? dashboard.recentOrders : [];
+    const latestCustomers = Array.isArray(dashboard.latestCustomers) ? dashboard.latestCustomers : [];
+    const recentPayments = Array.isArray(dashboard.recentPayments) ? dashboard.recentPayments : [];
+    const recentCouponUsage = Array.isArray(dashboard.recentCouponUsage) ? dashboard.recentCouponUsage : [];
+    const liveOrderDistribution = buildOrderStatusDistribution(state.orders);
+    const liveOrderCount = liveOrderDistribution.total;
+    const currentMonthKey = `${today.getFullYear()}-${pad(today.getMonth() + 1)}`;
+    const currentMonthRevenue = monthlyRevenueSeries.find((row) => String(row.month) === currentMonthKey)?.revenue || 0;
+    const monthlyRevenueMax = Math.max(1, ...monthlyRevenueSeries.map((row) => Number(row.revenue || 0)));
+    const monthlyChartRows = monthlyRevenueSeries.slice(-6).map((row) => ({
+      label: row.monthLabel || formatMonthLabel(row.month),
+      value: (Number(row.revenue || 0) / monthlyRevenueMax) * 100,
+      display: money(row.revenue || 0),
+    }));
+
     els.dashboardView.innerHTML = `
       <section class="admin-section">
         <div class="admin-section__head">
@@ -659,7 +1301,7 @@
           </div>
         </div>
         <div class="admin-section__body">
-          <div class="admin-card-grid admin-card-grid--2">
+          <div class="admin-card-grid admin-card-grid--1">
             <article class="admin-card">
               <div class="admin-card__head">
                 <h3 class="admin-card__title">Catalog Sync</h3>
@@ -680,191 +1322,190 @@
                 `).join('')}
               </div>
             </article>
-
-            <article class="admin-card">
-              <div class="admin-card__head">
-                <h3 class="admin-card__title">Wiring Status</h3>
-                <p class="admin-card__sub">What is connected right now</p>
-              </div>
-              <div class="admin-card__body admin-list">
-                <div class="admin-list__item">
-                  <p class="admin-list__item-title">Products</p>
-                  <p class="admin-list__item-sub">Connected to the storefront catalog data.</p>
-                </div>
-                <div class="admin-list__item">
-                  <p class="admin-list__item-title">Orders</p>
-                  <p class="admin-list__item-sub">Synced from the merch order table and refreshed on admin load.</p>
-                </div>
-                <div class="admin-list__item">
-                  <p class="admin-list__item-title">Customers</p>
-                  <p class="admin-list__item-sub">Built from live merch profiles and completed orders.</p>
-                </div>
-                <div class="admin-list__item">
-                  <p class="admin-list__item-title">Coupons and Influencers</p>
-                  <p class="admin-list__item-sub">Loaded from the shared coupon store and merch influencer table.</p>
-                </div>
-              </div>
-            </article>
           </div>
         </div>
       </section>
 
-      <div class="admin-view__split">
-        <section class="admin-section">
-          <div class="admin-section__head">
-            <div>
-              <h2 class="admin-section__title">Revenue Overview</h2>
-              <p class="admin-section__desc">Monthly sales trend and distribution snapshots.</p>
-            </div>
+      <section class="admin-section">
+        <div class="admin-section__head">
+          <div>
+            <h2 class="admin-section__title">Live Revenue</h2>
+            <p class="admin-section__desc">Revenue, orders, customer activity, and coupon usage streamed from the merch API.</p>
           </div>
-          <div class="admin-section__body admin-card-grid admin-card-grid--2">
+        </div>
+        <div class="admin-section__body admin-card-grid admin-card-grid--3">
+          <article class="admin-card">
+            <div class="admin-card__head">
+              <h3 class="admin-card__title">Monthly Revenue</h3>
+              <p class="admin-card__sub">Month-to-date totals from live orders</p>
+            </div>
+            <div class="admin-card__body admin-mini-chart">
+              <p class="admin-stat__value" style="margin:0 0 10px;">${escapeHtml(money(currentMonthRevenue))}</p>
+              <p class="admin-table__muted" style="margin:0 0 12px;">${escapeHtml(formatMonthLabel(currentMonthKey))}</p>
+              ${renderMiniChart(monthlyChartRows.length ? monthlyChartRows : [{ label: 'No revenue yet', value: 0, display: money(0) }])}
+            </div>
+          </article>
+
+          <article class="admin-card">
+            <div class="admin-card__head">
+              <h3 class="admin-card__title">Revenue Overview Chart</h3>
+              <p class="admin-card__sub">Monthly trend from the backend report feed</p>
+            </div>
+            <div class="admin-card__body admin-mini-chart">
+              ${monthlyChartRows.length ? renderMiniChart(monthlyChartRows) : '<p class="admin-table__muted" style="margin:0;">No monthly revenue data is available yet.</p>'}
+            </div>
+          </article>
+
+          <article class="admin-card">
+            <div class="admin-card__head">
+              <h3 class="admin-card__title">Order Status Distribution</h3>
+              <p class="admin-card__sub">Live breakdown from the current merch order feed</p>
+            </div>
+            <div class="admin-card__body" style="display:grid;gap:12px;">
+              ${renderOrderStatusRing(liveOrderDistribution)}
+              <div class="admin-chip-row" style="justify-content:center;">
+                ${renderStatusLegend(liveOrderDistribution)}
+              </div>
+              <p class="admin-table__muted" style="margin:0;">${formatCount(liveOrderCount)} order(s) across the live status distribution.</p>
+            </div>
+          </article>
+        </div>
+      </section>
+      <section class="admin-section admin-section--expanded">
+        <div class="admin-section__head">
+          <div>
+            <h2 class="admin-section__title">Live Activity</h2>
+            <p class="admin-section__desc">Recent orders, customers, payments, and coupon usage are wired to the admin data feed.</p>
+          </div>
+        </div>
+        <div class="admin-section__body">
+          <div class="admin-card-grid admin-card-grid--2">
             <article class="admin-card">
               <div class="admin-card__head">
-                <h3 class="admin-card__title">Monthly Revenue</h3>
-                <p class="admin-card__sub">Waiting for backend revenue data</p>
+                <h3 class="admin-card__title">Recent Orders</h3>
+                <p class="admin-card__sub">Latest checkout activity from the merch API</p>
               </div>
-              <div class="admin-card__body">
-                <p class="admin-table__muted" style="margin:0;">Revenue graphs will appear here after the reports API is connected.</p>
+              <div class="admin-card__body admin-list">
+                ${renderFeedList(
+                  recentOrders,
+                  'No recent orders',
+                  'Orders will appear here once live checkout activity is recorded.',
+                  (order) => `
+                    <div class="admin-list__item">
+                      <div class="admin-list__item-head">
+                        <div>
+                          <p class="admin-list__item-title">${escapeHtml(order.orderNumber || `Order #${order.id}`)}</p>
+                          <p class="admin-list__item-sub">${escapeHtml(order.customerName || 'Guest customer')} - ${escapeHtml(dateLabel(order.createdAt || ''))}</p>
+                        </div>
+                        <strong>${escapeHtml(money(order.totalAmount || 0))}</strong>
+                      </div>
+                      <p class="admin-table__muted" style="margin:0;">${escapeHtml(getStatusLabel(order.status || order.paymentStatus || 'pending'))} - ${escapeHtml(String(order.paymentStatus || 'pending'))}</p>
+                    </div>
+                  `
+                )}
               </div>
             </article>
+
             <article class="admin-card">
               <div class="admin-card__head">
-                <h3 class="admin-card__title">Order Status Distribution</h3>
-                <p class="admin-card__sub">Waiting for order data</p>
+                <h3 class="admin-card__title">Latest Customers</h3>
+                <p class="admin-card__sub">Most recently active merch customers</p>
               </div>
-              <div class="admin-card__body" style="display:grid;gap:12px;">
-                <div class="admin-chart-ring" style="margin-inline:auto;">
-                  <span>
-                    <strong>API</strong>
-                    <small>Pending</small>
-                  </span>
-                </div>
-                <p class="admin-table__muted" style="margin:0;">Order distribution charts will render once the backend returns real counts.</p>
+              <div class="admin-card__body admin-list">
+                ${renderFeedList(
+                  latestCustomers,
+                  'No customer activity yet',
+                  'Customer profiles will appear here after the backend is wired.',
+                  (customer) => `
+                    <div class="admin-list__item">
+                      <div class="admin-list__item-head">
+                        <div>
+                          <p class="admin-list__item-title">${escapeHtml(customer.name || 'Customer')}</p>
+                          <p class="admin-list__item-sub">${escapeHtml(customer.email || 'No email on file')}</p>
+                        </div>
+                        <span class="admin-avatar">${escapeHtml(initials(customer.name || 'Customer'))}</span>
+                      </div>
+                      <p class="admin-table__muted" style="margin:0;">${formatCount(customer.merchandiseOrders || 0)} order(s) - ${escapeHtml(dateLabel(customer.registrationDate || customer.createdAt || ''))}</p>
+                    </div>
+                  `
+                )}
+              </div>
+            </article>
+
+            <article class="admin-card">
+              <div class="admin-card__head">
+                <h3 class="admin-card__title">Recent Payments</h3>
+                <p class="admin-card__sub">Payment confirmations and refunds</p>
+              </div>
+              <div class="admin-card__body admin-list">
+                ${renderFeedList(
+                  recentPayments,
+                  'No payments yet',
+                  'Payment entries will appear when the checkout and payment APIs are connected.',
+                  (payment) => `
+                    <div class="admin-list__item">
+                      <div class="admin-list__item-head">
+                        <div>
+                          <p class="admin-list__item-title">${escapeHtml(payment.orderNumber || `Order #${payment.id}`)}</p>
+                          <p class="admin-list__item-sub">${escapeHtml(payment.customerName || 'Guest customer')} - ${escapeHtml(payment.paymentMethod || 'online')}</p>
+                        </div>
+                        <strong>${escapeHtml(money(payment.amount || 0))}</strong>
+                      </div>
+                      <p class="admin-table__muted" style="margin:0;">${escapeHtml(getStatusLabel(payment.paymentStatus || 'pending'))} - ${escapeHtml(dateLabel(payment.createdAt || ''))}</p>
+                    </div>
+                  `
+                )}
+              </div>
+            </article>
+
+            <article class="admin-card">
+              <div class="admin-card__head">
+                <h3 class="admin-card__title">Recent Coupon Usage</h3>
+                <p class="admin-card__sub">Recently applied merch coupon codes</p>
+              </div>
+              <div class="admin-card__body admin-list">
+                ${renderFeedList(
+                  recentCouponUsage,
+                  'No coupon usage yet',
+                  'Coupon performance metrics will appear once a real source is wired in.',
+                  (entry) => `
+                    <div class="admin-list__item">
+                      <div class="admin-list__item-head">
+                        <div>
+                          <p class="admin-list__item-title">${escapeHtml(entry.couponCode || 'Coupon')}</p>
+                          <p class="admin-list__item-sub">${escapeHtml(entry.customerName || 'Guest customer')} - ${escapeHtml(entry.orderNumber || '')}</p>
+                        </div>
+                        <strong>${escapeHtml(money(entry.amount || 0))}</strong>
+                      </div>
+                      <p class="admin-table__muted" style="margin:0;">${escapeHtml(entry.influencerName || 'Store coupon')} - ${escapeHtml(dateLabel(entry.createdAt || ''))}</p>
+                    </div>
+                  `
+                )}
               </div>
             </article>
           </div>
-        </section>
 
-        <section class="admin-section">
-          <div class="admin-section__head">
-            <div>
-              <h2 class="admin-section__title">Quick Activity</h2>
-              <p class="admin-section__desc">No live operational feed is connected yet.</p>
+          <section class="admin-card" style="margin-top:18px;">
+            <div class="admin-card__head">
+              <h3 class="admin-card__title">Top Selling Products</h3>
+              <p class="admin-card__sub">Using storefront catalog prices</p>
             </div>
-          </div>
-          <div class="admin-section__body admin-list">
-            <div class="admin-list__item">
-              <p class="admin-list__item-title">Orders</p>
-              <p class="admin-list__item-sub">This panel will show new orders, payment alerts, and fulfillment changes.</p>
-            </div>
-            <div class="admin-list__item">
-              <p class="admin-list__item-title">Stock</p>
-              <p class="admin-list__item-sub">Low-stock and replenishment alerts will appear here.</p>
-            </div>
-            <div class="admin-list__item">
-              <p class="admin-list__item-title">Coupons</p>
-              <p class="admin-list__item-sub">Coupon expiry and usage spikes will appear here.</p>
-            </div>
-            <div class="admin-list__item">
-              <p class="admin-list__item-title">Customers</p>
-              <p class="admin-list__item-sub">New registrations and customer activity will appear here.</p>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <div class="admin-card-grid admin-card-grid--2">
-        <section class="admin-card">
-          <div class="admin-card__head">
-            <h3 class="admin-card__title">Recent Orders</h3>
-            <p class="admin-card__sub">Waiting for the order API</p>
-          </div>
-          <div class="admin-card__body">
-            <p class="admin-table__muted" style="margin:0;">No live order data is connected yet.</p>
-          </div>
-        </section>
-
-        <section class="admin-card">
-          <div class="admin-card__head">
-            <h3 class="admin-card__title">Latest Customers</h3>
-            <p class="admin-card__sub">Waiting for customer API data</p>
-          </div>
-          <div class="admin-card__body">
-            <p class="admin-table__muted" style="margin:0;">Customer profiles will appear here after the backend is wired.</p>
-          </div>
-        </section>
-      </div>
-
-      <div class="admin-card-grid admin-card-grid--3">
-        <section class="admin-card">
-          <div class="admin-card__head">
-            <h3 class="admin-card__title">Recent Payments</h3>
-            <p class="admin-card__sub">Waiting for payment data</p>
-          </div>
-          <div class="admin-card__body">
-            <p class="admin-table__muted" style="margin:0;">Payment entries will appear when the checkout and payment APIs are connected.</p>
-          </div>
-        </section>
-
-        <section class="admin-card">
-          <div class="admin-card__head">
-            <h3 class="admin-card__title">Recent Coupon Usage</h3>
-            <p class="admin-card__sub">Waiting for coupon usage data</p>
-          </div>
-          <div class="admin-card__body">
-            <p class="admin-table__muted" style="margin:0;">Coupon performance metrics will appear once a real source is wired in.</p>
-          </div>
-        </section>
-
-        <section class="admin-card">
-          <div class="admin-card__head">
-            <h3 class="admin-card__title">Top Selling Products</h3>
-            <p class="admin-card__sub">Using storefront catalog prices</p>
-          </div>
-          <div class="admin-card__body admin-list">
-            ${state.products.map((product) => `
-              <div class="admin-list__item">
-                <div class="admin-list__item-head">
-                  <div>
-                    <p class="admin-list__item-title">${escapeHtml(product.name)}</p>
-                    <p class="admin-list__item-sub">${escapeHtml(product.category)}</p>
-                  </div>
-                  <strong>${escapeHtml(product.priceLabel || money(product.price))}</strong>
-                </div>
-              </div>
-            `).join('')}
-          </div>
-        </section>
-      </div>
-
-      <div class="admin-card-grid admin-card-grid--2">
-        <section class="admin-card">
-          <div class="admin-card__head">
-            <h3 class="admin-card__title">Top Categories</h3>
-            <p class="admin-card__sub">Storefront categories only</p>
-          </div>
-          <div class="admin-card__body">
-            <div class="admin-list">
-              ${state.categories.map((category) => `
+            <div class="admin-card__body admin-list">
+              ${state.products.slice(0, 5).map((product) => `
                 <div class="admin-list__item">
-                  <p class="admin-list__item-title">${escapeHtml(category.name)}</p>
-                  <p class="admin-list__item-sub">${escapeHtml(category.description)}</p>
+                  <div class="admin-list__item-head">
+                    <div>
+                      <p class="admin-list__item-title">${escapeHtml(product.name)}</p>
+                      <p class="admin-list__item-sub">${escapeHtml(product.category)}</p>
+                    </div>
+                    <strong>${escapeHtml(product.priceLabel || money(product.price))}</strong>
+                  </div>
                 </div>
               `).join('')}
             </div>
-          </div>
-        </section>
-
-        <section class="admin-card">
-          <div class="admin-card__head">
-            <h3 class="admin-card__title">Revenue Overview Chart</h3>
-            <p class="admin-card__sub">Pending revenue API</p>
-          </div>
-          <div class="admin-card__body">
-            <p class="admin-table__muted" style="margin:0;">Revenue charts are intentionally blank until we connect live reporting data.</p>
-          </div>
-        </section>
-      </div>
+          </section>
+        </div>
+      </section>
     `;
   }
 
@@ -906,7 +1547,7 @@
     const start = (state.productsPage - 1) * pageSize;
     const pageItems = filtered.slice(start, start + pageSize);
     const selectedCount = state.selectedProductIds.length;
-    const lowStockCount = state.products.filter((product) => !product.archived && product.stock <= product.lowStockThreshold).length;
+    const lowStockCount = getLowStockProducts().length;
 
     els.productsView.innerHTML = `
       <section class="admin-section">
@@ -949,10 +1590,10 @@
           <div class="admin-grid admin-grid--stats" style="margin-bottom:18px;">
             ${[
               { label: 'Products in view', value: filtered.length, note: 'Matching current filters', trend: '+8%', up: true },
-              { label: 'Low stock', value: lowStockCount, note: 'Needs replenishment', trend: '-2%', up: false },
+              { label: 'Low stock', value: lowStockCount, note: `At or below ${LOW_STOCK_THRESHOLD} units remaining`, trend: '-2%', up: false },
               { label: 'Archived', value: state.products.filter((product) => product.archived).length, note: 'Hidden from storefront', trend: '+1%', up: true },
               { label: 'Featured', value: state.products.filter((product) => product.featured).length, note: 'Highlighted items', trend: '+3%', up: true },
-              { label: 'Avg. price', value: money(Math.round(state.products.reduce((sum, product) => sum + product.price, 0) / state.products.length || 0)), note: 'All catalog items', trend: '+5%', up: true },
+              { label: 'Avg. price', value: catalogPrice(Math.round(state.products.reduce((sum, product) => sum + product.price, 0) / state.products.length || 0)), note: 'All catalog items', trend: '+5%', up: true },
             ].map((item) => `
               <article class="admin-stat">
                 <div class="admin-stat__top">
@@ -994,7 +1635,12 @@
                     <td>${escapeHtml(product.sku)}</td>
                     <td>${escapeHtml(product.category)}</td>
                     <td><strong>${escapeHtml(product.priceLabel || money(product.price))}</strong></td>
-                    <td>${escapeHtml(product.stock)}</td>
+                    <td>
+                      <div class="admin-list" style="gap:4px;">
+                        <strong>${escapeHtml(product.stock)}</strong>
+                        <span class="admin-badge ${Number(product.stock || 0) <= LOW_STOCK_THRESHOLD ? 'admin-badge--inactive' : 'admin-badge--active'}">${escapeHtml(getLowStockLabel(product))}</span>
+                      </div>
+                    </td>
                     <td><span class="admin-badge ${statusClass(product.status)}">${escapeHtml(getStatusLabel(product.status))}</span></td>
                     <td>${escapeHtml(dateLabel(product.createdAt))}</td>
                     <td>
@@ -1207,8 +1853,10 @@
     if (state.ordersPage > totalPages) state.ordersPage = totalPages;
     const start = (state.ordersPage - 1) * pageSize;
     const pageItems = filtered.slice(start, start + pageSize);
-    const selectedOrder = state.orders.find((order) => Number(order.id) === Number(state.selectedOrderId)) || filtered[0] || state.orders[0];
-    if (selectedOrder) state.selectedOrderId = selectedOrder.id;
+    const selectedOrder = state.selectedOrderId == null
+      ? null
+      : filtered.find((order) => Number(order.id) === Number(state.selectedOrderId)) || null;
+    const showOrderDetails = Boolean(selectedOrder);
 
     els.ordersView.innerHTML = `
       <section class="admin-section">
@@ -1234,7 +1882,7 @@
             </div>
           </div>
 
-          <div class="admin-grid admin-grid--two">
+          <div class="admin-grid admin-grid--two" ${showOrderDetails ? '' : 'style="grid-template-columns:1fr;"'}>
             <section class="admin-card">
               <div class="admin-card__head">
                 <h3 class="admin-card__title">Order List</h3>
@@ -1255,21 +1903,21 @@
                   <tbody>
                     ${pageItems.map((order) => `
                       <tr data-action="select-order" data-id="${order.id}" style="cursor:pointer;">
-                    <td><strong>${escapeHtml(order.orderNumber)}</strong><br><span class="admin-table__muted">${escapeHtml(dateLabel(order.createdAt))}</span></td>
-                    <td>${escapeHtml(order.customerName)}<br><span class="admin-table__muted">${escapeHtml(order.email)}</span></td>
-                    <td>${escapeHtml(order.paymentMethod.toUpperCase())}<br><span class="admin-table__muted">${escapeHtml(getStatusLabel(order.paymentStatus))}</span></td>
-                    <td><strong>${escapeHtml(money(order.totalAmount))}</strong></td>
-                    <td><span class="admin-badge ${statusClass(order.status)}">${escapeHtml(getStatusLabel(order.status))}</span></td>
-                    <td>
-                      <div class="admin-actions">
+                        <td><strong>${escapeHtml(order.orderNumber)}</strong><br><span class="admin-table__muted">${escapeHtml(dateLabel(order.createdAt))}</span></td>
+                        <td>${escapeHtml(order.customerName)}<br><span class="admin-table__muted">${escapeHtml(order.email)}</span></td>
+                        <td>${escapeHtml(order.paymentMethod.toUpperCase())}<br><span class="admin-table__muted">${escapeHtml(getStatusLabel(order.paymentStatus))}</span></td>
+                        <td><strong>${escapeHtml(money(order.totalAmount))}</strong></td>
+                        <td><span class="admin-badge ${statusClass(order.status)}">${escapeHtml(getStatusLabel(order.status))}</span></td>
+                        <td>
+                          <div class="admin-actions">
                             <button class="admin-action-link" type="button" data-action="open-order-invoice" data-id="${order.id}">Invoice</button>
                             <button class="admin-action-link" type="button" data-action="email-order-invoice" data-id="${order.id}">Email</button>
                             <button class="admin-action-link" type="button" data-action="download-order-invoice" data-id="${order.id}">Download</button>
                             <button class="admin-action-link" type="button" data-action="advance-order" data-id="${order.id}">Next Step</button>
                             <button class="admin-action-link" type="button" data-action="cancel-order" data-id="${order.id}">Cancel</button>
                             <button class="admin-action-link" type="button" data-action="refund-order" data-id="${order.id}">Refund</button>
-                      </div>
-                    </td>
+                          </div>
+                        </td>
                       </tr>
                     `).join('')}
                   </tbody>
@@ -1286,26 +1934,28 @@
               </div>
             </section>
 
-            <section class="admin-side-panel">
-              <article class="admin-card">
-                <div class="admin-card__head">
-                  <h3 class="admin-card__title">Order Details</h3>
-                  <p class="admin-card__sub">Customer, shipping, timeline, and payment info</p>
-                </div>
-                <div class="admin-card__body">
-                  ${renderOrderDetail(selectedOrder)}
-                </div>
-                <div class="admin-card__foot">
-                  <div class="admin-footer-actions">
-                    <button class="admin-btn admin-btn--ghost" type="button" data-action="advance-order" data-id="${selectedOrder?.id || ''}">Accept / Process</button>
-                    <button class="admin-btn admin-btn--ghost" type="button" data-action="ship-order" data-id="${selectedOrder?.id || ''}">Ship</button>
-                    <button class="admin-btn admin-btn--ghost" type="button" data-action="deliver-order" data-id="${selectedOrder?.id || ''}">Deliver</button>
-                    <button class="admin-btn admin-btn--danger" type="button" data-action="cancel-order" data-id="${selectedOrder?.id || ''}">Cancel</button>
-                    <button class="admin-btn admin-btn--soft" type="button" data-action="refund-order" data-id="${selectedOrder?.id || ''}">Refund</button>
+            ${showOrderDetails ? `
+              <section class="admin-side-panel">
+                <article class="admin-card">
+                  <div class="admin-card__head">
+                    <h3 class="admin-card__title">Order Details</h3>
+                    <p class="admin-card__sub">Customer, shipping, timeline, and payment info</p>
                   </div>
-                </div>
-              </article>
-            </section>
+                  <div class="admin-card__body">
+                    ${renderOrderDetail(selectedOrder)}
+                  </div>
+                  <div class="admin-card__foot">
+                    <div class="admin-footer-actions">
+                      <button class="admin-btn admin-btn--ghost" type="button" data-action="advance-order" data-id="${selectedOrder?.id || ''}">Accept / Process</button>
+                      <button class="admin-btn admin-btn--ghost" type="button" data-action="ship-order" data-id="${selectedOrder?.id || ''}">Ship</button>
+                      <button class="admin-btn admin-btn--ghost" type="button" data-action="deliver-order" data-id="${selectedOrder?.id || ''}">Deliver</button>
+                      <button class="admin-btn admin-btn--danger" type="button" data-action="cancel-order" data-id="${selectedOrder?.id || ''}">Cancel</button>
+                      <button class="admin-btn admin-btn--soft" type="button" data-action="refund-order" data-id="${selectedOrder?.id || ''}">Refund</button>
+                    </div>
+                  </div>
+                </article>
+              </section>
+            ` : ''}
           </div>
         </div>
       </section>
@@ -1408,8 +2058,10 @@
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(query))
     );
-    const selectedCustomer = state.customers.find((customer) => String(customer.id) === String(state.selectedCustomerId)) || filtered[0] || state.customers[0];
-    if (selectedCustomer) state.selectedCustomerId = selectedCustomer.id;
+    const selectedCustomer = state.selectedCustomerId == null
+      ? null
+      : filtered.find((customer) => String(customer.id) === String(state.selectedCustomerId)) || null;
+    const showCustomerDetails = Boolean(selectedCustomer);
 
     els.customersView.innerHTML = `
       <section class="admin-section">
@@ -1426,7 +2078,7 @@
             </div>
           </div>
 
-          <div class="admin-grid admin-grid--two">
+          <div class="admin-grid admin-grid--two" ${showCustomerDetails ? '' : 'style="grid-template-columns:1fr;"'}>
             <section class="admin-card">
               <div class="admin-card__head">
                 <h3 class="admin-card__title">Customer List</h3>
@@ -1461,23 +2113,25 @@
                 </table>
               </div>
             </section>
-            <section class="admin-side-panel">
-              <article class="admin-card">
-                <div class="admin-card__head">
-                  <h3 class="admin-card__title">Customer Profile</h3>
-                  <p class="admin-card__sub">Merchandise orders, addresses, and first interaction date</p>
-                </div>
-                <div class="admin-card__body">
-                  ${renderCustomerDetail(selectedCustomer)}
-                </div>
-                <div class="admin-card__foot">
-                  <div class="admin-footer-actions">
-                    <button class="admin-btn admin-btn--ghost" type="button" data-action="message-customer" data-id="${selectedCustomer?.id || ''}">Message</button>
-                    <button class="admin-btn admin-btn--soft" type="button" data-action="export-customer" data-id="${selectedCustomer?.id || ''}">Export Profile</button>
+            ${showCustomerDetails ? `
+              <section class="admin-side-panel">
+                <article class="admin-card">
+                  <div class="admin-card__head">
+                    <h3 class="admin-card__title">Customer Profile</h3>
+                    <p class="admin-card__sub">Merchandise orders, addresses, and first interaction date</p>
                   </div>
-                </div>
-              </article>
-            </section>
+                  <div class="admin-card__body">
+                    ${renderCustomerDetail(selectedCustomer)}
+                  </div>
+                  <div class="admin-card__foot">
+                    <div class="admin-footer-actions">
+                      <button class="admin-btn admin-btn--ghost" type="button" data-action="message-customer" data-id="${selectedCustomer?.id || ''}">Message</button>
+                      <button class="admin-btn admin-btn--soft" type="button" data-action="export-customer" data-id="${selectedCustomer?.id || ''}">Export Profile</button>
+                    </div>
+                  </div>
+                </article>
+              </section>
+            ` : ''}
           </div>
         </div>
       </section>
@@ -1522,8 +2176,10 @@
     }, 0);
     const activeInfluencerCoupons = items.filter((coupon) => getCouponTypeValue(coupon) === 'influencer' && Number(coupon.active ?? coupon.isActive ?? 0) === 1).length;
 
-    const selectedCoupon = items.find((coupon) => Number(coupon.id) === Number(state.selectedCouponId)) || filtered[0] || items[0] || null;
-    if (selectedCoupon) state.selectedCouponId = selectedCoupon.id;
+    const selectedCoupon = state.selectedCouponId == null
+      ? null
+      : filtered.find((coupon) => Number(coupon.id) === Number(state.selectedCouponId)) || null;
+    const showCouponDetails = Boolean(selectedCoupon);
 
     const summaryCards = [
       { label: 'Total Coupons', value: totalCoupons, note: 'Shared coupon store' },
@@ -1543,12 +2199,14 @@
           </div>
         </div>
         <div class="admin-section__body">
-          <div class="admin-grid admin-grid--3" style="margin-bottom:16px;">
+          <div class="admin-card-grid admin-card-grid--3 admin-coupon-stats" style="margin-bottom:16px;">
             ${summaryCards.map((card) => `
-              <article class="admin-stat">
-                <p class="admin-stat__label">${escapeHtml(card.label)}</p>
-                <p class="admin-stat__value">${escapeHtml(card.value)}</p>
-                <p class="admin-stat__note">${escapeHtml(card.note)}</p>
+              <article class="admin-card admin-coupon-stat">
+                <div class="admin-card__body">
+                  <p class="admin-stat__label">${escapeHtml(card.label)}</p>
+                  <p class="admin-stat__value">${escapeHtml(card.value)}</p>
+                  <p class="admin-stat__note">${escapeHtml(card.note)}</p>
+                </div>
               </article>
             `).join('')}
           </div>
@@ -1560,7 +2218,7 @@
             <button class="admin-btn admin-btn--soft" type="button" data-action="open-coupon-modal">Create Coupon</button>
           </div>
 
-          <div class="admin-grid admin-grid--two" style="margin-top:16px;">
+          <div class="admin-grid admin-grid--two" style="margin-top:16px;${showCouponDetails ? '' : 'grid-template-columns:1fr;'}">
             <section class="admin-card">
               <div class="admin-card__head">
                 <h3 class="admin-card__title">Coupon List</h3>
@@ -1624,7 +2282,8 @@
               </div>
             </section>
 
-            <section class="admin-card">
+            ${showCouponDetails ? `
+              <section class="admin-card">
               <div class="admin-card__head">
                 <h3 class="admin-card__title">Coupon Details</h3>
                 <p class="admin-card__sub">Usage, expiry, and owner context</p>
@@ -1669,7 +2328,8 @@
                   <button class="admin-btn admin-btn--soft" type="button" data-action="open-coupon-modal">Create New</button>
                 </div>
               </div>
-            </section>
+              </section>
+            ` : ''}
           </div>
         </div>
       </section>
@@ -1754,7 +2414,14 @@
                 <div class="admin-card__head">
                   <div class="admin-list__item-head">
                     <div>
-                      <h3 class="admin-card__title">${escapeHtml(influencer.name)}</h3>
+                      <button
+                        class="admin-action-link"
+                        type="button"
+                        data-action="select-influencer"
+                        data-id="${influencer.id}"
+                        aria-label="View ${escapeHtml(influencer.name)} profile"
+                        style="padding:0;border:0;background:none;font:inherit;font-weight:700;text-align:left;cursor:pointer;"
+                      >${escapeHtml(influencer.name)}</button>
                       <p class="admin-card__sub">${escapeHtml(influencer.handle)}</p>
                     </div>
                     <span class="admin-badge ${influencer.active ? 'admin-badge--active' : 'admin-badge--inactive'}">${influencer.active ? 'Active' : 'Inactive'}</span>
@@ -1793,10 +2460,25 @@
                       <p class="admin-stat__value" style="font-size:20px;">${formatCount(influencer.activeCampaigns)}</p>
                     </article>
                   </div>
+                  <div class="admin-grid admin-grid--stats" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:12px;">
+                    <article class="admin-stat" style="padding:12px;">
+                      <p class="admin-stat__label">Commission Earned</p>
+                      <p class="admin-stat__value" style="font-size:20px;">${money(influencer.commission)}</p>
+                      <p class="admin-stat__note">Based on the influencer's commission rate and attributed revenue.</p>
+                    </article>
+                    <article class="admin-stat" style="padding:12px;">
+                      <p class="admin-stat__label">Commission Paid</p>
+                      <p class="admin-stat__value" style="font-size:20px;">${money(influencer.paidCommission)}</p>
+                      <p class="admin-stat__note">Processed commission payments already recorded.</p>
+                    </article>
+                    <article class="admin-stat" style="padding:12px;">
+                      <p class="admin-stat__label">Commission Rate</p>
+                      <p class="admin-stat__value" style="font-size:20px;">${escapeHtml(String(influencer.commissionRate ?? 0))}%</p>
+                      <p class="admin-stat__note">Current commission percentage assigned to this influencer.</p>
+                    </article>
+                  </div>
                   <div class="admin-actions" style="margin-top:12px;">
-                    <button class="admin-action-link" type="button" data-action="edit-influencer" data-id="${influencer.id}">Edit Influencer</button>
-                    <button class="admin-action-link" type="button" data-action="toggle-influencer" data-id="${influencer.id}">${influencer.active ? 'Deactivate Influencer' : 'Reactivate Influencer'}</button>
-                    <button class="admin-action-link" type="button" data-action="assign-coupon" data-id="${influencer.id}">Assign Coupons</button>
+                    ${renderInfluencerActionLinks(influencer)}
                   </div>
                 </div>
               </article>
@@ -1810,7 +2492,7 @@
           </div>
 
           <div class="admin-grid admin-grid--two" style="margin-top:18px;">
-            <section class="admin-card">
+            <section class="admin-card" id="influencer-profile-panel" tabindex="-1">
               <div class="admin-card__head">
                 <h3 class="admin-card__title">Influencer Profile</h3>
                 <p class="admin-card__sub">Full partner profile and coupon summary</p>
@@ -1868,8 +2550,7 @@
               </div>
               <div class="admin-card__foot">
                 <div class="admin-footer-actions">
-                  <button class="admin-btn admin-btn--soft" type="button" data-action="assign-coupon" data-id="${selectedInfluencer?.id || ''}">Assign Coupons</button>
-                  <button class="admin-btn admin-btn--ghost" type="button" data-action="edit-influencer" data-id="${selectedInfluencer?.id || ''}">Edit Influencer</button>
+                  ${selectedInfluencer ? renderInfluencerActionLinks(selectedInfluencer) : ''}
                 </div>
               </div>
             </section>
@@ -1884,6 +2565,7 @@
                     ${renderMiniChart([
                       { label: 'Orders', value: Math.min(100, Number(selectedInfluencer.totalOrders || 0)), display: formatCount(selectedInfluencer.totalOrders) },
                       { label: 'Revenue', value: Math.min(100, Math.round(Number(selectedInfluencer.revenue || 0) / 100000)), display: money(selectedInfluencer.revenue) },
+                      { label: 'Commission', value: Math.min(100, Math.round(Number(selectedInfluencer.commission || 0) / 10000)), display: money(selectedInfluencer.commission) },
                       { label: 'Coupon Usage', value: Math.min(100, Number(selectedInfluencer.couponUsage || 0)), display: formatCount(selectedInfluencer.couponUsage) },
                       { label: 'Campaigns', value: Math.min(100, Number(selectedInfluencer.activeCampaigns || 0) * 20), display: `${formatCount(selectedInfluencer.activeCampaigns)} active` },
                     ])}
@@ -1933,17 +2615,37 @@
     }
 
     const reportTiles = [
-      { title: 'Sales Report', meta: 'Orders, revenue, averages, and top sellers' },
-      { title: 'Orders Report', meta: 'Fulfillment stages and channel breakdown' },
-      { title: 'Products Report', meta: 'Stock health and performance by SKU' },
-      { title: 'Customers Report', meta: 'LTV, repeat rate, and cohorts' },
-      { title: 'Coupons Report', meta: 'Usage, expiry, and owner split' },
-      { title: 'Influencer Report', meta: 'Campaign performance and revenue contribution' },
-      { title: 'Revenue Report', meta: 'Payment capture and return impact' },
+      { title: 'Sales Report', meta: 'Orders, revenue, averages, and top sellers', target: 'sales-report' },
+      { title: 'Orders Report', meta: 'Fulfillment stages and channel breakdown', target: 'orders-report' },
+      { title: 'Products Report', meta: 'Stock health and performance by SKU', target: 'products-report' },
+      { title: 'Customers Report', meta: 'LTV, repeat rate, and cohorts', target: 'customers-report' },
+      { title: 'Coupons Report', meta: 'Usage, expiry, and owner split', target: 'coupons-report' },
+      { title: 'Influencer Report', meta: 'Campaign performance and revenue contribution', target: 'influencer-report' },
+      { title: 'Revenue Report', meta: 'Payment capture and return impact', target: 'revenue-report' },
     ];
     const summary = state.reports?.summary || {};
     const influencerReports = Array.isArray(state.reports?.influencerReports) ? state.reports.influencerReports : [];
-    const statusBreakdown = state.reports?.statusBreakdown || {};
+    const monthlyInfluencerReports = Array.isArray(state.reports?.monthlyInfluencerReports) ? state.reports.monthlyInfluencerReports : [];
+    const liveStatusDistribution = buildOrderStatusDistribution(state.orders);
+    const statusBreakdown = state.reports?.statusBreakdown || liveStatusDistribution.breakdown;
+    const reportOrderTotal = summary.orderCount ?? liveStatusDistribution.total ?? 0;
+    const reportSegments = Object.entries(statusBreakdown)
+      .filter(([, count]) => Number(count || 0) > 0)
+      .map(([status, count]) => ({
+        status,
+        label: ORDER_STATUS_META[normalizeOrderStatus(status)]?.label || getStatusLabel(status),
+        color: ORDER_STATUS_META[normalizeOrderStatus(status)]?.color || '#9ca3af',
+        count: Number(count || 0),
+        percent: reportOrderTotal ? (Number(count || 0) / reportOrderTotal) * 100 : 0,
+      }));
+    const reportDistribution = {
+      total: reportOrderTotal,
+      segments: reportSegments,
+    };
+    const lowStockProducts = getLowStockProducts();
+    const couponReportRows = [...(Array.isArray(state.coupons) ? state.coupons : [])]
+      .sort((left, right) => Number(right.totalRedemptions || right.usageCount || 0) - Number(left.totalRedemptions || left.usageCount || 0))
+      .slice(0, 5);
 
     els.reportsView.innerHTML = `
       <section class="admin-section">
@@ -1961,27 +2663,27 @@
               <select class="admin-select" data-input="reportFormat">
                 <option value="csv" ${state.reportFormat === 'csv' ? 'selected' : ''}>CSV</option>
                 <option value="excel" ${state.reportFormat === 'excel' ? 'selected' : ''}>Excel</option>
-                <option value="pdf" ${state.reportFormat === 'pdf' ? 'selected' : ''}>PDF</option>
+                <option value="pdf" ${state.reportFormat === 'pdf' ? 'selected' : ''}>Printable HTML</option>
               </select>
             </div>
             <div class="admin-toolbar__group">
-              <button class="admin-btn admin-btn--ghost" type="button" data-action="export-report" data-format="csv">Export CSV</button>
-              <button class="admin-btn admin-btn--ghost" type="button" data-action="export-report" data-format="excel">Export Excel</button>
-              <button class="admin-btn admin-btn--ghost" type="button" data-action="export-report" data-format="pdf">Export PDF</button>
+              <button class="admin-btn admin-btn--ghost" type="button" data-action="export-report">Download Report</button>
+              <button class="admin-btn admin-btn--soft" type="button" data-action="email-report">Send via Email</button>
             </div>
           </div>
 
           <div class="admin-report-grid">
             ${reportTiles.map((tile) => `
-              <article class="admin-report-card">
+              <button class="admin-report-card admin-report-card--interactive" type="button" data-action="open-report-section" data-target="${escapeHtml(tile.target)}">
                 <h3 class="admin-report-card__title">${escapeHtml(tile.title)}</h3>
                 <p class="admin-report-card__meta">${escapeHtml(tile.meta)}</p>
-              </article>
+                <span class="admin-report-card__link">View report</span>
+              </button>
             `).join('')}
           </div>
 
           <div class="admin-card-grid admin-card-grid--2" style="margin-top:18px;">
-            <section class="admin-card">
+            <section class="admin-card" id="revenue-report">
               <div class="admin-card__head">
                 <h3 class="admin-card__title">Revenue Report</h3>
                 <p class="admin-card__sub">Date-filtered merch summary</p>
@@ -1996,26 +2698,88 @@
               </div>
             </section>
 
-            <section class="admin-card">
+            <section class="admin-card" id="orders-report">
               <div class="admin-card__head">
                 <h3 class="admin-card__title">Order Status Distribution</h3>
                 <p class="admin-card__sub">Filtered by selected date range</p>
               </div>
               <div class="admin-card__body" style="display:grid;place-items:center;gap:14px;">
-                <div class="admin-chart-ring">
-                  <span>
-                    <strong>${formatCount(summary.orderCount || state.orders.length)}</strong>
-                    <small>Orders</small>
-                  </span>
-                </div>
+                ${renderOrderStatusRing(reportDistribution)}
                 <div class="admin-chip-row">
-                  ${Object.entries(statusBreakdown).map(([status, count]) => `<span class="admin-chip">${escapeHtml(getStatusLabel(status))} ${formatCount(count)}</span>`).join('') || '<span class="admin-chip">No status data</span>'}
+                  ${renderStatusLegend(reportDistribution)}
                 </div>
+                <p class="admin-table__muted" style="margin:0;">${formatCount(reportOrderTotal)} order(s) in the selected range.</p>
               </div>
             </section>
           </div>
 
-          <section class="admin-card" style="margin-top:18px;">
+          <section class="admin-card" id="products-report" style="margin-top:18px;">
+            <div class="admin-card__head">
+              <h3 class="admin-card__title">Low Stock Report</h3>
+              <p class="admin-card__sub">Products at or below ${LOW_STOCK_THRESHOLD} units remaining</p>
+            </div>
+            <div class="admin-card__body admin-table-wrap">
+              ${lowStockProducts.length ? `
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th>SKU</th>
+                      <th>Category</th>
+                      <th>Stock</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${lowStockProducts.map((product) => `
+                      <tr>
+                        <td><strong>${escapeHtml(product.name)}</strong><br><span class="admin-table__muted">${escapeHtml(product.description || '')}</span></td>
+                        <td>${escapeHtml(product.sku || '—')}</td>
+                        <td>${escapeHtml(product.category || '—')}</td>
+                        <td><strong>${formatCount(product.stock)}</strong></td>
+                        <td><span class="admin-badge admin-badge--inactive">${escapeHtml(getLowStockLabel(product))}</span></td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              ` : renderEmptyState('No low stock items', `All products are above ${LOW_STOCK_THRESHOLD} units.`)}
+            </div>
+          </section>
+
+          <section class="admin-card" id="coupons-report" style="margin-top:18px;">
+            <div class="admin-card__head">
+              <h3 class="admin-card__title">Coupons Report</h3>
+              <p class="admin-card__sub">Usage, expiry, and owner split</p>
+            </div>
+            <div class="admin-card__body admin-table-wrap">
+              ${couponReportRows.length ? `
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Coupon</th>
+                      <th>Type</th>
+                      <th>Usage</th>
+                      <th>Status</th>
+                      <th>Owner</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${couponReportRows.map((coupon) => `
+                      <tr>
+                        <td><strong>${escapeHtml(coupon.code || '')}</strong></td>
+                        <td>${escapeHtml(getCouponTypeLabel(coupon))}</td>
+                        <td>${formatCount(coupon.totalRedemptions || coupon.usageCount || 0)}</td>
+                        <td><span class="admin-badge ${Number(coupon.active ?? coupon.isActive ?? 0) === 1 ? 'admin-badge--active' : 'admin-badge--inactive'}">${Number(coupon.active ?? coupon.isActive ?? 0) === 1 ? 'Active' : 'Inactive'}</span></td>
+                        <td>${escapeHtml(coupon.influencerName || coupon.owner || 'Store')}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              ` : renderEmptyState('No coupons found', 'Coupon usage will appear here once live order data is recorded.')}
+            </div>
+          </section>
+
+          <section class="admin-card" id="influencer-report" style="margin-top:18px;">
             <div class="admin-card__head">
               <h3 class="admin-card__title">Influencer Report</h3>
               <p class="admin-card__sub">Orders, revenue, coupon usage, and commission from stored influencer attribution</p>
@@ -2047,6 +2811,43 @@
                   </tbody>
                 </table>
               ` : renderEmptyState('No influencer attribution yet', 'Assign coupons to influencers and capture merch orders to populate this report.')}
+            </div>
+          </section>
+
+          <section class="admin-card" id="customers-report" style="margin-top:18px;">
+            <div class="admin-card__head">
+              <h3 class="admin-card__title">Monthly Influencer Breakdown</h3>
+              <p class="admin-card__sub">Month-wise sales and commission by influencer</p>
+            </div>
+            <div class="admin-card__body admin-table-wrap">
+              ${monthlyInfluencerReports.length ? `
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Month</th>
+                      <th>Influencer</th>
+                      <th>Handle</th>
+                      <th>Orders</th>
+                      <th>Revenue</th>
+                      <th>Commission</th>
+                      <th>Coupon Usage</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${monthlyInfluencerReports.map((row) => `
+                      <tr>
+                        <td><strong>${escapeHtml(row.monthLabel || row.month)}</strong></td>
+                        <td>${escapeHtml(row.name || '')}</td>
+                        <td class="admin-table__muted">${escapeHtml(row.handle || '—')}</td>
+                        <td>${formatCount(row.orders)}</td>
+                        <td><strong>${money(row.revenue)}</strong></td>
+                        <td>${money(row.commission)}</td>
+                        <td>${formatCount(row.couponUsage)}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              ` : renderEmptyState('No monthly influencer activity yet', 'Capture orders across multiple months to see the sales and commission trend here.')}
             </div>
           </section>
         </div>
@@ -2243,6 +3044,7 @@
           <label class="admin-field"><span>Email</span><input class="admin-input" name="email" value="${escapeHtml(entity?.email || '')}" /></label>
           <label class="admin-field"><span>Phone</span><input class="admin-input" name="phone" value="${escapeHtml(entity?.phone || '')}" /></label>
           <label class="admin-field"><span>Commission %</span><input class="admin-input" name="commissionRate" type="number" min="0" max="100" step="0.01" value="${escapeHtml(entity?.commissionRate ?? 10)}" /></label>
+          <label class="admin-field"><span>Commission Paid</span><input class="admin-input" name="paidCommission" type="number" min="0" step="0.01" value="${escapeHtml(entity?.paidCommission ?? 0)}" /></label>
           <label class="admin-field admin-field--wide"><span>Assigned Coupons</span><input class="admin-input" value="${escapeHtml((entity?.coupons || []).join(', '))}" readonly /></label>
           <label class="admin-field admin-field--wide"><span>Notes</span><textarea class="admin-textarea" name="notes">${escapeHtml(entity?.notes || '')}</textarea></label>
           <label class="admin-check"><input type="checkbox" name="active" ${entity?.active !== false ? 'checked' : ''} /><span>Active influencer</span></label>
@@ -2486,6 +3288,7 @@
       phone: String(fd.get('phone') || '').trim(),
       notes: String(fd.get('notes') || '').trim(),
       commissionRate: Number(fd.get('commissionRate') || 10),
+      paidCommission: Number(fd.get('paidCommission') || existing?.paidCommission || 0),
       coupons: existing?.coupons || [],
       totalOrders: Number(existing?.totalOrders || 0),
       revenue: Number(existing?.revenue || 0),
@@ -2529,15 +3332,24 @@
     }
   }
 
+  async function loadDashboardStats() {
+    try {
+      const result = await apiRequest('/api/merch/admin/stats');
+      state.dashboardStats = result || null;
+    } catch (error) {
+      state.dashboardStats = null;
+    } finally {
+      renderDashboard();
+      if (state.view === 'reports') renderReports();
+    }
+  }
+
   async function loadOrderData() {
     state.ordersLoading = true;
     renderOrders();
     try {
       const result = await apiRequest('/api/merch/admin/orders');
       state.orders = Array.isArray(result.orders) ? result.orders : [];
-      if (!state.selectedOrderId && state.orders[0]) {
-        state.selectedOrderId = state.orders[0].id;
-      }
     } catch (error) {
       state.orders = [];
       toast('Orders unavailable', error.message || 'Unable to load merch orders from the admin API.', 'warning');
@@ -2545,6 +3357,7 @@
       state.ordersLoading = false;
       renderOrders();
       renderDashboard();
+      if (state.view === 'reports') renderReports();
     }
   }
 
@@ -2594,6 +3407,57 @@
     } finally {
       state.reportsLoading = false;
       renderReports();
+      renderDashboard();
+    }
+  }
+
+  function downloadCurrentReport() {
+    if (!state.reports) {
+      toast('Reports unavailable', 'Load the report data before downloading.', 'warning');
+      return;
+    }
+
+    const format = String(state.reportFormat || 'csv').toLowerCase();
+    const report = state.reports;
+    const startLabel = String(state.reportFrom || 'start').replace(/[^0-9-]/g, '');
+    const endLabel = String(state.reportTo || 'end').replace(/[^0-9-]/g, '');
+    const baseName = `merch-influencer-report-${startLabel}-${endLabel}`;
+
+    if (format === 'excel') {
+      downloadMerchReportFile(`${baseName}.xls`, buildMerchReportTsv(report), 'application/vnd.ms-excel;charset=utf-8');
+      toast('Download ready', 'The Excel-friendly report has been downloaded.', 'success');
+      return;
+    }
+
+    if (format === 'pdf') {
+      downloadMerchReportFile(`${baseName}.html`, buildMerchReportHtml(report), 'text/html;charset=utf-8');
+      toast('Download ready', 'The printable report has been downloaded as HTML. Open it and print to PDF if needed.', 'success');
+      return;
+    }
+
+    downloadMerchReportFile(`${baseName}.csv`, buildMerchReportCsv(report), 'text/csv;charset=utf-8');
+    toast('Download ready', 'The CSV report has been downloaded.', 'success');
+  }
+
+  async function emailCurrentReport() {
+    if (!state.reports) {
+      toast('Reports unavailable', 'Load the report data before sending it by email.', 'warning');
+      return;
+    }
+
+    try {
+      await apiRequest('/api/merch/admin/reports/email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          startDate: state.reportFrom,
+          endDate: state.reportTo,
+          format: state.reportFormat || 'csv',
+        }),
+      });
+      toast('Report emailed', 'The current merch influencer report has been emailed successfully.', 'success');
+    } catch (error) {
+      toast('Email failed', error.message || 'Unable to send the report email.', 'danger');
     }
   }
 
@@ -2941,7 +3805,7 @@
         return;
       case 'select-order':
         if (order) {
-          state.selectedOrderId = order.id;
+          state.selectedOrderId = Number(state.selectedOrderId) === Number(order.id) ? null : order.id;
           renderOrders();
         }
         return;
@@ -3017,7 +3881,7 @@
         return;
       case 'select-customer':
         if (customer) {
-          state.selectedCustomerId = customer.id;
+          state.selectedCustomerId = String(state.selectedCustomerId) === String(customer.id) ? null : customer.id;
           renderCustomers();
         }
         return;
@@ -3029,7 +3893,7 @@
         return;
       case 'select-coupon':
         if (coupon) {
-          state.selectedCouponId = coupon.id;
+          state.selectedCouponId = Number(state.selectedCouponId) === Number(coupon.id) ? null : coupon.id;
           renderCoupons();
         }
         return;
@@ -3077,6 +3941,14 @@
         if (influencer) {
           state.selectedInfluencerId = influencer.id;
           renderInfluencers();
+          window.setTimeout(() => {
+            const section = document.getElementById('influencer-profile-panel');
+            if (!section) return;
+            section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            if (typeof section.focus === 'function') {
+              section.focus({ preventScroll: true });
+            }
+          }, 0);
         }
         return;
       case 'open-influencer-modal':
@@ -3119,9 +3991,45 @@
           renderInfluencerAssignmentModal(influencer);
         }
         return;
-      case 'export-report':
-        toast('Export started', `${String(target.dataset.format || 'csv').toUpperCase()} export for the current date range is mocked.`, 'success');
+      case 'download-influencer-report':
+        if (influencer) {
+          await downloadInfluencerReport(influencer);
+        }
         return;
+      case 'email-influencer-report':
+        if (influencer) {
+          await emailInfluencerReport(influencer);
+        }
+        return;
+      case 'export-report':
+        downloadCurrentReport();
+        return;
+      case 'email-report':
+        await emailCurrentReport();
+        return;
+      case 'open-report-section': {
+        const targetId = String(target.dataset.target || '').trim();
+        const sectionIdMap = {
+          'sales-report': 'revenue-report',
+          'revenue-report': 'revenue-report',
+          'orders-report': 'orders-report',
+          'products-report': 'products-report',
+          'customers-report': 'customers-report',
+          'coupons-report': 'coupons-report',
+          'influencer-report': 'influencer-report',
+        };
+        const resolvedId = sectionIdMap[targetId] || targetId;
+        const section = document.getElementById(resolvedId);
+        if (section) {
+          section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          section.classList.add('admin-report-target--active');
+          window.clearTimeout(section.__reportHighlightTimer);
+          section.__reportHighlightTimer = window.setTimeout(() => {
+            section.classList.remove('admin-report-target--active');
+          }, 2200);
+        }
+        return;
+      }
       default:
         return;
     }
@@ -3274,6 +4182,7 @@
       closeModal();
       await loadInfluencerData();
       await loadCouponData();
+      await loadReportData();
       return;
     }
   }
@@ -3372,11 +4281,18 @@
   function init() {
     bindEvents();
     renderAll();
+    loadDashboardStats();
     loadOrderData();
     loadCustomerData();
     loadInfluencerData();
     loadCouponData();
     loadReportData();
+    setInterval(() => {
+      if (document.hidden) return;
+      loadDashboardStats();
+      loadOrderData();
+      loadReportData();
+    }, 60000);
   }
 
   if (document.readyState === 'loading') {
@@ -3385,3 +4301,4 @@
     init();
   }
 })();
+

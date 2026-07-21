@@ -283,6 +283,8 @@
   }
 
   // ─── Utility ───
+  const LOW_STOCK_THRESHOLD = 15;
+
   function formatPrice(paise) {
     return '₹' + (paise / 100).toLocaleString('en-IN');
   }
@@ -298,6 +300,43 @@
   function getDefaultPurchasableVariant(product) {
     const variants = Array.isArray(product?.variants) ? product.variants : [];
     return variants.find((variant) => Number(variant?.stock || 0) > 0) || variants[0] || null;
+  }
+
+  function getVariantLabel(variant) {
+    return [variant?.size, variant?.color].filter(Boolean).join(' / ') || 'Default variant';
+  }
+
+  function getLowStockVariants(product) {
+    return (Array.isArray(product?.variants) ? product.variants : [])
+      .filter((variant) => Number(variant?.stock || 0) > 0 && Number(variant?.stock || 0) <= LOW_STOCK_THRESHOLD)
+      .sort((a, b) => Number(a.stock || 0) - Number(b.stock || 0));
+  }
+
+  function getVariantStockState(variant) {
+    const stock = Number(variant?.stock || 0);
+    const label = getVariantLabel(variant);
+
+    if (stock <= 0) {
+      return {
+        label: 'Out of stock',
+        className: 'out-of-stock',
+        detail: `${label} is unavailable right now.`,
+      };
+    }
+
+    if (stock <= LOW_STOCK_THRESHOLD) {
+      return {
+        label: `Low stock (${stock} left)`,
+        className: 'low-stock',
+        detail: `${label} is running low. Restock soon.`,
+      };
+    }
+
+    return {
+      label: `In stock (${stock} available)`,
+      className: 'in-stock',
+      detail: `${label} is available for purchase.`,
+    };
   }
 
   function escapeHtml(str) {
@@ -2560,9 +2599,12 @@
     els.productGrid.innerHTML = products.map(product => {
       const defaultVariant = getDefaultPurchasableVariant(product);
       const isSoldOut = !defaultVariant || Number(defaultVariant.stock || 0) <= 0;
+      const lowStockVariants = getLowStockVariants(product);
+      const stockState = getVariantStockState(defaultVariant);
       return `
       <article class="product-card" data-product-id="${product.id}" tabindex="0" role="button" aria-label="View ${escapeHtml(product.name)}">
         <div class="product-card__image">
+          ${isSoldOut ? '<span class="product-card__badge product-card__badge--sold-out">Sold out</span>' : lowStockVariants.length ? '<span class="product-card__badge product-card__badge--low-stock">Low stock</span>' : ''}
           <img src="${escapeHtml(product.images?.[0] || product.imageUrl || FALLBACK_PRODUCT_IMAGE)}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
         </div>
         <div class="product-card__body">
@@ -2571,6 +2613,15 @@
           <p class="product-card__price">
             ${product.variants.length > 1 ? '<span class="price-from">From </span>' : ''}${getPriceRange(product)}
           </p>
+          <p class="product-card__stock ${stockState.className}">
+            ${escapeHtml(stockState.label)}
+          </p>
+          ${lowStockVariants.length ? `
+            <p class="product-card__stock-details">
+              ${escapeHtml(lowStockVariants.slice(0, 2).map((variant) => `${getVariantLabel(variant)}: ${Number(variant.stock || 0)} left`).join(' · '))}
+              ${lowStockVariants.length > 2 ? ` · +${lowStockVariants.length - 2} more` : ''}
+            </p>
+          ` : ''}
           <div class="product-card__actions">
             <button class="btn btn-secondary product-card__action" type="button" data-product-action="add-to-cart" data-product-id="${product.id}" ${isSoldOut ? 'disabled' : ''}>
               ${isSoldOut ? 'Out of Stock' : 'Add to Cart'}
@@ -2696,6 +2747,8 @@
 
   function renderProductInfo(product) {
     const variant = state.selectedVariant;
+    const stockState = getVariantStockState(variant);
+    const lowStockVariants = getLowStockVariants(product);
 
     // Get unique sizes and colors
     const sizes = [...new Set(product.variants.map(v => v.size).filter(Boolean))];
@@ -2754,9 +2807,18 @@
         <button id="addToWishlistBtn" class="btn btn-outline btn-lg" type="button">♡ Wishlist</button>
       </div>
 
-      <p class="stock-status ${variant.stock > 0 ? 'in-stock' : 'out-of-stock'}">
-        ${variant.stock > 0 ? `✓ In stock (${variant.stock} available)` : '✕ Out of stock'}
+      <p class="stock-status ${stockState.className}">
+        ${escapeHtml(stockState.label)}
       </p>
+      <p class="stock-status__detail">
+        ${escapeHtml(stockState.detail)}
+      </p>
+      ${lowStockVariants.length ? `
+        <div class="stock-alert stock-alert--low">
+          <strong>Low stock details</strong>
+          <span>${escapeHtml(lowStockVariants.map((item) => `${getVariantLabel(item)} (${Number(item.stock || 0)})`).join(', '))}</span>
+        </div>
+      ` : ''}
     `;
 
     // Bind variant selectors
