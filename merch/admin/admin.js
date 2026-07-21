@@ -31,18 +31,18 @@
   }
 
   function money(paise) {
-  const amount = Number(paise || 0) / 100;
+    const amount = Number(paise || 0) / 100;
 
-  return '\u20B9' + amount.toLocaleString('en-IN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+    return '\u20B9' + amount.toLocaleString('en-IN', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    });
+  }
 
   function catalogPrice(value) {
     return '\u20B9' + Number(value || 0).toLocaleString('en-IN', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
     });
   }
 
@@ -1317,7 +1317,7 @@
                       </div>
                       <span class="admin-badge ${statusClass(product.status)}">${escapeHtml(getStatusLabel(product.status))}</span>
                     </div>
-                    <p class="admin-table__muted">${escapeHtml(product.priceLabel || money(product.price))} · ${escapeHtml(product.primarySku || 'SKU pending')}</p>
+                    <p class="admin-table__muted">${escapeHtml(product.priceLabel || catalogPrice(product.price))} · ${escapeHtml(product.primarySku || 'SKU pending')}</p>
                   </div>
                 `).join('')}
               </div>
@@ -1498,7 +1498,7 @@
                       <p class="admin-list__item-title">${escapeHtml(product.name)}</p>
                       <p class="admin-list__item-sub">${escapeHtml(product.category)}</p>
                     </div>
-                    <strong>${escapeHtml(product.priceLabel || money(product.price))}</strong>
+                    <strong>${escapeHtml(product.priceLabel || catalogPrice(product.price))}</strong>
                   </div>
                 </div>
               `).join('')}
@@ -1634,7 +1634,7 @@
                     <td><strong>${escapeHtml(product.name)}</strong><br><span class="admin-table__muted">${escapeHtml(product.description)}</span></td>
                     <td>${escapeHtml(product.sku)}</td>
                     <td>${escapeHtml(product.category)}</td>
-                    <td><strong>${escapeHtml(product.priceLabel || money(product.price))}</strong></td>
+                    <td><strong>${escapeHtml(product.priceLabel || catalogPrice(product.price))}</strong></td>
                     <td>
                       <div class="admin-list" style="gap:4px;">
                         <strong>${escapeHtml(product.stock)}</strong>
@@ -1769,7 +1769,7 @@
                     <p class="admin-list__item-title">${escapeHtml(item.name)}</p>
                     <p class="admin-list__item-sub">Qty ${escapeHtml(item.qty)}</p>
                   </div>
-                  <strong>${escapeHtml(money(item.price))}</strong>
+                  <strong>${escapeHtml(catalogPrice(item.price))}</strong>
                 </div>
               </div>
             `).join('')}
@@ -2975,7 +2975,7 @@
               ${state.categories.map((category) => `<option value="${category.id}" ${Number(entity?.categoryId) === Number(category.id) ? 'selected' : ''}>${escapeHtml(category.name)}</option>`).join('')}
             </select>
           </label>
-          <label class="admin-field"><span>Price (paise)</span><input class="admin-input" name="price" type="number" min="0" value="${escapeHtml(entity?.price || 0)}" required /></label>
+          <label class="admin-field"><span>Price (rupees)</span><input class="admin-input" name="price" type="number" min="0" step="1" value="${escapeHtml(entity?.price || 0)}" required /></label>
           <label class="admin-field"><span>Stock</span><input class="admin-input" name="stock" type="number" min="0" value="${escapeHtml(entity?.stock || 0)}" required /></label>
           <label class="admin-field"><span>Status</span>
             <select class="admin-select" name="status">
@@ -3224,7 +3224,7 @@
       categoryId,
       category: category?.name || 'Uncategorized',
       price: Number(fd.get('price') || 0),
-      priceLabel: existing?.priceLabel || money(Number(fd.get('price') || 0)),
+      priceLabel: catalogPrice(Number(fd.get('price') || 0)),
       stock: Number(fd.get('stock') || 0),
       status: String(fd.get('status') || 'draft'),
       createdAt: existing?.createdAt || toISODate(today),

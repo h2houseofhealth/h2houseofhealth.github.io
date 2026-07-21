@@ -31,6 +31,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       social_links_json TEXT,
       preferred_payment_details TEXT,
       commission_rate REAL NOT NULL DEFAULT 10,
+      paid_commission INTEGER NOT NULL DEFAULT 0,
       active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -228,6 +229,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   if (!hasColumn('merch_influencers', 'preferred_payment_details')) {
     db.exec('ALTER TABLE merch_influencers ADD COLUMN preferred_payment_details TEXT');
   }
+  if (!hasColumn('merch_influencers', 'paid_commission')) {
+    db.exec('ALTER TABLE merch_influencers ADD COLUMN paid_commission INTEGER NOT NULL DEFAULT 0');
+  }
 
   if (hasTable('coupons') && !hasColumn('coupons', 'influencer_id')) {
     db.exec('ALTER TABLE coupons ADD COLUMN influencer_id INTEGER REFERENCES merch_influencers(id)');
@@ -297,6 +301,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function normalizeInfluencerPayload(body = {}) {
     const commissionRate = Number(body.commissionRate ?? body.commission_rate ?? 10);
+    const paidCommission = Number(body.paidCommission ?? body.paid_commission ?? 0);
     const rawSocialLinks = Array.isArray(body.socialLinks)
       ? body.socialLinks
       : Array.isArray(body.social_links)
@@ -316,6 +321,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       socialLinks: Array.from(new Set(rawSocialLinks.map((item) => String(item || '').trim()).filter(Boolean))),
       preferredPaymentDetails: String(body.preferredPaymentDetails || body.preferred_payment_details || '').trim(),
       commissionRate: Number.isFinite(commissionRate) ? Math.min(Math.max(commissionRate, 0), 100) : 10,
+      paidCommission: Number.isFinite(paidCommission) ? Math.max(0, Math.round(paidCommission)) : 0,
       active: body.active === false || Number(body.active) === 0 ? 0 : 1,
     };
   }
@@ -386,7 +392,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return db.prepare(`
       SELECT id, name, handle, email, phone, notes, avatar_url AS avatarUrl, bio,
              social_links_json AS socialLinksJson, preferred_payment_details AS preferredPaymentDetails,
-             commission_rate AS commissionRate, active,
+             commission_rate AS commissionRate, paid_commission AS paidCommission, active,
              created_at AS createdAt, updated_at AS updatedAt
       FROM merch_influencers
       WHERE id = ?
@@ -399,7 +405,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return db.prepare(`
       SELECT id, name, handle, email, phone, notes, avatar_url AS avatarUrl, bio,
              social_links_json AS socialLinksJson, preferred_payment_details AS preferredPaymentDetails,
-             commission_rate AS commissionRate, active,
+             commission_rate AS commissionRate, paid_commission AS paidCommission, active,
              created_at AS createdAt, updated_at AS updatedAt
       FROM merch_influencers
       WHERE LOWER(TRIM(email)) = ?
@@ -486,6 +492,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   function serializeInfluencer(row, coupons = [], stats = {}, payments = []) {
     const commissionRate = Number(row.commissionRate ?? row.commission_rate ?? 10);
     const revenue = Number(stats.revenue || 0);
+    const paymentTotal = payments
+      .filter((payment) => ['paid', 'processed', 'completed', 'settled'].includes(String(payment.status || '').toLowerCase()))
+      .reduce((sum, payment) => sum + Number(payment.amountPaise || 0), 0);
+    const paidCommissionRecorded = Number(row.paidCommission ?? row.paid_commission);
     return {
       id: Number(row.id),
       name: String(row.name || ''),
@@ -498,6 +508,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       socialLinks: parseInfluencerSocialLinks(row.socialLinksJson || row.social_links_json),
       preferredPaymentDetails: String(row.preferredPaymentDetails || row.preferred_payment_details || ''),
       commissionRate,
+      paidCommission: Number.isFinite(paidCommissionRecorded)
+        ? Math.max(0, Math.max(Math.round(paidCommissionRecorded), paymentTotal))
+        : paymentTotal,
       active: Number(row.active ?? 1) === 1,
       coupons: coupons.map((coupon) => String(coupon.code || '')).filter(Boolean),
       couponDetails: coupons.map((coupon) => ({
@@ -515,9 +528,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       couponUsage: Number(stats.couponUsage || 0),
       activeCampaigns: coupons.filter((coupon) => Number(coupon.isActive ?? coupon.active ?? 0) === 1).length,
       commission: Math.round(revenue * (commissionRate / 100)),
-      paidCommission: payments
-        .filter((payment) => ['paid', 'processed', 'completed', 'settled'].includes(String(payment.status || '').toLowerCase()))
-        .reduce((sum, payment) => sum + Number(payment.amountPaise || 0), 0),
       createdAt: row.createdAt || row.created_at || null,
       updatedAt: row.updatedAt || row.updated_at || null,
     };
@@ -540,7 +550,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const rows = db.prepare(`
       SELECT id, name, handle, email, phone, notes, avatar_url AS avatarUrl, bio,
              social_links_json AS socialLinksJson, preferred_payment_details AS preferredPaymentDetails,
-             commission_rate AS commissionRate, active, created_at AS createdAt, updated_at AS updatedAt
+             commission_rate AS commissionRate, paid_commission AS paidCommission, active, created_at AS createdAt, updated_at AS updatedAt
       FROM merch_influencers
       ORDER BY active DESC, datetime(created_at) DESC, id DESC
     `).all();
@@ -800,9 +810,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const totalOrdersReferred = activeOrders.length;
     const commissionEarned = Math.round(salesGenerated * (commissionRate / 100));
     const commissionPayments = getInfluencerCommissionPayments(influencerId);
-    const commissionPaid = commissionPayments
+    const commissionPaidFromPayments = commissionPayments
       .filter((payment) => ['paid', 'processed', 'completed', 'settled'].includes(String(payment.status || '').toLowerCase()))
       .reduce((sum, payment) => sum + Number(payment.amountPaise || 0), 0);
+    const commissionPaidRecorded = Math.max(0, Math.round(Number(influencer.paidCommission ?? influencer.paid_commission ?? 0)));
+    const commissionPaid = Math.max(commissionPaidFromPayments, commissionPaidRecorded);
     const commissionPending = Math.max(0, commissionEarned - commissionPaid);
     const activeCoupons = coupons.filter((coupon) => Number(coupon.active) === 1).length;
     const couponUsage = allOrders.filter((order) => Boolean(order.couponUsed)).length;
@@ -3253,8 +3265,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     const result = db.prepare(`
-      INSERT INTO merch_influencers (name, handle, email, phone, notes, avatar_url, bio, social_links_json, preferred_payment_details, commission_rate, active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      INSERT INTO merch_influencers (name, handle, email, phone, notes, avatar_url, bio, social_links_json, preferred_payment_details, commission_rate, paid_commission, active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
     `).run(
       influencer.name,
       influencer.handle || null,
@@ -3266,6 +3278,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       influencer.socialLinks.length ? JSON.stringify(influencer.socialLinks) : null,
       influencer.preferredPaymentDetails || null,
       influencer.commissionRate,
+      influencer.paidCommission,
       influencer.active
     );
 
@@ -3301,7 +3314,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     db.prepare(`
       UPDATE merch_influencers
       SET name = ?, handle = ?, email = ?, phone = ?, notes = ?, avatar_url = ?, bio = ?, social_links_json = ?,
-          preferred_payment_details = ?, commission_rate = ?, active = ?, updated_at = datetime('now')
+          preferred_payment_details = ?, commission_rate = ?, paid_commission = ?, active = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(
       influencer.name,
@@ -3314,6 +3327,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       influencer.socialLinks.length ? JSON.stringify(influencer.socialLinks) : null,
       influencer.preferredPaymentDetails || null,
       influencer.commissionRate,
+      influencer.paidCommission,
       influencer.active,
       influencerId
     );

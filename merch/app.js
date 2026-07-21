@@ -285,8 +285,15 @@
   // ─── Utility ───
   const LOW_STOCK_THRESHOLD = 15;
 
-  function formatPrice(paise) {
-    return '₹' + (paise / 100).toLocaleString('en-IN');
+  function formatPrice(amountInr) {
+    return '₹' + Number(amountInr || 0).toLocaleString('en-IN', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    });
+  }
+
+  function normalizeCatalogAmount(valueInPaise) {
+    return Math.max(0, Math.round(Number(valueInPaise || 0) / 100));
   }
 
   function getPriceRange(product) {
@@ -645,6 +652,13 @@
       : imageUrl
         ? [imageUrl]
         : [];
+    const normalizedVariants = variants.map((variant) => ({
+      ...variant,
+      price: normalizeCatalogAmount(variant?.price || 0),
+    }));
+    const normalizedPrices = normalizedVariants.map((variant) => Number(variant.price || 0));
+    const basePrice = normalizeCatalogAmount(product?.basePrice || product?.base_price || 0);
+    const price = normalizeCatalogAmount(product?.price || product?.basePrice || product?.base_price || 0);
 
     return {
       ...product,
@@ -653,13 +667,15 @@
       slug: String(product?.slug || ''),
       description: String(product?.description || ''),
       category: String(product?.category || ''),
-      basePrice: Number(product?.basePrice || product?.base_price || 0),
+      basePrice,
       imageUrl,
       image: imageUrl,
       images,
-      variants,
-      price: Number(product?.price || product?.basePrice || product?.base_price || 0),
-      priceLabel: String(product?.priceLabel || ''),
+      variants: normalizedVariants,
+      price,
+      priceLabel: normalizedPrices.length > 1
+        ? `${formatPrice(Math.min(...normalizedPrices))} - ${formatPrice(Math.max(...normalizedPrices))}`
+        : formatPrice(price || basePrice),
       createdAt: String(product?.createdAt || ''),
     };
   }
@@ -842,8 +858,8 @@
     els.cartCouponPreview.innerHTML = `
       <strong>${escapeHtml(preview.code || '')}</strong>
       <span>${escapeHtml(preview.description || 'Coupon applied')}</span>
-      <span>Discount: ${formatPrice(Number(preview.discountAmountInr || 0) * 100)}</span>
-      <span>Payable: ${formatPrice(Number(preview.payableAmountInr || 0) * 100)}</span>
+      <span>Discount: ${formatPrice(Number(preview.discountAmountInr || 0))}</span>
+      <span>Payable: ${formatPrice(Number(preview.payableAmountInr || 0))}</span>
     `;
   }
 
@@ -865,7 +881,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           couponCode: code,
-          subtotalAmountPaise: getCartTotal(),
+          subtotalAmountPaise: Math.round(getCartTotal() * 100),
         }),
       });
       state.merchCouponPreview = result.coupon || null;
