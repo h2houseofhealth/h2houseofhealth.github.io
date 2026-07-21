@@ -292,6 +292,10 @@
     });
   }
 
+  function formatMoneyFromPaise(paise) {
+    return formatPrice(Math.max(0, Math.round(Number(paise || 0) / 100)));
+  }
+
   function normalizeCatalogAmount(valueInPaise) {
     return Math.max(0, Math.round(Number(valueInPaise || 0) / 100));
   }
@@ -1418,11 +1422,11 @@
     const pageSlice = filteredSales.slice((currentPage - 1) * pageSize, (currentPage - 1) * pageSize + pageSize);
 
     const kpis = [
-      { label: 'Total Sales Generated', value: formatPrice(summary.totalSalesGenerated || 0), note: 'Live merch sales linked to your coupons.' },
+      { label: 'Total Sales Generated', value: formatMoneyFromPaise(summary.totalSalesGenerated || 0), note: 'Live merch sales linked to your coupons.' },
       { label: 'Total Orders Referred', value: Number(summary.totalOrdersReferred || 0).toLocaleString('en-IN'), note: 'Attributed orders across merch checkout.' },
-      { label: 'Total Commission Earned', value: formatPrice(summary.totalCommissionEarned || 0), note: 'Calculated from active influencer commission.' },
-      { label: 'Commission Pending', value: formatPrice(summary.commissionPending || 0), note: 'Awaiting payout from the admin team.' },
-      { label: 'Commission Paid', value: formatPrice(summary.commissionPaid || 0), note: 'Already processed and recorded.' },
+      { label: 'Total Commission Earned', value: formatMoneyFromPaise(summary.totalCommissionEarned || 0), note: 'Calculated from active influencer commission.' },
+      { label: 'Commission Pending', value: formatMoneyFromPaise(summary.commissionPending || 0), note: 'Awaiting payout from the admin team.' },
+      { label: 'Commission Paid', value: formatMoneyFromPaise(summary.commissionPaid || 0), note: 'Already processed and recorded.' },
       { label: 'Active Coupons', value: Number(summary.activeCoupons || coupons.filter((coupon) => coupon.active).length || 0).toLocaleString('en-IN'), note: 'Assignable and currently live.' },
       { label: 'Coupon Usage', value: Number(summary.couponUsage || 0).toLocaleString('en-IN'), note: 'Orders captured through your codes.' },
       { label: 'Conversion Rate', value: `${Number(summary.conversionRate || 0).toFixed(1)}%`, note: 'Paid orders from referred traffic.' },
@@ -1470,7 +1474,7 @@
             </div>
             <div class="influencer-coupon-hero__stat">
               <small>Value</small>
-              <strong>${escapeHtml(primaryCoupon ? String(primaryCoupon.discountValue || 0) : '0')}</strong>
+              <strong>${escapeHtml(primaryCoupon ? formatPrice(primaryCoupon.discountValue || 0) : formatPrice(0))}</strong>
             </div>
             <div class="influencer-coupon-hero__stat">
               <small>Expires</small>
@@ -1502,7 +1506,7 @@
               </div>
             </div>
             <div class="influencer-chart">
-              ${monthlyTrend.length ? renderSparklineBars(monthlyTrend, 'sales', 'label') : '<p class="account-empty-state">No sales trend data yet.</p>'}
+              ${monthlyTrend.length ? renderSparklineBars(monthlyTrend, 'sales', 'label', (value) => formatMoneyFromPaise(value)) : '<p class="account-empty-state">No sales trend data yet.</p>'}
             </div>
           </article>
           <article class="influencer-panel">
@@ -1513,7 +1517,7 @@
               </div>
             </div>
             <div class="influencer-chart">
-              ${monthlyTrend.length ? renderSparklineBars(monthlyTrend, 'commission', 'label') : '<p class="account-empty-state">No commission trend data yet.</p>'}
+              ${monthlyTrend.length ? renderSparklineBars(monthlyTrend, 'commission', 'label', (value) => formatMoneyFromPaise(value)) : '<p class="account-empty-state">No commission trend data yet.</p>'}
             </div>
           </article>
         </div>
@@ -1540,7 +1544,7 @@
             <div class="account-chip-list influencer-insight-list">
               <span class="account-chip">Best coupon: ${escapeHtml(bestCoupon?.code || 'N/A')}</span>
               <span class="account-chip">Highest sales month: ${escapeHtml(highestSalesMonth?.label || 'N/A')}</span>
-              <span class="account-chip">Average order value: ${escapeHtml(formatPrice(averageOrderValue || 0))}</span>
+              <span class="account-chip">Average order value: ${escapeHtml(formatMoneyFromPaise(averageOrderValue || 0))}</span>
               <span class="account-chip">Repeat customers: ${escapeHtml(`${repeatCustomerPercentage.toFixed ? repeatCustomerPercentage.toFixed(1) : repeatCustomerPercentage}%`)}</span>
               <span class="account-chip">Conversion rate: ${escapeHtml(`${Number(conversionRate || 0).toFixed(1)}%`)}</span>
             </div>
@@ -1575,10 +1579,10 @@
                 </div>
                 <p>${escapeHtml(coupon.description || 'No description')}</p>
                 <div class="influencer-coupon-card__meta">
-                  <span>${escapeHtml(coupon.discountType || 'flat')} ${escapeHtml(String(coupon.discountValue || 0))}</span>
+                  <span>${escapeHtml(coupon.discountType || 'flat')} ${escapeHtml(formatPrice(coupon.discountValue || 0))}</span>
                   <span>Expires ${escapeHtml(coupon.expiresAt ? formatDateLabel(coupon.expiresAt) : 'No expiry')}</span>
                   <span>Usage ${escapeHtml(`${Number(coupon.usageCount || 0)} / ${coupon.remainingUsage == null ? '∞' : coupon.maxRedemptions}`)}</span>
-                  <span>Revenue ${escapeHtml(formatPrice(coupon.revenueGenerated || 0))}</span>
+                  <span>Revenue ${escapeHtml(formatMoneyFromPaise(coupon.revenueGenerated || 0))}</span>
                   <span>Orders ${escapeHtml(Number(coupon.ordersGenerated || 0).toLocaleString('en-IN'))}</span>
                 </div>
               </article>
@@ -1641,8 +1645,8 @@
                       <td>${escapeHtml(order.productSummary || 'Merch order')}</td>
                       <td>${escapeHtml(order.customerName || 'Customer')}</td>
                       <td>${escapeHtml(order.couponUsed || '—')}</td>
-                      <td>${escapeHtml(formatPrice(order.orderAmount || 0))}</td>
-                      <td>${escapeHtml(formatPrice(order.commissionEarned || 0))}</td>
+                      <td>${escapeHtml(formatMoneyFromPaise(order.orderAmount || 0))}</td>
+                      <td>${escapeHtml(formatMoneyFromPaise(order.commissionEarned || 0))}</td>
                       <td>${escapeHtml(order.orderStatus || 'pending')}</td>
                       <td>${escapeHtml(order.paymentStatus || 'pending')}</td>
                     </tr>
@@ -1664,12 +1668,12 @@
           <details class="influencer-details" open>
             <summary>
               <span>Commission</span>
-              <small>${formatPrice(dashboard.commission?.pending || 0)} pending</small>
+              <small>${formatMoneyFromPaise(dashboard.commission?.pending || 0)} pending</small>
             </summary>
             <div class="influencer-commission-grid">
-              <article class="influencer-commission-card"><span>Total Earned</span><strong>${escapeHtml(formatPrice(dashboard.commission?.totalEarned || 0))}</strong></article>
-              <article class="influencer-commission-card"><span>Total Paid</span><strong>${escapeHtml(formatPrice(dashboard.commission?.totalPaid || 0))}</strong></article>
-              <article class="influencer-commission-card"><span>Pending</span><strong>${escapeHtml(formatPrice(dashboard.commission?.pending || 0))}</strong></article>
+              <article class="influencer-commission-card"><span>Total Earned</span><strong>${escapeHtml(formatMoneyFromPaise(dashboard.commission?.totalEarned || 0))}</strong></article>
+              <article class="influencer-commission-card"><span>Total Paid</span><strong>${escapeHtml(formatMoneyFromPaise(dashboard.commission?.totalPaid || 0))}</strong></article>
+              <article class="influencer-commission-card"><span>Pending</span><strong>${escapeHtml(formatMoneyFromPaise(dashboard.commission?.pending || 0))}</strong></article>
               <article class="influencer-commission-card"><span>Last Payment</span><strong>${escapeHtml(lastPayment)}</strong></article>
               <article class="influencer-commission-card"><span>Upcoming Payment</span><strong>${escapeHtml(upcomingPayment)}</strong></article>
             </div>
@@ -1689,7 +1693,7 @@
                     ${commissions.map((payment) => `
                       <tr>
                         <td>${escapeHtml(formatDateLabel(payment.paymentDate))}</td>
-                        <td>${escapeHtml(formatPrice(payment.amount || 0))}</td>
+                        <td>${escapeHtml(formatMoneyFromPaise(payment.amount || 0))}</td>
                         <td>${escapeHtml(payment.paymentMethod || 'Manual')}</td>
                         <td>${escapeHtml(payment.referenceNumber || '—')}</td>
                         <td>${escapeHtml(payment.status || 'pending')}</td>
@@ -1886,7 +1890,7 @@
                   </div>
                   
                 </div>
-                <p>${escapeHtml(formatDateLabel(order.createdAt))} · ${escapeHtml(order.totalAmount ? formatPrice(order.totalAmount) : 'Total unavailable')}</p>
+                <p>${escapeHtml(formatDateLabel(order.createdAt))} · ${escapeHtml(order.totalAmount ? formatMoneyFromPaise(order.totalAmount) : 'Total unavailable')}</p>
                 <div class="account-item-actions account-item-actions--inline">
                   <button type="button" data-account-action="view-order" data-order-id="${escapeHtml(String(order.id || ''))}">View Details</button>
                   <button type="button" data-account-action="track-order" data-order-id="${escapeHtml(String(order.id || ''))}">Track Order</button>
@@ -2188,7 +2192,7 @@
              </div>
              <div class="order-detail-row">
                <span>Total</span>
-               <strong>${order.totalAmount ? formatPrice(order.totalAmount) : 'Unavailable'}</strong>
+               <strong>${order.totalAmount ? formatMoneyFromPaise(order.totalAmount) : 'Unavailable'}</strong>
              </div>
            </div>
          `
