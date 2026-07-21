@@ -3016,10 +3016,14 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
     couponType = recipientEmail ? 'private' : 'public';
   }
   const singleUse = Boolean(req.body?.singleUse) || couponType === 'private';
+  const supportsInfluencerUnlimited = portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0;
+  const hasMaxRedemptions = supportsInfluencerUnlimited && Object.prototype.hasOwnProperty.call(req.body || {}, 'maxRedemptions');
   const maxRedemptionsRaw = req.body?.maxRedemptions;
   let maxRedemptions =
-    maxRedemptionsRaw === '' || maxRedemptionsRaw == null
+    !hasMaxRedemptions
       ? existing.maxRedemptions ?? null
+      : maxRedemptionsRaw === '' || maxRedemptionsRaw == null
+      ? null
       : Number(maxRedemptionsRaw);
   const perUserLimitRaw = req.body?.perUserLimit ?? req.body?.sessionLimit;
   const perUserLimit =
@@ -3027,7 +3031,13 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
       ? Number(existing.perUserLimit || 1)
       : Number(perUserLimitRaw);
   const validFrom = String(req.body?.validFrom || existing.validFrom || '').trim();
-  const validTill = String(req.body?.validTill || req.body?.expiresAt || existing.validTill || existing.expiresAt || '').trim();
+  const hasValidTill = supportsInfluencerUnlimited && (
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'validTill') ||
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'expiresAt')
+  );
+  const validTill = hasValidTill
+    ? String(req.body?.validTill ?? req.body?.expiresAt ?? '').trim()
+    : String(existing.validTill || existing.expiresAt || '').trim();
   const active = req.body?.active == null ? Number(existing.active || existing.isActive || 1) : Number(req.body?.active) === 1 ? 1 : 0;
 
   if (!code) {
