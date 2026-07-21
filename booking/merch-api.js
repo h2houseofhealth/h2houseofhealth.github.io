@@ -6,6 +6,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 const express = require('express');
 const router = express.Router();
 
@@ -281,6 +282,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return '₹' + Number(paise || 0).toLocaleString('en-IN');
   }
 
+  const LOW_STOCK_THRESHOLD = 15;
+
   function getMerchVariantPriceOverrides(slug) {
     const normalizedSlug = String(slug || '').trim().toLowerCase();
     if (normalizedSlug === 'h2-water-bottle' || normalizedSlug === 'molecular-hydrogen-water-bottle') {
@@ -319,6 +322,62 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function normalizeInfluencerEmail(email) {
     return String(email || '').trim().toLowerCase();
+  }
+
+  function isValidMerchEmail(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
+  }
+
+  function getMerchReportTransporter() {
+    const host = process.env.SMTP_HOST;
+    const port = Number(process.env.SMTP_PORT || 587);
+    const user = process.env.SMTP_USER;
+    const pass = process.env.SMTP_PASS;
+
+    if (!host || !user || !pass) {
+      return null;
+    }
+
+    return nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465,
+      auth: { user, pass },
+    });
+  }
+
+  function escapeCsvValue(value) {
+    const text = String(value ?? '');
+    if (/[",\n]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function formatMerchReportMonth(monthKey) {
+    const parsed = new Date(`${String(monthKey || '').slice(0, 7)}-01T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) {
+      return String(monthKey || '');
+    }
+    return new Intl.DateTimeFormat('en-IN', { month: 'short', year: 'numeric' }).format(parsed);
+  }
+
+  function formatMerchCurrency(paise) {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(Number(paise || 0) / 100);
   }
 
   function getInfluencerById(influencerId) {
@@ -461,6 +520,19 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         .reduce((sum, payment) => sum + Number(payment.amountPaise || 0), 0),
       createdAt: row.createdAt || row.created_at || null,
       updatedAt: row.updatedAt || row.updated_at || null,
+    };
+  }
+
+  function normalizeCommissionPaymentPayload(body = {}) {
+    const amountPaise = Number(body.amountPaise ?? body.amount_paise ?? body.amount ?? 0);
+    const rawStatus = String(body.status || 'paid').trim().toLowerCase();
+    return {
+      amountPaise: Number.isFinite(amountPaise) ? Math.max(0, Math.round(amountPaise)) : 0,
+      paymentMethod: String(body.paymentMethod || body.payment_method || '').trim(),
+      referenceNumber: String(body.referenceNumber || body.reference_number || '').trim(),
+      status: ['pending', 'paid', 'processed', 'completed', 'settled', 'cancelled'].includes(rawStatus) ? rawStatus : 'paid',
+      paidAt: String(body.paidAt || body.paid_at || '').trim(),
+      note: String(body.note || '').trim(),
     };
   }
 
@@ -848,6 +920,202 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     };
   }
 
+  function buildInfluencerAdminReport(influencerId, options = {}) {
+    const influencer = getInfluencerById(influencerId);
+    if (!influencer) return null;
+    const dashboard = buildInfluencerDashboard(influencer, {
+      page: 1,
+      pageSize: 20,
+      search: options.search || '',
+      status: options.status || '',
+      startDate: options.startDate || '',
+      endDate: options.endDate || '',
+    });
+    if (!dashboard) return null;
+
+    return {
+      ...dashboard,
+      generatedAt: new Date().toISOString(),
+      periodLabel: [options.startDate, options.endDate].filter(Boolean).join(' to ') || 'all available dates',
+    };
+  }
+
+  function buildInfluencerAdminReportHtml(report) {
+    const influencer = report?.influencer || {};
+    const summary = report?.summary || {};
+    const analytics = report?.analytics || {};
+    const performance = report?.performance || {};
+    const commission = report?.commission || {};
+    const couponRows = Array.isArray(report?.couponPerformance) ? report.couponPerformance : [];
+    const orderRows = Array.isArray(report?.salesHistory?.items) ? report.salesHistory.items : [];
+    const commissionRows = Array.isArray(report?.commissionHistory) ? report.commissionHistory : [];
+    const trendRows = Array.isArray(analytics.monthlyTrend) ? analytics.monthlyTrend : [];
+    const productRows = Array.isArray(performance.topSellingProducts) ? performance.topSellingProducts : [];
+    const generatedAt = report?.generatedAt || new Date().toISOString();
+    const periodLabel = report?.periodLabel || 'all available dates';
+
+    const summaryCards = [
+      ['Orders', summary.totalOrdersReferred || influencer.totalOrders || 0],
+      ['Revenue', formatMerchCurrency(summary.totalSalesGenerated || influencer.revenue || 0)],
+      ['Commission Earned', formatMerchCurrency(summary.totalCommissionEarned || commission.totalEarned || influencer.commission || 0)],
+      ['Commission Paid', formatMerchCurrency(summary.commissionPaid || commission.totalPaid || influencer.paidCommission || 0)],
+    ];
+
+    const renderRows = (rows, emptyMessage, colCount, renderRow) => (rows.length ? rows.map(renderRow).join('') : `<tr><td colspan="${colCount}">${escapeHtml(emptyMessage)}</td></tr>`);
+
+    return `<!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>${escapeHtml(`${String(influencer.name || 'Influencer')} report`)}</title>
+          <style>
+            body { font-family: Arial, sans-serif; color: #1f2937; margin: 24px; font-size: 13px; line-height: 1.45; }
+            h1, h2, h3, p { margin: 0 0 10px; }
+            h1 { font-size: 26px; line-height: 1.1; }
+            h2 { font-size: 18px; line-height: 1.15; }
+            h3 { font-size: 15px; line-height: 1.2; }
+            .muted { color: #6b7280; }
+            .grid { display: grid; gap: 12px; }
+            .meta, .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+            .meta div, .cards div { border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px 14px; }
+            .cards strong { display: block; font-size: 14px; margin-top: 4px; }
+            .section { margin-top: 20px; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #e5e7eb; padding: 8px 10px; text-align: left; vertical-align: top; font-size: 12px; }
+            th { background: #f9fafb; }
+            .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+            .chip { display: inline-flex; align-items: center; border: 1px solid #e5e7eb; border-radius: 999px; padding: 5px 9px; background: #fafafa; font-size: 11px; }
+          </style>
+        </head>
+        <body>
+          <div class="grid">
+            <div class="muted">Generated ${escapeHtml(new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(generatedAt)))}</div>
+            <h1>Influencer report</h1>
+            <p class="muted">${escapeHtml(periodLabel)}</p>
+          </div>
+
+          <div class="meta">
+            <div><strong>${escapeHtml(influencer.name || 'Unnamed influencer')}</strong><br />${escapeHtml(influencer.handle || 'No handle')}</div>
+            <div><strong>Status</strong><br />${escapeHtml(Number(influencer.active ?? 1) === 1 ? 'Active' : 'Inactive')}</div>
+            <div><strong>Email</strong><br />${escapeHtml(influencer.email || 'Not added yet')}</div>
+            <div><strong>Phone</strong><br />${escapeHtml(influencer.phone || 'Not added yet')}</div>
+          </div>
+
+          <div class="cards">
+            ${summaryCards.map(([label, value]) => `<div><span class="muted">${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`).join('')}
+          </div>
+
+          <div class="section">
+            <h2>Coupon Performance</h2>
+            <div class="chips">
+              ${couponRows.length ? couponRows.map((coupon) => `<span class="chip">${escapeHtml(coupon.code || '')}${coupon.usageCount != null ? ` · ${escapeHtml(String(coupon.usageCount))} uses` : ''}</span>`).join('') : '<span class="muted">No coupon history yet.</span>'}
+            </div>
+          </div>
+
+          <div class="section">
+            <h2>Monthly Trend</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Month</th>
+                  <th>Orders</th>
+                  <th>Sales</th>
+                  <th>Commission</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${renderRows(trendRows, 'No monthly activity yet.', 4, (row) => `
+                  <tr>
+                    <td>${escapeHtml(row.label || formatMerchReportMonth(row.month))}</td>
+                    <td>${escapeHtml(String(row.orders || 0))}</td>
+                    <td>${escapeHtml(formatMerchCurrency(row.sales || 0))}</td>
+                    <td>${escapeHtml(formatMerchCurrency(row.commission || 0))}</td>
+                  </tr>
+                `)}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="section">
+            <h2>Top Products</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Qty</th>
+                  <th>Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${renderRows(productRows, 'No product breakdown yet.', 3, (row) => `
+                  <tr>
+                    <td>${escapeHtml(row.name || '')}</td>
+                    <td>${escapeHtml(String(row.quantity || 0))}</td>
+                    <td>${escapeHtml(formatMerchCurrency(row.revenue || 0))}</td>
+                  </tr>
+                `)}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="section">
+            <h2>Recent Orders</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Order</th>
+                  <th>Date</th>
+                  <th>Customer</th>
+                  <th>Coupon</th>
+                  <th>Status</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${renderRows(orderRows, 'No order history yet.', 6, (row) => `
+                  <tr>
+                    <td>${escapeHtml(row.orderNumber || row.id || '')}</td>
+                    <td>${escapeHtml(String(row.orderDate || '').slice(0, 10) || '-')}</td>
+                    <td>${escapeHtml(row.customerName || '-')}</td>
+                    <td>${escapeHtml(row.couponUsed || '-')}</td>
+                    <td>${escapeHtml(row.paymentStatus || row.orderStatus || '-')}</td>
+                    <td>${escapeHtml(formatMerchCurrency(row.orderAmount || 0))}</td>
+                  </tr>
+                `)}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="section">
+            <h2>Commission History</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th>Reference</th>
+                  <th>Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${renderRows(commissionRows, 'No commission payments recorded yet.', 5, (row) => `
+                  <tr>
+                    <td>${escapeHtml(String(row.paymentDate || '').slice(0, 10) || '-')}</td>
+                    <td>${escapeHtml(formatMerchCurrency(row.amount || 0))}</td>
+                    <td>${escapeHtml(row.status || '-')}</td>
+                    <td>${escapeHtml(row.referenceNumber || '-')}</td>
+                    <td>${escapeHtml(row.note || '-')}</td>
+                  </tr>
+                `)}
+              </tbody>
+            </table>
+          </div>
+        </body>
+      </html>`;
+  }
+
   function getMerchProductVariants(productIds = [], { includeInactive = false } = {}) {
     const ids = Array.isArray(productIds)
       ? productIds.map((value) => Number(value)).filter((value) => Number.isInteger(value))
@@ -963,7 +1231,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       weightGrams: Number(product.weight_grams || 0),
       createdAt: product.created_at || null,
       updatedAt: product.updated_at || null,
-      lowStockThreshold: 10,
+      lowStockThreshold: LOW_STOCK_THRESHOLD,
     };
   }
 
@@ -1205,10 +1473,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const profiles = db
       .prepare(
         `SELECT id, user_id AS userId, full_name AS fullName, email, mobile AS phone,
-                avatar_url AS avatarUrl, created_at AS createdAt, updated_at AS updatedAt
+               avatar_url AS avatarUrl, created_at AS createdAt, updated_at AS updatedAt
          FROM merch_customer_profiles`
       )
       .all();
+    const influencers = loadMerchInfluencers();
+    const influencerById = new Map(influencers.map((influencer) => [Number(influencer.id), influencer]));
     const coupons = db
       .prepare(
         `SELECT c.id, c.code, c.coupon_type AS couponType, c.active, c.influencer_id AS influencerId,
@@ -1219,7 +1489,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
          GROUP BY c.id`
       )
       .all();
-    const influencers = loadMerchInfluencers();
 
     const paidOrders = allOrders.filter((order) => String(order.paymentStatus || '').toLowerCase() === 'paid');
     const revenue = paidOrders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
@@ -1256,11 +1525,109 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     const revenueByDate = new Map();
+    const monthlyInfluencerMap = new Map();
     for (const order of paidOrders) {
       const dateKey = String(order.createdAt || '').slice(0, 10);
       if (!dateKey) continue;
       revenueByDate.set(dateKey, (revenueByDate.get(dateKey) || 0) + Number(order.totalAmount || 0));
     }
+    for (const order of allOrders) {
+      const influencerId = Number(order.influencerId || 0);
+      const monthKey = String(order.createdAt || '').slice(0, 7);
+      if (!influencerId || !monthKey) continue;
+
+      const influencer = influencerById.get(influencerId) || null;
+      const commissionRate = Number(influencer?.commissionRate || 0);
+      const entryKey = `${monthKey}:${influencerId}`;
+      const existing = monthlyInfluencerMap.get(entryKey) || {
+        month: monthKey,
+        influencerId,
+        name: String(order.influencerName || influencer?.name || 'Unknown Influencer'),
+        handle: String(influencer?.handle || ''),
+        orders: 0,
+        revenue: 0,
+        commission: 0,
+        couponUsage: 0,
+      };
+
+      const orderRevenue = Number(order.totalAmount || 0);
+      existing.orders += 1;
+      existing.revenue += orderRevenue;
+      existing.commission += Math.round(orderRevenue * (commissionRate / 100));
+      if (String(order.couponCode || '').trim()) {
+        existing.couponUsage += 1;
+      }
+      monthlyInfluencerMap.set(entryKey, existing);
+    }
+
+    const monthlyRevenueMap = new Map();
+    for (const order of paidOrders) {
+      const monthKey = String(order.createdAt || '').slice(0, 7);
+      if (!monthKey) continue;
+      const entry = monthlyRevenueMap.get(monthKey) || { month: monthKey, revenue: 0, orders: 0 };
+      entry.revenue += Number(order.totalAmount || 0);
+      entry.orders += 1;
+      monthlyRevenueMap.set(monthKey, entry);
+    }
+
+    const recentPayments = allOrders
+      .filter((order) => ['paid', 'cod_pending', 'refunded'].includes(String(order.paymentStatus || '').toLowerCase()) || Number(order.totalAmount || 0) > 0)
+      .slice(0, 5)
+      .map((order) => ({
+        id: Number(order.id),
+        orderNumber: order.orderNumber,
+        customerName: order.customerName,
+        amount: Number(order.totalAmount || 0),
+        paymentMethod: String(order.paymentMethod || 'online'),
+        paymentStatus: String(order.paymentStatus || 'pending'),
+        createdAt: order.createdAt || null,
+        status: String(order.status || 'pending'),
+      }));
+
+    const recentCouponUsage = allOrders
+      .filter((order) => String(order.couponCode || '').trim())
+      .slice(0, 5)
+      .map((order) => ({
+        id: Number(order.id),
+        orderNumber: order.orderNumber,
+        customerName: order.customerName,
+        couponCode: String(order.couponCode || ''),
+        influencerName: String(order.influencerName || ''),
+        amount: Number(order.totalAmount || 0),
+        createdAt: order.createdAt || null,
+      }));
+
+    const recentCustomers = profiles
+      .map((profile) => {
+        const profileEmail = normalizeMerchCustomerEmail(profile.email);
+        const profileId = Number(profile.id || 0);
+        const userId = Number(profile.userId || 0);
+        const matchingOrders = allOrders.filter((order) => {
+          if (profileId && Number(order.customerId || 0) === profileId) return true;
+          if (userId && Number(order.customerUserId || 0) === userId) return true;
+          if (profileEmail && normalizeMerchCustomerEmail(order.customerEmail) === profileEmail) return true;
+          return false;
+        });
+        const lastOrder = matchingOrders[0] || null;
+        return {
+          id: profileId,
+          name: String(profile.fullName || profile.email || 'Customer'),
+          email: String(profile.email || ''),
+          phone: String(profile.phone || ''),
+          avatarUrl: String(profile.avatarUrl || ''),
+          merchandiseOrders: matchingOrders.length,
+          registrationDate: profile.createdAt || lastOrder?.createdAt || null,
+          lastOrder: lastOrder
+            ? {
+                orderNumber: lastOrder.orderNumber,
+                createdAt: lastOrder.createdAt || null,
+                status: lastOrder.status || 'pending',
+              }
+            : null,
+        };
+      })
+      .sort((left, right) => String(right.registrationDate || right.lastOrder?.createdAt || '').localeCompare(String(left.registrationDate || left.lastOrder?.createdAt || '')))
+      .slice(0, 5);
 
     const orderItemStats = new Map();
     for (const order of allOrders) {
@@ -1314,6 +1681,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         display: formatMerchPrice(value),
       }));
 
+    const monthlyRevenueSeries = [...monthlyRevenueMap.values()]
+      .sort((left, right) => String(left.month).localeCompare(String(right.month)))
+      .map((row) => ({
+        month: row.month,
+        monthLabel: formatMerchReportMonth(row.month),
+        revenue: row.revenue,
+        orders: row.orders,
+        display: formatMerchPrice(row.revenue),
+      }));
+
     return {
       dateRange: {
         startDate,
@@ -1332,15 +1709,41 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         customerCount: uniqueCustomers.size || profiles.length,
         repeatCustomerCount: repeatCustomers.size,
         productCount: products.length,
-        lowStockCount: products.filter((product) => !product.archived && Number(product.stock || 0) <= Number(product.lowStockThreshold || 10)).length,
+        lowStockCount: products.filter((product) => !product.archived && Number(product.stock || 0) <= LOW_STOCK_THRESHOLD).length,
         activeCouponCount: coupons.filter((coupon) => Number(coupon.active ?? 0) === 1).length,
       },
+      lowStockProducts: products
+        .filter((product) => !product.archived && Number(product.stock || 0) <= LOW_STOCK_THRESHOLD)
+        .map((product) => ({
+          id: product.id,
+          name: product.name,
+          category: product.category,
+          sku: product.primarySku || product.sku || '',
+          stock: Number(product.stock || 0),
+          threshold: LOW_STOCK_THRESHOLD,
+          priceLabel: product.priceLabel,
+        }))
+        .sort((left, right) => left.stock - right.stock || String(left.name).localeCompare(String(right.name))),
       statusBreakdown: statusCounts,
       revenueSeries: dailyRevenue,
+      monthlyRevenueSeries,
       topProducts,
       topCategories: [...categoryStats.values()]
         .sort((left, right) => right.revenue - left.revenue || right.quantity - left.quantity)
         .slice(0, 5),
+      monthlyInfluencerReports: [...monthlyInfluencerMap.values()]
+        .sort((left, right) => String(right.month).localeCompare(String(left.month)) || right.revenue - left.revenue || right.orders - left.orders)
+        .map((row) => ({
+          month: row.month,
+          monthLabel: formatMerchReportMonth(row.month),
+          influencerId: row.influencerId,
+          name: row.name,
+          handle: row.handle,
+          orders: row.orders,
+          revenue: row.revenue,
+          commission: row.commission,
+          couponUsage: row.couponUsage,
+        })),
       influencerReports: influencers
         .map((influencer) => ({
           id: influencer.id,
@@ -1354,6 +1757,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           commission: influencer.commission,
         }))
         .sort((left, right) => right.revenue - left.revenue || right.orders - left.orders),
+      recentPayments,
+      recentCouponUsage,
+      recentCustomers,
       recentOrders: allOrders.slice(0, 5),
     };
   }
@@ -3017,6 +3423,94 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     res.json({ influencer: updated || null });
   });
 
+  app.get('/api/merch/admin/influencers/:id/report', requireAdmin, (req, res) => {
+    const influencerId = Number(req.params.id);
+    if (!Number.isInteger(influencerId) || influencerId <= 0) {
+      return res.status(400).json({ message: 'Invalid influencer id' });
+    }
+    const report = buildInfluencerAdminReport(influencerId, {
+      startDate: req.query?.startDate || '',
+      endDate: req.query?.endDate || '',
+      search: req.query?.search || '',
+      status: req.query?.status || '',
+    });
+    if (!report) {
+      return res.status(404).json({ message: 'Influencer not found' });
+    }
+    res.json({ report });
+  });
+
+  app.post('/api/merch/admin/influencers/:id/report/email', requireAdmin, async (req, res) => {
+    const influencerId = Number(req.params.id);
+    if (!Number.isInteger(influencerId) || influencerId <= 0) {
+      return res.status(400).json({ message: 'Invalid influencer id' });
+    }
+
+    const report = buildInfluencerAdminReport(influencerId, {
+      startDate: req.body?.startDate || '',
+      endDate: req.body?.endDate || '',
+      search: req.body?.search || '',
+      status: req.body?.status || '',
+    });
+    if (!report) {
+      return res.status(404).json({ message: 'Influencer not found' });
+    }
+
+    const influencer = report.influencer || {};
+    const recipientEmail = normalizeInfluencerEmail(influencer.email);
+    if (!isValidMerchEmail(recipientEmail)) {
+      return res.status(400).json({ message: 'Influencer email is required to send the report.' });
+    }
+
+    const transporter = getMerchReportTransporter();
+    const fromEmail = String(process.env.SMTP_FROM || process.env.SMTP_USER || '').trim();
+    if (!transporter || !fromEmail) {
+      return res.status(500).json({ message: 'Email service is not configured.' });
+    }
+
+    const subject = `Merch influencer report - ${String(influencer.name || 'Influencer').trim()}`;
+    const periodLabel = String(report.periodLabel || 'all available dates');
+    const text = [
+      `Merch influencer report for ${String(influencer.name || 'Influencer').trim()}.`,
+      `Period: ${periodLabel}.`,
+      '',
+      `Orders: ${report.summary?.totalOrdersReferred || 0}`,
+      `Revenue: ${formatMerchCurrency(report.summary?.totalSalesGenerated || 0)}`,
+      `Commission earned: ${formatMerchCurrency(report.summary?.totalCommissionEarned || 0)}`,
+      `Commission paid: ${formatMerchCurrency(report.summary?.commissionPaid || 0)}`,
+      '',
+      'A detailed HTML report is attached for review.',
+    ].join('\n');
+    const html = buildInfluencerAdminReportHtml(report);
+    const attachmentSlug = String(influencer.name || `influencer-${influencerId}`)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || `influencer-${influencerId}`;
+    const attachmentName = `merch-influencer-report-${attachmentSlug}.html`;
+
+    try {
+      await transporter.sendMail({
+        from: fromEmail,
+        to: recipientEmail,
+        subject,
+        text,
+        html,
+        attachments: [
+          {
+            filename: attachmentName,
+            content: html,
+            contentType: 'text/html',
+          },
+        ],
+      });
+      res.json({ message: 'Influencer report emailed successfully.', recipientEmail });
+    } catch (error) {
+      console.error('Failed to send influencer report email:', error);
+      res.status(500).json({ message: error.message || 'Unable to send influencer report email.' });
+    }
+  });
+
   // ─── ADMIN: Get order detail ───
   app.get('/api/merch/admin/orders/:id', requireAdmin, (req, res) => {
     const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
@@ -3053,18 +3547,29 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   // ─── ADMIN: Dashboard stats ───
   app.get('/api/merch/admin/stats', requireAdmin, (req, res) => {
-    const orders = loadMerchOrders({ includeUnconfirmed: false });
-    const totalOrders = orders.length;
-    const totalRevenue = orders
-      .filter((order) => String(order.paymentStatus || '').toLowerCase() === 'paid')
-      .reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
-    const pendingOrders = orders.filter((order) => order.status === 'pending').length;
-    const processingOrders = orders.filter((order) => order.status === 'processing').length;
-    const shippedOrders = orders.filter((order) => order.status === 'shipped').length;
-    const deliveredOrders = orders.filter((order) => order.status === 'delivered').length;
-    const todayOrders = orders.filter((order) => String(order.createdAt || '').slice(0, 10) === new Date().toISOString().slice(0, 10)).length;
-
-    res.json({ totalOrders, totalRevenue, pendingOrders, processingOrders, shippedOrders, deliveredOrders, todayOrders });
+    const report = buildMerchReports();
+    const summary = report.summary || {};
+    res.json({
+      totalOrders: summary.orderCount || 0,
+      totalRevenue: summary.revenue || 0,
+      pendingOrders: Number(report.statusBreakdown?.pending || 0),
+      processingOrders: Number(report.statusBreakdown?.processing || 0),
+      shippedOrders: Number(report.statusBreakdown?.shipped || 0),
+      deliveredOrders: Number(report.statusBreakdown?.delivered || 0),
+      todayOrders: Array.isArray(report.recentOrders)
+        ? report.recentOrders.filter((order) => String(order.createdAt || '').slice(0, 10) === new Date().toISOString().slice(0, 10)).length
+        : 0,
+      summary,
+      statusBreakdown: report.statusBreakdown || {},
+      monthlyRevenueSeries: report.monthlyRevenueSeries || [],
+      recentOrders: report.recentOrders || [],
+      recentPayments: report.recentPayments || [],
+      recentCouponUsage: report.recentCouponUsage || [],
+      recentCustomers: report.recentCustomers || [],
+      topProducts: report.topProducts || [],
+      topCategories: report.topCategories || [],
+      revenueSeries: report.revenueSeries || [],
+    });
   });
 
   // ─── ADMIN: Get all products (including inactive) ───
@@ -3088,6 +3593,118 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   app.get('/api/merch/admin/reports', requireAdmin, (req, res) => {
     const { startDate, endDate } = req.query;
     res.json(buildMerchReports({ startDate, endDate }));
+  });
+
+  app.post('/api/merch/admin/reports/email', requireAdmin, async (req, res) => {
+    const { startDate, endDate, format = 'csv' } = req.body || {};
+    const recipientEmail = String(req.body?.email || req.user?.email || '').trim().toLowerCase();
+    if (!isValidMerchEmail(recipientEmail)) {
+      return res.status(400).json({ message: 'A valid recipient email is required.' });
+    }
+
+    const transporter = getMerchReportTransporter();
+    const fromEmail = String(process.env.SMTP_FROM || process.env.SMTP_USER || '').trim();
+    if (!transporter || !fromEmail) {
+      return res.status(500).json({ message: 'Email service is not configured.' });
+    }
+
+    const report = buildMerchReports({ startDate, endDate });
+    const monthlyRows = Array.isArray(report.monthlyInfluencerReports) ? report.monthlyInfluencerReports : [];
+    const influencerRows = Array.isArray(report.influencerReports) ? report.influencerReports : [];
+    const summary = report.summary || {};
+    const monthRangeLabel = [startDate, endDate].filter(Boolean).join(' to ') || 'all available dates';
+    const subject = `Merch influencer report - ${monthRangeLabel}`;
+    const text = [
+      `Merch influencer report for ${monthRangeLabel}.`,
+      '',
+      `Orders: ${summary.orderCount || 0}`,
+      `Revenue: ${formatMerchCurrency(summary.revenue || 0)}`,
+      `Influencers: ${influencerRows.length}`,
+      `Monthly rows: ${monthlyRows.length}`,
+      '',
+      'Attached is the month-wise influencer breakdown for download and sharing.',
+    ].join('\n');
+    const html = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #1f2937;">
+        <h2 style="margin: 0 0 12px;">Merch influencer report</h2>
+        <p style="margin: 0 0 16px;">Period: ${escapeHtml(monthRangeLabel)}</p>
+        <table cellpadding="0" cellspacing="0" style="border-collapse: collapse; width: 100%; max-width: 720px;">
+          <tr>
+            <td style="padding: 8px 12px; border: 1px solid #e5e7eb;">Orders</td>
+            <td style="padding: 8px 12px; border: 1px solid #e5e7eb;">${escapeHtml(String(summary.orderCount || 0))}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 12px; border: 1px solid #e5e7eb;">Revenue</td>
+            <td style="padding: 8px 12px; border: 1px solid #e5e7eb;">${escapeHtml(formatMerchCurrency(summary.revenue || 0))}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 12px; border: 1px solid #e5e7eb;">Influencer rows</td>
+            <td style="padding: 8px 12px; border: 1px solid #e5e7eb;">${escapeHtml(String(influencerRows.length))}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 12px; border: 1px solid #e5e7eb;">Monthly rows</td>
+            <td style="padding: 8px 12px; border: 1px solid #e5e7eb;">${escapeHtml(String(monthlyRows.length))}</td>
+          </tr>
+        </table>
+      </div>
+    `;
+
+    const csvLines = [
+      ['Period', monthRangeLabel],
+      ['Orders', summary.orderCount || 0],
+      ['Revenue', summary.revenue || 0],
+      ['Influencers', influencerRows.length],
+      ['Monthly rows', monthlyRows.length],
+      [],
+      ['Month', 'Influencer', 'Handle', 'Orders', 'Revenue', 'Commission', 'Coupon Usage'],
+      ...monthlyRows.map((row) => [
+        row.monthLabel || row.month || '',
+        row.name || '',
+        row.handle || '',
+        row.orders || 0,
+        row.revenue || 0,
+        row.commission || 0,
+        row.couponUsage || 0,
+      ]),
+    ];
+    const csvContent = csvLines
+      .map((line) => line.map(escapeCsvValue).join(','))
+      .join('\n');
+    const normalizedFormat = String(format || 'csv').toLowerCase();
+    const attachmentExtension = normalizedFormat === 'excel' ? 'xls' : normalizedFormat === 'pdf' ? 'html' : 'csv';
+    const attachmentContent = normalizedFormat === 'excel'
+      ? csvContent.split('\n').map((line) => line.replace(/,/g, '\t')).join('\n')
+      : normalizedFormat === 'pdf'
+        ? html
+        : csvContent;
+    const attachmentContentType = normalizedFormat === 'excel'
+      ? 'application/vnd.ms-excel'
+      : normalizedFormat === 'pdf'
+        ? 'text/html'
+        : 'text/csv';
+    const attachmentName = `merch-influencer-report-${String(startDate || 'start').replace(/[^0-9-]/g, '')}-${String(endDate || 'end').replace(/[^0-9-]/g, '')}.${attachmentExtension}`;
+
+    try {
+      await transporter.sendMail({
+        from: fromEmail,
+        to: recipientEmail,
+        subject,
+        text,
+        html,
+        attachments: [
+          {
+            filename: attachmentName,
+            content: attachmentContent,
+            contentType: attachmentContentType,
+          },
+        ],
+      });
+
+      res.json({ message: 'Report emailed successfully.', recipientEmail });
+    } catch (error) {
+      console.error('Failed to send merch report email:', error);
+      res.status(500).json({ message: error.message || 'Unable to send report email.' });
+    }
   });
 
   console.log('[Merch] API routes mounted at /api/merch/*');
