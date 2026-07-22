@@ -953,12 +953,37 @@
   const customersList = [];
   const couponsList = [];
   const influencersList = [];
-  const notificationsList = [];
+  const NOTIFICATION_META = {
+    'New Order': { icon: '&#128994;', className: 'admin-notification__icon--success' },
+    'Low Stock': { icon: '&#128992;', className: 'admin-notification__icon--warning' },
+    'Out of Stock': { icon: '&#128308;', className: 'admin-notification__icon--danger' },
+    'Payment Failed': { icon: '&#128308;', className: 'admin-notification__icon--danger' },
+    'Payment Received': { icon: '&#128994;', className: 'admin-notification__icon--success' },
+    'New Customer': { icon: '&#128994;', className: 'admin-notification__icon--info' },
+    'Coupon Expiring': { icon: '&#128992;', className: 'admin-notification__icon--warning' },
+    'Coupon Created': { icon: '&#128994;', className: 'admin-notification__icon--info' },
+    'Coupon Disabled': { icon: '&#128308;', className: 'admin-notification__icon--danger' },
+    'Influencer Referral': { icon: '&#128994;', className: 'admin-notification__icon--info' },
+    'Order Cancelled': { icon: '&#128308;', className: 'admin-notification__icon--danger' },
+    'Order Refunded': { icon: '&#128992;', className: 'admin-notification__icon--warning' },
+  };
+
+  // Shape this feed like an API response so the sample data can be replaced without changing the renderer.
+  const notificationsList = [
+    { id: 'note-1038', type: 'Low Stock', title: 'Low Stock', message: 'Hydrogen Mist Spray has only 4 units remaining.', time: new Date(Date.now() - 2 * 60000).toISOString(), read: false },
+    { id: 'note-1037', type: 'New Order', title: 'New Order', message: 'Order #HM-1038 placed by Rahul Sharma.', time: new Date(Date.now() - 5 * 60000).toISOString(), read: false },
+    { id: 'note-1036', type: 'Payment Failed', title: 'Payment Failed', message: 'Order #HM-1035 payment failed.', time: new Date(Date.now() - 12 * 60000).toISOString(), read: false },
+    { id: 'note-1035', type: 'Payment Received', title: 'Payment Received', message: 'Payment received for Order #HM-1034.', time: new Date(Date.now() - 38 * 60000).toISOString(), read: true },
+    { id: 'note-1034', type: 'New Customer', title: 'New Customer', message: 'Ananya Mehta created a new merch account.', time: new Date(Date.now() - 2 * 3600000).toISOString(), read: true },
+    { id: 'note-1033', type: 'Coupon Expiring', title: 'Coupon Expiring', message: 'WELCOME10 expires in 2 days.', time: new Date(Date.now() - 5 * 3600000).toISOString(), read: true },
+    { id: 'note-1032', type: 'Influencer Referral', title: 'Influencer Referral', message: 'Maya Rao referred a new order with H2MAYA.', time: new Date(Date.now() - 24 * 3600000).toISOString(), read: true },
+    { id: 'note-1031', type: 'Order Cancelled', title: 'Order Cancelled', message: 'Order #HM-1031 was cancelled by the customer.', time: new Date(Date.now() - 27 * 3600000).toISOString(), read: true },
+  ];
 
   const initialState = {
     view: 'dashboard',
     sidebarOpen: false,
-    notificationsOpen: false,
+    notificationsExpanded: false,
     selectedProductIds: [],
     selectedProductId: 101,
     selectedOrderId: null,
@@ -1031,8 +1056,7 @@
     influencersView: document.getElementById('influencersView'),
     reportsView: document.getElementById('reportsView'),
     settingsView: document.getElementById('settingsView'),
-    notificationsDrawer: document.getElementById('notificationsDrawer'),
-    notificationsList: document.getElementById('notificationsList'),
+    notificationBadgeCount: document.getElementById('notificationBadgeCount'),
     adminModal: document.getElementById('adminModal'),
     adminModalDialog: document.getElementById('adminModalDialog'),
     toastRegion: document.getElementById('toastRegion'),
@@ -1085,9 +1109,40 @@
     els.sidebarOverlay.hidden = !state.sidebarOpen;
   }
 
-  function setNotificationsOpen(isOpen) {
-    state.notificationsOpen = Boolean(isOpen);
-    els.notificationsDrawer.hidden = !state.notificationsOpen;
+  function getActiveNotifications() {
+    return state.notifications
+      .filter((item) => !item.dismissedAt)
+      .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+  }
+
+  function relativeTime(value) {
+    const parsed = new Date(value);
+    const seconds = Math.max(0, Math.floor((Date.now() - parsed.getTime()) / 1000));
+    if (seconds < 60) return 'Just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} minute${Math.floor(seconds / 60) === 1 ? '' : 's'} ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} hour${Math.floor(seconds / 3600) === 1 ? '' : 's'} ago`;
+    if (seconds < 172800) return 'Yesterday';
+    return `${Math.floor(seconds / 86400)} days ago`;
+  }
+
+  function renderNotificationItem(item) {
+    const meta = NOTIFICATION_META[item.type] || { icon: '&#128276;', className: 'admin-notification__icon--info' };
+    return `
+      <article class="admin-notification ${item.read ? '' : 'is-unread'}">
+        <span class="admin-notification__icon ${meta.className}" aria-hidden="true">${meta.icon}</span>
+        <div class="admin-notification__content">
+          <div class="admin-notification__title-row">
+            <h4>${escapeHtml(item.title || item.type || 'Notification')}</h4>
+            ${item.read ? '' : '<span class="admin-notification__unread" aria-label="Unread"></span>'}
+          </div>
+          <p>${escapeHtml(item.message)}</p>
+          <time datetime="${escapeHtml(item.time)}">${escapeHtml(relativeTime(item.time))}</time>
+        </div>
+        <button class="admin-notification__close" type="button" data-action="dismiss-notification" data-notification-id="${escapeHtml(item.id)}" aria-label="Close ${escapeHtml(item.title || 'notification')}">
+          <span aria-hidden="true">&times;</span><span>Close</span>
+        </button>
+      </article>
+    `;
   }
 
   function openModal({ title, subtitle = '', body = '', footer = '', size = 'md' }) {
@@ -1348,6 +1403,10 @@
       value: (Number(row.revenue || 0) / monthlyRevenueMax) * 100,
       display: money(row.revenue || 0),
     }));
+    const activeNotifications = getActiveNotifications();
+    const visibleNotifications = state.notificationsExpanded ? activeNotifications : activeNotifications.slice(0, 5);
+    const unreadNotificationCount = state.notifications.filter((item) => !item.read && !item.dismissedAt).length;
+    if (els.notificationBadgeCount) els.notificationBadgeCount.textContent = String(unreadNotificationCount);
 
     els.dashboardView.innerHTML = `
       <section class="admin-section">
@@ -1361,23 +1420,13 @@
           <div class="admin-card-grid admin-card-grid--1">
             <article class="admin-card">
               <div class="admin-card__head">
-                <h3 class="admin-card__title">Catalog Sync</h3>
-                <p class="admin-card__sub">Pulled from the storefront product list</p>
+                <h3 class="admin-card__title">Live Notifications</h3>
+                <p class="admin-card__sub">Latest activity from your merch operations</p>
               </div>
-              <div class="admin-card__body admin-list">
-                ${state.products.map((product) => `
-                  <div class="admin-list__item">
-                    <div class="admin-list__item-head">
-                      <div>
-                        <p class="admin-list__item-title">${escapeHtml(product.name)}</p>
-                        <p class="admin-list__item-sub">${escapeHtml(product.category)}</p>
-                      </div>
-                      <span class="admin-badge ${statusClass(product.status)}">${escapeHtml(getStatusLabel(product.status))}</span>
-                    </div>
-                    <p class="admin-table__muted">${escapeHtml(product.priceLabel || catalogPrice(product.price))} · ${escapeHtml(product.primarySku || 'SKU pending')}</p>
-                  </div>
-                `).join('')}
+              <div class="admin-card__body admin-notifications">
+                ${visibleNotifications.length ? visibleNotifications.map(renderNotificationItem).join('') : renderEmptyState('All caught up', 'There are no active notifications right now.')}
               </div>
+              ${activeNotifications.length > 5 ? `<div class="admin-card__foot admin-notifications__foot"><button class="admin-btn admin-btn--soft" type="button" data-action="toggle-notifications">${state.notificationsExpanded ? 'Show Less' : 'View More'}</button></div>` : ''}
             </article>
           </div>
         </div>
@@ -2989,25 +3038,6 @@
     `;
   }
 
-  function renderNotifications() {
-    els.notificationsList.innerHTML = state.notifications
-      .map(
-        (item) => `
-          <div class="admin-list__item">
-            <div class="admin-list__item-head">
-              <div>
-                <p class="admin-list__item-title">${escapeHtml(item.title)}</p>
-                <p class="admin-list__item-sub">${escapeHtml(item.message)}</p>
-              </div>
-              <span class="admin-badge ${statusClass(item.type)}">${escapeHtml(item.type)}</span>
-            </div>
-            <p class="admin-table__muted">${escapeHtml(timeLabel(item.time))}</p>
-          </div>
-        `
-      )
-      .join('');
-  }
-
   function renderProfileModal() {
     openModal({
       title: 'Admin Profile',
@@ -3659,7 +3689,6 @@
     renderInfluencers();
     renderReports();
     renderSettings();
-    renderNotifications();
   }
 
   async function updateOrderOnServer(order, payload) {
@@ -3762,12 +3791,19 @@
     const influencer = state.influencers.find((item) => Number(item.id) === id);
 
     switch (action) {
-      case 'open-notifications':
-        setNotificationsOpen(true);
+      case 'toggle-notifications':
+        state.notificationsExpanded = !state.notificationsExpanded;
+        renderDashboard();
         return;
-      case 'close-notifications':
-        setNotificationsOpen(false);
+      case 'dismiss-notification': {
+        const notificationId = String(target?.dataset?.notificationId || '');
+        const notification = state.notifications.find((item) => String(item.id) === notificationId);
+        if (!notification) return;
+        notification.read = true;
+        notification.dismissedAt = new Date().toISOString();
+        renderDashboard();
         return;
+      }
       case 'open-profile':
         renderProfileModal();
         return;
@@ -4411,15 +4447,9 @@
         closeModal();
       }
     });
-    els.notificationsDrawer?.addEventListener('click', (event) => {
-      const closeTarget = event.target instanceof Element ? event.target.closest('[data-action="close-notifications"]') : null;
-      if (closeTarget) setNotificationsOpen(false);
-    });
-
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
         setSidebarOpen(false);
-        setNotificationsOpen(false);
         closeModal();
       }
     });
