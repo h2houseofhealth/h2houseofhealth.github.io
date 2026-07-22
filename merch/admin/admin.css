@@ -866,6 +866,106 @@ a {
   font-size: 13px;
 }
 
+.admin-notifications {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+}
+
+.admin-notification {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.admin-notification.is-unread {
+  border-color: rgba(200, 101, 45, 0.2);
+  background: #fffaf5;
+}
+
+.admin-notification__icon {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.admin-notification__content {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.admin-notification__title-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.admin-notification__title-row h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.admin-notification__content p,
+.admin-notification__content time {
+  margin: 0;
+  color: var(--admin-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.admin-notification__content time {
+  color: var(--admin-subtle);
+  font-size: 12px;
+}
+
+.admin-notification__unread {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--admin-accent);
+}
+
+.admin-notification__close {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--admin-muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.admin-notification__close:hover {
+  color: var(--admin-danger);
+}
+
+.admin-notification__close span:first-child {
+  font-size: 18px;
+  line-height: 0.8;
+}
+
+.admin-notifications__foot {
+  display: flex;
+  justify-content: center;
+  padding-top: 0;
+}
+
 .admin-divider {
   height: 1px;
   background: rgba(0, 0, 0, 0.06);
@@ -1337,5 +1437,14 @@ a {
   .admin-toast {
     max-width: none;
     min-width: 0;
+  }
+
+  .admin-notification {
+    grid-template-columns: 26px minmax(0, 1fr);
+  }
+
+  .admin-notification__close {
+    grid-column: 2;
+    justify-self: start;
   }
 }
