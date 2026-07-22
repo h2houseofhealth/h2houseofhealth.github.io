@@ -89,8 +89,10 @@
     influencerSalesFrom: '',
     influencerSalesTo: '',
     influencerSalesPage: 1,
+    influencerSalesMonth: 'all',
     accountDrawerOpen: false,
     accountDrawerTrigger: null,
+    accountActiveSection: null,
     accountProfileEditing: false,
     accountProfileMessage: '',
     accountAddressMessage: '',
@@ -886,6 +888,12 @@
         body: JSON.stringify({
           couponCode: code,
           subtotalAmountPaise: Math.round(getCartTotal() * 100),
+          productIds: state.cart.map((item) => Number(item.productId)).filter(Boolean),
+          productLineTotals: state.cart.reduce((totals, item) => {
+            const productId = Number(item.productId || 0);
+            if (productId) totals[productId] = Number(totals[productId] || 0) + Math.round(item.price * item.quantity * 100);
+            return totals;
+          }, {}),
         }),
       });
       state.merchCouponPreview = result.coupon || null;
@@ -1341,9 +1349,11 @@
     `;
 
     const button = document.getElementById('merchAccountBtn');
-    button?.addEventListener('click', () => {
+    button?.addEventListener('click', (event) => {
+      event.preventDefault();
       openAccountDrawer();
     });
+
   }
 
   function getInfluencerDashboardData() {
@@ -1363,6 +1373,7 @@
       if (status && status !== 'all' && rowStatus !== status) return false;
       if (from && String(row.orderDate || '').slice(0, 10) < from) return false;
       if (to && String(row.orderDate || '').slice(0, 10) > to) return false;
+      if (state.influencerSalesMonth !== 'all' && String(row.orderDate || '').slice(0, 7) !== state.influencerSalesMonth) return false;
       if (!search) return true;
       return [row.orderNumber, row.productSummary, row.customerName, row.couponUsed, row.orderStatus, row.paymentStatus]
         .filter(Boolean)
@@ -1421,18 +1432,8 @@
     const currentPage = Math.min(Math.max(1, Number(state.influencerSalesPage || 1)), pageCount);
     const pageSlice = filteredSales.slice((currentPage - 1) * pageSize, (currentPage - 1) * pageSize + pageSize);
 
-    const kpis = [
-      { label: 'Total Sales Generated', value: formatMoneyFromPaise(summary.totalSalesGenerated || 0), note: 'Live merch sales linked to your coupons.' },
-      { label: 'Total Orders Referred', value: Number(summary.totalOrdersReferred || 0).toLocaleString('en-IN'), note: 'Attributed orders across merch checkout.' },
-      { label: 'Total Commission Earned', value: formatMoneyFromPaise(summary.totalCommissionEarned || 0), note: 'Calculated from active influencer commission.' },
-      { label: 'Commission Pending', value: formatMoneyFromPaise(summary.commissionPending || 0), note: 'Awaiting payout from the admin team.' },
-      { label: 'Commission Paid', value: formatMoneyFromPaise(summary.commissionPaid || 0), note: 'Already processed and recorded.' },
-      { label: 'Active Coupons', value: Number(summary.activeCoupons || coupons.filter((coupon) => coupon.active).length || 0).toLocaleString('en-IN'), note: 'Assignable and currently live.' },
-      { label: 'Coupon Usage', value: Number(summary.couponUsage || 0).toLocaleString('en-IN'), note: 'Orders captured through your codes.' },
-      { label: 'Conversion Rate', value: `${Number(summary.conversionRate || 0).toFixed(1)}%`, note: 'Paid orders from referred traffic.' },
-    ];
-
     const socialLinksText = Array.isArray(influencer.socialLinks) ? influencer.socialLinks.join('\n') : '';
+    // Kept available for legacy markup while the insights panel remains hidden.
     const bestCoupon = analytics.bestCoupon || dashboard.performance?.bestCoupon || null;
     const highestSalesMonth = analytics.highestSalesMonth || dashboard.performance?.highestSalesMonth || null;
     const topProducts = Array.isArray(analytics.topProducts) ? analytics.topProducts : Array.isArray(dashboard.performance?.topSellingProducts) ? dashboard.performance.topSellingProducts : [];
@@ -1442,7 +1443,39 @@
     const upcomingPayment = dashboard.commission?.upcomingPayment ? formatDateLabel(dashboard.commission.upcomingPayment) : 'No payout scheduled';
     const lastPayment = dashboard.commission?.lastPaymentDate ? formatDateLabel(dashboard.commission.lastPaymentDate) : 'No payments yet';
     const monthlyTrend = Array.isArray(analytics.monthlyTrend) ? analytics.monthlyTrend : [];
-    const primaryCoupon = coupons.find((coupon) => coupon && coupon.active) || coupons[0] || null;
+    const isCouponExpired = (coupon) => {
+      if (!coupon?.expiresAt) return false;
+      const expiry = new Date(String(coupon.expiresAt).length <= 10 ? `${coupon.expiresAt}T23:59:59` : coupon.expiresAt);
+      return !Number.isNaN(expiry.getTime()) && expiry.getTime() < Date.now();
+    };
+    const isCouponDisabled = (coupon) => coupon && (coupon.active === false || coupon.active === 0 || ['false', 'disabled', 'inactive'].includes(String(coupon.active).toLowerCase()));
+    const isCouponUnavailable = (coupon) => isCouponDisabled(coupon) || isCouponExpired(coupon);
+    const getCouponStatus = (coupon) => isCouponExpired(coupon) ? 'Expired' : isCouponDisabled(coupon) ? 'Disabled' : 'Active';
+    const primaryCoupon = coupons.find((coupon) => coupon && !isCouponUnavailable(coupon)) || coupons[0] || null;
+    const monthOptions = monthlyTrend.map((item) => ({
+      value: String(item.month || item.key || '').slice(0, 7),
+      label: String(item.label || item.month || item.key || ''),
+    })).filter((item, index, items) => item.value && items.findIndex((entry) => entry.value === item.value) === index);
+    const selectedMonth = monthOptions.find((item) => item.value === state.influencerSalesMonth) || null;
+    const monthlyRows = getInfluencerSalesRows();
+    const activeMonthlyRows = monthlyRows.filter((row) => !['cancelled', 'refunded', 'failed'].includes(String(row.orderStatus || row.paymentStatus || '').toLowerCase()));
+    const activeMonthlySales = activeMonthlyRows.reduce((total, row) => total + Number(row.orderAmount || 0), 0);
+    const monthlyCommission = activeMonthlyRows.reduce((total, row) => total + Number(row.commissionEarned || 0), 0);
+    const monthlyPaidRows = activeMonthlyRows.filter((row) => ['paid', 'cod_pending'].includes(String(row.paymentStatus || '').toLowerCase()));
+    const monthlyCouponUsage = activeMonthlyRows.filter((row) => row.couponUsed).length;
+    const monthlyConversion = activeMonthlyRows.length ? (monthlyPaidRows.length / activeMonthlyRows.length) * 100 : 0;
+    const isMonthlyView = Boolean(selectedMonth);
+    const primaryCouponUnavailable = isCouponUnavailable(primaryCoupon);
+    const kpis = [
+      { label: 'Total Sales Generated', value: formatMoneyFromPaise(isMonthlyView ? activeMonthlySales : summary.totalSalesGenerated || 0), note: isMonthlyView ? `${selectedMonth.label} active sales.` : 'Live merch sales linked to your coupons.' },
+      { label: 'Total Orders Referred', value: (isMonthlyView ? activeMonthlyRows.length : Number(summary.totalOrdersReferred || 0)).toLocaleString('en-IN'), note: isMonthlyView ? `${selectedMonth.label} active orders.` : 'Attributed orders across merch checkout.' },
+      { label: 'Total Commission Earned', value: formatMoneyFromPaise(isMonthlyView ? monthlyCommission : summary.totalCommissionEarned || 0), note: isMonthlyView ? `${selectedMonth.label} calculated commission.` : 'Calculated from active influencer commission.' },
+      { label: 'Commission Pending', value: formatMoneyFromPaise(isMonthlyView ? monthlyCommission : summary.commissionPending || 0), note: isMonthlyView ? `${selectedMonth.label} commission awaiting payout.` : 'Awaiting payout from the admin team.' },
+      { label: 'Commission Paid', value: formatMoneyFromPaise(isMonthlyView ? 0 : summary.commissionPaid || 0), note: isMonthlyView ? 'Monthly payout details are recorded separately.' : 'Already processed and recorded.' },
+      { label: 'Active Coupons', value: Number(summary.activeCoupons || coupons.filter((coupon) => coupon.active).length || 0).toLocaleString('en-IN'), note: 'Assignable and currently live.' },
+      { label: 'Coupon Usage', value: (isMonthlyView ? monthlyCouponUsage : Number(summary.couponUsage || 0)).toLocaleString('en-IN'), note: isMonthlyView ? `${selectedMonth.label} orders captured through your codes.` : 'Orders captured through your codes.' },
+      { label: 'Conversion Rate', value: `${(isMonthlyView ? monthlyConversion : Number(summary.conversionRate || 0)).toFixed(1)}%`, note: 'Paid orders from referred traffic.' },
+    ];
 
     return `
       <section class="account-section account-section--influencer">
@@ -1451,11 +1484,17 @@
             <p class="account-section__eyebrow">Influencer Dashboard</p>
             <h4>Premium creator analytics</h4>
           </div>
-          <span class="account-badge account-badge--live">Live</span>
+          <label class="influencer-month-select">
+            <span>Month</span>
+            <select data-influencer-filter="month">
+              <option value="all" ${state.influencerSalesMonth === 'all' ? 'selected' : ''}>All months</option>
+              ${monthOptions.map((item) => `<option value="${escapeHtml(item.value)}" ${state.influencerSalesMonth === item.value ? 'selected' : ''}>${escapeHtml(item.label)}</option>`).join('')}
+            </select>
+          </label>
         </div>
         <p class="account-card__note">Your dashboard updates from live merch sales, assigned coupons, and commission payments.</p>
 
-        <article class="influencer-coupon-hero">
+        <article class="influencer-coupon-hero${primaryCouponUnavailable ? ' influencer-coupon-hero--unavailable' : ''}">
           <div class="influencer-coupon-hero__top">
             <div class="influencer-coupon-hero__copy">
               <p class="account-section__eyebrow">Assigned Coupon</p>
@@ -1463,8 +1502,8 @@
               <p>${escapeHtml(primaryCoupon ? (primaryCoupon.description || 'This coupon is linked to your influencer account.') : 'No coupon has been assigned yet. Once the admin assigns one, it will appear here automatically.')}</p>
             </div>
             <div class="influencer-coupon-hero__actions">
-              <span class="account-badge ${primaryCoupon && primaryCoupon.active ? 'account-badge--live' : 'account-badge--muted'}">${escapeHtml(primaryCoupon ? (primaryCoupon.active ? 'Active' : 'Inactive') : 'No coupon')}</span>
-              <button type="button" class="btn btn-outline account-action-btn" data-account-action="copy-influencer-coupon" data-coupon-code="${escapeHtml(primaryCoupon?.code || '')}" ${primaryCoupon?.code ? '' : 'disabled'}>Copy code</button>
+              <span class="account-badge ${primaryCoupon && !primaryCouponUnavailable ? 'account-badge--live' : 'account-badge--muted'}">${escapeHtml(primaryCoupon ? getCouponStatus(primaryCoupon) : 'No coupon')}</span>
+              <button type="button" class="btn btn-outline account-action-btn" data-account-action="copy-influencer-coupon" data-coupon-code="${escapeHtml(primaryCoupon?.code || '')}" ${primaryCoupon?.code && !primaryCouponUnavailable ? '' : 'disabled'}>Copy code</button>
             </div>
           </div>
           <div class="influencer-coupon-hero__stats">
@@ -1534,7 +1573,7 @@
               ${monthlyTrend.length ? renderSparklineBars(monthlyTrend, 'orders', 'label', (value) => Number(value || 0).toLocaleString('en-IN')) : '<p class="account-empty-state">No order activity yet.</p>'}
             </div>
           </article>
-          <article class="influencer-panel">
+          <article class="influencer-panel influencer-panel--removed-insights">
             <div class="account-section__head">
               <div>
                 <p class="account-section__eyebrow">Performance Insights</p>
@@ -1569,13 +1608,13 @@
           </div>
           <div class="influencer-coupon-grid">
             ${coupons.length ? coupons.map((coupon) => `
-              <article class="influencer-coupon-card">
+              <article class="influencer-coupon-card${isCouponUnavailable(coupon) ? ' influencer-coupon-card--unavailable' : ''}">
                 <div class="influencer-coupon-card__head">
                   <div>
                     <strong>${escapeHtml(coupon.code || '')}</strong>
-                    <span>${escapeHtml(coupon.active ? 'Active' : 'Inactive')}</span>
+                    <span>${escapeHtml(getCouponStatus(coupon))}</span>
                   </div>
-                  <button type="button" class="btn btn-outline account-action-btn" data-account-action="copy-influencer-coupon" data-coupon-code="${escapeHtml(coupon.code || '')}">Copy</button>
+                  <button type="button" class="btn btn-outline account-action-btn" data-account-action="copy-influencer-coupon" data-coupon-code="${escapeHtml(coupon.code || '')}" ${isCouponUnavailable(coupon) ? 'disabled' : ''}>Copy</button>
                 </div>
                 <p>${escapeHtml(coupon.description || 'No description')}</p>
                 <div class="influencer-coupon-card__meta">
@@ -1590,7 +1629,7 @@
           </div>
         </article>
 
-        <details class="influencer-details" open>
+        <details class="influencer-details influencer-details--sales-history" open>
           <summary>
             <span>Sales History</span>
             <small>${filteredSales.length} records</small>
@@ -1783,7 +1822,14 @@
       : '';
 
     els.accountDrawerContent.innerHTML = `
-      <section class="account-card account-card--profile">
+      <nav class="account-panel-nav" aria-label="Account sections">
+        <button type="button" data-account-nav="account-profile" aria-current="${state.accountActiveSection === 'account-profile' ? 'page' : 'false'}">My Profile</button>
+        <button type="button" data-account-nav="account-orders" aria-current="${state.accountActiveSection === 'account-orders' ? 'page' : 'false'}">My Orders</button>
+        <button type="button" data-account-nav="account-addresses" aria-current="${state.accountActiveSection === 'account-addresses' ? 'page' : 'false'}">My Addresses</button>
+        <button type="button" data-account-nav="account-wishlist" aria-current="${state.accountActiveSection === 'account-wishlist' ? 'page' : 'false'}">Wishlist</button>
+        ${state.influencerDashboard?.influencer ? `<button type="button" data-account-nav="account-influencer" aria-current="${state.accountActiveSection === 'account-influencer' ? 'page' : 'false'}">Influencer Dashboard</button>` : ''}
+      </nav>
+      <section id="account-profile" data-account-section="account-profile" class="account-card account-card--profile">
         <div class="account-card__avatar profile-avatar${profile.avatarUrl ? ' has-image' : ''}"${avatarStyle}>${accountInitials}</div>
         <div class="account-card__summary">
           <div class="account-card__title-row">
@@ -1823,7 +1869,7 @@
         </div>
       </section>
 
-      <section class="account-section">
+      <section id="account-addresses" data-account-section="account-addresses" class="account-section">
         <div class="account-section__head">
           <div>
             <p class="account-section__eyebrow">My Addresses</p>
@@ -1863,7 +1909,7 @@
         `}
       </section>
 
-      <section class="account-section">
+      <section id="account-orders" data-account-section="account-orders" class="account-section">
         <div class="account-section__head">
           <div>
             <p class="account-section__eyebrow">My Orders</p>
@@ -1891,6 +1937,7 @@
                   
                 </div>
                 <p>${escapeHtml(formatDateLabel(order.createdAt))} · ${escapeHtml(order.totalAmount ? formatMoneyFromPaise(order.totalAmount) : 'Total unavailable')}</p>
+                ${(order.influencerCoupon || order.couponCode || order.coupon_code) ? `<p class="account-order-coupon"><span>Coupon applied</span><strong>${escapeHtml(order.influencerCoupon || order.couponCode || order.coupon_code)}</strong></p>` : ''}
                 <div class="account-item-actions account-item-actions--inline">
                   <button type="button" data-account-action="view-order" data-order-id="${escapeHtml(String(order.id || ''))}">View Details</button>
                   <button type="button" data-account-action="track-order" data-order-id="${escapeHtml(String(order.id || ''))}">Track Order</button>
@@ -1909,7 +1956,7 @@
         `}
       </section>
 
-      <section class="account-section">
+      <section data-account-section="account-coupons" class="account-section account-section--coupon-history">
         <div class="account-section__head">
           <div>
             <p class="account-section__eyebrow">Coupon History</p>
@@ -1940,9 +1987,9 @@
         `}
       </section>
 
-      ${renderInfluencerDashboardSection()}
+      <div id="account-influencer" data-account-section="account-influencer">${renderInfluencerDashboardSection()}</div>
 
-      <section class="account-section">
+      <section id="account-wishlist" data-account-section="account-wishlist" class="account-section">
         <div class="account-section__head">
           <div>
             <p class="account-section__eyebrow">Wishlist</p>
@@ -1977,7 +2024,7 @@
         `}
       </section>
 
-      <section class="account-section">
+      <section class="account-section account-section--extra">
         <div class="account-section__head">
           <div>
             <p class="account-section__eyebrow">Saved Payments</p>
@@ -1991,7 +2038,7 @@
         </div>
       </section>
 
-      <section class="account-section">
+      <section class="account-section account-section--extra">
         <div class="account-section__head">
           <div>
             <p class="account-section__eyebrow">Account Settings</p>
@@ -2007,6 +2054,11 @@
 
       <button id="merchLogoutBtn" class="btn btn-secondary btn-full account-logout-btn" type="button">Logout</button>
     `;
+
+    const activeSection = state.accountActiveSection || '';
+    els.accountDrawerContent.querySelectorAll('[data-account-section]').forEach((section) => {
+      section.hidden = !activeSection || section.dataset.accountSection !== activeSection;
+    });
 
     document.getElementById('merchLogoutBtn')?.addEventListener('click', handleLogout);
     bindAccountDrawerActions();
@@ -2076,6 +2128,13 @@
       button.addEventListener('click', () => handleAccountAction(button));
     });
 
+    els.accountDrawerContent?.querySelectorAll('[data-account-nav]').forEach((button) => {
+      button.addEventListener('click', () => {
+        state.accountActiveSection = button.dataset.accountNav || 'account-profile';
+        renderAccountDrawer();
+      });
+    });
+
     els.accountDrawerContent?.querySelectorAll('[data-influencer-filter]').forEach((input) => {
       const eventName = input.tagName === 'SELECT' ? 'change' : 'input';
       input.addEventListener(eventName, () => {
@@ -2084,6 +2143,7 @@
         if (key === 'status') state.influencerSalesStatus = String(input.value || 'all');
         if (key === 'from') state.influencerSalesFrom = String(input.value || '');
         if (key === 'to') state.influencerSalesTo = String(input.value || '');
+        if (key === 'month') state.influencerSalesMonth = String(input.value || 'all');
         state.influencerSalesPage = 1;
         renderAccountDrawer();
       });
@@ -2178,10 +2238,7 @@
                <span>Payment Method</span>
                <strong>${order.paymentMethod || 'Online'}</strong>
              </div>
-             <div class="order-detail-row">
-               <span>Coupon</span>
-               <strong>${escapeHtml(order.influencerCoupon || order.couponCode || 'No coupon used')}</strong>
-             </div>
+             ${(order.influencerCoupon || order.couponCode || order.coupon_code) ? `<div class="order-detail-row"><span>Coupon Applied</span><strong>${escapeHtml(order.influencerCoupon || order.couponCode || order.coupon_code)}</strong></div>` : ''}
              <div class="order-detail-row">
                <span>Shipping</span>
                <strong>${escapeHtml(order.shippingAddress || 'Unavailable')}</strong>
@@ -2514,8 +2571,7 @@
 
     state.accountDrawerOpen = true;
     state.accountDrawerTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    await loadInfluencerDashboard();
-    renderAccountDrawer();
+    state.accountActiveSection = null;
     els.accountDrawer.hidden = false;
     els.accountDrawerOverlay.hidden = false;
     requestAnimationFrame(() => {
@@ -2523,8 +2579,12 @@
       els.accountDrawerOverlay.classList.add('is-visible');
     });
     document.body.classList.add('is-account-drawer-open');
+    renderAccountDrawer();
     els.accountDrawerCloseBtn?.focus();
     els.merchAuthCta?.querySelector('#merchAccountBtn')?.setAttribute('aria-expanded', 'true');
+
+    await loadInfluencerDashboard();
+    if (state.accountDrawerOpen) renderAccountDrawer();
   }
 
   function closeAccountDrawer() {
@@ -2562,6 +2622,7 @@
     state.influencerSalesFrom = '';
     state.influencerSalesTo = '';
     state.influencerSalesPage = 1;
+    state.influencerSalesMonth = 'all';
     state.accountDrawerTrigger = null;
     closeAccountDrawer();
     renderAccountTrigger();

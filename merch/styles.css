@@ -267,6 +267,72 @@ body.is-auth-loading .merch-auth-cta {
   gap: 16px;
 }
 
+.account-panel-nav {
+  display: grid;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #faf7f3;
+}
+
+.account-panel-nav button {
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dark);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.account-panel-nav button:hover,
+.account-panel-nav button:focus-visible,
+.account-panel-nav button[aria-current="page"] {
+  background: var(--white);
+  color: var(--primary);
+  outline: none;
+}
+
+.account-section--coupon-history,
+.account-section--extra,
+.influencer-panel--removed-insights,
+.influencer-details--sales-history {
+  display: none !important;
+}
+
+.influencer-month-select {
+  display: grid;
+  gap: 4px;
+  min-width: 128px;
+}
+
+.influencer-month-select span {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.influencer-month-select select {
+  min-width: 128px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  color: var(--text-dark);
+  font: inherit;
+  font-size: 12px;
+  padding: 8px 10px;
+}
+
 .account-card,
 .account-section {
   background: var(--white);
@@ -488,6 +554,28 @@ body.is-auth-loading .merch-auth-cta {
   line-height: 1.45;
 }
 
+.account-order-coupon {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(200, 101, 45, 0.08);
+}
+
+.account-order-coupon span {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.account-order-coupon strong {
+  color: var(--primary-dark);
+  font-size: 12px;
+}
+
 .account-list__item span {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -620,6 +708,13 @@ body.is-auth-loading .merch-auth-cta {
   border-radius: var(--radius);
   background: linear-gradient(135deg, rgba(200, 101, 45, 0.08), rgba(255, 248, 241, 0.96));
   border: 1px solid rgba(200, 101, 45, 0.12);
+}
+
+.influencer-coupon-hero--unavailable {
+  filter: grayscale(1);
+  opacity: 0.62;
+  background: #f1f1f1;
+  border-color: #d7d7d7;
 }
 
 .influencer-coupon-hero__top {
@@ -828,6 +923,18 @@ body.is-auth-loading .merch-auth-cta {
   border: 1px solid rgba(0, 0, 0, 0.05);
   display: grid;
   gap: 10px;
+}
+
+.influencer-coupon-card--unavailable {
+  filter: grayscale(1);
+  opacity: 0.58;
+  background: #f1f1f1;
+  border-color: #d7d7d7;
+}
+
+.influencer-coupon-card--unavailable .influencer-coupon-card__meta span {
+  background: rgba(0, 0, 0, 0.06);
+  color: #777;
 }
 
 .influencer-coupon-card__head {

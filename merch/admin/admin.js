@@ -556,7 +556,7 @@
           <div class="meta">
             <div><strong>Profile</strong><br />${escapeHtml([influencer.email, influencer.phone].filter(Boolean).join(' • ') || 'No contact info')}</div>
             <div><strong>Status</strong><br />${escapeHtml(Number(influencer.active ?? 1) === 1 ? 'Active' : 'Inactive')}</div>
-            <div><strong>Commission Rate</strong><br />${escapeHtml(`${Number(influencer.commissionRate ?? 0)}%`)}</div>
+            <div><strong>Commission per Order</strong><br />${escapeHtml(money(influencer.commissionPerOrderPaise || 0))}</div>
             <div><strong>Coupons</strong><br />${escapeHtml(String(couponRows.length))}</div>
           </div>
 
@@ -842,6 +842,13 @@
       archived: false,
       image: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146',
       description: 'Heavyweight 450 GSM organic cotton blend hoodie in black.',
+      variants: [
+        { id: 1, size: 'S', color: 'Black', price: 3499, stock: 25, sku: 'HM-HOD-BLK-S' },
+        { id: 2, size: 'M', color: 'Black', price: 3499, stock: 30, sku: 'HM-HOD-BLK-M' },
+        { id: 3, size: 'L', color: 'Black', price: 3499, stock: 20, sku: 'HM-HOD-BLK-L' },
+        { id: 4, size: 'XL', color: 'Black', price: 3499, stock: 15, sku: 'HM-HOD-BLK-XL' },
+        { id: 5, size: 'XXL', color: 'Black', price: 3499, stock: 10, sku: 'HM-HOD-BLK-XXL' },
+      ],
     },
     {
       id: 2,
@@ -861,6 +868,13 @@
       archived: false,
       image: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.30034b.jpg?v=1770377146',
       description: 'Earth-toned variant of the Zenith heavyweight hoodie.',
+      variants: [
+        { id: 6, size: 'S', color: 'Sand', price: 3499, stock: 20, sku: 'HM-HOD-SND-S' },
+        { id: 7, size: 'M', color: 'Sand', price: 3499, stock: 25, sku: 'HM-HOD-SND-M' },
+        { id: 8, size: 'L', color: 'Sand', price: 3499, stock: 18, sku: 'HM-HOD-SND-L' },
+        { id: 9, size: 'XL', color: 'Sand', price: 3499, stock: 12, sku: 'HM-HOD-SND-XL' },
+        { id: 10, size: 'XXL', color: 'Sand', price: 3499, stock: 8, sku: 'HM-HOD-SND-XXL' },
+      ],
     },
     {
       id: 3,
@@ -880,6 +894,12 @@
       archived: false,
       image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113',
       description: 'Hydrogen-rich water bottle with 300ml and 500ml variants.',
+      variants: [
+        { id: 11, size: '300ml', color: 'Silver', price: 6999, stock: 40, sku: 'HM-BTL-300-SLV' },
+        { id: 12, size: '500ml', color: 'Silver', price: 6499, stock: 35, sku: 'HM-BTL-500-SLV' },
+        { id: 13, size: '300ml', color: 'Black', price: 7499, stock: 30, sku: 'HM-BTL-300-BLK' },
+        { id: 14, size: '500ml', color: 'Black', price: 8499, stock: 25, sku: 'HM-BTL-500-BLK' },
+      ],
     },
     {
       id: 4,
@@ -899,8 +919,35 @@
       archived: false,
       image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138',
       description: 'Hydrogen mist and spray range with white and rose-gold variants.',
+      variants: [
+        { id: 15, size: '50ml', color: 'White', price: 2499, stock: 50, sku: 'HM-SPR-050-WHT' },
+        { id: 16, size: '100ml', color: 'White', price: 3499, stock: 40, sku: 'HM-SPR-100-WHT' },
+        { id: 17, size: '50ml', color: 'Rose Gold', price: 2799, stock: 35, sku: 'HM-SPR-050-RSG' },
+        { id: 18, size: '100ml', color: 'Rose Gold', price: 3799, stock: 30, sku: 'HM-SPR-100-RSG' },
+      ],
     },
   ];
+
+  function expandProductVariants(products) {
+    return products.flatMap((product) => {
+      const variants = Array.isArray(product.variants) && product.variants.length
+        ? product.variants
+        : [{ id: product.id, size: '', color: '', price: product.price, stock: product.stock, sku: product.primarySku || product.sku }];
+      return variants.map((variant) => ({
+        ...product,
+        ...variant,
+        id: variant.id,
+        productId: product.id,
+        parentProductId: product.id,
+        variantId: variant.id,
+        sku: variant.sku || product.primarySku || product.sku,
+        price: Number(variant.price || product.price || 0),
+        priceLabel: catalogPrice(Number(variant.price || product.price || 0)),
+        stock: Number(variant.stock || 0),
+        variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '),
+      }));
+    });
+  }
 
   const ordersList = [];
   const customersList = [];
@@ -933,6 +980,7 @@
     influencersLoading: false,
     reportsLoading: false,
     influencersSearch: '',
+    influencersMonth: '',
     reportFrom: daysAgo(29),
     reportTo: toISODate(today),
     reportFormat: 'csv',
@@ -953,7 +1001,7 @@
 
   const state = {
     ...initialState,
-    products: productsList,
+    products: expandProductVariants(productsList),
     categories: categoryList,
     orders: ordersList,
     customers: customersList,
@@ -1556,7 +1604,7 @@
     const start = (state.productsPage - 1) * pageSize;
     const pageItems = filtered.slice(start, start + pageSize);
     const selectedCount = state.selectedProductIds.length;
-    const lowStockCount = getLowStockProducts().length;
+    const lowStockCount = getLowStockProducts(filtered).length;
 
     els.productsView.innerHTML = `
       <section class="admin-section">
@@ -1590,7 +1638,6 @@
             </div>
             <div class="admin-toolbar__group">
               <button class="admin-btn admin-btn--soft" type="button" data-action="open-product-modal">Add Product</button>
-              <button class="admin-btn admin-btn--ghost" type="button" data-action="bulk-duplicate" ${selectedCount ? '' : 'disabled'}>Duplicate Selected</button>
               <button class="admin-btn admin-btn--ghost" type="button" data-action="bulk-archive" ${selectedCount ? '' : 'disabled'}>Archive Selected</button>
               <button class="admin-btn admin-btn--danger" type="button" data-action="bulk-delete" ${selectedCount ? '' : 'disabled'}>Delete Selected</button>
             </div>
@@ -1626,6 +1673,7 @@
                   <th><input type="checkbox" data-action="toggle-product-page-selection" ${pageItems.length && pageItems.every((item) => state.selectedProductIds.includes(item.id)) ? 'checked' : ''} /></th>
                   <th>Image</th>
                   <th>Product</th>
+                  <th>Variant</th>
                   <th>SKU</th>
                   <th>Category</th>
                   <th>Price</th>
@@ -1641,12 +1689,13 @@
                     <td><input type="checkbox" data-action="toggle-product-selection" data-id="${product.id}" ${state.selectedProductIds.includes(product.id) ? 'checked' : ''} /></td>
                     <td><img class="admin-thumb" src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}" /></td>
                     <td><strong>${escapeHtml(product.name)}</strong><br><span class="admin-table__muted">${escapeHtml(product.description)}</span></td>
+                    <td>${escapeHtml(product.variantLabel || 'Default variant')}</td>
                     <td>${escapeHtml(product.sku)}</td>
                     <td>${escapeHtml(product.category)}</td>
                     <td><strong>${escapeHtml(product.priceLabel || catalogPrice(product.price))}</strong></td>
                     <td>
                       <div class="admin-list" style="gap:4px;">
-                        <strong>${escapeHtml(product.stock)}</strong>
+                        <input class="admin-input admin-stock-input" data-action="update-product-stock" data-id="${product.id}" type="number" min="0" value="${escapeHtml(product.stock)}" aria-label="Stock for ${escapeHtml(product.name)} ${escapeHtml(product.variantLabel || '')}" />
                         <span class="admin-badge ${Number(product.stock || 0) <= LOW_STOCK_THRESHOLD ? 'admin-badge--inactive' : 'admin-badge--active'}">${escapeHtml(getLowStockLabel(product))}</span>
                       </div>
                     </td>
@@ -1655,7 +1704,6 @@
                     <td>
                       <div class="admin-actions">
                         <button class="admin-action-link" type="button" data-action="edit-product" data-id="${product.id}">Edit</button>
-                        <button class="admin-action-link" type="button" data-action="duplicate-product" data-id="${product.id}">Duplicate</button>
                         <button class="admin-action-link" type="button" data-action="archive-product" data-id="${product.id}">${product.archived ? 'Restore' : 'Archive'}</button>
                         <button class="admin-action-link" type="button" data-action="delete-product" data-id="${product.id}">Delete</button>
                       </div>
@@ -1778,7 +1826,7 @@
                     <p class="admin-list__item-title">${escapeHtml(item.name)}</p>
                     <p class="admin-list__item-sub">Qty ${escapeHtml(item.qty)}</p>
                   </div>
-                  <strong>${escapeHtml(catalogPrice(item.price))}</strong>
+                  <strong>${escapeHtml(money(item.price))}</strong>
                 </div>
               </div>
             `).join('')}
@@ -1916,13 +1964,16 @@
                         <td>${escapeHtml(order.customerName)}<br><span class="admin-table__muted">${escapeHtml(order.email)}</span></td>
                         <td>${escapeHtml(order.paymentMethod.toUpperCase())}<br><span class="admin-table__muted">${escapeHtml(getStatusLabel(order.paymentStatus))}</span></td>
                         <td><strong>${escapeHtml(money(order.totalAmount))}</strong></td>
-                        <td><span class="admin-badge ${statusClass(order.status)}">${escapeHtml(getStatusLabel(order.status))}</span></td>
+                        <td>
+                          <select class="admin-select admin-order-status-select" data-action="update-order-status" data-id="${order.id}" aria-label="Status for ${escapeHtml(order.orderNumber)}">
+                            ${Object.keys(ORDER_STATUS_META).map((status) => `<option value="${status}" ${normalizeOrderStatus(order.status) === status ? 'selected' : ''}>${escapeHtml(getStatusLabel(status))}</option>`).join('')}
+                          </select>
+                        </td>
                         <td>
                           <div class="admin-actions">
                             <button class="admin-action-link" type="button" data-action="open-order-invoice" data-id="${order.id}">Invoice</button>
                             <button class="admin-action-link" type="button" data-action="email-order-invoice" data-id="${order.id}">Email</button>
                             <button class="admin-action-link" type="button" data-action="download-order-invoice" data-id="${order.id}">Download</button>
-                            <button class="admin-action-link" type="button" data-action="advance-order" data-id="${order.id}">Next Step</button>
                             <button class="admin-action-link" type="button" data-action="cancel-order" data-id="${order.id}">Cancel</button>
                             <button class="admin-action-link" type="button" data-action="refund-order" data-id="${order.id}">Refund</button>
                           </div>
@@ -1955,7 +2006,6 @@
                   </div>
                   <div class="admin-card__foot">
                     <div class="admin-footer-actions">
-                      <button class="admin-btn admin-btn--ghost" type="button" data-action="advance-order" data-id="${selectedOrder?.id || ''}">Accept / Process</button>
                       <button class="admin-btn admin-btn--ghost" type="button" data-action="ship-order" data-id="${selectedOrder?.id || ''}">Ship</button>
                       <button class="admin-btn admin-btn--ghost" type="button" data-action="deliver-order" data-id="${selectedOrder?.id || ''}">Deliver</button>
                       <button class="admin-btn admin-btn--danger" type="button" data-action="cancel-order" data-id="${selectedOrder?.id || ''}">Cancel</button>
@@ -2347,6 +2397,21 @@
 
   function renderInfluencers() {
     const query = state.influencersSearch.trim().toLowerCase();
+    const month = String(state.influencersMonth || '').trim();
+    const recentMonths = Array.from({ length: 12 }, (_, index) => {
+      const date = new Date(today.getFullYear(), today.getMonth() - index, 1);
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    });
+    const monthOptions = Array.from(new Set([
+      ...recentMonths,
+      ...state.influencers.flatMap((influencer) => (influencer.monthlySales || []).map((row) => row.month)),
+    ]))
+      .filter(Boolean)
+      .sort((left, right) => right.localeCompare(left));
+    const getMonthStats = (influencer) => {
+      if (!month) return { orders: Number(influencer.totalOrders || 0), revenue: Number(influencer.revenue || 0), commission: Number(influencer.commission || 0), couponUsage: Number(influencer.couponUsage || 0) };
+      return (influencer.monthlySales || []).find((row) => row.month === month) || { orders: 0, revenue: 0, commission: 0, couponUsage: 0 };
+    };
     const filtered = state.influencers.filter((influencer) =>
       !query ||
       [influencer.name, influencer.handle, influencer.email, influencer.phone]
@@ -2358,9 +2423,9 @@
 
     const visibleInfluencers = filtered;
     const statsSource = filtered.length ? filtered : state.influencers;
-    const totalRevenue = statsSource.reduce((sum, influencer) => sum + Number(influencer.revenue || 0), 0);
-    const totalOrders = statsSource.reduce((sum, influencer) => sum + Number(influencer.totalOrders || 0), 0);
-    const totalCoupons = statsSource.reduce((sum, influencer) => sum + Number(influencer.couponUsage || 0), 0);
+    const totalRevenue = statsSource.reduce((sum, influencer) => sum + getMonthStats(influencer).revenue, 0);
+    const totalOrders = statsSource.reduce((sum, influencer) => sum + getMonthStats(influencer).orders, 0);
+    const totalCoupons = statsSource.reduce((sum, influencer) => sum + getMonthStats(influencer).couponUsage, 0);
 
     els.influencersView.innerHTML = `
       <section class="admin-section">
@@ -2414,6 +2479,12 @@
             <div class="admin-toolbar__group" style="flex:1 1 420px;">
               <input class="admin-input" data-input="influencersSearch" value="${escapeHtml(state.influencersSearch)}" placeholder="Search by name, handle, email, or phone" />
             </div>
+            <div class="admin-toolbar__group" style="flex:0 1 220px;">
+              <select class="admin-select" data-input="influencersMonth" aria-label="Filter influencer sales by month">
+                <option value="">All months</option>
+                ${monthOptions.map((value) => `<option value="${escapeHtml(value)}" ${month === value ? 'selected' : ''}>${escapeHtml(reportMonthLabel(value))}</option>`).join('')}
+              </select>
+            </div>
             <button class="admin-btn admin-btn--soft" type="button" data-action="open-influencer-modal">Add Influencer</button>
           </div>
 
@@ -2452,14 +2523,14 @@
                     </div>
                   </div>
                   <div class="admin-grid admin-grid--stats" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-top:14px;">
-                    <article class="admin-stat" style="padding:12px;">
+                    ${(() => { const stats = getMonthStats(influencer); return `<article class="admin-stat" style="padding:12px;">
                       <p class="admin-stat__label">Orders</p>
-                      <p class="admin-stat__value" style="font-size:20px;">${formatCount(influencer.totalOrders)}</p>
+                      <p class="admin-stat__value" style="font-size:20px;">${formatCount(stats.orders)}</p>
                     </article>
                     <article class="admin-stat" style="padding:12px;">
                       <p class="admin-stat__label">Revenue</p>
-                      <p class="admin-stat__value" style="font-size:20px;">${money(influencer.revenue)}</p>
-                    </article>
+                      <p class="admin-stat__value" style="font-size:20px;">${money(stats.revenue)}</p>
+                    </article>`; })()}
                     <article class="admin-stat" style="padding:12px;">
                       <p class="admin-stat__label">Coupon Use</p>
                       <p class="admin-stat__value" style="font-size:20px;">${formatCount(influencer.couponUsage)}</p>
@@ -2472,7 +2543,7 @@
                   <div class="admin-grid admin-grid--stats" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:12px;">
                     <article class="admin-stat" style="padding:12px;">
                       <p class="admin-stat__label">Commission Earned</p>
-                      <p class="admin-stat__value" style="font-size:20px;">${money(influencer.commission)}</p>
+                      <p class="admin-stat__value" style="font-size:20px;">${money(getMonthStats(influencer).commission)}</p>
                       <p class="admin-stat__note">Based on the influencer's commission rate and attributed revenue.</p>
                     </article>
                     <article class="admin-stat" style="padding:12px;">
@@ -2481,9 +2552,9 @@
                       <p class="admin-stat__note">Processed commission payments already recorded.</p>
                     </article>
                     <article class="admin-stat" style="padding:12px;">
-                      <p class="admin-stat__label">Commission Rate</p>
-                      <p class="admin-stat__value" style="font-size:20px;">${escapeHtml(String(influencer.commissionRate ?? 0))}%</p>
-                      <p class="admin-stat__note">Current commission percentage assigned to this influencer.</p>
+                      <p class="admin-stat__label">Commission per Order</p>
+                      <p class="admin-stat__value" style="font-size:20px;">${money(influencer.commissionPerOrderPaise || 0)}</p>
+                      <p class="admin-stat__note">Fixed amount credited for each attributed order.</p>
                     </article>
                   </div>
                   <div class="admin-actions" style="margin-top:12px;">
@@ -2509,6 +2580,7 @@
               <div class="admin-card__body">
                 ${selectedInfluencer ? `
                   <div class="admin-list">
+                    ${month ? `<div class="admin-list__item"><p class="admin-list__item-title">${escapeHtml(reportMonthLabel(month))} Sales</p><p class="admin-list__item-sub">${formatCount(getMonthStats(selectedInfluencer).orders)} orders · ${money(getMonthStats(selectedInfluencer).revenue)} revenue · ${money(getMonthStats(selectedInfluencer).commission)} commission</p></div>` : ''}
                     <div class="admin-list__item">
                       <div class="admin-list__item-head">
                         <div>
@@ -2540,11 +2612,11 @@
                     </div>
                     <div class="admin-list__item">
                       <p class="admin-list__item-title">Total Orders</p>
-                      <p class="admin-list__item-sub">${formatCount(selectedInfluencer.totalOrders)}</p>
+                      <p class="admin-list__item-sub">${formatCount(getMonthStats(selectedInfluencer).orders)}</p>
                     </div>
                     <div class="admin-list__item">
                       <p class="admin-list__item-title">Revenue Generated</p>
-                      <p class="admin-list__item-sub">${money(selectedInfluencer.revenue)}</p>
+                      <p class="admin-list__item-sub">${money(getMonthStats(selectedInfluencer).revenue)}</p>
                     </div>
                     <div class="admin-list__item">
                       <p class="admin-list__item-title">Coupon Usage</p>
@@ -2572,9 +2644,9 @@
                 ${selectedInfluencer ? `
                   <div class="admin-mini-chart">
                     ${renderMiniChart([
-                      { label: 'Orders', value: Math.min(100, Number(selectedInfluencer.totalOrders || 0)), display: formatCount(selectedInfluencer.totalOrders) },
-                      { label: 'Revenue', value: Math.min(100, Math.round(Number(selectedInfluencer.revenue || 0) / 100000)), display: money(selectedInfluencer.revenue) },
-                      { label: 'Commission', value: Math.min(100, Math.round(Number(selectedInfluencer.commission || 0) / 10000)), display: money(selectedInfluencer.commission) },
+                      { label: 'Orders', value: Math.min(100, Number(getMonthStats(selectedInfluencer).orders || 0)), display: formatCount(getMonthStats(selectedInfluencer).orders) },
+                      { label: 'Revenue', value: Math.min(100, Math.round(Number(getMonthStats(selectedInfluencer).revenue || 0) / 100000)), display: money(getMonthStats(selectedInfluencer).revenue) },
+                      { label: 'Commission', value: Math.min(100, Math.round(Number(getMonthStats(selectedInfluencer).commission || 0) / 10000)), display: money(getMonthStats(selectedInfluencer).commission) },
                       { label: 'Coupon Usage', value: Math.min(100, Number(selectedInfluencer.couponUsage || 0)), display: formatCount(selectedInfluencer.couponUsage) },
                       { label: 'Campaigns', value: Math.min(100, Number(selectedInfluencer.activeCampaigns || 0) * 20), display: `${formatCount(selectedInfluencer.activeCampaigns)} active` },
                     ])}
@@ -2814,7 +2886,7 @@
                         <td>${formatCount(row.orders)}</td>
                         <td><strong>${money(row.revenue)}</strong></td>
                         <td>${formatCount(row.couponUsage)}</td>
-                        <td>${money(row.commission)}<br><span class="admin-table__muted">${escapeHtml(row.commissionRate)}%</span></td>
+                        <td>${money(row.commission)}<br><span class="admin-table__muted">Fixed per order</span></td>
                       </tr>
                     `).join('')}
                   </tbody>
@@ -3043,7 +3115,13 @@
           <label class="admin-field" data-coupon-owner-field><span>Owner Email</span><input class="admin-input" name="recipientEmail" type="email" value="${escapeHtml(entity?.recipientEmail || '')}" placeholder="customer@example.com" /></label>
           <label class="admin-field"><span>Applies To</span>
             <select class="admin-select" name="appliesTo">
-              <option value="merch" ${String(entity?.appliesTo || 'merch') === 'merch' ? 'selected' : ''}>Merch</option>
+              <option value="merch" ${String(entity?.appliesTo || 'merch') === 'merch' ? 'selected' : ''}>All Merch Products</option>
+              ${state.products.map((product) => {
+                const productId = product.productId || product.id;
+                const variantLabel = [product.size, product.color].filter(Boolean).join(' / ');
+                const label = variantLabel ? `${product.name} — ${variantLabel}` : product.name;
+                return `<option value="product:${productId}" ${String(entity?.appliesTo) === `product:${productId}` ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+              }).join('')}
               <option value="all" ${String(entity?.appliesTo) === 'all' ? 'selected' : ''}>All</option>
             </select>
           </label>
@@ -3058,7 +3136,7 @@
           <label class="admin-field"><span>Social Handle</span><input class="admin-input" name="handle" value="${escapeHtml(entity?.handle || '')}" required /></label>
           <label class="admin-field"><span>Email</span><input class="admin-input" name="email" value="${escapeHtml(entity?.email || '')}" /></label>
           <label class="admin-field"><span>Phone</span><input class="admin-input" name="phone" value="${escapeHtml(entity?.phone || '')}" /></label>
-          <label class="admin-field"><span>Commission %</span><input class="admin-input" name="commissionRate" type="number" min="0" max="100" step="0.01" value="${escapeHtml(entity?.commissionRate ?? 10)}" /></label>
+          <label class="admin-field"><span>Commission per Order (rupees)</span><input class="admin-input" name="commissionPerOrder" type="number" min="0" step="1" value="${escapeHtml(Number(entity?.commissionPerOrderPaise || 0) / 100)}" /></label>
           <label class="admin-field"><span>Commission Paid (rupees)</span><input class="admin-input" name="paidCommission" type="number" min="0" step="1" value="${escapeHtml(Math.round(Number(entity?.paidCommission || 0) / 100))}" /></label>
           <label class="admin-field admin-field--wide"><span>Assigned Coupons</span><input class="admin-input" value="${escapeHtml((entity?.coupons || []).join(', '))}" readonly /></label>
           <label class="admin-field admin-field--wide"><span>Notes</span><textarea class="admin-textarea" name="notes">${escapeHtml(entity?.notes || '')}</textarea></label>
@@ -3312,7 +3390,7 @@
       status: fd.get('status') === 'on' ? 'active' : 'inactive',
       couponType,
       ownerType: couponCategory === 'influencer' ? 'influencer' : couponCategory === 'private' ? 'private' : 'general',
-      appliesTo: String(fd.get('appliesTo') || 'merch').trim().toLowerCase() === 'all' ? 'all' : 'merch',
+      appliesTo: String(fd.get('appliesTo') || 'merch').trim().toLowerCase(),
       owner: couponCategory === 'influencer' ? influencer?.name || 'Influencer' : couponCategory === 'private' ? recipientEmail : 'General',
       recipientName: couponCategory === 'influencer' ? influencer?.name || '' : '',
       recipientEmail: couponCategory === 'private' ? recipientEmail : '',
@@ -3331,7 +3409,7 @@
       email: String(fd.get('email') || '').trim(),
       phone: String(fd.get('phone') || '').trim(),
       notes: String(fd.get('notes') || '').trim(),
-      commissionRate: Number(fd.get('commissionRate') || 10),
+      commissionPerOrderPaise: Math.max(0, Math.round(Number(fd.get('commissionPerOrder') || 0) * 100)),
       paidCommission: Math.max(0, Math.round(Number(fd.get('paidCommission') || existing?.paidCommission || 0) * 100)),
       coupons: existing?.coupons || [],
       totalOrders: Number(existing?.totalOrders || 0),
@@ -3853,6 +3931,31 @@
           renderOrders();
         }
         return;
+      case 'update-product-stock':
+        if (product && target instanceof HTMLInputElement) {
+          const stock = Math.max(0, Number(target.value || 0));
+          product.stock = Number.isFinite(stock) ? stock : 0;
+          target.value = String(product.stock);
+          renderProducts();
+        }
+        return;
+      case 'update-order-status':
+        if (order && target instanceof HTMLSelectElement) {
+          const nextStatus = normalizeOrderStatus(target.value);
+          const payload = { status: nextStatus };
+          if (nextStatus === 'shipped' && !order.trackingNumber) {
+            payload.tracking_number = `TRK-${Math.floor(10000 + Math.random() * 90000)}-HM`;
+            payload.carrier_name = order.carrier || 'Shiprocket';
+          }
+          try {
+            await updateOrderOnServer(order, payload);
+            toast('Order updated', `${order.orderNumber} moved to ${getStatusLabel(nextStatus)}.`, 'success');
+          } catch (error) {
+            toast('Order update failed', error.message || 'Unable to update the order status.', 'warning');
+            renderOrders();
+          }
+        }
+        return;
       case 'open-order-invoice':
         if (order) {
           await openOrderInvoice(order.id);
@@ -4109,7 +4212,7 @@
       renderCoupons();
       return;
     }
-    if (inputKey === 'influencersSearch') {
+    if (inputKey === 'influencersSearch' || inputKey === 'influencersMonth') {
       renderInfluencers();
       return;
     }
@@ -4238,7 +4341,7 @@
 
       const actionTarget = target.closest('[data-action]');
       if (actionTarget) {
-        if (actionTarget instanceof HTMLInputElement && actionTarget.type === 'checkbox') return;
+        if (actionTarget instanceof HTMLInputElement || actionTarget instanceof HTMLSelectElement) return;
         event.preventDefault();
         handleAction(actionTarget.dataset.action, actionTarget);
         return;
@@ -4269,7 +4372,7 @@
     document.addEventListener('change', (event) => {
       const target = event.target;
       if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement)) return;
-      if (target instanceof HTMLInputElement && target.dataset.action) {
+      if ((target instanceof HTMLInputElement || target instanceof HTMLSelectElement) && target.dataset.action) {
         handleAction(target.dataset.action, target);
         return;
       }
