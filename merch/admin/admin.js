@@ -1068,6 +1068,15 @@
     return state.categories.find((item) => Number(item.id) === Number(categoryId))?.name || 'Uncategorized';
   }
 
+  function getProductFallbackImage(product) {
+    const category = String(product?.category || '').toLowerCase();
+    const name = String(product?.name || '').toLowerCase();
+    if (category.includes('spray') || category === 'sprays' || name.includes('mist') || name.includes('spray')) return '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138';
+    if (category.includes('bottle') || category === 'bottles' || name.includes('bottle')) return '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113';
+    if (category.includes('hoodie') || name.includes('hoodie')) return '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg';
+    return '/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=120';
+  }
+
   function getStatusLabel(status) {
     const map = {
       pending: 'Pending',
@@ -1736,7 +1745,7 @@
                 ${pageItems.map((product) => `
                   <tr>
                     <td><input type="checkbox" data-action="toggle-product-selection" data-id="${product.id}" ${state.selectedProductIds.includes(product.id) ? 'checked' : ''} /></td>
-                    <td><img class="admin-thumb" src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}" /></td>
+                    <td><img class="admin-thumb" src="${escapeHtml(product.image || getProductFallbackImage(product))}" alt="${escapeHtml(product.name)}" onerror="this.onerror=null;this.src='${escapeHtml(getProductFallbackImage(product))}';" /></td>
                     <td><strong>${escapeHtml(product.name)}</strong><br><span class="admin-table__muted">${escapeHtml(product.description)}</span></td>
                     <td>${escapeHtml(product.variantLabel || 'Default variant')}</td>
                     <td>${escapeHtml(product.sku)}</td>
@@ -3083,14 +3092,16 @@
           <label class="admin-field"><span>SKU</span><input class="admin-input" name="sku" value="${escapeHtml(entity?.sku || '')}" required /></label>
           <label class="admin-field"><span>Category</span>
             <select class="admin-select" name="categoryId">
-              ${state.categories.map((category) => `<option value="${category.id}" ${Number(entity?.categoryId) === Number(category.id) ? 'selected' : ''}>${escapeHtml(category.name)}</option>`).join('')}
+              ${state.categories.map((category) => `<option value="${category.id}" ${String(entity?.categoryId ?? '') === String(category.id) ? 'selected' : ''}>${escapeHtml(category.name)}</option>`).join('')}
             </select>
           </label>
+          <label class="admin-field"><span>New Category Name</span><input class="admin-input" name="newCategoryName" value="" placeholder="Optional future category" /><small class="admin-field__hint">Enter a name to add a new category to the dropdown and storefront.</small></label>
+          <label class="admin-field"><span>Size / Ltrs / Metric</span><input class="admin-input" name="size" value="${escapeHtml(entity?.size || '')}" placeholder="e.g. 500ml, 1L, M, 42" /><small class="admin-field__hint">Use litres/ml for liquids, clothing size, or any future product metric.</small></label>
           <label class="admin-field"><span>Price (rupees)</span><input class="admin-input" name="price" type="number" min="0" step="1" value="${escapeHtml(entity?.price || 0)}" required /></label>
           <label class="admin-field"><span>Stock</span><input class="admin-input" name="stock" type="number" min="0" value="${escapeHtml(entity?.stock || 0)}" required /></label>
           <label class="admin-field"><span>Status</span>
             <select class="admin-select" name="status">
-              ${['published', 'draft', 'archived'].map((status) => `<option value="${status}" ${String(entity?.status || 'draft') === status ? 'selected' : ''}>${getStatusLabel(status)}</option>`).join('')}
+              ${['published', 'draft', 'archived'].map((status) => `<option value="${status}" ${String(entity?.status || 'published') === status ? 'selected' : ''}>${getStatusLabel(status)}</option>`).join('')}
             </select>
           </label>
           <label class="admin-field admin-field--wide"><span>Image URL</span><input class="admin-input" name="image" value="${escapeHtml(entity?.image || '')}" /></label>
@@ -3363,14 +3374,20 @@
 
   function updateProductFromForm(form, existing = null) {
     const fd = new FormData(form);
-    const categoryId = Number(fd.get('categoryId'));
-    const category = state.categories.find((item) => Number(item.id) === categoryId);
+    const categoryIdValue = String(fd.get('categoryId') || '').trim();
+    const categoryId = /^\d+$/.test(categoryIdValue) ? Number(categoryIdValue) : categoryIdValue;
+    const category = state.categories.find((item) => String(item.id) === String(categoryId));
+    const newCategoryName = String(fd.get('newCategoryName') || '').trim();
+    const newCategorySlug = slugify(newCategoryName);
     const product = {
       id: existing?.id || Number(uniqueId('prod').replace(/\D/g, '').slice(0, 6)),
       name: String(fd.get('name') || '').trim(),
       sku: String(fd.get('sku') || '').trim(),
       categoryId,
       category: category?.name || 'Uncategorized',
+      newCategoryName,
+      newCategorySlug,
+      size: String(fd.get('size') || '').trim(),
       price: Number(fd.get('price') || 0),
       priceLabel: catalogPrice(Number(fd.get('price') || 0)),
       stock: Number(fd.get('stock') || 0),
@@ -3511,6 +3528,63 @@
     } finally {
       renderDashboard();
       if (state.view === 'reports') renderReports();
+    }
+  }
+
+  async function loadProductData() {
+    try {
+      const result = await apiRequest('/api/merch/admin/products');
+      const categoryIds = { hoodies: 1, bottles: 2, sprays: 3 };
+      const unknownCategories = new Map();
+      const products = Array.isArray(result) ? result.map((product) => {
+        const variants = Array.isArray(product.variants) ? product.variants : [];
+        const firstVariant = variants[0] || {};
+        const price = Number(firstVariant.price || product.basePrice || 0) / 100;
+        const categorySlug = String(product.category || '').trim().toLowerCase();
+        const categoryId = categoryIds[categorySlug] || `custom-${categorySlug}`;
+        if (!categoryIds[categorySlug] && categorySlug && !unknownCategories.has(categorySlug)) {
+          unknownCategories.set(categorySlug, {
+            id: categoryId,
+            name: categorySlug.split('-').map((word) => word ? word[0].toUpperCase() + word.slice(1) : '').join(' '),
+            slug: categorySlug,
+            active: true,
+            productCount: 0,
+            description: `Products in the ${categorySlug.replace(/-/g, ' ')} category.`,
+          });
+        }
+        return {
+          id: Number(product.id),
+          name: product.name,
+          slug: product.slug,
+          primarySku: product.primarySku || firstVariant.sku || '',
+          categoryId,
+          category: state.categories.find((item) => String(item.id) === String(categoryId))?.name || unknownCategories.get(categorySlug)?.name || categorySlug,
+          price,
+          priceLabel: catalogPrice(price),
+          stock: Number(product.stock || 0),
+          status: product.status === 'published' ? 'published' : 'archived',
+          archived: Boolean(product.archived),
+          createdAt: product.createdAt || '',
+          sales: Number(product.sales || 0),
+          lowStockThreshold: Number(product.lowStockThreshold || LOW_STOCK_THRESHOLD),
+          featured: Boolean(product.featured),
+          image: product.imageUrl || product.image || '',
+          description: product.description || '',
+          specifications: product.specifications || {},
+          variants: variants.map((variant) => ({
+            ...variant,
+            price: Number(variant.price || 0) / 100,
+            stock: Number(variant.stock || 0),
+          })),
+        };
+      }) : [];
+      unknownCategories.forEach((category) => {
+        if (!state.categories.some((item) => String(item.id) === String(category.id))) state.categories.push(category);
+      });
+      state.products = expandProductVariants(products);
+      renderAll();
+    } catch (error) {
+      toast('Products unavailable', error.message || 'Unable to load products from the merch API.', 'warning');
     }
   }
 
@@ -3879,15 +3953,21 @@
         return;
       case 'delete-product':
         if (product) {
+          const productId = Number(product.parentProductId || product.productId || product.id);
           openConfirmModal({
             title: 'Delete product',
-            message: `Delete ${product.name}? This placeholder action removes the item from the in-memory catalog.`,
+            message: `Remove ${product.name} from the customer storefront? Existing order history will be preserved.`,
             confirmLabel: 'Delete',
-            onConfirm: () => {
-              state.products = state.products.filter((item) => Number(item.id) !== id);
-              state.selectedProductIds = state.selectedProductIds.filter((itemId) => itemId !== id);
-              toast('Product deleted', `${product.name} has been removed.`, 'danger');
-              renderAll();
+            onConfirm: async () => {
+              try {
+                await apiRequest(`/api/merch/admin/products/${encodeURIComponent(productId)}`, { method: 'DELETE' });
+                state.products = state.products.filter((item) => Number(item.parentProductId || item.productId || item.id) !== productId);
+                state.selectedProductIds = state.selectedProductIds.filter((itemId) => itemId !== id);
+                toast('Product deleted', `${product.name} has been removed from the storefront.`, 'danger');
+                renderAll();
+              } catch (error) {
+                toast('Delete failed', error.message || 'Unable to remove the product.', 'warning');
+              }
             },
           });
         }
@@ -3912,14 +3992,22 @@
       case 'bulk-delete':
         openConfirmModal({
           title: 'Delete selected products',
-          message: 'Remove all selected products from this mock catalog?',
+          message: 'Remove all selected products from the customer storefront? Existing order history will be preserved.',
           confirmLabel: 'Delete',
-          onConfirm: () => {
-            const ids = new Set(state.selectedProductIds);
-            state.products = state.products.filter((item) => !ids.has(item.id));
-            state.selectedProductIds = [];
-            toast('Bulk delete complete', 'Selected products were removed.', 'danger');
-            renderAll();
+          onConfirm: async () => {
+            const ids = [...new Set(state.products
+              .filter((item) => state.selectedProductIds.includes(item.id))
+              .map((item) => Number(item.parentProductId || item.productId || item.id))
+              .filter((itemId) => Number.isInteger(itemId) && itemId > 0))];
+            try {
+              await Promise.all(ids.map((productId) => apiRequest(`/api/merch/admin/products/${encodeURIComponent(productId)}`, { method: 'DELETE' })));
+              state.selectedProductIds = [];
+              await loadProductData();
+              toast('Bulk delete complete', 'Selected products were removed from the storefront.', 'danger');
+              renderAll();
+            } catch (error) {
+              toast('Bulk delete failed', error.message || 'Unable to remove the selected products.', 'warning');
+            }
           },
         });
         return;
@@ -4288,11 +4376,41 @@
         return;
       }
       if (existingId) {
+        toast('Product editing unavailable', 'Existing product editing is still local. New products are synced to the storefront.', 'warning');
         state.products = state.products.map((item) => (Number(item.id) === existingId ? entity : item));
-        toast('Product saved', `${entity.name} updated successfully.`, 'success');
       } else {
-        state.products.unshift(entity);
-        toast('Product added', `${entity.name} added to the catalog.`, 'success');
+        if (entity.newCategoryName && entity.newCategorySlug) {
+          const existingCategory = state.categories.find((category) => category.slug === entity.newCategorySlug);
+          if (!existingCategory) {
+            state.categories.push({ id: `custom-${entity.newCategorySlug}`, name: entity.newCategoryName, slug: entity.newCategorySlug, active: true, productCount: 0, description: `Products in the ${entity.newCategoryName} category.` });
+          }
+        }
+        const selectedCategory = entity.newCategorySlug
+          ? { slug: entity.newCategorySlug }
+          : state.categories.find((category) => String(category.id) === String(entity.categoryId));
+        try {
+          await apiRequest('/api/merch/admin/products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: entity.name,
+            sku: entity.sku,
+            category: selectedCategory?.slug || 'uncategorized',
+            price: entity.price,
+            stock: entity.stock,
+            status: entity.status,
+            image: entity.image,
+            description: entity.description,
+            specifications: entity.specifications,
+            size: entity.size,
+          }),
+          });
+        } catch (error) {
+          toast('Product not saved', error.message || 'Unable to save the product. Please try again.', 'danger');
+          return;
+        }
+        toast('Product added', `${entity.name} is now available in the merch store.`, 'success');
+        await loadProductData();
       }
       closeModal();
       renderAll();
@@ -4477,6 +4595,7 @@
     bindEvents();
     renderAll();
     loadDashboardStats();
+    loadProductData();
     loadOrderData();
     loadCustomerData();
     loadInfluencerData();
