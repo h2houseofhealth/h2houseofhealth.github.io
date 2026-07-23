@@ -10,7 +10,7 @@ const nodemailer = require('nodemailer');
 const express = require('express');
 const router = express.Router();
 
-module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, JWT_SECRET, jwt, couponHelpers = {} }) {
+module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, JWT_SECRET, jwt, sendMerchEmail = null, couponHelpers = {} }) {
   const {
     normalizeCouponCode,
     validateCouponForUser,
@@ -288,6 +288,71 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function formatMerchPrice(paise) {
     return '₹' + Number(paise || 0).toLocaleString('en-IN');
+  }
+
+  function formatMerchEmailCurrency(paise) {
+    return `&#8377;${(Number(paise || 0) / 100).toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  }
+
+  function formatMerchEmailDateTime(value) {
+    const parsed = new Date(String(value || '').replace(' ', 'T'));
+    if (Number.isNaN(parsed.getTime())) return '';
+    return new Intl.DateTimeFormat('en-IN', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    }).format(parsed);
+  }
+
+  function addMerchEmailDays(value, days) {
+    const parsed = new Date(String(value || '').replace(' ', 'T'));
+    const date = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+    date.setDate(date.getDate() + Number(days || 0));
+    return date;
+  }
+
+  function formatMerchEmailDate(value) {
+    return new Intl.DateTimeFormat('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }).format(value);
+  }
+
+  function getMerchEmailOrigin(req) {
+    const explicit = String(process.env.PUBLIC_APP_URL || process.env.FRONTEND_ORIGIN || process.env.API_BASE_URL || '').trim();
+    if (explicit) return explicit.replace(/\/+$/, '');
+    const protocol = String(req?.protocol || 'https').trim();
+    const host = String(req?.get?.('host') || '').trim();
+    return host ? `${protocol}://${host}` : 'https://h2houseofhealth.com';
+  }
+
+  function getMerchEmailAssetUrl(req, pathValue) {
+    const value = String(pathValue || '').trim();
+    if (/^https:\/\//i.test(value)) return value;
+    if (/^http:\/\//i.test(value) && !/\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(value)) {
+      return value.replace(/^http:/i, 'https:');
+    }
+    if (/^http:\/\//i.test(value)) {
+      try {
+        const parsed = new URL(value);
+        return `https://h2houseofhealth.com${parsed.pathname}${parsed.search}`;
+      } catch {
+        return 'https://h2houseofhealth.com/';
+      }
+    }
+    const normalizedPath = value.startsWith('/') ? value : `/${value}`;
+    const origin = getMerchEmailOrigin(req);
+    const assetOrigin = /^https:\/\//i.test(origin) && !/\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(origin)
+      ? origin
+      : 'https://h2houseofhealth.com';
+    return `${assetOrigin}${normalizedPath}`;
   }
 
   const LOW_STOCK_THRESHOLD = 15;
@@ -2284,6 +2349,370 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
 
   // ─── Auth middleware (optional - for admin) ───
+  function getMerchOrderEmailData(orderId) {
+    const id = Number(orderId);
+    if (!Number.isInteger(id) || id <= 0) return null;
+    const order = db.prepare(`
+      SELECT id, order_number AS orderNumber, customer_name AS customerName, customer_email AS customerEmail,
+             customer_phone AS customerPhone, subtotal, gst_amount AS gstAmount, shipping_charge AS shippingCharge,
+             discount_amount AS discountAmount, total_amount AS totalAmount, payment_method AS paymentMethod,
+             payment_status AS paymentStatus, shipping_address AS shippingAddress, created_at AS createdAt
+      FROM merch_orders
+      WHERE id = ?
+      LIMIT 1
+    `).get(id);
+    if (!order) return null;
+    const items = db.prepare(`
+      SELECT oi.id, oi.product_name AS productName, oi.variant_label AS variantLabel, oi.sku,
+             oi.unit_price AS unitPrice, oi.quantity, oi.line_total AS lineTotal,
+             p.image_url AS imageUrl
+      FROM merch_order_items oi
+      LEFT JOIN merch_variants v ON v.id = oi.variant_id
+      LEFT JOIN merch_products p ON p.id = v.product_id
+      WHERE oi.order_id = ?
+      ORDER BY oi.id ASC
+    `).all(id);
+    return { order, items };
+  }
+
+  function buildMerchEmailLinks(req, orderId) {
+    const origin = getMerchEmailOrigin(req);
+    return {
+      home: `${origin}/`,
+      shop: `${origin}/merch/`,
+      track: `${origin}/merch/#track-order/${encodeURIComponent(String(orderId || ''))}`,
+      logo: getMerchEmailAssetUrl(req, '/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=240'),
+      hero: getMerchEmailAssetUrl(req, '/booking/assets/invoice-page.png'),
+      leaf: getMerchEmailAssetUrl(req, '/booking/assets/leaf.png'),
+      placeholder: getMerchEmailAssetUrl(req, '/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=400'),
+      email: 'mailto:hello@h2houseofhealth.com',
+      phone: 'tel:+919876543210',
+      instagram: process.env.H2_INSTAGRAM_URL || origin,
+      facebook: process.env.H2_FACEBOOK_URL || origin,
+      youtube: process.env.H2_YOUTUBE_URL || origin,
+    };
+  }
+
+  function buildMerchOrderConfirmationText({ order, items, expectedDelivery, links }) {
+    return [
+      `Hi ${order.customerName || 'there'},`,
+      '',
+      'Thank you. Your H2 House of Health merchandise order is confirmed.',
+      '',
+      `Order ID: ${order.orderNumber || `Order #${order.id}`}`,
+      `Order Date: ${formatMerchEmailDateTime(order.createdAt) || order.createdAt || ''}`,
+      `Payment Status: ${String(order.paymentStatus || 'paid').toUpperCase()}`,
+      `Payment Method: ${String(order.paymentMethod || 'online').toUpperCase()}`,
+      `Customer Email: ${order.customerEmail || ''}`,
+      '',
+      'Order Summary:',
+      ...items.map((item) => `- ${item.productName}${item.variantLabel ? ` (${item.variantLabel})` : ''} x ${item.quantity}: Rs. ${(Number(item.lineTotal || 0) / 100).toFixed(2)}`),
+      '',
+      `Subtotal: Rs. ${(Number(order.subtotal || 0) / 100).toFixed(2)}`,
+      `Shipping: Rs. ${(Number(order.shippingCharge || 0) / 100).toFixed(2)}`,
+      `GST (inclusive): Rs. ${(Number(order.gstAmount || 0) / 100).toFixed(2)}`,
+      `Total Paid: Rs. ${(Number(order.totalAmount || 0) / 100).toFixed(2)}`,
+      '',
+      `Expected Delivery: ${expectedDelivery}`,
+      `Track My Order: ${links.track}`,
+      `Continue Shopping: ${links.shop}`,
+      '',
+      'Need help with your order? Contact hello@h2houseofhealth.com or +91 98765 43210.',
+    ].join('\n');
+  }
+
+  function buildMerchOrderConfirmationHtml({ order, items, req }) {
+    const links = buildMerchEmailLinks(req, order.id);
+    const expectedStart = addMerchEmailDays(order.createdAt, 5);
+    const expectedEnd = addMerchEmailDays(order.createdAt, 9);
+    const expectedDelivery = `${formatMerchEmailDate(expectedStart)} - ${formatMerchEmailDate(expectedEnd)}`;
+    const shippingAddress = formatMerchAddressLine(parseMerchShippingAddress(order.shippingAddress) || {}) || 'H2 House of Health, Hyderabad';
+    const firstItem = items[0] || {};
+    const productImage = getMerchEmailAssetUrl(req, firstItem.imageUrl || links.placeholder);
+    const primaryItemName = firstItem.productName || 'H2 House Merch';
+    const primaryVariant = firstItem.variantLabel || firstItem.sku || 'Standard';
+    const totalQuantity = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0) || 1;
+    const itemRows = items.map((item) => `
+      <tr>
+        <td class="item-name" style="padding:9px 22px;color:#14233b;font-size:14px;line-height:20px;word-break:break-word;">${escapeHtml(item.productName || 'H2 House Merch')}</td>
+        <td class="item-qty" align="center" style="padding:9px 8px;color:#14233b;font-size:14px;line-height:20px;white-space:nowrap;">${escapeHtml(String(item.quantity || 1))}</td>
+        <td class="item-price" align="right" style="padding:9px 22px;color:#14233b;font-size:14px;line-height:20px;white-space:nowrap;">${formatMerchEmailCurrency(item.lineTotal || 0)}</td>
+      </tr>
+    `).join('');
+    const text = buildMerchOrderConfirmationText({ order, items, expectedDelivery, links });
+    const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your H2 order is confirmed</title>
+    <style>
+      body, table, td, p, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+      table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+      img { -ms-interpolation-mode: bicubic; }
+      .product-name { overflow-wrap: break-word; word-break: break-word; }
+      .price-table-value, .total-value, .product-price, .item-price, .item-qty { white-space: nowrap; }
+      @media only screen and (max-width: 620px) {
+        .email-shell { width: 100% !important; max-width: 600px !important; }
+        .mobile-pad { padding-left: 20px !important; padding-right: 20px !important; }
+        .mobile-top-pad { padding-top: 22px !important; }
+        .mobile-stack { display: block !important; width: 100% !important; }
+        .mobile-center { text-align: center !important; }
+        .mobile-left { text-align: left !important; }
+        .mobile-button { display: block !important; width: 100% !important; min-height: 44px !important; box-sizing: border-box !important; }
+        .mobile-button-wrap { display: block !important; width: 100% !important; padding-left: 0 !important; padding-right: 0 !important; padding-bottom: 12px !important; }
+        .mobile-logo { width: 142px !important; max-width: 142px !important; margin: 0 auto !important; }
+        .mobile-help { padding-top: 16px !important; text-align: center !important; }
+        .hero-pad { padding-top: 18px !important; padding-bottom: 24px !important; }
+        .hero-copy { padding-left: 0 !important; }
+        .hero-title { font-size: 42px !important; line-height: 48px !important; }
+        .hero-subtitle { font-size: 24px !important; line-height: 30px !important; }
+        .hero-image { width: 170px !important; margin: 18px auto 0 !important; }
+        .stat-cell { display: block !important; width: 100% !important; padding: 20px 12px !important; border-right: 0 !important; border-bottom: 1px solid rgba(255,255,255,0.45) !important; }
+        .stat-cell-last { border-bottom: 0 !important; }
+        .product-image-cell { padding: 18px 0 8px !important; text-align: center !important; }
+        .product-image { width: 100% !important; max-width: 224px !important; height: auto !important; margin: 0 auto !important; }
+        .product-copy { padding: 10px 0 6px !important; }
+        .product-price { padding: 6px 0 18px !important; text-align: right !important; }
+        .product-name { font-size: 20px !important; line-height: 26px !important; }
+        .price-table-label { font-size: 16px !important; line-height: 23px !important; }
+        .price-table-value { font-size: 16px !important; line-height: 23px !important; }
+        .total-label { font-size: 22px !important; line-height: 28px !important; }
+        .total-value { font-size: 26px !important; line-height: 32px !important; }
+        .delivery-icon { display: block !important; width: 100% !important; padding: 18px 0 4px !important; text-align: center !important; }
+        .delivery-copy { display: block !important; width: 100% !important; padding: 8px 18px 18px !important; text-align: center !important; box-sizing: border-box !important; }
+        .footer-logo-cell { border-right: 0 !important; border-bottom: 1px solid #d6a28c !important; padding: 0 0 18px !important; }
+        .footer-copy-cell { padding: 18px 0 0 !important; }
+        .footer-contact-cell { padding-top: 4px !important; }
+        .footer-leaf-cell { padding-top: 18px !important; text-align: center !important; }
+        .footer-leaf-cell img { margin: 0 auto !important; }
+        .footer-contact { display: block !important; width: 100% !important; padding: 4px 0 !important; }
+        .footer-separator { display: none !important; }
+      }
+      @media only screen and (max-width: 390px) {
+        .mobile-pad { padding-left: 16px !important; padding-right: 16px !important; }
+        .hero-title { font-size: 38px !important; line-height: 44px !important; }
+        .hero-subtitle { font-size: 22px !important; line-height: 28px !important; }
+        .hero-image { width: 170px !important; }
+        .mobile-button { font-size: 18px !important; line-height: 24px !important; padding-left: 12px !important; padding-right: 12px !important; }
+        .total-value { font-size: 24px !important; line-height: 30px !important; }
+      }
+      @media only screen and (max-width: 360px) {
+        .mobile-pad { padding-left: 14px !important; padding-right: 14px !important; }
+        .hero-title { font-size: 34px !important; line-height: 40px !important; }
+        .hero-subtitle { font-size: 20px !important; line-height: 26px !important; }
+        .hero-image { width: 154px !important; }
+        .stat-cell { padding: 18px 10px !important; }
+        .product-image { max-width: 196px !important; }
+        .price-table-label, .price-table-value { padding-left: 10px !important; padding-right: 10px !important; }
+        .total-label { font-size: 20px !important; line-height: 26px !important; padding-left: 10px !important; padding-right: 8px !important; }
+        .total-value { font-size: 22px !important; line-height: 28px !important; padding-left: 8px !important; padding-right: 10px !important; }
+        .footer-copy-cell p { font-size: 13px !important; line-height: 20px !important; }
+      }
+    </style>
+  </head>
+  <body style="margin:0;padding:0;background:#f6f1ec;color:#14233b;font-family:Arial,Helvetica,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f6f1ec;">
+      <tr>
+        <td align="center" style="padding:0;">
+          <table role="presentation" class="email-shell" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:600px;border-collapse:collapse;background:#fffaf7;">
+            <tr>
+              <td class="mobile-pad mobile-top-pad" style="padding:38px 32px 18px;background:#fffaf7;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+                  <tr>
+                    <td class="mobile-stack mobile-center" valign="top" style="width:50%;">
+                      <a href="${escapeHtml(links.home)}" style="text-decoration:none;">
+                        <img class="mobile-logo" src="${escapeHtml(links.logo)}" width="154" alt="H2 House of Health logo" style="display:block;border:0;width:154px;max-width:154px;height:auto;">
+                      </a>
+                    </td>
+                    <td class="mobile-stack mobile-center mobile-help" valign="top" align="right" style="width:50%;font-size:13px;line-height:20px;color:#14233b;">
+                      <p style="margin:6px 0 5px;font-size:15px;line-height:20px;font-weight:500;color:#14233b;">Need help?</p>
+                      <a href="${escapeHtml(links.email)}" style="color:#14233b;text-decoration:none;font-size:13px;line-height:18px;">hello@h2houseofhealth.com</a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td class="mobile-pad hero-pad" style="padding:26px 32px 34px;background:#fffaf7;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+                  <tr>
+                    <td class="mobile-stack mobile-center hero-copy" valign="middle" style="width:68%;text-align:center;padding-left:80px;">
+                      <h1 class="hero-title" style="margin:0;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:50px;line-height:58px;font-weight:700;letter-spacing:0;">Thank You!</h1>
+                      <h2 class="hero-subtitle" style="margin:2px 0 0;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:27px;line-height:34px;font-weight:700;letter-spacing:0;">Your order is confirmed.</h2>
+                    </td>
+                    <td class="mobile-stack mobile-center" valign="middle" align="right" style="width:32%;">
+                      <img class="hero-image" src="${escapeHtml(links.hero)}" width="150" alt="H2 House of Health wellness hero image" style="display:block;border:0;width:150px;max-width:100%;height:auto;border-radius:6px;">
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td class="mobile-pad" style="padding:0 24px 34px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;background:#b63b20;border-radius:8px;box-shadow:0 8px 18px rgba(88,36,19,0.12);">
+                  <tr>
+                    <td class="stat-cell" align="center" style="width:33.33%;padding:28px 14px;border-right:1px solid rgba(255,255,255,0.48);color:#ffffff;">
+                      <div style="font-size:32px;line-height:32px;color:#ffffff;">&#9633;</div>
+                      <p style="margin:18px 0 9px;font-size:18px;line-height:23px;font-weight:500;color:#ffffff;">Order ID</p>
+                      <p style="margin:0;font-size:17px;line-height:24px;color:#ffffff;">${escapeHtml(order.orderNumber || `Order #${order.id}`)}</p>
+                    </td>
+                    <td class="stat-cell" align="center" style="width:33.33%;padding:28px 14px;border-right:1px solid rgba(255,255,255,0.48);color:#ffffff;">
+                      <div style="font-size:32px;line-height:32px;color:#ffffff;">&#128197;</div>
+                      <p style="margin:18px 0 9px;font-size:18px;line-height:23px;font-weight:500;color:#ffffff;">Order Date</p>
+                      <p style="margin:0;font-size:17px;line-height:24px;color:#ffffff;">${escapeHtml(formatMerchEmailDateTime(order.createdAt) || order.createdAt || '')}</p>
+                    </td>
+                    <td class="stat-cell stat-cell-last" align="center" style="width:33.33%;padding:28px 14px;color:#ffffff;">
+                      <div style="font-size:32px;line-height:32px;color:#ffffff;">&#10003;</div>
+                      <p style="margin:18px 0 9px;font-size:18px;line-height:23px;font-weight:500;color:#ffffff;">Payment</p>
+                      <p style="margin:0;font-size:17px;line-height:24px;color:#ffffff;">${escapeHtml(String(order.paymentStatus || 'paid').replace(/_/g, ' '))}</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td class="mobile-pad" style="padding:0 30px 24px;">
+                <h2 style="margin:0 0 14px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:34px;font-weight:700;">Order Summary</h2>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-top:1px solid #dcae9b;">
+                  <tr>
+                    <td class="mobile-stack product-image-cell" valign="top" style="width:172px;padding:18px 26px 18px 0;">
+                      <img class="product-image" src="${escapeHtml(productImage)}" width="150" alt="${escapeHtml(primaryItemName)} product image" style="display:block;border:0;width:150px;max-width:150px;height:auto;border-radius:8px;background:#f5eee8;">
+                    </td>
+                    <td class="mobile-stack product-copy mobile-left" valign="top" style="padding:28px 0 18px;">
+                      <h3 class="product-name" style="margin:0 0 18px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:22px;line-height:28px;font-weight:700;overflow-wrap:break-word;word-break:break-word;">${escapeHtml(primaryItemName)}</h3>
+                      <p style="margin:0 0 12px;color:#14233b;font-size:18px;line-height:25px;">Variant: ${escapeHtml(primaryVariant)}</p>
+                      <p style="margin:0 0 12px;color:#14233b;font-size:18px;line-height:25px;">Quantity: ${escapeHtml(String(totalQuantity))}</p>
+                      <p style="margin:0;color:#52606f;font-size:14px;line-height:20px;">Payment Method: ${escapeHtml(String(order.paymentMethod || 'online').toUpperCase())}</p>
+                    </td>
+                    <td class="mobile-stack product-price" valign="bottom" align="right" style="width:132px;padding:18px 0 22px;font-family:Georgia,'Times New Roman',serif;color:#14233b;font-size:24px;line-height:30px;font-weight:700;white-space:nowrap;">${formatMerchEmailCurrency(firstItem.lineTotal || order.totalAmount || 0)}</td>
+                  </tr>
+                </table>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;border:1px solid #e7cabb;border-radius:8px;background:#fffaf7;table-layout:fixed;">
+                  <colgroup>
+                    <col width="60%">
+                    <col width="10%">
+                    <col width="30%">
+                  </colgroup>
+                  ${itemRows}
+                  <tr><td colspan="3" style="padding:0 0 8px;border-top:1px solid #f0ded4;"></td></tr>
+                  <tr>
+                    <td class="price-table-label" colspan="2" style="padding:8px 22px;color:#14233b;font-size:17px;line-height:24px;">Subtotal</td>
+                    <td class="price-table-value" align="right" style="padding:8px 22px;color:#14233b;font-size:17px;line-height:24px;white-space:nowrap;">${formatMerchEmailCurrency(order.subtotal || 0)}</td>
+                  </tr>
+                  <tr>
+                    <td class="price-table-label" colspan="2" style="padding:8px 22px;color:#14233b;font-size:17px;line-height:24px;">Shipping</td>
+                    <td class="price-table-value" align="right" style="padding:8px 22px;color:#14233b;font-size:17px;line-height:24px;white-space:nowrap;">${formatMerchEmailCurrency(order.shippingCharge || 0)}</td>
+                  </tr>
+                  <tr>
+                    <td class="price-table-label" colspan="2" style="padding:8px 22px 16px;color:#14233b;font-size:17px;line-height:24px;">GST (Inclusive)</td>
+                    <td class="price-table-value" align="right" style="padding:8px 22px 16px;color:#14233b;font-size:17px;line-height:24px;white-space:nowrap;">${formatMerchEmailCurrency(order.gstAmount || 0)}</td>
+                  </tr>
+                  <tr>
+                    <td class="total-label" colspan="2" style="padding:16px 22px;background:#f5e8e1;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:30px;font-weight:700;border-radius:6px 0 0 6px;">Total Paid</td>
+                    <td class="total-value" align="right" style="padding:16px 22px;background:#f5e8e1;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:27px;line-height:32px;font-weight:700;white-space:nowrap;border-radius:0 6px 6px 0;">${formatMerchEmailCurrency(order.totalAmount || 0)}</td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td class="mobile-pad" style="padding:0 30px 18px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;border:1px solid #e7cabb;border-radius:8px;background:#fffaf7;">
+                  <tr>
+                    <td class="delivery-icon" width="122" align="center" style="padding:23px 14px;color:#ad3c22;font-size:42px;line-height:42px;">&#128666;</td>
+                    <td class="delivery-copy" style="padding:22px 22px 22px 0;">
+                      <p style="margin:0 0 7px;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:19px;line-height:25px;">Expected Delivery</p>
+                      <p style="margin:0 0 8px;color:#14233b;font-weight:700;font-size:20px;line-height:27px;">${escapeHtml(expectedDelivery)}</p>
+                      <p style="margin:0;color:#14233b;font-size:16px;line-height:23px;">We'll notify you once your order is shipped.</p>
+                      <p style="margin:10px 0 0;color:#657384;font-size:13px;line-height:19px;">Ship to: ${escapeHtml(shippingAddress)}</p>
+                      <p style="margin:4px 0 0;color:#657384;font-size:13px;line-height:19px;">Email: ${escapeHtml(order.customerEmail || '')}</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td class="mobile-pad" style="padding:0 30px 30px;">
+                <a class="mobile-button" href="${escapeHtml(links.track)}" style="display:block;text-align:center;padding:17px 18px;border-radius:6px;background:#b63b20;color:#ffffff;text-decoration:none;font-family:Georgia,'Times New Roman',serif;font-size:22px;line-height:28px;font-weight:700;">Track My Order&nbsp;&nbsp;&#8594;</a>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:16px;">
+                  <tr>
+                    <td class="mobile-stack mobile-button-wrap" style="width:50%;padding-right:5px;">
+                      <a class="mobile-button" href="${escapeHtml(links.home)}" style="display:block;text-align:center;padding:15px 12px;border:1px solid #b63b20;border-radius:6px;color:#ad3c22;text-decoration:none;font-family:Georgia,'Times New Roman',serif;font-size:19px;line-height:25px;font-weight:700;background:#fffaf7;">&#8962; &nbsp; Back to Home</a>
+                    </td>
+                    <td class="mobile-stack mobile-button-wrap" style="width:50%;padding-left:5px;">
+                      <a class="mobile-button" href="${escapeHtml(links.shop)}" style="display:block;text-align:center;padding:15px 12px;border:1px solid #b63b20;border-radius:6px;color:#ad3c22;text-decoration:none;font-family:Georgia,'Times New Roman',serif;font-size:19px;line-height:25px;font-weight:700;background:#fffaf7;">&#128717; &nbsp; Continue Shopping</a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td class="mobile-pad" style="padding:28px 30px 26px;background:#f4eee9;border-top:1px solid #ead8cd;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+                  <tr>
+                    <td class="mobile-stack mobile-center footer-logo-cell" valign="middle" style="width:31%;padding-right:22px;border-right:1px solid #d2a08d;">
+                      <a href="${escapeHtml(links.home)}"><img src="${escapeHtml(links.logo)}" width="132" alt="H2 House of Health logo" style="display:block;border:0;width:132px;max-width:132px;height:auto;"></a>
+                    </td>
+                    <td class="mobile-stack mobile-center footer-copy-cell" valign="middle" style="padding-left:26px;">
+                      <p style="margin:0 0 15px;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:21px;font-weight:700;letter-spacing:1px;">PREVENTIVE TODAY, HEALTHIER TOMORROW.</p>
+                      <p style="margin:0 0 18px;">
+                        <a href="${escapeHtml(links.instagram)}" style="display:inline-block;width:26px;height:26px;margin-right:28px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:24px;line-height:26px;text-align:center;" title="Instagram">&#9678;</a>
+                        <a href="${escapeHtml(links.facebook)}" style="display:inline-block;width:26px;height:26px;margin-right:28px;color:#ad3c22;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:24px;line-height:26px;text-align:center;" title="Facebook">f</a>
+                        <a href="${escapeHtml(links.youtube)}" style="display:inline-block;width:30px;height:24px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:24px;line-height:24px;text-align:center;" title="YouTube">&#9658;</a>
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:24px;">
+                  <tr>
+                    <td class="mobile-stack mobile-center footer-contact-cell" valign="top" style="width:76%;">
+                      <p style="margin:0 0 8px;color:#14233b;font-size:15px;line-height:22px;">
+                        <span style="color:#ad3c22;font-size:18px;line-height:18px;">&#9993;</span>
+                        <span>&nbsp;&nbsp;</span>
+                        <span class="footer-contact"><a href="${escapeHtml(links.email)}" style="color:#111827;text-decoration:none;">hello@h2houseofhealth.com</a></span>
+                        <span class="footer-separator">&nbsp;&nbsp; | &nbsp;&nbsp;</span>
+                        <span style="color:#ad3c22;font-size:18px;line-height:18px;">&#9742;</span>
+                        <span>&nbsp;&nbsp;</span>
+                        <span class="footer-contact"><a href="${escapeHtml(links.phone)}" style="color:#111827;text-decoration:none;">+91 98765 43210</a></span>
+                      </p>
+                      <p style="margin:0;color:#14233b;font-size:15px;line-height:22px;">
+                        <span style="color:#ad3c22;font-size:18px;line-height:18px;">&#9679;</span>
+                        <span>&nbsp;&nbsp;</span>
+                        H2 House of Health, Hyderabad
+                      </p>
+                    </td>
+                    <td class="mobile-stack mobile-center footer-leaf-cell" valign="bottom" align="right" style="width:24%;">
+                      <img src="${escapeHtml(links.leaf)}" width="82" alt="" style="display:block;border:0;width:82px;max-width:82px;height:auto;margin-left:auto;">
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+    return { html, text };
+  }
+
+  async function sendMerchOrderConfirmationEmail(orderId, req) {
+    const data = getMerchOrderEmailData(orderId);
+    if (!data || !isValidMerchEmail(data.order.customerEmail)) return;
+    if (typeof sendMerchEmail !== 'function') {
+      console.warn('[Merch] Order confirmation email skipped: email service is not configured.');
+      return;
+    }
+    const { html, text } = buildMerchOrderConfirmationHtml({ order: data.order, items: data.items, req });
+    await sendMerchEmail({
+      to: String(data.order.customerEmail || '').trim().toLowerCase(),
+      subject: `Your H2 order is confirmed - ${data.order.orderNumber || `Order #${data.order.id}`}`,
+      text,
+      html,
+    });
+  }
+
   function requireAdmin(req, res, next) {
     const token = req.cookies?.booking_portal_token ||
       (req.headers.authorization || '').replace('Bearer ', '');
@@ -2539,6 +2968,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         discountAmountPaise: Number(order.discountAmount || 0),
       });
     }
+
+    sendMerchOrderConfirmationEmail(order.id, req).catch((error) => {
+      console.error('[Merch] Failed to send order confirmation email:', error?.message || error);
+    });
 
     res.json({ success: true, message: 'Payment verified, order confirmed', orderId: order.id });
   });

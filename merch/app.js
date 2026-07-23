@@ -1,10 +1,10 @@
-/* House Merch – Storefront App */
+﻿/* House Merch â€“ Storefront App */
 /* Vanilla JS SPA following booking portal patterns */
 
 (function () {
   'use strict';
 
-  // ─── API Configuration ───
+  // â”€â”€â”€ API Configuration â”€â”€â”€
   function resolveApiUrl() {
     const meta = document.querySelector('meta[name="api-base-url"]');
     const configured = meta ? String(meta.content || '').trim() : '';
@@ -63,7 +63,7 @@
     return data || {};
   }
 
-  // ─── State ───
+  // â”€â”€â”€ State â”€â”€â”€
   const state = {
     products: [],
     cart: [],
@@ -111,11 +111,11 @@
 
   const FALLBACK_PRODUCT_IMAGE = '/booking/assets/service-hydrogen-session.jpg';
 
-  // ─── Product Data (Static catalog until API is built) ───
+  // â”€â”€â”€ Product Data (Static catalog until API is built) â”€â”€â”€
   const PRODUCTS = [
     {
       id: 1,
-      name: 'Zenith Hoodie – Black',
+      name: 'Zenith Hoodie â€“ Black',
       slug: 'zenith-hoodie-black',
       description: 'Meet the hoodie that understands the assignment. Engineered from a heavyweight 450 GSM organic cotton blend, the Zenith offers a structured, premium silhouette without sacrificing that "lived-in" softness. Whether you\'re hitting the gym, the coffee shop, or the couch, this is your new uniform.',
       category: 'hoodies',
@@ -140,9 +140,9 @@
     },
     {
       id: 2,
-      name: 'Zenith Hoodie – Sand',
+      name: 'Zenith Hoodie â€“ Sand',
       slug: 'zenith-hoodie-sand',
-      description: 'Same Zenith. New vibe. The Sand colourway brings an earthy, tonal palette to the heavyweight 450 GSM frame. Perfect for layering or wearing solo — this piece transitions from sunrise sessions to evening outings effortlessly.',
+      description: 'Same Zenith. New vibe. The Sand colourway brings an earthy, tonal palette to the heavyweight 450 GSM frame. Perfect for layering or wearing solo â€” this piece transitions from sunrise sessions to evening outings effortlessly.',
       category: 'hoodies',
       basePrice: 3499.00,
       images: [
@@ -165,7 +165,7 @@
       id: 3,
       name: 'H2 Molecular Hydrogen Water Bottle',
       slug: 'molecular-hydrogen-water-bottle',
-      description: 'Generate hydrogen-rich water on the go. This portable bottle uses advanced PEM/SPE electrolysis technology to infuse your water with molecular hydrogen (H₂) in just 3 minutes. BPA-free, USB-C rechargeable, and built to last.',
+      description: 'Generate hydrogen-rich water on the go. This portable bottle uses advanced PEM/SPE electrolysis technology to infuse your water with molecular hydrogen (Hâ‚‚) in just 3 minutes. BPA-free, USB-C rechargeable, and built to last.',
       category: 'bottles',
       basePrice: 6499.00,
       images: [
@@ -284,7 +284,7 @@
     return getGalleryVariantForIndex(product, index);
   }
 
-  // ─── Utility ───
+  // â”€â”€â”€ Utility â”€â”€â”€
   const LOW_STOCK_THRESHOLD = 15;
 
   function formatPrice(amountInr) {
@@ -307,7 +307,7 @@
     const min = Math.min(...prices);
     const max = Math.max(...prices);
     if (min === max) return formatPrice(min);
-    return `${formatPrice(min)} – ${formatPrice(max)}`;
+    return `${formatPrice(min)} - ${formatPrice(max)}`;
   }
 
   function getDefaultPurchasableVariant(product) {
@@ -715,7 +715,7 @@
     }
   }
 
-  // ─── Elements ───
+  // â”€â”€â”€ Elements â”€â”€â”€
   const els = {
     productGrid: document.getElementById('productGrid'),
     productEmpty: document.getElementById('productEmpty'),
@@ -755,7 +755,7 @@
     accountDrawerContent: document.getElementById('accountDrawerContent'),
   };
 
-  // ─── Cart (localStorage for now) ───
+  // â”€â”€â”€ Cart (localStorage for now) â”€â”€â”€
   function loadCart() {
     try {
       const saved = localStorage.getItem('merch_cart');
@@ -909,7 +909,7 @@
     }
   }
 
-  // ─── Render: Cart Badge ───
+  // â”€â”€â”€ Render: Cart Badge â”€â”€â”€
   function renderCartBadge() {
     const count = getCartCount();
     if (count > 0) {
@@ -920,7 +920,7 @@
     }
   }
 
-  // ─── Render: Cart Drawer ───
+  // â”€â”€â”€ Render: Cart Drawer â”€â”€â”€
   function renderCart() {
     if (state.cart.length === 0) {
       els.cartItems.innerHTML = '';
@@ -951,10 +951,10 @@
         </div>
         <div class="cart-item__details">
           <p class="cart-item__name">${escapeHtml(item.productName)}</p>
-          <p class="cart-item__variant">${escapeHtml(item.variantLabel)} × ${item.quantity}</p>
+          <p class="cart-item__variant">${escapeHtml(item.variantLabel)} Ã— ${item.quantity}</p>
           <p class="cart-item__price">${formatPrice(item.price * item.quantity)}</p>
         </div>
-        <button class="cart-item__remove" data-variant-id="${item.variantId}" aria-label="Remove">✕</button>
+        <button class="cart-item__remove" data-variant-id="${item.variantId}" aria-label="Remove">âœ•</button>
       </div>
     `).join('');
 
@@ -1052,7 +1052,9 @@
       map: '<path d="M12 21s7-5.2 7-12a7 7 0 1 0-14 0c0 6.8 7 12 7 12Z" /><circle cx="12" cy="9" r="2.4" />',
       truck: '<path d="M3 7h10v9H3zM13 10h4l3 3v3h-7z" /><circle cx="7" cy="18" r="1.8" /><circle cx="17" cy="18" r="1.8" />',
       home: '<path d="m4 11 8-7 8 7" /><path d="M6.5 10.5V20h11v-9.5" /><path d="M10 20v-6h4v6" />',
+      bag: '<path d="M6.5 8.5h11l-1 11h-9z" /><path d="M9 8.5a3 3 0 0 1 6 0" />',
       mail: '<rect x="3.5" y="5.5" width="17" height="13" rx="2" /><path d="m4.5 7 7.5 6 7.5-6" />',
+      whatsapp: '<path d="M19.1 4.9A9.4 9.4 0 0 0 4.2 16.1L3 21l5-1.2A9.4 9.4 0 0 0 21.4 8.2a9.3 9.3 0 0 0-2.3-3.3Z" /><path d="M8.4 8.7c.2-.5.4-.6.7-.6h.5c.2 0 .4.1.5.4l.7 1.7c.1.2.1.4 0 .6l-.4.5c-.1.2-.1.4 0 .5.5.9 1.2 1.6 2.1 2.1.2.1.4.1.5 0l.6-.7c.2-.2.4-.2.6-.1l1.7.8c.3.1.4.3.4.5 0 .4-.2 1.1-.6 1.4-.5.5-1.4.6-2.4.3-2.6-.8-4.8-3-5.7-5.6-.3-.8-.1-1.5.2-1.8Z" />',
       shield: '<path d="M12 3 5 6v5.5c0 4 2.8 7.2 7 8.5 4.2-1.3 7-4.5 7-8.5V6z" /><path d="m9 12 2 2 4-5" />',
       bell: '<path d="M18 16H6c1.2-1.4 1.8-3 1.8-5V9a4.2 4.2 0 0 1 8.4 0v2c0 2 .6 3.6 1.8 5Z" /><path d="M10 19a2.3 2.3 0 0 0 4 0" />',
       heart: '<path d="M20.5 8.8c0 5-8.5 10.2-8.5 10.2S3.5 13.8 3.5 8.8A4.3 4.3 0 0 1 12 7.5a4.3 4.3 0 0 1 8.5 1.3Z" />',
@@ -1069,7 +1071,7 @@
         <div class="booking-success-icon">${confirmationIcon('check')}</div>
         <h1 id="bookingConfirmationTitle">Booking Confirmed!</h1>
         <p>Your booking has been confirmed successfully.</p>
-        <p>A confirmation has been sent to your email.</p>
+        <p>Your confirmation email will be available soon.</p>
       </div>
     `;
   }
@@ -1086,20 +1088,56 @@
     `;
   }
 
+  function BookingUpdatesCard() {
+    return `
+      <section class="booking-updates-card" aria-label="Booking status updates">
+        <h2>We'll keep you updated</h2>
+        <div class="booking-updates-grid">
+          <article class="booking-update-item">
+            <div class="booking-update-icon">${confirmationIcon('mail')}</div>
+            <div>
+              <h3>Email Confirmation</h3>
+              <strong>Preparing...</strong>
+              <p>We're preparing your confirmation email.</p>
+            </div>
+          </article>
+          <article class="booking-update-item">
+            <div class="booking-update-icon">${confirmationIcon('whatsapp')}</div>
+            <div>
+              <h3>WhatsApp Updates <span>Coming Soon</span></h3>
+              <strong>Coming Soon</strong>
+              <p>We'll notify you on WhatsApp when your order is shipped.</p>
+            </div>
+          </article>
+        </div>
+      </section>
+    `;
+  }
+
   function BookingDetailsCard(data) {
     const details = [
       { icon: 'calendar', label: 'Date & Time', lines: [data.dateLabel, data.timeLabel] },
       { icon: 'user', label: 'Service', lines: [data.service] },
       { icon: 'map', label: data.locationTitle || 'Location', lines: ['H2 House of Health', data.location] },
+      {
+        icon: 'truck',
+        label: 'Estimated Delivery Date',
+        lines: ['27 Jul 2026 - 31 Jul 2026', "We'll notify you once your order is shipped."],
+        isDelivery: true,
+      },
     ];
     return `
       <div class="booking-details-card">
         ${details.map((item) => `
-          <article class="booking-detail-item">
+          <article class="booking-detail-item${item.isDelivery ? ' booking-detail-item--delivery' : ''}">
             <div class="booking-detail-icon">${confirmationIcon(item.icon)}</div>
             <div>
               <h2>${escapeHtml(item.label)}</h2>
-              ${item.lines.map((line) => `<p>${escapeHtml(line)}</p>`).join('')}
+              ${item.lines.map((line, index) => (
+                item.isDelivery && index === 0
+                  ? `<strong>${escapeHtml(line)}</strong>`
+                  : `<p>${escapeHtml(line)}</p>`
+              )).join('')}
             </div>
           </article>
         `).join('')}
@@ -1110,35 +1148,19 @@
   function BookingActions() {
     return `
       <div class="booking-actions">
-        <button class="booking-action-btn booking-action-btn--neutral" type="button" data-confirmation-action="calendar">
-          ${confirmationIcon('calendar')} <span>Add to Calendar</span>
-        </button>
         <button class="booking-action-btn booking-action-btn--accent" type="button" data-confirmation-action="track">
           ${confirmationIcon('truck')} <span>Track My Order</span>
         </button>
-        <button class="booking-action-btn booking-action-btn--primary" type="button" data-confirmation-action="home">
+        <button class="booking-action-btn booking-action-btn--neutral" type="button" data-confirmation-action="home">
           ${confirmationIcon('home')} <span>Back to Home</span>
+        </button>
+        <button class="booking-action-btn booking-action-btn--primary" type="button" data-confirmation-action="shop">
+          ${confirmationIcon('bag')} <span>Continue Shopping</span>
         </button>
       </div>
     `;
   }
 
-  function EmailConfirmationCard(data) {
-    return `
-      <div class="booking-email-card">
-        <div class="booking-email-icon">${confirmationIcon('mail')}</div>
-        <div>
-          <p>We've sent all the details to</p>
-          <strong>${escapeHtml(data.email)}</strong>
-          <p>Please check your inbox (and spam folder).</p>
-        </div>
-        <div class="booking-email-illustration" aria-hidden="true">
-          <div class="booking-envelope">${confirmationIcon('mail')}</div>
-          <span>${confirmationIcon('check')}</span>
-        </div>
-      </div>
-    `;
-  }
 
   function BookingFeatureCards() {
     const features = [
@@ -1167,9 +1189,9 @@
       <div class="booking-confirmation__inner">
         ${BookingSuccessHeader(data)}
         ${BookingIdCard(data)}
+        ${BookingUpdatesCard(data)}
         ${BookingDetailsCard(data)}
         ${BookingActions(data)}
-        ${EmailConfirmationCard(data)}
         ${BookingFeatureCards(data)}
       </div>
     `;
@@ -1194,16 +1216,16 @@
           window.location.href = '/';
           return;
         }
+        if (action === 'shop') {
+          window.location.href = '/merch/';
+          return;
+        }
         if (action === 'track') {
           if (data.orderId) {
             window.location.hash = `track-order/${encodeURIComponent(data.orderId)}`;
           } else {
             showCheckoutNotice('Track My Order', 'Order details are unavailable for tracking yet.');
           }
-          return;
-        }
-        if (action === 'calendar') {
-          showCheckoutNotice('Add to Calendar', 'Calendar export is ready for future booking schedule details.');
         }
       });
     });
@@ -1414,7 +1436,7 @@
           </div>
           <div class="account-empty-state">
             <p>No influencer dashboard for this account.</p>
-            <span>Your logged-in email must match an active influencer record in Merch Admin → Influencers.</span>
+            <span>Your logged-in email must match an active influencer record in Merch Admin â†’ Influencers.</span>
           </div>
         </section>
       `;
@@ -1620,7 +1642,7 @@
                 <div class="influencer-coupon-card__meta">
                   <span>${escapeHtml(coupon.discountType || 'flat')} ${escapeHtml(formatPrice(coupon.discountValue || 0))}</span>
                   <span>Expires ${escapeHtml(coupon.expiresAt ? formatDateLabel(coupon.expiresAt) : 'No expiry')}</span>
-                  <span>Usage ${escapeHtml(`${Number(coupon.usageCount || 0)} / ${coupon.remainingUsage == null ? '∞' : coupon.maxRedemptions}`)}</span>
+                  <span>Usage ${escapeHtml(`${Number(coupon.usageCount || 0)} / ${coupon.remainingUsage == null ? 'âˆž' : coupon.maxRedemptions}`)}</span>
                   <span>Revenue ${escapeHtml(formatMoneyFromPaise(coupon.revenueGenerated || 0))}</span>
                   <span>Orders ${escapeHtml(Number(coupon.ordersGenerated || 0).toLocaleString('en-IN'))}</span>
                 </div>
@@ -1683,7 +1705,7 @@
                       <td>${escapeHtml(formatDateLabel(order.orderDate))}</td>
                       <td>${escapeHtml(order.productSummary || 'Merch order')}</td>
                       <td>${escapeHtml(order.customerName || 'Customer')}</td>
-                      <td>${escapeHtml(order.couponUsed || '—')}</td>
+                      <td>${escapeHtml(order.couponUsed || 'â€”')}</td>
                       <td>${escapeHtml(formatMoneyFromPaise(order.orderAmount || 0))}</td>
                       <td>${escapeHtml(formatMoneyFromPaise(order.commissionEarned || 0))}</td>
                       <td>${escapeHtml(order.orderStatus || 'pending')}</td>
@@ -1734,7 +1756,7 @@
                         <td>${escapeHtml(formatDateLabel(payment.paymentDate))}</td>
                         <td>${escapeHtml(formatMoneyFromPaise(payment.amount || 0))}</td>
                         <td>${escapeHtml(payment.paymentMethod || 'Manual')}</td>
-                        <td>${escapeHtml(payment.referenceNumber || '—')}</td>
+                        <td>${escapeHtml(payment.referenceNumber || 'â€”')}</td>
                         <td>${escapeHtml(payment.status || 'pending')}</td>
                       </tr>
                     `).join('')}
@@ -1889,7 +1911,7 @@
                 <div>
                   <strong>${escapeHtml(address.label || address.recipientName || 'Address')}</strong>
                   <p>${escapeHtml(getAddressSummary(address))}</p>
-                  <p>${escapeHtml([address.recipientName, address.phone].filter(Boolean).join(' · '))}</p>
+                  <p>${escapeHtml([address.recipientName, address.phone].filter(Boolean).join(' Â· '))}</p>
                 </div>
                 <div class="account-item-actions">
                   <span>${address.isDefault ? 'Default' : escapeHtml(address.country || 'India')}</span>
@@ -1936,7 +1958,7 @@
                   </div>
                   
                 </div>
-                <p>${escapeHtml(formatDateLabel(order.createdAt))} · ${escapeHtml(order.totalAmount ? formatMoneyFromPaise(order.totalAmount) : 'Total unavailable')}</p>
+                <p>${escapeHtml(formatDateLabel(order.createdAt))} - ${escapeHtml(order.totalAmount ? formatMoneyFromPaise(order.totalAmount) : 'Total unavailable')}</p>
                 ${(order.influencerCoupon || order.couponCode || order.coupon_code) ? `<p class="account-order-coupon"><span>Coupon applied</span><strong>${escapeHtml(order.influencerCoupon || order.couponCode || order.coupon_code)}</strong></p>` : ''}
                 <div class="account-item-actions account-item-actions--inline">
                   <button type="button" data-account-action="view-order" data-order-id="${escapeHtml(String(order.id || ''))}">View Details</button>
@@ -2631,7 +2653,7 @@
     });
   }
 
-  // ─── Render: Product Grid ───
+  // â”€â”€â”€ Render: Product Grid â”€â”€â”€
   function getFilteredProducts() {
     let products = [...state.products];
 
@@ -2699,8 +2721,8 @@
           </p>
           ${lowStockVariants.length ? `
             <p class="product-card__stock-details">
-              ${escapeHtml(lowStockVariants.slice(0, 2).map((variant) => `${getVariantLabel(variant)}: ${Number(variant.stock || 0)} left`).join(' · '))}
-              ${lowStockVariants.length > 2 ? ` · +${lowStockVariants.length - 2} more` : ''}
+              ${escapeHtml(lowStockVariants.slice(0, 2).map((variant) => `${getVariantLabel(variant)}: ${Number(variant.stock || 0)} left`).join(' Â· '))}
+              ${lowStockVariants.length > 2 ? ` Â· +${lowStockVariants.length - 2} more` : ''}
             </p>
           ` : ''}
           <div class="product-card__actions">
@@ -2751,7 +2773,7 @@
     return labels[category] || category;
   }
 
-  // ─── Render: Product Detail ───
+  // â”€â”€â”€ Render: Product Detail â”€â”€â”€
   function showProductDetail(productId) {
     const product = state.products.find(p => Number(p.id) === Number(productId));
     if (!product) return;
@@ -2873,7 +2895,7 @@
 
       <div class="quantity-control">
         <label>Quantity</label>
-        <button class="qty-btn" id="qtyDec" type="button">−</button>
+        <button class="qty-btn" id="qtyDec" type="button">âˆ’</button>
         <span class="qty-value" id="qtyValue">${state.quantity}</span>
         <button class="qty-btn" id="qtyInc" type="button">+</button>
       </div>
@@ -2885,7 +2907,7 @@
         <button id="buyNowBtn" class="btn btn-secondary btn-lg" type="button" ${variant.stock <= 0 ? 'disabled' : ''}>
           ${variant.stock <= 0 ? 'Unavailable' : 'Buy Now'}
         </button>
-        <button id="addToWishlistBtn" class="btn btn-outline btn-lg" type="button">♡ Wishlist</button>
+        <button id="addToWishlistBtn" class="btn btn-outline btn-lg" type="button">â™¡ Wishlist</button>
       </div>
 
       <p class="stock-status ${stockState.className}">
@@ -2960,7 +2982,7 @@
     });
   }
 
-  // ─── Search ───
+  // â”€â”€â”€ Search â”€â”€â”€
   function openSearch() {
     els.searchOverlay.hidden = false;
     els.searchInput.focus();
@@ -3120,7 +3142,7 @@
           <span>
             <strong>${escapeHtml(getAddressLabel(address))}</strong>
             <small>${escapeHtml(getAddressSummary(address))}</small>
-            <small>${escapeHtml([address.recipientName, address.phone].filter(Boolean).join(' · '))}</small>
+            <small>${escapeHtml([address.recipientName, address.phone].filter(Boolean).join(' Â· '))}</small>
           </span>
           ${address.isDefault ? '<em>Default</em>' : ''}
         </label>
@@ -3145,7 +3167,7 @@
         <div class="checkout-profile-summary">
           <p>Checking out as</p>
           <strong>${escapeHtml(customer.name)}</strong>
-          <span>${escapeHtml(customer.email)}${customer.phone ? ` · ${escapeHtml(customer.phone)}` : ''}</span>
+          <span>${escapeHtml(customer.email)}${customer.phone ? ` Â· ${escapeHtml(customer.phone)}` : ''}</span>
         </div>
         <form id="checkoutAddressSelectForm" class="checkout-address-list">
           ${renderCheckoutAddressCards()}
@@ -3334,7 +3356,7 @@
     startRazorpayCheckout(customer, address);
   }
 
-  // ─── Event Bindings ───
+  // â”€â”€â”€ Event Bindings â”€â”€â”€
   function bindEvents() {
     // Hero shop button
     els.heroShopBtn.addEventListener('click', () => {
@@ -3386,7 +3408,7 @@
       showShop();
     });
 
-    // Checkout button — Razorpay integration
+    // Checkout button â€” Razorpay integration
     els.checkoutBtn.addEventListener('click', () => {
       if (state.cart.length === 0) return;
       initiateCheckout();
@@ -3418,7 +3440,7 @@
     });
   }
 
-  // ─── Razorpay Checkout Flow ───
+  // â”€â”€â”€ Razorpay Checkout Flow â”€â”€â”€
   async function initiateCheckout() {
     if (!state.authResolved) {
       await loadCustomerContext();
@@ -3609,7 +3631,7 @@
     }
   }
 
-  // ─── Initialize ───
+  // â”€â”€â”€ Initialize â”€â”€â”€
   function init() {
     loadCart();
     renderCartBadge();

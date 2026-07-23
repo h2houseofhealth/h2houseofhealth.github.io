@@ -808,6 +808,13 @@ mountMerchApi(app, {
   RAZORPAY_KEY_SECRET,
   JWT_SECRET,
   jwt,
+  sendMerchEmail: ({ to, subject, text, html }) => sendConfiguredEmail({
+    to,
+    from: MAIL_FROM,
+    subject,
+    text,
+    html,
+  }),
   couponHelpers: {
     normalizeCouponCode,
     validateCouponForUser,
