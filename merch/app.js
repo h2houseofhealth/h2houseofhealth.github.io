@@ -115,7 +115,7 @@
   const PRODUCTS = [
     {
       id: 1,
-      name: 'Zenith Hoodie â€“ Black',
+      name: 'Zenith Hoodie – Black',
       slug: 'zenith-hoodie-black',
       description: 'Meet the hoodie that understands the assignment. Engineered from a heavyweight 450 GSM organic cotton blend, the Zenith offers a structured, premium silhouette without sacrificing that "lived-in" softness. Whether you\'re hitting the gym, the coffee shop, or the couch, this is your new uniform.',
       category: 'hoodies',
@@ -140,9 +140,9 @@
     },
     {
       id: 2,
-      name: 'Zenith Hoodie â€“ Sand',
+      name: 'Zenith Hoodie – Sand',
       slug: 'zenith-hoodie-sand',
-      description: 'Same Zenith. New vibe. The Sand colourway brings an earthy, tonal palette to the heavyweight 450 GSM frame. Perfect for layering or wearing solo â€” this piece transitions from sunrise sessions to evening outings effortlessly.',
+      description: 'Same Zenith. New vibe. The Sand colourway brings an earthy, tonal palette to the heavyweight 450 GSM frame. Perfect for layering or wearing solo — this piece transitions from sunrise sessions to evening outings effortlessly.',
       category: 'hoodies',
       basePrice: 3499.00,
       images: [
@@ -1011,10 +1011,10 @@
         </div>
         <div class="cart-item__details">
           <p class="cart-item__name">${escapeHtml(item.productName)}</p>
-          <p class="cart-item__variant">${escapeHtml(item.variantLabel)} Ã— ${item.quantity}</p>
+          <p class="cart-item__variant">${escapeHtml(item.variantLabel)} × ${item.quantity}</p>
           <p class="cart-item__price">${formatPrice(item.price * item.quantity)}</p>
         </div>
-        <button class="cart-item__remove" data-variant-id="${item.variantId}" aria-label="Remove">âœ•</button>
+        <button class="cart-item__remove" data-variant-id="${item.variantId}" aria-label="Remove">✕</button>
       </div>
     `).join('');
 
@@ -1496,7 +1496,7 @@
           </div>
           <div class="account-empty-state">
             <p>No influencer dashboard for this account.</p>
-            <span>Your logged-in email must match an active influencer record in Merch Admin â†’ Influencers.</span>
+            <span>Your logged-in email must match an active influencer record in Merch Admin → Influencers.</span>
           </div>
         </section>
       `;
@@ -1702,7 +1702,7 @@
                 <div class="influencer-coupon-card__meta">
                   <span>${escapeHtml(coupon.discountType || 'flat')} ${escapeHtml(formatPrice(coupon.discountValue || 0))}</span>
                   <span>Expires ${escapeHtml(coupon.expiresAt ? formatDateLabel(coupon.expiresAt) : 'No expiry')}</span>
-                  <span>Usage ${escapeHtml(`${Number(coupon.usageCount || 0)} / ${coupon.remainingUsage == null ? 'âˆž' : coupon.maxRedemptions}`)}</span>
+                  <span>Usage ${escapeHtml(`${Number(coupon.usageCount || 0)} / ${coupon.remainingUsage == null ? '∞' : coupon.maxRedemptions}`)}</span>
                   <span>Revenue ${escapeHtml(formatMoneyFromPaise(coupon.revenueGenerated || 0))}</span>
                   <span>Orders ${escapeHtml(Number(coupon.ordersGenerated || 0).toLocaleString('en-IN'))}</span>
                 </div>
@@ -1765,7 +1765,7 @@
                       <td>${escapeHtml(formatDateLabel(order.orderDate))}</td>
                       <td>${escapeHtml(order.productSummary || 'Merch order')}</td>
                       <td>${escapeHtml(order.customerName || 'Customer')}</td>
-                      <td>${escapeHtml(order.couponUsed || 'â€”')}</td>
+                      <td>${escapeHtml(order.couponUsed || '—')}</td>
                       <td>${escapeHtml(formatMoneyFromPaise(order.orderAmount || 0))}</td>
                       <td>${escapeHtml(formatMoneyFromPaise(order.commissionEarned || 0))}</td>
                       <td>${escapeHtml(order.orderStatus || 'pending')}</td>
@@ -1816,7 +1816,7 @@
                         <td>${escapeHtml(formatDateLabel(payment.paymentDate))}</td>
                         <td>${escapeHtml(formatMoneyFromPaise(payment.amount || 0))}</td>
                         <td>${escapeHtml(payment.paymentMethod || 'Manual')}</td>
-                        <td>${escapeHtml(payment.referenceNumber || 'â€”')}</td>
+                        <td>${escapeHtml(payment.referenceNumber || '—')}</td>
                         <td>${escapeHtml(payment.status || 'pending')}</td>
                       </tr>
                     `).join('')}
@@ -1971,7 +1971,7 @@
                 <div>
                   <strong>${escapeHtml(address.label || address.recipientName || 'Address')}</strong>
                   <p>${escapeHtml(getAddressSummary(address))}</p>
-                  <p>${escapeHtml([address.recipientName, address.phone].filter(Boolean).join(' Â· '))}</p>
+                  <p>${escapeHtml([address.recipientName, address.phone].filter(Boolean).join(' · '))}</p>
                 </div>
                 <div class="account-item-actions">
                   <span>${address.isDefault ? 'Default' : escapeHtml(address.country || 'India')}</span>
@@ -2781,8 +2781,8 @@
           </p>
           ${lowStockVariants.length ? `
             <p class="product-card__stock-details">
-              ${escapeHtml(lowStockVariants.slice(0, 2).map((variant) => `${getVariantLabel(variant)}: ${Number(variant.stock || 0)} left`).join(' Â· '))}
-              ${lowStockVariants.length > 2 ? ` Â· +${lowStockVariants.length - 2} more` : ''}
+              ${escapeHtml(lowStockVariants.slice(0, 2).map((variant) => `${getVariantLabel(variant)}: ${Number(variant.stock || 0)} left`).join(' · '))}
+              ${lowStockVariants.length > 2 ? ` · +${lowStockVariants.length - 2} more` : ''}
             </p>
           ` : ''}
           <div class="product-card__actions">
@@ -2957,7 +2957,7 @@
 
       <div class="quantity-control">
         <label>Quantity</label>
-        <button class="qty-btn" id="qtyDec" type="button">âˆ’</button>
+        <button class="qty-btn" id="qtyDec" type="button">-</button>
         <span class="qty-value" id="qtyValue">${state.quantity}</span>
         <button class="qty-btn" id="qtyInc" type="button">+</button>
       </div>
@@ -2969,7 +2969,7 @@
         <button id="buyNowBtn" class="btn btn-secondary btn-lg" type="button" ${variant.stock <= 0 ? 'disabled' : ''}>
           ${variant.stock <= 0 ? 'Unavailable' : 'Buy Now'}
         </button>
-        <button id="addToWishlistBtn" class="btn btn-outline btn-lg" type="button">â™¡ Wishlist</button>
+        <button id="addToWishlistBtn" class="btn btn-outline btn-lg" type="button">♡ Wishlist</button>
       </div>
 
       <p class="stock-status ${stockState.className}">
@@ -3213,7 +3213,7 @@
           <span>
             <strong>${escapeHtml(getAddressLabel(address))}</strong>
             <small>${escapeHtml(getAddressSummary(address))}</small>
-            <small>${escapeHtml([address.recipientName, address.phone].filter(Boolean).join(' Â· '))}</small>
+                    <small>${escapeHtml([address.recipientName, address.phone].filter(Boolean).join(' · '))}</small>
           </span>
           ${address.isDefault ? '<em>Default</em>' : ''}
         </label>
@@ -3238,7 +3238,7 @@
         <div class="checkout-profile-summary">
           <p>Checking out as</p>
           <strong>${escapeHtml(customer.name)}</strong>
-          <span>${escapeHtml(customer.email)}${customer.phone ? ` Â· ${escapeHtml(customer.phone)}` : ''}</span>
+          <span>${escapeHtml(customer.email)}${customer.phone ? ` · ${escapeHtml(customer.phone)}` : ''}</span>
         </div>
         <form id="checkoutAddressSelectForm" class="checkout-address-list">
           ${renderCheckoutAddressCards()}
@@ -3479,7 +3479,7 @@
       showShop();
     });
 
-    // Checkout button â€” Razorpay integration
+    // Checkout button — Razorpay integration
     els.checkoutBtn.addEventListener('click', () => {
       if (state.cart.length === 0) return;
       initiateCheckout();
