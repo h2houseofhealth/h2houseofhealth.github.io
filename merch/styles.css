@@ -1781,6 +1781,66 @@ body.is-auth-loading .merch-auth-cta {
   margin: 0 0 24px;
 }
 
+.more-details-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: -8px 0 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.more-details-button:hover {
+  text-decoration: underline;
+}
+
+.more-details-button span {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.product-specifications {
+  margin: -4px 0 28px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface, #fffaf5);
+}
+
+.product-specifications h2 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.product-specifications dl {
+  margin: 0;
+}
+
+.product-specification {
+  display: grid;
+  grid-template-columns: minmax(120px, 42%) 1fr;
+  gap: 12px;
+  padding: 9px 0;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.product-specification dt {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.product-specification dd {
+  margin: 0;
+  color: var(--text);
+}
+
 /* Variant selectors */
 .variant-group {
   margin-bottom: 20px;

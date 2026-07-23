@@ -165,7 +165,8 @@
       id: 3,
       name: 'H2 Molecular Hydrogen Water Bottle',
       slug: 'molecular-hydrogen-water-bottle',
-      description: 'Generate hydrogen-rich water on the go. This portable bottle uses advanced PEM/SPE electrolysis technology to infuse your water with molecular hydrogen (Hâ‚‚) in just 3 minutes. BPA-free, USB-C rechargeable, and built to last.',
+      description: 'Generate hydrogen-rich water on the go. This portable bottle uses advanced PEM/SPE electrolysis technology to infuse your water with molecular hydrogen (H₂) in just 3 minutes. BPA-free, USB-C rechargeable, and built to last.',
+      specifications: { 'Product Name': 'Hydrogen-Rich Water Bottle', Capacity: '460ml', 'Electrolytic Material': 'Platinum-Titanium', 'Membrane Electrode': 'PEM + SPE', 'Main Material': 'Glass', 'Shell Material': 'Stainless Steel', 'Battery Type': '700mAh Lithium Polymer', 'Working Time': '5 minutes per cycle (3,000+ ppb)', Size: 'Ø7cm × 24cm', 'Colours Available': 'Blue / Black / Silver / Gold' },
       category: 'bottles',
       basePrice: 6499.00,
       images: [
@@ -188,6 +189,7 @@
       name: 'H2 Hydrogen Mist Spray',
       slug: 'hydrogen-mist-spray',
       description: 'Refresh and rejuvenate your skin anywhere. This compact hydrogen mist spray delivers antioxidant-rich hydrogen water directly to your face and body. Perfect for post-workout recovery, skincare routines, or a quick pick-me-up throughout the day.',
+      specifications: { 'Product Name': 'Hydrogen Mist Sprayer', 'Atomisation Amount': '0.8–1.2 ml/min', 'Hydrogen Concentration': '1000 ppb', 'Water Tank Capacity': '13ml', 'Main Material': 'PC (Polycarbonate)', 'Negative Potential': '< −300mV', 'Battery Capacity': '500mAh', 'Power Supply': 'DC 5V / Micro USB' },
       category: 'sprays',
       basePrice: 2499.00,
       images: [
@@ -672,6 +674,7 @@
       name: String(product?.name || ''),
       slug: String(product?.slug || ''),
       description: String(product?.description || ''),
+      specifications: normalizeSpecifications(product?.specifications || product?.specifications_json, product),
       category: String(product?.category || ''),
       basePrice,
       imageUrl,
@@ -684,6 +687,63 @@
         : formatPrice(price || basePrice),
       createdAt: String(product?.createdAt || ''),
     };
+  }
+
+  function normalizeSpecifications(value, product = null) {
+    if (!value) return inferSpecifications(product);
+    if (typeof value === 'object' && !Array.isArray(value)) return value;
+    try {
+      const parsed = JSON.parse(String(value));
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : inferSpecifications(product);
+    } catch {
+      return inferSpecifications(product);
+    }
+  }
+
+  function inferSpecifications(product) {
+    const category = String(product?.category || '').toLowerCase();
+    const name = String(product?.name || '').toLowerCase();
+    if (category === 'bottles' || name.includes('bottle')) return { 'Product type': 'Hydrogen-rich water bottle', 'Recommended use': 'Use with clean drinking water; follow the product cycle instructions' };
+    if (category === 'sprays' || name.includes('mist') || name.includes('spray')) return { 'Product type': 'Hydrogen mist sprayer', 'Recommended use': 'Fill with clean water and use as directed' };
+    if (category === 'hoodies' || name.includes('hoodie')) return { 'Product type': 'Premium pullover hoodie', Care: 'Machine wash cold; air dry' };
+    return {};
+  }
+
+  function getProductSpecifications(product, variant = null) {
+    const specifications = { ...normalizeSpecifications(product?.specifications, product) };
+    const category = String(product?.category || '').toLowerCase();
+    const selectedSize = String(variant?.size || '').trim();
+    const selectedColor = String(variant?.color || '').trim();
+
+    // Variant-dependent values must follow the option selected by the customer.
+    if (selectedSize && (category === 'bottles' || String(product?.name || '').toLowerCase().includes('bottle'))) {
+      specifications.Capacity = selectedSize;
+    }
+    if (selectedSize && (category === 'sprays' || String(product?.name || '').toLowerCase().includes('mist') || String(product?.name || '').toLowerCase().includes('spray'))) {
+      specifications['Product Size'] = selectedSize;
+    }
+    if (selectedColor && category === 'hoodies') {
+      specifications.Colour = selectedColor;
+    }
+    if (selectedColor) {
+      specifications['Selected Colour'] = selectedColor;
+    }
+    if (selectedSize) {
+      specifications['Selected Size'] = selectedSize;
+    }
+    return specifications;
+  }
+
+  function renderProductSpecifications(product, variant = null) {
+    const specifications = getProductSpecifications(product, variant);
+    const entries = Object.entries(specifications).filter(([label, value]) => String(label).trim() && String(value).trim());
+    if (!entries.length) return '';
+    return `
+      <div class="product-specifications" id="productSpecifications" hidden>
+        <h2>Specifications</h2>
+        <dl>${entries.map(([label, value]) => `<div class="product-specification"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl>
+      </div>
+    `;
   }
 
   async function loadMerchProducts() {
@@ -2862,6 +2922,8 @@
       <h1 class="detail-title">${escapeHtml(product.name)}</h1>
       <p class="detail-price">${formatPrice(variant.price)}</p>
       <p class="detail-description">${escapeHtml(product.description)}</p>
+      ${Object.keys(getProductSpecifications(product, variant)).length ? '<button class="more-details-button" id="moreDetailsButton" type="button" aria-expanded="false" aria-controls="productSpecifications">More details <span aria-hidden="true">＋</span></button>' : ''}
+      ${renderProductSpecifications(product, variant)}
 
       ${sizes.length > 0 ? `
         <div class="variant-group">
@@ -2923,6 +2985,15 @@
         </div>
       ` : ''}
     `;
+
+    const moreDetailsButton = document.getElementById('moreDetailsButton');
+    const specificationsPanel = document.getElementById('productSpecifications');
+    moreDetailsButton?.addEventListener('click', () => {
+      const isOpen = !specificationsPanel.hidden;
+      specificationsPanel.hidden = isOpen;
+      moreDetailsButton.setAttribute('aria-expanded', String(!isOpen));
+      moreDetailsButton.querySelector('span').textContent = isOpen ? '＋' : '−';
+    });
 
     // Bind variant selectors
     els.productInfo.querySelectorAll('[data-size]').forEach(btn => {

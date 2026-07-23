@@ -3095,6 +3095,7 @@
           </label>
           <label class="admin-field admin-field--wide"><span>Image URL</span><input class="admin-input" name="image" value="${escapeHtml(entity?.image || '')}" /></label>
           <label class="admin-field admin-field--wide"><span>Description</span><textarea class="admin-textarea" name="description">${escapeHtml(entity?.description || '')}</textarea></label>
+          <label class="admin-field admin-field--wide"><span>Product specifications</span><textarea class="admin-textarea" name="specifications" rows="7" placeholder="One per line: Label: Value">${escapeHtml(formatProductSpecifications(entity?.specifications))}</textarea><small class="admin-field__hint">Add one specification per line in the format <code>Label: Value</code>. These appear under More details.</small></label>
           <label class="admin-check"><input type="checkbox" name="featured" ${entity?.featured ? 'checked' : ''} /><span>Featured product</span></label>
           <label class="admin-check"><input type="checkbox" name="archived" ${entity?.archived ? 'checked' : ''} /><span>Archived</span></label>
         `,
@@ -3381,8 +3382,25 @@
       archived: fd.get('archived') === 'on' || String(fd.get('status')) === 'archived',
       image: String(fd.get('image') || '').trim() || '/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=120',
       description: String(fd.get('description') || '').trim(),
+      specifications: parseProductSpecifications(fd.get('specifications')),
     };
     return product;
+  }
+
+  function parseProductSpecifications(value) {
+    return String(value || '').split(/\r?\n/).reduce((result, line) => {
+      const separator = line.indexOf(':');
+      if (separator < 1) return result;
+      const label = line.slice(0, separator).trim();
+      const specificationValue = line.slice(separator + 1).trim();
+      if (label && specificationValue) result[label] = specificationValue;
+      return result;
+    }, {});
+  }
+
+  function formatProductSpecifications(specifications) {
+    if (!specifications || typeof specifications !== 'object') return '';
+    return Object.entries(specifications).map(([label, value]) => `${label}: ${value}`).join('\n');
   }
 
   function updateCategoryFromForm(form, existing = null) {
