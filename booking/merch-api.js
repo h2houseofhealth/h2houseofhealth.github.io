@@ -71,6 +71,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       .run(JSON.stringify(specifications), `%${match}%`, `%${match}%`);
   }
 
+  // Restore product photography for records created by the earlier service-image fallback.
+  db.prepare("UPDATE merch_products SET image_url = ? WHERE image_url = '/booking/assets/service-hydrogen-session.jpg'")
+    .run('/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113');
+  db.prepare("UPDATE merch_products SET image_url = ? WHERE image_url = '/booking/assets/service-iv-shots.jpg'")
+    .run('/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138');
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS merch_variants (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -4094,6 +4100,105 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     res.json(products);
   });
 
+  // ADMIN: Create a product and its first purchasable variant.
+  app.post('/api/merch/admin/products', requireAdmin, (req, res) => {
+    const body = req.body || {};
+    const name = String(body.name || '').trim();
+    const sku = String(body.sku || '').trim();
+    const category = String(body.category || '').trim().toLowerCase();
+    const description = String(body.description || '').trim();
+    const slug = String(body.slug || name).trim().toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const priceRupees = Number(body.price || 0);
+    const stock = Math.max(0, Math.floor(Number(body.stock || 0)));
+    const specifications = body.specifications && typeof body.specifications === 'object' && !Array.isArray(body.specifications)
+      ? body.specifications
+      : {};
+    const status = String(body.status || 'draft').toLowerCase();
+    const rawImage = String(body.image || '').trim() || (
+      category === 'bottles' ? '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113' :
+      category === 'sprays' ? '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138' :
+      category === 'hoodies' ? '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146' :
+      ''
+    );
+    const imageUrl = rawImage && !/^(https?:|data:|blob:|\/)/i.test(rawImage)
+      ? `/${rawImage.startsWith('cdn/') || rawImage.startsWith('booking/') || rawImage.startsWith('uploads/') ? rawImage : `cdn/shop/files/${rawImage}`}`
+      : rawImage;
+
+    if (!name || !sku || !slug || !category || !Number.isFinite(priceRupees) || priceRupees <= 0) {
+      return res.status(400).json({ message: 'Product name, SKU, category, and a valid price are required.' });
+    }
+    if (db.prepare('SELECT id FROM merch_products WHERE slug = ?').get(slug)) {
+      return res.status(409).json({ message: 'A product with this name or slug already exists.' });
+    }
+    if (db.prepare('SELECT id FROM merch_variants WHERE sku = ?').get(sku)) {
+      return res.status(409).json({ message: 'A product with this SKU already exists.' });
+    }
+
+    const insertProduct = db.prepare(`
+      INSERT INTO merch_products (name, slug, description, specifications_json, category, base_price, image_url, is_active, gst_rate, weight_grams)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertVariant = db.prepare(`
+      INSERT INTO merch_variants (product_id, sku, size, color, price, stock)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    const transaction = db.transaction(() => {
+      const productResult = insertProduct.run(
+        name,
+        slug,
+        description,
+        JSON.stringify(specifications),
+        category,
+        Math.round(priceRupees * 100),
+        imageUrl,
+        status === 'published' ? 1 : 0,
+        Number(body.gstRate || 18),
+        Math.max(0, Math.floor(Number(body.weightGrams || 0))),
+      );
+      insertVariant.run(
+        productResult.lastInsertRowid,
+        sku,
+        String(body.size || '').trim() || null,
+        String(body.color || '').trim() || null,
+        Math.round(priceRupees * 100),
+        stock,
+      );
+      return Number(productResult.lastInsertRowid);
+    });
+
+    try {
+      const productId = transaction();
+      const product = loadMerchProductCatalog({ includeInactive: true }).find((item) => Number(item.id) === productId);
+      return res.status(201).json(product || { id: productId, message: 'Product created.' });
+    } catch (error) {
+      console.error('Failed to create merch product:', error);
+      return res.status(500).json({ message: error.message || 'Unable to create product.' });
+    }
+  });
+
+  // ADMIN: Remove a product from the storefront without breaking historical orders.
+  app.delete('/api/merch/admin/products/:id', requireAdmin, (req, res) => {
+    const productId = Number(req.params.id);
+    if (!Number.isInteger(productId) || productId <= 0) {
+      return res.status(400).json({ message: 'A valid product id is required.' });
+    }
+    const product = db.prepare(`
+      SELECT p.id, p.name
+      FROM merch_products p
+      WHERE p.id = ?
+         OR p.id = (SELECT product_id FROM merch_variants WHERE id = ?)
+      LIMIT 1
+    `).get(productId, productId);
+    if (!product) return res.status(404).json({ message: 'Product not found.' });
+    db.transaction(() => {
+      db.prepare('UPDATE merch_products SET is_active = 0, updated_at = datetime(\'now\') WHERE id = ?').run(productId);
+      db.prepare('UPDATE merch_variants SET is_active = 0 WHERE product_id = ?').run(productId);
+    })();
+    res.json({ message: 'Product removed from storefront.', id: productId, name: product.name });
+  });
+
   // ─── ADMIN: Get inventory ───
   app.get('/api/merch/admin/inventory', requireAdmin, (req, res) => {
     const variants = db.prepare(`
@@ -4231,8 +4336,8 @@ function seedMerchProducts(db) {
   const products = [
     { name: 'Zenith Hoodie – Black', slug: 'zenith-hoodie-black', description: 'Heavyweight 450 GSM organic cotton blend hoodie with structured premium silhouette.', specifications_json: { 'Product type': 'Premium pullover hoodie', 'Fabric': '450 GSM organic cotton blend', 'Colour': 'Black', 'Fit': 'Structured relaxed fit', 'Care': 'Machine wash cold; air dry' }, category: 'hoodies', base_price: 349900, image_url: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146&width=600', gst_rate: 18, weight_grams: 650 },
     { name: 'Zenith Hoodie – Sand', slug: 'zenith-hoodie-sand', description: 'Same Zenith frame in earthy sand colourway. 450 GSM organic cotton blend.', specifications_json: { 'Product type': 'Premium pullover hoodie', 'Fabric': '450 GSM organic cotton blend', 'Colour': 'Sand', 'Fit': 'Structured relaxed fit', 'Care': 'Machine wash cold; air dry' }, category: 'hoodies', base_price: 349900, image_url: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146&width=600', gst_rate: 18, weight_grams: 650 },
-    { name: 'H2 Molecular Hydrogen Water Bottle', slug: 'h2-water-bottle', description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 3 minutes. BPA-free, USB-C rechargeable.', specifications_json: { 'Product Name': 'Hydrogen-Rich Water Bottle', 'Capacity': '460ml', 'Electrolytic Material': 'Platinum-Titanium', 'Membrane Electrode': 'PEM + SPE', 'Main Material': 'Glass', 'Shell Material': 'Stainless Steel', 'Battery Type': '700mAh Lithium Polymer', 'Working Time': '5 minutes per cycle (3,000+ ppb)', 'Size': 'Ø7cm × 24cm', 'Colours Available': 'Blue / Black / Silver / Gold' }, category: 'bottles', base_price: 649900, image_url: '/booking/assets/service-hydrogen-session.jpg', gst_rate: 18, weight_grams: 380 },
-    { name: 'H2 Hydrogen Mist Spray', slug: 'h2-mist-spray', description: 'Compact hydrogen mist spray for skin rejuvenation. Antioxidant-rich hydrogen water delivery.', specifications_json: { 'Product Name': 'Hydrogen Mist Sprayer', 'Atomisation Amount': '0.8–1.2 ml/min', 'Hydrogen Concentration': '1000 ppb', 'Water Tank Capacity': '13ml', 'Main Material': 'PC (Polycarbonate)', 'Negative Potential': '< −300mV', 'Battery Capacity': '500mAh', 'Power Supply': 'DC 5V / Micro USB' }, category: 'sprays', base_price: 249900, image_url: '/booking/assets/service-iv-shots.jpg', gst_rate: 18, weight_grams: 150 },
+    { name: 'H2 Molecular Hydrogen Water Bottle', slug: 'h2-water-bottle', description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 3 minutes. BPA-free, USB-C rechargeable.', specifications_json: { 'Product Name': 'Hydrogen-Rich Water Bottle', 'Capacity': '460ml', 'Electrolytic Material': 'Platinum-Titanium', 'Membrane Electrode': 'PEM + SPE', 'Main Material': 'Glass', 'Shell Material': 'Stainless Steel', 'Battery Type': '700mAh Lithium Polymer', 'Working Time': '5 minutes per cycle (3,000+ ppb)', 'Size': 'Ø7cm × 24cm', 'Colours Available': 'Blue / Black / Silver / Gold' }, category: 'bottles', base_price: 649900, image_url: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113', gst_rate: 18, weight_grams: 380 },
+    { name: 'H2 Hydrogen Mist Spray', slug: 'h2-mist-spray', description: 'Compact hydrogen mist spray for skin rejuvenation. Antioxidant-rich hydrogen water delivery.', specifications_json: { 'Product Name': 'Hydrogen Mist Sprayer', 'Atomisation Amount': '0.8–1.2 ml/min', 'Hydrogen Concentration': '1000 ppb', 'Water Tank Capacity': '13ml', 'Main Material': 'PC (Polycarbonate)', 'Negative Potential': '< −300mV', 'Battery Capacity': '500mAh', 'Power Supply': 'DC 5V / Micro USB' }, category: 'sprays', base_price: 249900, image_url: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138', gst_rate: 18, weight_grams: 150 },
   ];
 
   const insertProduct = db.prepare(`

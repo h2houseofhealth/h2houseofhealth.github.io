@@ -250,12 +250,41 @@
       null;
     const fallbackImages = Array.isArray(source?.images) ? source.images.filter(Boolean) : [];
     const productImages = Array.isArray(product?.images) ? product.images.filter(Boolean) : [];
-    const imageUrl = String(source?.imageUrl || product?.imageUrl || product?.image || product?.image_url || '').trim();
+    const imageUrl = normalizeProductImageUrl(source?.imageUrl || product?.imageUrl || product?.image || product?.image_url || '');
 
     return {
       imageUrl: imageUrl || fallbackImages[0] || '',
       images: fallbackImages.length ? fallbackImages : (productImages.length ? productImages : (imageUrl ? [imageUrl] : [])),
     };
+  }
+
+  function normalizeProductImageUrl(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^(https?:|data:|blob:)/i.test(raw)) return raw;
+    if (raw.startsWith('/')) return raw;
+    if (raw.startsWith('cdn/') || raw.startsWith('booking/') || raw.startsWith('uploads/')) return `/${raw}`;
+    return `/cdn/shop/files/${raw}`;
+  }
+
+  function getProductFallbackImage(product) {
+    const category = String(product?.category || '').toLowerCase();
+    const name = String(product?.name || '').toLowerCase();
+    if (category === 'sprays' || name.includes('mist') || name.includes('spray')) return '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138';
+    if (category === 'bottles' || name.includes('bottle')) return '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113';
+    if (category === 'hoodies' || name.includes('hoodie')) return '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg';
+    return FALLBACK_PRODUCT_IMAGE;
+  }
+
+  function renderDynamicCategoryOptions() {
+    const categories = [...new Set(state.products.map((product) => String(product.category || '').trim()).filter(Boolean))];
+    const currentValue = state.selectedCategory;
+    els.categoryFilter.innerHTML = [
+      '<option value="all">All Categories</option>',
+      ...categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(getCategoryLabel(category))}</option>`),
+    ].join('');
+    els.categoryFilter.value = categories.includes(currentValue) ? currentValue : 'all';
+    state.selectedCategory = els.categoryFilter.value;
   }
 
   function getGalleryVariantPrice(product, index) {
@@ -750,6 +779,7 @@
     try {
       const result = await api('/api/merch/products');
       state.products = Array.isArray(result) ? result.map(normalizeMerchProduct) : [];
+      renderDynamicCategoryOptions();
     } catch (error) {
       state.products = [];
       console.error('Unable to load merch products:', error);
@@ -2768,7 +2798,7 @@
       <article class="product-card" data-product-id="${product.id}" tabindex="0" role="button" aria-label="View ${escapeHtml(product.name)}">
         <div class="product-card__image">
           ${isSoldOut ? '<span class="product-card__badge product-card__badge--sold-out">Sold out</span>' : lowStockVariants.length ? '<span class="product-card__badge product-card__badge--low-stock">Low stock</span>' : ''}
-          <img src="${escapeHtml(product.images?.[0] || product.imageUrl || FALLBACK_PRODUCT_IMAGE)}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
+          <img src="${escapeHtml(product.images?.[0] || product.imageUrl || getProductFallbackImage(product))}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
         </div>
         <div class="product-card__body">
           <p class="product-card__category">${escapeHtml(getCategoryLabel(product.category))}</p>
@@ -2830,7 +2860,10 @@
       bottles: 'Hydrogen Water Bottles',
       sprays: 'Hydrogen Mists',
     };
-    return labels[category] || category;
+    if (labels[category]) return labels[category];
+    return String(category || 'Products')
+      .replace(/[-_]+/g, ' ')
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
   }
 
   // â”€â”€â”€ Render: Product Detail â”€â”€â”€
@@ -2874,10 +2907,10 @@
   }
 
   function renderProductGallery(product) {
-    const mainImage = product.images?.[0] || product.imageUrl || FALLBACK_PRODUCT_IMAGE;
+    const mainImage = product.images?.[0] || product.imageUrl || getProductFallbackImage(product);
     els.productGallery.innerHTML = `
       <div class="gallery-main">
-        <img id="galleryMainImg" src="${escapeHtml(mainImage)}" alt="${escapeHtml(product.name)}" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
+        <img id="galleryMainImg" src="${escapeHtml(mainImage)}" alt="${escapeHtml(product.name)}" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
       </div>
       ${(product.images || []).length > 1 ? `
         <div class="gallery-thumbs">
