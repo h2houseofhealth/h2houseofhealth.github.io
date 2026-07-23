@@ -2811,7 +2811,10 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   const discountType = 'flat';
   const discountValue = Number(req.body?.discountValue || 0);
   const appliesToRaw = String(req.body?.appliesTo || 'all').trim().toLowerCase();
-  const productAppliesTo = appliesToRaw.match(/^product:(\d+)$/);
+  const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
+  const productIds = productAppliesTo
+    ? [...new Set(productAppliesTo[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
+    : [];
   const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || '').trim().toLowerCase();
   const influencerId = Number(req.body?.influencerId || req.body?.influencer_id || 0);
@@ -2821,8 +2824,10 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     .toLowerCase();
   const portal = ['booking', 'merch'].includes(portalRaw) ? portalRaw : 'booking';
   if (portal === 'merch' && productAppliesTo) {
-    const product = db.prepare('SELECT id FROM merch_products WHERE id = ?').get(Number(productAppliesTo[1]));
-    if (!product) return res.status(400).json({ message: 'Product not found.' });
+    for (const productId of productIds) {
+      const product = db.prepare('SELECT id FROM merch_products WHERE id = ?').get(productId);
+      if (!product) return res.status(400).json({ message: 'Product not found.' });
+    }
   }
   let couponType = String(req.body?.couponType || '').trim().toLowerCase();
   if (!['public', 'private'].includes(couponType)) {
@@ -3010,7 +3015,10 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   const discountType = String(req.body?.discountType || existing.discountType || 'flat').trim().toLowerCase() || 'flat';
   const discountValue = Number(req.body?.discountValue ?? existing.discountValue ?? 0);
   const appliesToRaw = String(req.body?.appliesTo || existing.appliesTo || 'all').trim().toLowerCase();
-  const productAppliesTo = appliesToRaw.match(/^product:(\d+)$/);
+  const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
+  const productIds = productAppliesTo
+    ? [...new Set(productAppliesTo[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
+    : [];
   const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || existing.recipientEmail || '').trim().toLowerCase();
   const recipientName = String(req.body?.recipientName || existing.recipientName || '').trim();
@@ -3024,8 +3032,12 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
     .trim()
     .toLowerCase();
   const portal = ['booking', 'merch'].includes(portalRaw) ? portalRaw : 'booking';
-  if (portal === 'merch' && productAppliesTo && !db.prepare('SELECT id FROM merch_products WHERE id = ?').get(Number(productAppliesTo[1]))) {
-    return res.status(400).json({ message: 'Product not found.' });
+  if (portal === 'merch' && productAppliesTo) {
+    for (const productId of productIds) {
+      if (!db.prepare('SELECT id FROM merch_products WHERE id = ?').get(productId)) {
+        return res.status(400).json({ message: 'Product not found.' });
+      }
+    }
   }
   let couponType = String(req.body?.couponType || existing.couponType || '').trim().toLowerCase();
   if (!['public', 'private'].includes(couponType)) {
@@ -10461,14 +10473,17 @@ function validateCouponForUser({ code, userId, appliesTo, productIds = [], produ
     return { error: 'This coupon has expired.' };
   }
   const couponAppliesTo = String(coupon.appliesTo || 'all').trim().toLowerCase();
-  const productRestriction = couponAppliesTo.match(/^product:(\d+)$/);
+  const productRestriction = couponAppliesTo.match(/^product:([\d,]+)$/);
+  const restrictedProductIds = productRestriction
+    ? [...new Set(productRestriction[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
+    : [];
   const productIdSet = new Set((Array.isArray(productIds) ? productIds : [productIds]).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0));
-  const appliesToProduct = productRestriction && productIdSet.has(Number(productRestriction[1]));
+  const appliesToProduct = productRestriction && restrictedProductIds.some((id) => productIdSet.has(id));
   if (!['all', appliesTo].includes(couponAppliesTo) && !appliesToProduct) {
     return { error: 'This coupon is not valid for this payment.' };
   }
   const restrictedProductSubtotalPaise = productRestriction
-    ? Math.max(0, Math.round(Number(productLineTotals?.[productRestriction[1]] ?? productSubtotalAmountPaise ?? 0)))
+    ? Math.max(0, Math.round(restrictedProductIds.reduce((sum, id) => sum + Number(productLineTotals?.[id] || 0), 0) || productSubtotalAmountPaise || 0))
     : 0;
   if (appliesToProduct && restrictedProductSubtotalPaise <= 0) {
     return { error: 'This coupon is only valid when the selected product is in the cart.' };
