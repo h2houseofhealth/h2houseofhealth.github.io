@@ -15,6 +15,22 @@
 
   const today = new Date();
   const LOW_STOCK_THRESHOLD = 15;
+  const REVENUE_PERIOD_OPTIONS = [
+    { value: 'today', label: 'Today' },
+    { value: 'week', label: 'This Week' },
+    { value: 'month', label: 'This Month' },
+    { value: 'quarter', label: 'This Quarter' },
+    { value: 'year', label: 'This Year' },
+    { value: 'custom', label: 'Custom Date Range', disabled: true },
+  ];
+  const ORDER_STATUS_PERIOD_OPTIONS = [
+    { value: 'today', label: 'Today' },
+    { value: 'week', label: 'This Week' },
+    { value: 'month', label: 'This Month' },
+    { value: 'quarter', label: 'This Quarter' },
+    { value: 'year', label: 'This Year' },
+    { value: 'custom', label: 'Custom Range' },
+  ];
 
   function pad(num) {
     return String(num).padStart(2, '0');
@@ -138,7 +154,11 @@
   };
 
   function normalizeOrderStatus(status) {
-    const value = String(status || 'pending').trim().toLowerCase().replace(/\s+/g, '_');
+    const value = String(status || 'pending')
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, '_')
+      .replace(/^order_/, '');
     return ORDER_STATUS_META[value] ? value : 'pending';
   }
 
@@ -146,7 +166,7 @@
     const breakdown = Object.fromEntries(Object.keys(ORDER_STATUS_META).map((status) => [status, 0]));
 
     for (const order of Array.isArray(orders) ? orders : []) {
-      const status = normalizeOrderStatus(order?.status);
+      const status = normalizeOrderStatus(order?.status ?? order?.orderStatus);
       breakdown[status] += 1;
     }
 
@@ -162,6 +182,62 @@
       }));
 
     return { total, breakdown, segments };
+  }
+
+  function getOrderStatusPeriodDates(period, fromValue, toValue) {
+    const start = new Date(today);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+
+    if (period === 'custom') {
+      const from = new Date(`${fromValue || toISODate(today)}T00:00:00`);
+      const to = new Date(`${toValue || fromValue || toISODate(today)}T00:00:00`);
+      if (!Number.isNaN(from.getTime()) && !Number.isNaN(to.getTime())) {
+        from.setHours(0, 0, 0, 0);
+        to.setHours(0, 0, 0, 0);
+        to.setDate(to.getDate() + 1);
+        return { start: from, end: to };
+      }
+    }
+
+    if (period === 'week') {
+      const day = start.getDay();
+      start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
+      end.setTime(start.getTime());
+      end.setDate(end.getDate() + 7);
+    } else if (period === 'month') {
+      start.setDate(1);
+      end.setTime(start.getTime());
+      end.setMonth(end.getMonth() + 1);
+    } else if (period === 'quarter') {
+      start.setMonth(Math.floor(start.getMonth() / 3) * 3, 1);
+      end.setTime(start.getTime());
+      end.setMonth(end.getMonth() + 3);
+    } else if (period === 'year') {
+      start.setMonth(0, 1);
+      end.setTime(start.getTime());
+      end.setFullYear(end.getFullYear() + 1);
+    }
+
+    return { start, end };
+  }
+
+  function filterOrdersByStatusPeriod(orders, period, fromValue, toValue) {
+    // Keep this client-side adapter isolated so it can be replaced with an API
+    // request later without changing the chart, counters, or summary renderer.
+    const { start, end } = getOrderStatusPeriodDates(period, fromValue, toValue);
+    return (Array.isArray(orders) ? orders : []).filter((order) => {
+      const createdAt = getOrderCreatedAt(order);
+      return !Number.isNaN(createdAt.getTime()) && createdAt >= start && createdAt < end;
+    });
+  }
+
+  function getOrderStatusPeriodSummary(period, label, count, fromValue, toValue) {
+    if (period === 'custom' && fromValue && toValue) {
+      return `${formatCount(count)} order(s) from ${dateLabel(fromValue)} to ${dateLabel(toValue)}.`;
+    }
+    return `${formatCount(count)} order(s) in ${label.toLowerCase()}.`;
   }
 
   function renderOrderStatusRing(distribution) {
@@ -355,8 +431,6 @@
 
     return `
       <button class="admin-action-link" type="button" data-action="edit-influencer" data-id="${id}">Edit Influencer</button>
-      <button class="admin-action-link" type="button" data-action="toggle-influencer" data-id="${id}">${influencer?.active ? 'Deactivate Influencer' : 'Reactivate Influencer'}</button>
-      <button class="admin-action-link" type="button" data-action="assign-coupon" data-id="${id}">Assign Coupons</button>
       <button class="admin-action-link" type="button" data-action="download-influencer-report" data-id="${id}">Download Report</button>
       <button class="admin-action-link" type="button" data-action="email-influencer-report" data-id="${id}"${emailTitle}${emailDisabled}>Send to Email</button>
     `;
@@ -984,6 +1058,12 @@
     view: 'dashboard',
     sidebarOpen: false,
     notificationsExpanded: false,
+    revenuePeriod: 'month',
+    orderStatusPeriod: 'today',
+    orderStatusFrom: toISODate(today),
+    orderStatusTo: toISODate(today),
+    orderStatusAppliedFrom: toISODate(today),
+    orderStatusAppliedTo: toISODate(today),
     selectedProductIds: [],
     selectedProductId: 101,
     selectedOrderId: null,
@@ -998,14 +1078,24 @@
     ordersLoading: false,
     ordersSearch: '',
     ordersStatus: 'all',
+    ordersTodayOnly: false,
+    ordersDateFrom: '',
+    ordersDateTo: '',
+    ordersAppliedDateFrom: '',
+    ordersAppliedDateTo: '',
     ordersPage: 1,
     customersSearch: '',
+    customersTodayOnly: false,
+    customersDateFrom: '',
+    customersDateTo: '',
+    customersAppliedDateFrom: '',
+    customersAppliedDateTo: '',
     couponsSearch: '',
     couponsLoading: false,
     influencersLoading: false,
     reportsLoading: false,
     influencersSearch: '',
-    influencersMonth: '',
+    influencerDetailsFilter: 'all',
     reportFrom: daysAgo(29),
     reportTo: toISODate(today),
     reportFormat: 'csv',
@@ -1207,12 +1297,12 @@
     const revenue = state.orders
       .filter((order) => ['paid', 'refunded'].includes(order.paymentStatus) || order.status === 'delivered' || order.status === 'shipped')
       .reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
-    const pending = state.orders.filter((order) => order.status === 'pending').length;
-    const processing = state.orders.filter((order) => order.status === 'processing').length;
-    const shipped = state.orders.filter((order) => order.status === 'shipped').length;
-    const delivered = state.orders.filter((order) => order.status === 'delivered').length;
-    const cancelled = state.orders.filter((order) => order.status === 'cancelled').length;
-    const returned = state.orders.filter((order) => order.status === 'returned').length;
+    const pending = state.orders.filter((order) => normalizeOrderStatus(order.status ?? order.orderStatus) === 'pending').length;
+    const processing = state.orders.filter((order) => normalizeOrderStatus(order.status ?? order.orderStatus) === 'processing').length;
+    const shipped = state.orders.filter((order) => normalizeOrderStatus(order.status ?? order.orderStatus) === 'shipped').length;
+    const delivered = state.orders.filter((order) => normalizeOrderStatus(order.status ?? order.orderStatus) === 'delivered').length;
+    const cancelled = state.orders.filter((order) => normalizeOrderStatus(order.status ?? order.orderStatus) === 'cancelled').length;
+    const returned = state.orders.filter((order) => normalizeOrderStatus(order.status ?? order.orderStatus) === 'returned').length;
     const lowStock = state.products.filter((product) => product.status !== 'archived' && Number(product.stock || 0) > 0 && Number(product.stock || 0) <= LOW_STOCK_THRESHOLD).length;
 
     return [
@@ -1295,93 +1385,72 @@
       }));
   }
 
-  function buildRecentPayments(orders = []) {
-    return [...(Array.isArray(orders) ? orders : [])]
-      .filter((order) => ['paid', 'cod_pending', 'refunded'].includes(String(order.paymentStatus || '').toLowerCase()) || Number(order.totalAmount || 0) > 0)
-      .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')))
-      .slice(0, 5)
-      .map((order) => ({
-        id: order.id,
-        orderNumber: order.orderNumber || '',
-        customerName: order.customerName || '',
-        amount: Number(order.totalAmount || 0),
-        paymentMethod: String(order.paymentMethod || 'online'),
-        paymentStatus: String(order.paymentStatus || 'pending'),
-        createdAt: order.createdAt || null,
-      }));
-  }
+  function getRevenueForPeriod(period, monthlyRevenueSeries) {
+    const currentMonthKey = `${today.getFullYear()}-${pad(today.getMonth() + 1)}`;
+    if (period === 'month') {
+      return Number(monthlyRevenueSeries.find((row) => String(row.month) === currentMonthKey)?.revenue || 0);
+    }
 
-  function buildRecentCouponUsage(orders = []) {
-    return [...(Array.isArray(orders) ? orders : [])]
-      .filter((order) => String(order.couponCode || '').trim())
-      .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')))
-      .slice(0, 5)
-      .map((order) => ({
-        id: order.id,
-        orderNumber: order.orderNumber || '',
-        customerName: order.customerName || '',
-        couponCode: String(order.couponCode || ''),
-        influencerName: String(order.influencerName || ''),
-        amount: Number(order.totalAmount || 0),
-        createdAt: order.createdAt || null,
-      }));
-  }
+    const start = new Date(today);
+    start.setHours(0, 0, 0, 0);
+    if (period === 'week') {
+      const day = start.getDay();
+      start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
+    } else if (period === 'quarter') {
+      start.setMonth(Math.floor(start.getMonth() / 3) * 3, 1);
+    } else if (period === 'year') {
+      start.setMonth(0, 1);
+    }
 
-  function buildLatestCustomers(customers = []) {
-    return [...(Array.isArray(customers) ? customers : [])]
-      .sort((left, right) => {
-        const leftKey = String(left.registrationDate || left.lastOrder?.createdAt || left.createdAt || '');
-        const rightKey = String(right.registrationDate || right.lastOrder?.createdAt || right.createdAt || '');
-        return rightKey.localeCompare(leftKey);
+    return state.orders
+      .filter((order) => ['paid', 'cod_pending'].includes(String(order.paymentStatus || '').toLowerCase()))
+      .filter((order) => {
+        const createdAt = new Date(String(order.createdAt || '').replace(' ', 'T'));
+        return !Number.isNaN(createdAt.getTime()) && createdAt >= start;
       })
-      .slice(0, 5);
+      .reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
+  }
+
+  function getCouponOverview() {
+    const coupons = Array.isArray(state.coupons) ? state.coupons : [];
+    const isActive = (coupon) => Number(coupon.active ?? coupon.isActive ?? 0) === 1;
+    const isExpired = (coupon) => {
+      const expiry = String(coupon.validTill || coupon.expiresAt || coupon.expiry || '').trim();
+      return Boolean(expiry) && new Date(expiry).getTime() < Date.now();
+    };
+    const redemptionsFor = (coupon) => Number(coupon.totalRedemptions || coupon.redemptions || coupon.usageCount || 0);
+    const totalRedemptions = coupons.reduce((sum, coupon) => sum + redemptionsFor(coupon), 0);
+    const totalDiscountAmount = coupons.reduce((sum, coupon) => {
+      const explicitAmount = Number(coupon.totalDiscountAmount || coupon.discountAmount || 0);
+      const discountValue = Number(coupon.discountValue || coupon.discount || 0);
+      return sum + (explicitAmount || redemptionsFor(coupon) * discountValue);
+    }, 0);
+    const topCoupon = [...coupons].sort((left, right) => redemptionsFor(right) - redemptionsFor(left))[0];
+
+    return {
+      total: coupons.length,
+      active: coupons.filter(isActive).length,
+      expiredOrDisabled: coupons.filter((coupon) => !isActive(coupon) || isExpired(coupon)).length,
+      totalRedemptions,
+      totalDiscountAmount,
+      topCoupon: topCoupon && redemptionsFor(topCoupon) > 0 ? `${topCoupon.code || 'Coupon'} · ${formatCount(redemptionsFor(topCoupon))} redemptions` : 'No redemption data yet',
+    };
   }
 
   function getDashboardSnapshot() {
     const stats = state.dashboardStats || {};
     const report = state.reports || {};
     const orders = Array.isArray(state.orders) ? state.orders : [];
-    const customers = Array.isArray(state.customers) ? state.customers : [];
     const monthlyRevenueSeries = Array.isArray(stats.monthlyRevenueSeries) && stats.monthlyRevenueSeries.length
       ? stats.monthlyRevenueSeries
       : Array.isArray(report.monthlyRevenueSeries) && report.monthlyRevenueSeries.length
         ? report.monthlyRevenueSeries
         : buildMonthlyRevenueSeries(orders);
-    const recentOrders = Array.isArray(stats.recentOrders) && stats.recentOrders.length
-      ? stats.recentOrders
-      : Array.isArray(report.recentOrders) && report.recentOrders.length
-        ? report.recentOrders
-        : orders.slice(0, 5);
-    const recentPayments = Array.isArray(stats.recentPayments) && stats.recentPayments.length
-      ? stats.recentPayments
-      : Array.isArray(report.recentPayments) && report.recentPayments.length
-        ? report.recentPayments
-        : buildRecentPayments(orders);
-    const recentCouponUsage = Array.isArray(stats.recentCouponUsage) && stats.recentCouponUsage.length
-      ? stats.recentCouponUsage
-      : Array.isArray(report.recentCouponUsage) && report.recentCouponUsage.length
-        ? report.recentCouponUsage
-        : buildRecentCouponUsage(orders);
-    const latestCustomers = Array.isArray(stats.recentCustomers) && stats.recentCustomers.length
-      ? stats.recentCustomers
-      : buildLatestCustomers(customers);
-
     return {
       summary: stats.summary || report.summary || {},
       monthlyRevenueSeries,
-      recentOrders,
-      recentPayments,
-      recentCouponUsage,
-      latestCustomers,
       statusBreakdown: stats.statusBreakdown || report.statusBreakdown || {},
     };
-  }
-
-  function renderFeedList(items, emptyTitle, emptyMessage, renderItem) {
-    if (!Array.isArray(items) || !items.length) {
-      return renderEmptyState(emptyTitle, emptyMessage);
-    }
-    return items.map((item) => renderItem(item)).join('');
   }
 
   function renderEmptyState(title, message, actionLabel = '', actionId = '') {
@@ -1398,14 +1467,22 @@
     const dashboard = getDashboardSnapshot();
     const summary = dashboard.summary || {};
     const monthlyRevenueSeries = Array.isArray(dashboard.monthlyRevenueSeries) ? dashboard.monthlyRevenueSeries : [];
-    const recentOrders = Array.isArray(dashboard.recentOrders) ? dashboard.recentOrders : [];
-    const latestCustomers = Array.isArray(dashboard.latestCustomers) ? dashboard.latestCustomers : [];
-    const recentPayments = Array.isArray(dashboard.recentPayments) ? dashboard.recentPayments : [];
-    const recentCouponUsage = Array.isArray(dashboard.recentCouponUsage) ? dashboard.recentCouponUsage : [];
-    const liveOrderDistribution = buildOrderStatusDistribution(state.orders);
+    const couponOverview = getCouponOverview();
+    const selectedOrderStatusPeriod = ORDER_STATUS_PERIOD_OPTIONS.find((option) => option.value === state.orderStatusPeriod) || ORDER_STATUS_PERIOD_OPTIONS[0];
+    const filteredOrderStatusOrders = filterOrdersByStatusPeriod(
+      state.orders,
+      selectedOrderStatusPeriod.value,
+      state.orderStatusAppliedFrom,
+      state.orderStatusAppliedTo
+    );
+    const liveOrderDistribution = buildOrderStatusDistribution(filteredOrderStatusOrders);
     const liveOrderCount = liveOrderDistribution.total;
+    const orderStatusPeriodSubtitle = selectedOrderStatusPeriod.value === 'custom' && state.orderStatusAppliedFrom && state.orderStatusAppliedTo
+      ? `From ${dateLabel(state.orderStatusAppliedFrom)} to ${dateLabel(state.orderStatusAppliedTo)}`
+      : `Live breakdown for ${selectedOrderStatusPeriod.label.toLowerCase()}`;
     const currentMonthKey = `${today.getFullYear()}-${pad(today.getMonth() + 1)}`;
-    const currentMonthRevenue = monthlyRevenueSeries.find((row) => String(row.month) === currentMonthKey)?.revenue || 0;
+    const selectedRevenuePeriod = REVENUE_PERIOD_OPTIONS.find((option) => option.value === state.revenuePeriod) || REVENUE_PERIOD_OPTIONS[2];
+    const selectedRevenue = getRevenueForPeriod(selectedRevenuePeriod.value, monthlyRevenueSeries);
     const monthlyRevenueMax = Math.max(1, ...monthlyRevenueSeries.map((row) => Number(row.revenue || 0)));
     const monthlyChartRows = monthlyRevenueSeries.slice(-6).map((row) => ({
       label: row.monthLabel || formatMonthLabel(row.month),
@@ -1444,19 +1521,27 @@
       <section class="admin-section">
         <div class="admin-section__head">
           <div>
-            <h2 class="admin-section__title">Live Revenue</h2>
+            <h2 class="admin-section__title">Revenue Overview</h2>
             <p class="admin-section__desc">Revenue, orders, customer activity, and coupon usage streamed from the merch API.</p>
           </div>
         </div>
         <div class="admin-section__body admin-card-grid admin-card-grid--3">
           <article class="admin-card">
-            <div class="admin-card__head">
-              <h3 class="admin-card__title">Monthly Revenue</h3>
-              <p class="admin-card__sub">Month-to-date totals from live orders</p>
+            <div class="admin-card__head admin-card__head--with-filter">
+              <div>
+                <h3 class="admin-card__title">Monthly Revenue</h3>
+                <p class="admin-card__sub">Revenue totals from live orders</p>
+              </div>
+              <label class="admin-revenue-filter">
+                <span class="admin-sr-only">Revenue period</span>
+                <select class="admin-select" data-input="revenuePeriod" aria-label="Revenue period">
+                  ${REVENUE_PERIOD_OPTIONS.map((option) => `<option value="${option.value}"${option.value === selectedRevenuePeriod.value ? ' selected' : ''}${option.disabled ? ' disabled' : ''}>${option.label}</option>`).join('')}
+                </select>
+              </label>
             </div>
             <div class="admin-card__body admin-mini-chart">
-              <p class="admin-stat__value" style="margin:0 0 10px;">${escapeHtml(money(currentMonthRevenue))}</p>
-              <p class="admin-table__muted" style="margin:0 0 12px;">${escapeHtml(formatMonthLabel(currentMonthKey))}</p>
+              <p class="admin-stat__value" style="margin:0 0 10px;">${escapeHtml(money(selectedRevenue))}</p>
+              <p class="admin-table__muted" style="margin:0 0 12px;">${escapeHtml(selectedRevenuePeriod.label)}${selectedRevenuePeriod.value === 'month' ? ` · ${escapeHtml(formatMonthLabel(currentMonthKey))}` : ''}</p>
               ${renderMiniChart(monthlyChartRows.length ? monthlyChartRows : [{ label: 'No revenue yet', value: 0, display: money(0) }])}
             </div>
           </article>
@@ -1472,153 +1557,75 @@
           </article>
 
           <article class="admin-card">
-            <div class="admin-card__head">
-              <h3 class="admin-card__title">Order Status Distribution</h3>
-              <p class="admin-card__sub">Live breakdown from the current merch order feed</p>
+            <div class="admin-card__head admin-card__head--with-filter admin-order-status__head">
+              <div>
+                <h3 class="admin-card__title">Order Status Distribution</h3>
+                <p class="admin-card__sub">${escapeHtml(orderStatusPeriodSubtitle)}</p>
+              </div>
+              <div class="admin-status-filter">
+                <label>
+                  <span class="admin-sr-only">Order status period</span>
+                  <select class="admin-select" data-input="orderStatusPeriod" aria-label="Order status period">
+                    ${ORDER_STATUS_PERIOD_OPTIONS.map((option) => `<option value="${option.value}"${option.value === selectedOrderStatusPeriod.value ? ' selected' : ''}>${option.label}</option>`).join('')}
+                  </select>
+                </label>
+                ${selectedOrderStatusPeriod.value === 'custom' ? `
+                  <div class="admin-order-status-range">
+                    <label><span>From</span><input class="admin-input" type="date" data-input="orderStatusFrom" value="${escapeHtml(state.orderStatusFrom)}" /></label>
+                    <label><span>To</span><input class="admin-input" type="date" data-input="orderStatusTo" value="${escapeHtml(state.orderStatusTo)}" /></label>
+                    <button class="admin-btn admin-btn--soft" type="button" data-action="apply-order-status-range">Apply</button>
+                    <button class="admin-btn admin-btn--ghost" type="button" data-action="clear-order-status-range" ${state.orderStatusAppliedFrom || state.orderStatusAppliedTo || state.orderStatusFrom || state.orderStatusTo ? '' : 'disabled'}>Clear</button>
+                  </div>
+                ` : ''}
+              </div>
             </div>
             <div class="admin-card__body" style="display:grid;gap:12px;">
               ${renderOrderStatusRing(liveOrderDistribution)}
               <div class="admin-chip-row" style="justify-content:center;">
                 ${renderStatusLegend(liveOrderDistribution)}
               </div>
-              <p class="admin-table__muted" style="margin:0;">${formatCount(liveOrderCount)} order(s) across the live status distribution.</p>
+              <p class="admin-table__muted" style="margin:0;">${escapeHtml(getOrderStatusPeriodSummary(selectedOrderStatusPeriod.value, selectedOrderStatusPeriod.label, liveOrderCount, state.orderStatusAppliedFrom, state.orderStatusAppliedTo))}</p>
             </div>
           </article>
         </div>
       </section>
-      <section class="admin-section admin-section--expanded">
-        <div class="admin-section__head">
-          <div>
-            <h2 class="admin-section__title">Live Activity</h2>
-            <p class="admin-section__desc">Recent orders, customers, payments, and coupon usage are wired to the admin data feed.</p>
-          </div>
-        </div>
+      <section class="admin-section">
         <div class="admin-section__body">
           <div class="admin-card-grid admin-card-grid--2">
             <article class="admin-card">
               <div class="admin-card__head">
-                <h3 class="admin-card__title">Recent Orders</h3>
-                <p class="admin-card__sub">Latest checkout activity from the merch API</p>
+                <h3 class="admin-card__title">Coupon Overview</h3>
+                <p class="admin-card__sub">Current coupon performance summary</p>
               </div>
-              <div class="admin-card__body admin-list">
-                ${renderFeedList(
-                  recentOrders,
-                  'No recent orders',
-                  'Orders will appear here once live checkout activity is recorded.',
-                  (order) => `
-                    <div class="admin-list__item">
-                      <div class="admin-list__item-head">
-                        <div>
-                          <p class="admin-list__item-title">${escapeHtml(order.orderNumber || `Order #${order.id}`)}</p>
-                          <p class="admin-list__item-sub">${escapeHtml(order.customerName || 'Guest customer')} - ${escapeHtml(dateLabel(order.createdAt || ''))}</p>
-                        </div>
-                        <strong>${escapeHtml(money(order.totalAmount || 0))}</strong>
-                      </div>
-                      <p class="admin-table__muted" style="margin:0;">${escapeHtml(getStatusLabel(order.status || order.paymentStatus || 'pending'))} - ${escapeHtml(String(order.paymentStatus || 'pending'))}</p>
-                    </div>
-                  `
-                )}
+              <div class="admin-card__body admin-coupon-overview">
+                <div class="admin-coupon-overview__item"><span>Total Coupons</span><strong>${formatCount(couponOverview.total)}</strong></div>
+                <div class="admin-coupon-overview__item"><span>Active Coupons</span><strong>${formatCount(couponOverview.active)}</strong></div>
+                <div class="admin-coupon-overview__item"><span>Expired / Disabled</span><strong>${formatCount(couponOverview.expiredOrDisabled)}</strong></div>
+                <div class="admin-coupon-overview__item"><span>Total Redemptions</span><strong>${formatCount(couponOverview.totalRedemptions)}</strong></div>
+                <div class="admin-coupon-overview__item"><span>Total Discount Amount</span><strong>${escapeHtml(money(couponOverview.totalDiscountAmount))}</strong></div>
+                <div class="admin-coupon-overview__item admin-coupon-overview__item--wide"><span>Top Performing Coupon</span><strong>${escapeHtml(couponOverview.topCoupon)}</strong></div>
               </div>
             </article>
 
             <article class="admin-card">
               <div class="admin-card__head">
-                <h3 class="admin-card__title">Latest Customers</h3>
-                <p class="admin-card__sub">Most recently active merch customers</p>
+                <h3 class="admin-card__title">Top Selling Products</h3>
+                <p class="admin-card__sub">Using storefront catalog prices</p>
               </div>
               <div class="admin-card__body admin-list">
-                ${renderFeedList(
-                  latestCustomers,
-                  'No customer activity yet',
-                  'Customer profiles will appear here after the backend is wired.',
-                  (customer) => `
-                    <div class="admin-list__item">
-                      <div class="admin-list__item-head">
-                        <div>
-                          <p class="admin-list__item-title">${escapeHtml(customer.name || 'Customer')}</p>
-                          <p class="admin-list__item-sub">${escapeHtml(customer.email || 'No email on file')}</p>
-                        </div>
-                        <span class="admin-avatar">${escapeHtml(initials(customer.name || 'Customer'))}</span>
+                ${state.products.slice(0, 5).map((product) => `
+                  <div class="admin-list__item">
+                    <div class="admin-list__item-head">
+                      <div>
+                        <p class="admin-list__item-title">${escapeHtml(product.name)}</p>
+                        <p class="admin-list__item-sub">${escapeHtml(product.category)}</p>
                       </div>
-                      <p class="admin-table__muted" style="margin:0;">${formatCount(customer.merchandiseOrders || 0)} order(s) - ${escapeHtml(dateLabel(customer.registrationDate || customer.createdAt || ''))}</p>
+                      <strong>${escapeHtml(product.priceLabel || catalogPrice(product.price))}</strong>
                     </div>
-                  `
-                )}
-              </div>
-            </article>
-
-            <article class="admin-card">
-              <div class="admin-card__head">
-                <h3 class="admin-card__title">Recent Payments</h3>
-                <p class="admin-card__sub">Payment confirmations and refunds</p>
-              </div>
-              <div class="admin-card__body admin-list">
-                ${renderFeedList(
-                  recentPayments,
-                  'No payments yet',
-                  'Payment entries will appear when the checkout and payment APIs are connected.',
-                  (payment) => `
-                    <div class="admin-list__item">
-                      <div class="admin-list__item-head">
-                        <div>
-                          <p class="admin-list__item-title">${escapeHtml(payment.orderNumber || `Order #${payment.id}`)}</p>
-                          <p class="admin-list__item-sub">${escapeHtml(payment.customerName || 'Guest customer')} - ${escapeHtml(payment.paymentMethod || 'online')}</p>
-                        </div>
-                        <strong>${escapeHtml(money(payment.amount || 0))}</strong>
-                      </div>
-                      <p class="admin-table__muted" style="margin:0;">${escapeHtml(getStatusLabel(payment.paymentStatus || 'pending'))} - ${escapeHtml(dateLabel(payment.createdAt || ''))}</p>
-                    </div>
-                  `
-                )}
-              </div>
-            </article>
-
-            <article class="admin-card">
-              <div class="admin-card__head">
-                <h3 class="admin-card__title">Recent Coupon Usage</h3>
-                <p class="admin-card__sub">Recently applied merch coupon codes</p>
-              </div>
-              <div class="admin-card__body admin-list">
-                ${renderFeedList(
-                  recentCouponUsage,
-                  'No coupon usage yet',
-                  'Coupon performance metrics will appear once a real source is wired in.',
-                  (entry) => `
-                    <div class="admin-list__item">
-                      <div class="admin-list__item-head">
-                        <div>
-                          <p class="admin-list__item-title">${escapeHtml(entry.couponCode || 'Coupon')}</p>
-                          <p class="admin-list__item-sub">${escapeHtml(entry.customerName || 'Guest customer')} - ${escapeHtml(entry.orderNumber || '')}</p>
-                        </div>
-                        <strong>${escapeHtml(money(entry.amount || 0))}</strong>
-                      </div>
-                      <p class="admin-table__muted" style="margin:0;">${escapeHtml(entry.influencerName || 'Store coupon')} - ${escapeHtml(dateLabel(entry.createdAt || ''))}</p>
-                    </div>
-                  `
-                )}
-              </div>
-            </article>
-          </div>
-
-          <section class="admin-card" style="margin-top:18px;">
-            <div class="admin-card__head">
-              <h3 class="admin-card__title">Top Selling Products</h3>
-              <p class="admin-card__sub">Using storefront catalog prices</p>
-            </div>
-            <div class="admin-card__body admin-list">
-              ${state.products.slice(0, 5).map((product) => `
-                <div class="admin-list__item">
-                  <div class="admin-list__item-head">
-                    <div>
-                      <p class="admin-list__item-title">${escapeHtml(product.name)}</p>
-                      <p class="admin-list__item-sub">${escapeHtml(product.category)}</p>
-                    </div>
-                    <strong>${escapeHtml(product.priceLabel || catalogPrice(product.price))}</strong>
                   </div>
-                </div>
-              `).join('')}
-            </div>
-          </section>
+                `).join('')}
+              </div>
+            </article>
         </div>
       </section>
     `;
@@ -1834,8 +1841,22 @@
     `;
   }
 
+  function getOrderCreatedAt(order) {
+    const rawValue = order?.createdAt ?? order?.created_at ?? order?.orderDate ?? order?.date ?? '';
+    const raw = String(rawValue).trim();
+    if (!raw) return new Date('invalid');
+    return new Date(/^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T00:00:00` : raw.replace(' ', 'T'));
+  }
+
   function filteredOrders() {
     const query = state.ordersSearch.trim().toLowerCase();
+    const todayStart = new Date(`${toISODate(today)}T00:00:00`);
+    const tomorrowStart = new Date(todayStart);
+    tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+    const rangeStart = state.ordersAppliedDateFrom ? new Date(`${state.ordersAppliedDateFrom}T00:00:00`) : null;
+    const rangeEnd = state.ordersAppliedDateTo ? new Date(`${state.ordersAppliedDateTo}T00:00:00`) : null;
+    if (rangeEnd) rangeEnd.setDate(rangeEnd.getDate() + 1);
+
     return [...state.orders].filter((order) => {
       const matchesStatus = state.ordersStatus === 'all' || order.status === state.ordersStatus;
       const matchesQuery =
@@ -1843,7 +1864,11 @@
         [order.orderNumber, order.customerName, order.email, order.phone]
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(query));
-      return matchesStatus && matchesQuery;
+      const createdAt = getOrderCreatedAt(order);
+      const matchesToday = !state.ordersTodayOnly || (createdAt >= todayStart && createdAt < tomorrowStart);
+      const matchesFrom = !rangeStart || (createdAt >= rangeStart);
+      const matchesTo = !rangeEnd || (createdAt < rangeEnd);
+      return matchesStatus && matchesQuery && matchesToday && matchesFrom && matchesTo;
     });
   }
 
@@ -1986,14 +2011,25 @@
             <div class="admin-toolbar__group" style="flex:1 1 420px;">
               <input class="admin-input" data-input="ordersSearch" value="${escapeHtml(state.ordersSearch)}" placeholder="Search by order ID, customer name, email, or phone" />
             </div>
-            <div class="admin-toolbar__group">
-              <button class="admin-btn ${state.ordersStatus === 'all' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="all">All</button>
-              <button class="admin-btn ${state.ordersStatus === 'pending' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="pending">Pending</button>
-              <button class="admin-btn ${state.ordersStatus === 'processing' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="processing">Processing</button>
-              <button class="admin-btn ${state.ordersStatus === 'shipped' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="shipped">Shipped</button>
-              <button class="admin-btn ${state.ordersStatus === 'delivered' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="delivered">Delivered</button>
-              <button class="admin-btn ${state.ordersStatus === 'cancelled' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="cancelled">Cancelled</button>
-              <button class="admin-btn ${state.ordersStatus === 'returned' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="returned">Returned</button>
+            <div class="admin-orders-filter-row">
+              <div class="admin-toolbar__group">
+                <div class="admin-orders-date-range${state.ordersAppliedDateFrom || state.ordersAppliedDateTo ? ' is-active' : ''}" aria-label="Order date range">
+                  <label class="admin-orders-date-field"><span>From</span><input class="admin-input" type="date" data-input="ordersDateFrom" value="${escapeHtml(state.ordersDateFrom)}" /></label>
+                  <label class="admin-orders-date-field"><span>To</span><input class="admin-input" type="date" data-input="ordersDateTo" value="${escapeHtml(state.ordersDateTo)}" /></label>
+                  <button class="admin-btn ${state.ordersAppliedDateFrom || state.ordersAppliedDateTo ? 'admin-btn--primary' : 'admin-btn--soft'}" type="button" data-action="apply-orders-date-range">Apply</button>
+                  <button class="admin-btn admin-btn--ghost" type="button" data-action="clear-orders-date-range" ${state.ordersAppliedDateFrom || state.ordersAppliedDateTo || state.ordersDateFrom || state.ordersDateTo ? '' : 'disabled'}>Clear</button>
+                </div>
+              </div>
+              <div class="admin-toolbar__group">
+                <button class="admin-btn ${state.ordersStatus === 'all' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="all">All</button>
+                <button class="admin-btn ${state.ordersTodayOnly ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-action="toggle-orders-today">Today</button>
+                <button class="admin-btn ${state.ordersStatus === 'pending' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="pending">Pending</button>
+                <button class="admin-btn ${state.ordersStatus === 'processing' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="processing">Processing</button>
+                <button class="admin-btn ${state.ordersStatus === 'shipped' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="shipped">Shipped</button>
+                <button class="admin-btn ${state.ordersStatus === 'delivered' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="delivered">Delivered</button>
+                <button class="admin-btn ${state.ordersStatus === 'cancelled' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="cancelled">Cancelled</button>
+                <button class="admin-btn ${state.ordersStatus === 'returned' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="returned">Returned</button>
+              </div>
             </div>
           </div>
 
@@ -2126,6 +2162,13 @@
     `;
   }
 
+  function getCustomerCreatedAt(customer) {
+    const rawValue = customer?.registrationDate ?? customer?.registeredAt ?? customer?.createdAt ?? customer?.created_at ?? '';
+    const raw = String(rawValue).trim();
+    if (!raw) return new Date('invalid');
+    return new Date(/^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T00:00:00` : raw.replace(' ', 'T'));
+  }
+
   function renderCustomers() {
     if (state.customersLoading && !state.customers.length) {
       els.customersView.innerHTML = `
@@ -2162,9 +2205,14 @@
     }
 
     const query = state.customersSearch.trim().toLowerCase();
-    const filtered = state.customers.filter((customer) =>
-      !query ||
-      [
+    const todayStart = new Date(`${toISODate(today)}T00:00:00`);
+    const tomorrowStart = new Date(todayStart);
+    tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+    const rangeStart = state.customersAppliedDateFrom ? new Date(`${state.customersAppliedDateFrom}T00:00:00`) : null;
+    const rangeEnd = state.customersAppliedDateTo ? new Date(`${state.customersAppliedDateTo}T00:00:00`) : null;
+    if (rangeEnd) rangeEnd.setDate(rangeEnd.getDate() + 1);
+    const filtered = state.customers.filter((customer) => {
+      const matchesQuery = !query || [
         customer.name,
         customer.email,
         customer.phone,
@@ -2173,8 +2221,13 @@
         String(customer.merchandiseOrders || ''),
       ]
         .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(query))
-    );
+        .some((value) => String(value).toLowerCase().includes(query));
+      const createdAt = getCustomerCreatedAt(customer);
+      const matchesToday = !state.customersTodayOnly || (createdAt >= todayStart && createdAt < tomorrowStart);
+      const matchesFrom = !rangeStart || (createdAt >= rangeStart);
+      const matchesTo = !rangeEnd || (createdAt < rangeEnd);
+      return !Number.isNaN(createdAt.getTime()) && matchesQuery && matchesToday && matchesFrom && matchesTo;
+    });
     const selectedCustomer = state.selectedCustomerId == null
       ? null
       : filtered.find((customer) => String(customer.id) === String(state.selectedCustomerId)) || null;
@@ -2192,6 +2245,17 @@
           <div class="admin-toolbar">
             <div class="admin-toolbar__group" style="flex:1 1 420px;">
               <input class="admin-input" data-input="customersSearch" value="${escapeHtml(state.customersSearch)}" placeholder="Search by name, email, phone, address, or last order" />
+            </div>
+            <div class="admin-orders-filter-row">
+              <div class="admin-toolbar__group">
+                <div class="admin-orders-date-range${state.customersAppliedDateFrom || state.customersAppliedDateTo ? ' is-active' : ''}">
+                  <button class="admin-btn ${state.customersTodayOnly ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-action="toggle-customers-today">Today</button>
+                  <label class="admin-orders-date-field"><span>From</span><input class="admin-input" type="date" data-input="customersDateFrom" value="${escapeHtml(state.customersDateFrom)}" /></label>
+                  <label class="admin-orders-date-field"><span>To</span><input class="admin-input" type="date" data-input="customersDateTo" value="${escapeHtml(state.customersDateTo)}" /></label>
+                  <button class="admin-btn admin-btn--soft" type="button" data-action="apply-customers-date-range">Apply</button>
+                  <button class="admin-btn admin-btn--ghost" type="button" data-action="clear-customers-date-range" ${state.customersAppliedDateFrom || state.customersAppliedDateTo || state.customersDateFrom || state.customersDateTo ? '' : 'disabled'}>Clear</button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -2302,7 +2366,7 @@
       { label: 'Total Coupons', value: totalCoupons, note: 'Shared coupon store' },
       { label: 'Active Coupons', value: activeCoupons, note: 'Currently usable' },
       { label: 'Expired Coupons', value: expiredCoupons, note: 'Needs review' },
-      { label: 'Coupons Redeemed', value: redeemedCoupons, note: 'Lifetime redemptions' },
+      { label: 'Coupons Usage', value: redeemedCoupons, note: 'Lifetime redemptions' },
       { label: 'Discount Given', value: `Rs. ${discountGiven.toLocaleString('en-IN')}`, note: 'Approx. total discount' },
       { label: 'Active Influencer Coupons', value: activeInfluencerCoupons, note: 'Assigned creator codes' },
     ];
@@ -2384,10 +2448,6 @@
                               <div class="admin-actions">
                                 <button class="admin-action-link" type="button" data-action="select-coupon" data-id="${coupon.id}">View</button>
                                 <button class="admin-action-link" type="button" data-action="edit-coupon" data-id="${coupon.id}">Edit</button>
-                                <button class="admin-action-link" type="button" data-action="assign-coupon-owner" data-id="${coupon.id}">Assign Influencer</button>
-                                <button class="admin-action-link" type="button" data-action="toggle-coupon" data-id="${coupon.id}">${statusValue === 'active' ? 'Disable' : 'Enable'}</button>
-                                <button class="admin-action-link" type="button" data-action="copy-coupon" data-id="${coupon.id}">Copy Coupon</button>
-                                <button class="admin-action-link" type="button" data-action="delete-coupon" data-id="${coupon.id}">Delete</button>
                               </div>
                             </td>
                           </tr>
@@ -2401,9 +2461,12 @@
 
             ${showCouponDetails ? `
               <section class="admin-card">
-              <div class="admin-card__head">
-                <h3 class="admin-card__title">Coupon Details</h3>
-                <p class="admin-card__sub">Usage, expiry, and owner context</p>
+              <div class="admin-card__head admin-card__head--with-close">
+                <div>
+                  <h3 class="admin-card__title">Coupon Details</h3>
+                  <p class="admin-card__sub">Usage, expiry, and owner context</p>
+                </div>
+                <button class="admin-card__close" type="button" data-action="close-coupon-details" aria-label="Close coupon details">&times;</button>
               </div>
               <div class="admin-card__body">
                 ${selectedCoupon ? `
@@ -2455,32 +2518,27 @@
 
   function renderInfluencers() {
     const query = state.influencersSearch.trim().toLowerCase();
-    const month = String(state.influencersMonth || '').trim();
-    const recentMonths = Array.from({ length: 12 }, (_, index) => {
-      const date = new Date(today.getFullYear(), today.getMonth() - index, 1);
-      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    });
-    const monthOptions = Array.from(new Set([
-      ...recentMonths,
-      ...state.influencers.flatMap((influencer) => (influencer.monthlySales || []).map((row) => row.month)),
-    ]))
-      .filter(Boolean)
-      .sort((left, right) => right.localeCompare(left));
+    const selectedInfluencerFilter = String(state.influencerDetailsFilter || 'all');
+    const month = '';
     const getMonthStats = (influencer) => {
       if (!month) return { orders: Number(influencer.totalOrders || 0), revenue: Number(influencer.revenue || 0), commission: Number(influencer.commission || 0), couponUsage: Number(influencer.couponUsage || 0) };
       return (influencer.monthlySales || []).find((row) => row.month === month) || { orders: 0, revenue: 0, commission: 0, couponUsage: 0 };
     };
-    const filtered = state.influencers.filter((influencer) =>
-      !query ||
-      [influencer.name, influencer.handle, influencer.email, influencer.phone]
+    const getAssignedCouponCount = (influencer) => Array.isArray(influencer?.coupons)
+      ? influencer.coupons.length
+      : Number(influencer?.assignedCouponCount || influencer?.couponCount || 0);
+    const filtered = state.influencers.filter((influencer) => {
+      const matchesDetails = selectedInfluencerFilter === 'all' || String(influencer.id) === selectedInfluencerFilter;
+      const matchesSearch = !query || [influencer.name, influencer.handle, influencer.email, influencer.phone]
         .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(query))
-    );
-    const selectedInfluencer = getInfluencerById(state.selectedInfluencerId) || filtered[0] || state.influencers[0] || null;
+        .some((value) => String(value).toLowerCase().includes(query));
+      return matchesDetails && matchesSearch;
+    });
+    const selectedInfluencer = filtered.find((influencer) => String(influencer.id) === String(state.selectedInfluencerId)) || filtered[0] || null;
     if (selectedInfluencer) state.selectedInfluencerId = selectedInfluencer.id;
 
     const visibleInfluencers = filtered;
-    const statsSource = filtered.length ? filtered : state.influencers;
+    const statsSource = filtered;
     const totalRevenue = statsSource.reduce((sum, influencer) => sum + getMonthStats(influencer).revenue, 0);
     const totalOrders = statsSource.reduce((sum, influencer) => sum + getMonthStats(influencer).orders, 0);
     const totalCoupons = statsSource.reduce((sum, influencer) => sum + getMonthStats(influencer).couponUsage, 0);
@@ -2538,9 +2596,9 @@
               <input class="admin-input" data-input="influencersSearch" value="${escapeHtml(state.influencersSearch)}" placeholder="Search by name, handle, email, or phone" />
             </div>
             <div class="admin-toolbar__group" style="flex:0 1 220px;">
-              <select class="admin-select" data-input="influencersMonth" aria-label="Filter influencer sales by month">
-                <option value="">All months</option>
-                ${monthOptions.map((value) => `<option value="${escapeHtml(value)}" ${month === value ? 'selected' : ''}>${escapeHtml(reportMonthLabel(value))}</option>`).join('')}
+              <select class="admin-select" data-input="influencerDetailsFilter" aria-label="Influencer Details">
+                <option value="all" ${selectedInfluencerFilter === 'all' ? 'selected' : ''}>All Influencers</option>
+                ${state.influencers.map((influencer) => `<option value="${escapeHtml(influencer.id)}" ${String(influencer.id) === selectedInfluencerFilter ? 'selected' : ''}>${escapeHtml(influencer.name || influencer.handle || `Influencer ${influencer.id}`)}</option>`).join('')}
               </select>
             </div>
             <button class="admin-btn admin-btn--soft" type="button" data-action="open-influencer-modal">Add Influencer</button>
@@ -2594,8 +2652,8 @@
                       <p class="admin-stat__value" style="font-size:20px;">${formatCount(influencer.couponUsage)}</p>
                     </article>
                     <article class="admin-stat" style="padding:12px;">
-                      <p class="admin-stat__label">Campaigns</p>
-                      <p class="admin-stat__value" style="font-size:20px;">${formatCount(influencer.activeCampaigns)}</p>
+                      <p class="admin-stat__label">No. of Coupons Assigned</p>
+                      <p class="admin-stat__value" style="font-size:20px;">${formatCount(getAssignedCouponCount(influencer))}</p>
                     </article>
                   </div>
                   <div class="admin-grid admin-grid--stats" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:12px;">
@@ -2681,8 +2739,8 @@
                       <p class="admin-list__item-sub">${formatCount(selectedInfluencer.couponUsage)}</p>
                     </div>
                     <div class="admin-list__item">
-                      <p class="admin-list__item-title">Active Campaigns</p>
-                      <p class="admin-list__item-sub">${formatCount(selectedInfluencer.activeCampaigns)}</p>
+                      <p class="admin-list__item-title">No. of Coupons Assigned in Influencer</p>
+                      <p class="admin-list__item-sub">${formatCount(getAssignedCouponCount(selectedInfluencer))}</p>
                     </div>
                   </div>
                 ` : '<p class="admin-table__muted">No influencer selected.</p>'}
@@ -2706,7 +2764,7 @@
                       { label: 'Revenue', value: Math.min(100, Math.round(Number(getMonthStats(selectedInfluencer).revenue || 0) / 100000)), display: money(getMonthStats(selectedInfluencer).revenue) },
                       { label: 'Commission', value: Math.min(100, Math.round(Number(getMonthStats(selectedInfluencer).commission || 0) / 10000)), display: money(getMonthStats(selectedInfluencer).commission) },
                       { label: 'Coupon Usage', value: Math.min(100, Number(selectedInfluencer.couponUsage || 0)), display: formatCount(selectedInfluencer.couponUsage) },
-                      { label: 'Campaigns', value: Math.min(100, Number(selectedInfluencer.activeCampaigns || 0) * 20), display: `${formatCount(selectedInfluencer.activeCampaigns)} active` },
+                      { label: 'Coupons Assigned', value: Math.min(100, getAssignedCouponCount(selectedInfluencer) * 20), display: formatCount(getAssignedCouponCount(selectedInfluencer)) },
                     ])}
                   </div>
                 ` : '<p class="admin-table__muted" style="margin:0;">Select an influencer to inspect their performance snapshot.</p>'}
@@ -3082,6 +3140,78 @@
     });
   }
 
+  function getCouponProductOptions(entity = null) {
+    const selectedAppliesTo = String(entity?.appliesTo || '').trim().toLowerCase();
+    const selectedIds = new Set(
+      (selectedAppliesTo.match(/^product:(.+)$/)?.[1] || '')
+        .split(',')
+        .map((id) => Number(id.trim()))
+        .filter((id) => Number.isInteger(id) && id > 0)
+    );
+    const products = [];
+    for (const product of Array.isArray(state.products) ? state.products : []) {
+      const productId = Number(product.productId || product.id);
+      if (!Number.isInteger(productId) || productId <= 0) continue;
+      const variantLabel = [product.size, product.color].filter(Boolean).join(' / ');
+      products.push({
+        id: productId,
+        name: product.name || `Product ${productId}`,
+        label: variantLabel ? `${product.name || `Product ${productId}`} — ${variantLabel}` : product.name || `Product ${productId}`,
+        selected: selectedIds.has(productId),
+      });
+    }
+    return {
+      allSelected: !selectedIds.size || selectedAppliesTo === 'merch' || selectedAppliesTo === 'all',
+      products,
+    };
+  }
+
+  function couponProductsSummary(form) {
+    const allSelected = form.querySelector('[data-coupon-product-all]')?.checked;
+    const selected = [...form.querySelectorAll('[data-coupon-product-id]:checked')];
+    if (allSelected || !selected.length) return 'All Merch Products';
+    if (selected.length === 1) return selected[0].dataset.couponProductName || '1 Product Selected';
+    return `${selected.length} Products Selected`;
+  }
+
+  function syncCouponProductSelection(checkbox) {
+    const form = checkbox.closest('[data-entity-form="coupon"]');
+    if (!form) return;
+    const allCheckbox = form.querySelector('[data-coupon-product-all]');
+    const productCheckboxes = [...form.querySelectorAll('[data-coupon-product-id]')];
+    if (checkbox === allCheckbox && allCheckbox.checked) {
+      productCheckboxes.forEach((productCheckbox) => { productCheckbox.checked = false; });
+    } else if (checkbox === allCheckbox && !allCheckbox.checked && !productCheckboxes.some((productCheckbox) => productCheckbox.checked)) {
+      allCheckbox.checked = true;
+    } else if (checkbox !== allCheckbox && productCheckboxes.some((productCheckbox) => productCheckbox.checked)) {
+      allCheckbox.checked = false;
+    } else if (checkbox !== allCheckbox && !productCheckboxes.some((productCheckbox) => productCheckbox.checked)) {
+      allCheckbox.checked = true;
+    }
+    const trigger = form.querySelector('[data-coupon-products-toggle]');
+    if (trigger) trigger.textContent = couponProductsSummary(form);
+  }
+
+  function filterCouponProductOptions(input) {
+    const dropdown = input.closest('[data-coupon-products-dropdown]');
+    if (!dropdown) return;
+    const query = String(input.value || '').trim().toLowerCase();
+    dropdown.querySelectorAll('[data-coupon-product-option]').forEach((option) => {
+      option.hidden = Boolean(query) && !String(option.dataset.couponProductSearch || '').includes(query);
+    });
+  }
+
+  function closeCouponProductDropdown() {
+    const dropdown = document.querySelector('[data-coupon-products-dropdown].is-open, [data-influencer-coupon-dropdown].is-open');
+    if (!dropdown) return false;
+    const menu = dropdown.querySelector('[data-coupon-products-menu], [data-influencer-coupon-menu]');
+    const toggle = dropdown.querySelector('[data-coupon-products-toggle], [data-influencer-coupon-toggle]');
+    if (menu) menu.hidden = true;
+    toggle?.setAttribute('aria-expanded', 'false');
+    dropdown.classList.remove('is-open');
+    return true;
+  }
+
   function renderEntityFormModal(type, entity = null) {
     const config = {
       product: {
@@ -3155,18 +3285,30 @@
             </select>
           </label>
           <label class="admin-field" data-coupon-owner-field><span>Owner Email</span><input class="admin-input" name="recipientEmail" type="email" value="${escapeHtml(entity?.recipientEmail || '')}" placeholder="customer@example.com" /></label>
-          <label class="admin-field"><span>Applies To</span>
-            <select class="admin-select" name="appliesTo">
-              <option value="merch" ${String(entity?.appliesTo || 'merch') === 'merch' ? 'selected' : ''}>All Merch Products</option>
-              ${state.products.map((product) => {
-                const productId = product.productId || product.id;
-                const variantLabel = [product.size, product.color].filter(Boolean).join(' / ');
-                const label = variantLabel ? `${product.name} — ${variantLabel}` : product.name;
-                return `<option value="product:${productId}" ${String(entity?.appliesTo) === `product:${productId}` ? 'selected' : ''}>${escapeHtml(label)}</option>`;
-              }).join('')}
-              <option value="all" ${String(entity?.appliesTo) === 'all' ? 'selected' : ''}>All</option>
-            </select>
-          </label>
+          ${(() => {
+            const productOptions = getCouponProductOptions(entity);
+            return `
+              <div class="admin-field admin-field--wide admin-product-multiselect" data-coupon-products-dropdown>
+                <span>Applies To</span>
+                <button class="admin-product-multiselect__trigger" type="button" data-coupon-products-toggle aria-expanded="false">${escapeHtml(productOptions.allSelected ? 'All Merch Products' : productOptions.products.filter((product) => product.selected).length === 1 ? productOptions.products.find((product) => product.selected)?.label || '1 Product Selected' : `${productOptions.products.filter((product) => product.selected).length} Products Selected`)}</button>
+                <div class="admin-product-multiselect__menu" data-coupon-products-menu hidden>
+                  <input class="admin-input" type="search" data-input="couponProductSearch" placeholder="Search products" aria-label="Search products" />
+                  <div class="admin-product-multiselect__options">
+                    <label class="admin-product-multiselect__option" data-coupon-product-option data-coupon-product-search="all merch products">
+                      <input type="checkbox" name="appliesToAll" value="merch" data-coupon-product-checkbox data-coupon-product-all ${productOptions.allSelected ? 'checked' : ''} />
+                      <span>All Merch Products</span>
+                    </label>
+                    ${productOptions.products.map((product) => `
+                      <label class="admin-product-multiselect__option" data-coupon-product-option data-coupon-product-search="${escapeHtml(product.label).toLowerCase()}">
+                        <input type="checkbox" name="appliesToProduct" value="${product.id}" data-coupon-product-checkbox data-coupon-product-id="${product.id}" data-coupon-product-name="${escapeHtml(product.label)}" ${product.selected ? 'checked' : ''} />
+                        <span>${escapeHtml(product.label)}</span>
+                      </label>
+                    `).join('')}
+                  </div>
+                </div>
+              </div>
+            `;
+          })()}
           <label class="admin-check"><input type="checkbox" name="status" ${String(entity?.status || 'active') === 'active' ? 'checked' : ''} /><span>Active</span></label>
         `,
       },
@@ -3190,6 +3332,24 @@
     const selected = config[type];
     if (!selected) return;
 
+    const isEditingCoupon = type === 'coupon' && Boolean(entity);
+    const couponIsInfluencer = isEditingCoupon && getCouponCategoryValue(entity) === 'influencer';
+    const couponManagementActions = isEditingCoupon ? `
+      <div class="admin-modal__management-actions">
+        ${couponIsInfluencer ? '<button class="admin-btn admin-btn--ghost" type="button" data-action="assign-coupon-owner" data-id="' + escapeHtml(entity.id) + '">Assign Influencer</button>' : ''}
+        <button class="admin-btn admin-btn--ghost" type="button" data-action="copy-coupon" data-id="${escapeHtml(entity.id)}">Copy Coupon</button>
+        <button class="admin-btn admin-btn--ghost" type="button" data-action="toggle-coupon" data-id="${escapeHtml(entity.id)}">${Number(entity.active ?? entity.isActive ?? 0) === 1 ? 'Disable' : 'Enable'}</button>
+        <button class="admin-btn admin-btn--danger" type="button" data-action="delete-coupon" data-id="${escapeHtml(entity.id)}">Delete</button>
+      </div>
+    ` : '';
+    const isEditingInfluencer = type === 'influencer' && Boolean(entity);
+    const influencerManagementActions = isEditingInfluencer ? `
+      <div class="admin-modal__management-actions">
+        <button class="admin-btn admin-btn--ghost" type="button" data-action="assign-coupon" data-id="${escapeHtml(entity.id)}">Assign Coupons</button>
+        <button class="admin-btn ${entity.active ? 'admin-btn--danger' : 'admin-btn--ghost'}" type="button" data-action="toggle-influencer" data-id="${escapeHtml(entity.id)}">${entity.active ? 'Deactivate Influencer' : 'Activate Influencer'}</button>
+      </div>
+    ` : '';
+
     openModal({
       title: selected.title,
       subtitle: selected.subtitle,
@@ -3201,6 +3361,8 @@
         </form>
       `,
       footer: `
+        ${couponManagementActions}
+        ${influencerManagementActions}
         <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button>
         <button class="admin-btn admin-btn--primary" type="submit" form="entityFormSubmit">Save</button>
       `,
@@ -3229,6 +3391,22 @@
     const influencerSelect = form.querySelector('[name="influencerId"]');
     const ownerEmailInput = form.querySelector('[name="recipientEmail"]');
     const activeInput = form.querySelector('[name="status"]');
+    const productsDropdown = form.querySelector('[data-coupon-products-dropdown]');
+    const productsToggle = form.querySelector('[data-coupon-products-toggle]');
+    const productsMenu = form.querySelector('[data-coupon-products-menu]');
+    const productsSearch = form.querySelector('[data-input="couponProductSearch"]');
+
+    productsToggle?.addEventListener('click', () => {
+      const isOpen = !productsMenu?.hidden;
+      if (productsMenu) productsMenu.hidden = isOpen;
+      productsToggle.setAttribute('aria-expanded', String(!isOpen));
+      productsDropdown?.classList.toggle('is-open', !isOpen);
+      if (!isOpen) productsSearch?.focus();
+    });
+    productsSearch?.addEventListener('input', () => filterCouponProductOptions(productsSearch));
+    form.querySelectorAll('[data-coupon-product-checkbox]').forEach((checkbox) => {
+      checkbox.addEventListener('change', () => syncCouponProductSelection(checkbox));
+    });
 
     const generateCodeForCategory = async () => {
       if (!codeInput) return;
@@ -3311,11 +3489,17 @@
 
   function renderInfluencerAssignmentModal(influencer) {
     if (!influencer) return;
-    const availableCoupons = Array.isArray(state.coupons)
-      ? state.coupons
-          .map((coupon) => String(coupon.code || '').trim().toUpperCase())
-          .filter(Boolean)
-      : [];
+    const assignedCoupons = normalizeCouponCodes(influencer.coupons || []);
+    const availableCouponMap = new Map(
+      (Array.isArray(state.coupons) ? state.coupons : [])
+        .filter((coupon) => getCouponTypeValue(coupon) === 'influencer')
+        .map((coupon) => [String(coupon.code || '').trim().toUpperCase(), coupon])
+        .filter(([code]) => Boolean(code))
+    );
+    assignedCoupons.forEach((code) => {
+      if (!availableCouponMap.has(code)) availableCouponMap.set(code, { code });
+    });
+    const availableCoupons = [...availableCouponMap.values()].sort((left, right) => String(left.code || '').localeCompare(String(right.code || '')));
 
     openModal({
       title: `Assign Coupons to ${influencer.name}`,
@@ -3323,14 +3507,25 @@
       body: `
         <form class="admin-form" data-form="influencer-coupons" data-influencer-id="${escapeHtml(influencer.id)}">
           <div class="admin-form__grid">
-            <label class="admin-field admin-field--wide">
+            <div class="admin-field admin-field--wide admin-product-multiselect" data-influencer-coupon-dropdown>
               <span>Assigned Coupons</span>
-              <textarea class="admin-textarea" name="coupons" rows="4" placeholder="Enter coupon codes separated by commas or new lines">${escapeHtml((influencer.coupons || []).join(', '))}</textarea>
-            </label>
-            <label class="admin-field admin-field--wide">
-              <span>Available Coupon Codes</span>
-              <input class="admin-input" type="text" value="${escapeHtml(availableCoupons.length ? availableCoupons.join(', ') : 'No coupons synced yet')}" readonly />
-            </label>
+              <div class="admin-chip-row admin-influencer-coupon-chips" data-influencer-coupon-chips></div>
+              <button class="admin-product-multiselect__trigger" type="button" data-influencer-coupon-toggle aria-expanded="false">Choose coupons</button>
+              <div class="admin-product-multiselect__menu" data-influencer-coupon-menu hidden>
+                <input class="admin-input" type="search" data-influencer-coupon-search placeholder="Search influencer coupons" aria-label="Search influencer coupons" />
+                <div class="admin-product-multiselect__options">
+                  ${availableCoupons.length ? availableCoupons.map((coupon) => {
+                    const code = String(coupon.code || '').trim().toUpperCase();
+                    return `
+                      <label class="admin-product-multiselect__option" data-influencer-coupon-option data-influencer-coupon-search="${escapeHtml(`${code} ${coupon.description || ''}`).toLowerCase()}">
+                        <input type="checkbox" name="couponCodes" value="${escapeHtml(code)}" data-influencer-coupon-checkbox ${assignedCoupons.includes(code) ? 'checked' : ''} />
+                        <span>${escapeHtml(code)}</span>
+                      </label>
+                    `;
+                  }).join('') : '<p class="admin-table__muted" style="margin:8px;">No influencer coupons available.</p>'}
+                </div>
+              </div>
+            </div>
             <label class="admin-field admin-field--wide">
               <span>Campaign Notes</span>
               <textarea class="admin-textarea" name="notes" rows="2" placeholder="Optional campaign note">${escapeHtml(influencer.notes || '')}</textarea>
@@ -3346,7 +3541,44 @@
     });
 
     const form = els.adminModalDialog.querySelector('[data-form="influencer-coupons"]');
-    if (form) form.id = 'influencerCouponForm';
+    if (form) {
+      form.id = 'influencerCouponForm';
+      const dropdown = form.querySelector('[data-influencer-coupon-dropdown]');
+      const toggle = form.querySelector('[data-influencer-coupon-toggle]');
+      const menu = form.querySelector('[data-influencer-coupon-menu]');
+      const search = form.querySelector('[data-influencer-coupon-search]');
+      const chips = form.querySelector('[data-influencer-coupon-chips]');
+      const renderAssignedChips = () => {
+        const selected = [...form.querySelectorAll('[data-influencer-coupon-checkbox]:checked')].map((checkbox) => checkbox.value);
+        chips.innerHTML = selected.length
+          ? selected.map((code) => `<button class="admin-chip admin-chip--removable" type="button" data-remove-influencer-coupon="${escapeHtml(code)}"><span>${escapeHtml(code)}</span><span aria-hidden="true">&times;</span></button>`).join('')
+          : '<span class="admin-table__muted">No coupons assigned yet.</span>';
+        toggle.textContent = selected.length ? `${selected.length} Coupon${selected.length === 1 ? '' : 's'} Selected` : 'Choose coupons';
+      };
+      const filterOptions = () => {
+        const query = String(search.value || '').trim().toLowerCase();
+        form.querySelectorAll('[data-influencer-coupon-option]').forEach((option) => {
+          option.hidden = Boolean(query) && !String(option.dataset.influencerCouponSearch || '').includes(query);
+        });
+      };
+      toggle.addEventListener('click', () => {
+        const isOpen = !menu.hidden;
+        menu.hidden = isOpen;
+        toggle.setAttribute('aria-expanded', String(!isOpen));
+        dropdown.classList.toggle('is-open', !isOpen);
+        if (!isOpen) search.focus();
+      });
+      search.addEventListener('input', filterOptions);
+      form.querySelectorAll('[data-influencer-coupon-checkbox]').forEach((checkbox) => checkbox.addEventListener('change', renderAssignedChips));
+      form.addEventListener('click', (event) => {
+        const removeButton = event.target.closest('[data-remove-influencer-coupon]');
+        if (!removeButton) return;
+        const checkbox = [...form.querySelectorAll('[data-influencer-coupon-checkbox]')].find((item) => item.value === removeButton.dataset.removeInfluencerCoupon);
+        if (checkbox) checkbox.checked = false;
+        renderAssignedChips();
+      });
+      renderAssignedChips();
+    }
   }
 
   async function updateInfluencerCouponsFromForm(form) {
@@ -3357,7 +3589,7 @@
       return;
     }
 
-    const coupons = normalizeCouponCodes(form.querySelector('[name="coupons"]')?.value);
+    const coupons = normalizeCouponCodes([...form.querySelectorAll('[data-influencer-coupon-checkbox]:checked')].map((checkbox) => checkbox.value));
     const notes = String(form.querySelector('[name="notes"]')?.value || '').trim();
     await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencerId)}/coupons`, {
       method: 'PUT',
@@ -3455,7 +3687,12 @@
       status: fd.get('status') === 'on' ? 'active' : 'inactive',
       couponType,
       ownerType: couponCategory === 'influencer' ? 'influencer' : couponCategory === 'private' ? 'private' : 'general',
-      appliesTo: String(fd.get('appliesTo') || 'merch').trim().toLowerCase(),
+      appliesTo: fd.get('appliesToAll') === 'merch'
+        ? 'merch'
+        : (() => {
+            const productIds = [...new Set(fd.getAll('appliesToProduct').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
+            return productIds.length ? `product:${productIds.join(',')}` : 'merch';
+          })(),
       owner: couponCategory === 'influencer' ? influencer?.name || 'Influencer' : couponCategory === 'private' ? recipientEmail : 'General',
       recipientName: couponCategory === 'influencer' ? influencer?.name || '' : '',
       recipientEmail: couponCategory === 'private' ? recipientEmail : '',
@@ -3516,6 +3753,7 @@
     } finally {
       state.couponsLoading = false;
       renderCoupons();
+      renderDashboard();
     }
   }
 
@@ -3896,6 +4134,26 @@
         renderDashboard();
         return;
       }
+      case 'apply-order-status-range': {
+        const from = String(state.orderStatusFrom || '').trim();
+        const to = String(state.orderStatusTo || '').trim();
+        if (!from || !to || from > to) {
+          toast('Invalid date range', 'Choose a valid From and To date before applying the filter.', 'warning');
+          return;
+        }
+        state.orderStatusAppliedFrom = from;
+        state.orderStatusAppliedTo = to;
+        renderDashboard();
+        return;
+      }
+      case 'clear-order-status-range':
+        state.orderStatusPeriod = 'today';
+        state.orderStatusFrom = '';
+        state.orderStatusTo = '';
+        state.orderStatusAppliedFrom = '';
+        state.orderStatusAppliedTo = '';
+        renderDashboard();
+        return;
       case 'open-profile':
         renderProfileModal();
         return;
@@ -4073,6 +4331,78 @@
           renderOrders();
         }
         return;
+      case 'toggle-customers-today':
+        state.customersTodayOnly = !state.customersTodayOnly;
+        if (state.customersTodayOnly) {
+          state.customersDateFrom = '';
+          state.customersDateTo = '';
+          state.customersAppliedDateFrom = '';
+          state.customersAppliedDateTo = '';
+        }
+        renderCustomers();
+        return;
+      case 'apply-customers-date-range': {
+        const from = String(state.customersDateFrom || '').trim();
+        const to = String(state.customersDateTo || '').trim();
+        if (!from || !to) {
+          toast('Date range incomplete', 'Choose both a From and To date before applying the customer filter.', 'warning');
+          return;
+        }
+        if (from > to) {
+          toast('Invalid date range', 'The From date must be on or before the To date.', 'warning');
+          return;
+        }
+        state.customersTodayOnly = false;
+        state.customersAppliedDateFrom = from;
+        state.customersAppliedDateTo = to;
+        renderCustomers();
+        return;
+      }
+      case 'clear-customers-date-range':
+        state.customersTodayOnly = false;
+        state.customersDateFrom = '';
+        state.customersDateTo = '';
+        state.customersAppliedDateFrom = '';
+        state.customersAppliedDateTo = '';
+        renderCustomers();
+        return;
+      case 'toggle-orders-today':
+        state.ordersTodayOnly = !state.ordersTodayOnly;
+        if (state.ordersTodayOnly) {
+          state.ordersDateFrom = '';
+          state.ordersDateTo = '';
+          state.ordersAppliedDateFrom = '';
+          state.ordersAppliedDateTo = '';
+        }
+        state.ordersPage = 1;
+        renderOrders();
+        return;
+      case 'apply-orders-date-range': {
+        const from = String(state.ordersDateFrom || '').trim();
+        const to = String(state.ordersDateTo || '').trim();
+        if (!from || !to) {
+          toast('Date range incomplete', 'Choose both a From and To date before applying the filter.', 'warning');
+          return;
+        }
+        if (from && to && from > to) {
+          toast('Invalid date range', 'The From date must be on or before the To date.', 'warning');
+          return;
+        }
+        state.ordersTodayOnly = false;
+        state.ordersAppliedDateFrom = from;
+        state.ordersAppliedDateTo = to;
+        state.ordersPage = 1;
+        renderOrders();
+        return;
+      }
+      case 'clear-orders-date-range':
+        state.ordersDateFrom = '';
+        state.ordersDateTo = '';
+        state.ordersAppliedDateFrom = '';
+        state.ordersAppliedDateTo = '';
+        state.ordersPage = 1;
+        renderOrders();
+        return;
       case 'update-product-stock':
         if (product && target instanceof HTMLInputElement) {
           const stock = Math.max(0, Number(target.value || 0));
@@ -4186,6 +4516,10 @@
           renderCoupons();
         }
         return;
+      case 'close-coupon-details':
+        state.selectedCouponId = null;
+        renderCoupons();
+        return;
       case 'open-coupon-modal':
         renderEntityFormModal('coupon');
         return;
@@ -4193,7 +4527,10 @@
         renderEntityFormModal('coupon', coupon);
         return;
       case 'assign-coupon-owner':
-        renderEntityFormModal('coupon', coupon);
+        if (coupon && getCouponTypeValue(coupon) === 'influencer') {
+          renderEntityFormModal('coupon', coupon);
+          window.setTimeout(() => els.adminModalDialog.querySelector('[name="influencerId"]')?.focus(), 0);
+        }
         return;
       case 'toggle-coupon':
         if (coupon) {
@@ -4204,6 +4541,7 @@
             body: JSON.stringify({ active: nextActive }),
           });
           toast('Coupon updated', `${coupon.code} is now ${nextActive ? 'active' : 'inactive'}.`, 'success');
+          closeModal();
           await loadCouponData();
         }
         return;
@@ -4261,6 +4599,7 @@
                   body: JSON.stringify({ active: 0 }),
                 });
                 toast('Influencer deactivated', `${influencer.name} is now inactive.`, 'warning');
+                closeModal();
                 await loadInfluencerData();
               },
             });
@@ -4271,6 +4610,7 @@
               body: JSON.stringify({ active: 1 }),
             });
             toast('Influencer reactivated', `${influencer.name} is now active again.`, 'success');
+            closeModal();
             await loadInfluencerData();
           }
         }
@@ -4346,16 +4686,33 @@
       renderOrders();
       return;
     }
+    if (inputKey === 'ordersDateFrom' || inputKey === 'ordersDateTo') {
+      return;
+    }
     if (inputKey === 'customersSearch') {
       renderCustomers();
+      return;
+    }
+    if (inputKey === 'customersDateFrom' || inputKey === 'customersDateTo') {
       return;
     }
     if (inputKey === 'couponsSearch') {
       renderCoupons();
       return;
     }
-    if (inputKey === 'influencersSearch' || inputKey === 'influencersMonth') {
+    if (inputKey === 'influencersSearch' || inputKey === 'influencerDetailsFilter') {
       renderInfluencers();
+      return;
+    }
+    if (inputKey === 'revenuePeriod') {
+      renderDashboard();
+      return;
+    }
+    if (inputKey === 'orderStatusPeriod') {
+      renderDashboard();
+      return;
+    }
+    if (inputKey === 'orderStatusFrom' || inputKey === 'orderStatusTo') {
       return;
     }
     if (inputKey === 'reportFrom' || inputKey === 'reportTo' || inputKey === 'reportFormat') {
@@ -4511,6 +4868,11 @@
       const target = event.target instanceof Element ? event.target : null;
       if (!target) return;
 
+      const openProductDropdown = document.querySelector('[data-coupon-products-dropdown].is-open, [data-influencer-coupon-dropdown].is-open');
+      if (openProductDropdown && !target.closest('[data-coupon-products-dropdown], [data-influencer-coupon-dropdown]')) {
+        closeCouponProductDropdown();
+      }
+
       const actionTarget = target.closest('[data-action]');
       if (actionTarget) {
         if (actionTarget instanceof HTMLInputElement || actionTarget instanceof HTMLSelectElement) return;
@@ -4585,6 +4947,10 @@
     });
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
+        if (closeCouponProductDropdown()) {
+          event.preventDefault();
+          return;
+        }
         setSidebarOpen(false);
         closeModal();
       }
