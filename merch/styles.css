@@ -536,6 +536,52 @@ body.is-auth-loading .merch-auth-cta {
   font-weight: 700;
 }
 
+.account-order-filter {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 10px;
+  margin: -2px 0 12px;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: #faf7f3;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.account-order-filter__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.account-order-filter__clear {
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 10px 0;
+  cursor: pointer;
+  transition: color var(--transition);
+}
+
+.account-order-filter__clear:hover,
+.account-order-filter__clear:focus-visible {
+  color: var(--primary-dark);
+}
+
+.account-order-filter__message,
+.account-order-filter__summary {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--primary-dark);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .account-list {
   display: grid;
   gap: 10px;
@@ -3200,6 +3246,14 @@ body.is-auth-loading .merch-auth-cta {
 
   .account-form__grid {
     grid-template-columns: 1fr;
+  }
+
+  .account-order-filter {
+    grid-template-columns: 1fr;
+  }
+
+  .account-order-filter__actions .account-action-btn {
+    flex: 1 1 auto;
   }
 
   .account-form__actions .account-action-btn {
