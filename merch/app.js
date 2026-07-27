@@ -99,6 +99,11 @@
     accountAddressFormMode: null,
     accountEditingAddressId: null,
     accountOrdersExpanded: false,
+    accountOrderFilterFrom: '',
+    accountOrderFilterTo: '',
+    accountOrderFilterAppliedFrom: '',
+    accountOrderFilterAppliedTo: '',
+    accountOrderFilterMessage: '',
     checkoutModalOpen: false,
     checkoutSelectedAddressId: '',
     checkoutMessage: '',
@@ -410,6 +415,33 @@
       month: 'short',
       year: 'numeric',
     }).format(parsed);
+  }
+
+  function getOrderDateKey(order) {
+    const value = order?.createdAt || order?.created_at || order?.orderDate || order?.order_date || '';
+    if (!value) return '';
+    const raw = String(value).trim();
+    const directDate = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (directDate) return directDate[1];
+    const parsed = new Date(raw.replace(' ', 'T'));
+    if (Number.isNaN(parsed.getTime())) return '';
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  function getFilteredMerchOrders(orders) {
+    const from = state.accountOrderFilterAppliedFrom;
+    const to = state.accountOrderFilterAppliedTo;
+    if (!from && !to) return orders;
+    return orders.filter((order) => {
+      const orderDate = getOrderDateKey(order);
+      if (!orderDate) return false;
+      if (from && orderDate < from) return false;
+      if (to && orderDate > to) return false;
+      return true;
+    });
   }
 
   function formatOrderStatus(status) {
@@ -1925,10 +1957,12 @@
 
     const profile = getMerchantProfile();
     const orders = Array.isArray(state.merchOrders) ? state.merchOrders : [];
+    const filteredOrders = getFilteredMerchOrders(orders);
     const addresses = Array.isArray(state.merchAddresses) ? state.merchAddresses : [];
     const wishlistItems = Array.isArray(state.merchWishlistItems) ? state.merchWishlistItems : [];
     const couponHistory = Array.isArray(state.merchCouponHistory) ? state.merchCouponHistory : [];
-    const visibleOrders = state.accountOrdersExpanded ? orders : orders.slice(0, 4);
+    const visibleOrders = state.accountOrdersExpanded ? filteredOrders : filteredOrders.slice(0, 4);
+    const hasActiveOrderFilter = Boolean(state.accountOrderFilterAppliedFrom && state.accountOrderFilterAppliedTo);
     const editingAddress = addresses.find((address) => getAddressId(address) === String(state.accountEditingAddressId || ''));
     const accountInitials = escapeHtml(getInitials(profile.fullName));
     const avatarStyle = profile.avatarUrl
@@ -2030,11 +2064,28 @@
             <h4>Merchandise orders</h4>
           </div>
           <div class="account-section__actions">
-            ${orders.length > 4 ? `<button class="btn btn-outline account-action-btn" type="button" data-account-action="view-all-orders">${state.accountOrdersExpanded ? 'Show Less' : 'View All'}</button>` : ''}
+            ${filteredOrders.length > 4 ? `<button class="btn btn-outline account-action-btn" type="button" data-account-action="view-all-orders">${state.accountOrdersExpanded ? 'Show Less' : 'View All'}</button>` : ''}
             <span class="account-section__count">${orders.length}</span>
           </div>
         </div>
         ${orders.length ? `
+          <form class="account-order-filter" id="accountOrderFilterForm">
+            <label class="account-field">
+              <span>From</span>
+              <input name="fromDate" type="date" value="${escapeHtml(state.accountOrderFilterFrom)}" />
+            </label>
+            <label class="account-field">
+              <span>To</span>
+              <input name="toDate" type="date" value="${escapeHtml(state.accountOrderFilterTo)}" />
+            </label>
+            <div class="account-order-filter__actions">
+              <button class="btn btn-primary account-action-btn" type="submit">Apply</button>
+              <button class="account-order-filter__clear" type="button" data-account-action="clear-order-filter">Clear</button>
+            </div>
+            ${state.accountOrderFilterMessage ? `<p class="account-order-filter__message" role="alert">${escapeHtml(state.accountOrderFilterMessage)}</p>` : ''}
+          </form>
+        ` : ''}
+        ${filteredOrders.length ? `
           <div class="account-list">
             ${visibleOrders.map((order) => `
               <article class="account-list__item account-list__item--stacked">
@@ -2061,6 +2112,12 @@
                 </div>
               </article>
             `).join('')}
+          </div>
+          ${hasActiveOrderFilter && filteredOrders.length > visibleOrders.length ? `<p class="account-order-filter__summary">Showing ${visibleOrders.length} of ${filteredOrders.length} matching orders.</p>` : ''}
+        ` : orders.length ? `
+          <div class="account-empty-state">
+            <p>No orders found.</p>
+            <span>No merchandise orders match the selected date range.</span>
           </div>
         ` : `
           <div class="account-empty-state">
@@ -2237,6 +2294,7 @@
     document.getElementById('accountProfileForm')?.addEventListener('submit', handleProfileSubmit);
     document.getElementById('accountAddressForm')?.addEventListener('submit', handleAddressSubmit);
     document.getElementById('influencerProfileForm')?.addEventListener('submit', handleInfluencerProfileSubmit);
+    document.getElementById('accountOrderFilterForm')?.addEventListener('submit', handleAccountOrderFilterSubmit);
 
     els.accountDrawerContent?.querySelectorAll('[data-account-action]').forEach((button) => {
       button.addEventListener('click', () => handleAccountAction(button));
@@ -2266,6 +2324,32 @@
 
   function getOrderById(orderId) {
     return (Array.isArray(state.merchOrders) ? state.merchOrders : []).find((order) => String(order.id || '') === String(orderId || ''));
+  }
+
+  function handleAccountOrderFilterSubmit(event) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const from = String(formData.get('fromDate') || '').trim();
+    const to = String(formData.get('toDate') || '').trim();
+    state.accountOrderFilterFrom = from;
+    state.accountOrderFilterTo = to;
+
+    if (!from || !to) {
+      state.accountOrderFilterMessage = 'Select both From and To dates.';
+      renderAccountDrawer();
+      return;
+    }
+
+    if (from > to) {
+      state.accountOrderFilterMessage = 'From date must be before or equal to To date.';
+      renderAccountDrawer();
+      return;
+    }
+
+    state.accountOrderFilterAppliedFrom = from;
+    state.accountOrderFilterAppliedTo = to;
+    state.accountOrderFilterMessage = '';
+    renderAccountDrawer();
   }
 
   async function handleAccountAction(button) {
@@ -2320,6 +2404,16 @@
 
     if (action === 'view-all-orders') {
       state.accountOrdersExpanded = !state.accountOrdersExpanded;
+      renderAccountDrawer();
+      return;
+    }
+
+    if (action === 'clear-order-filter') {
+      state.accountOrderFilterFrom = '';
+      state.accountOrderFilterTo = '';
+      state.accountOrderFilterAppliedFrom = '';
+      state.accountOrderFilterAppliedTo = '';
+      state.accountOrderFilterMessage = '';
       renderAccountDrawer();
       return;
     }
