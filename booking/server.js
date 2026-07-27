@@ -2615,6 +2615,7 @@ app.get('/api/admin/coupons', requireAuth, requireAdmin, (req, res) => {
               c.description,
               c.discount_type AS discountType,
               c.discount_value AS discountValue,
+              c.commission_per_order_paise AS commissionPerOrderPaise,
               c.applies_to AS appliesTo,
               c.max_redemptions AS maxRedemptions,
               c.per_user_limit AS perUserLimit,
@@ -2705,6 +2706,7 @@ app.get('/api/coupons/general', requireAuth, (req, res) => {
                 description,
                 discount_type AS discountType,
                 discount_value AS discountValue,
+                commission_per_order_paise AS commissionPerOrderPaise,
                 applies_to AS appliesTo,
                 max_redemptions AS maxRedemptions,
                 per_user_limit AS perUserLimit,
@@ -2720,7 +2722,7 @@ app.get('/api/coupons/general', requireAuth, (req, res) => {
                 created_at AS createdAt
          FROM coupons
          WHERE portal = 'booking'
-         WHERE active = 1
+           AND active = 1
            AND COALESCE(is_active, 1) = 1
            AND COALESCE(coupon_type, 'public') = 'public'
            AND (valid_from IS NULL OR datetime(valid_from) <= datetime('now'))
@@ -2810,6 +2812,7 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   const festivalName = String(req.body?.festivalName || '').trim();
   const discountType = 'flat';
   const discountValue = Number(req.body?.discountValue || 0);
+  const commissionPerOrderPaise = Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
   const appliesToRaw = String(req.body?.appliesTo || 'all').trim().toLowerCase();
   const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
   const productIds = productAppliesTo
@@ -2913,14 +2916,15 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
 
   db.prepare(
     `INSERT INTO coupons (
-      code, description, discount_type, discount_value, applies_to, max_redemptions, per_user_limit, expires_at, active,
+      code, description, discount_type, discount_value, commission_per_order_paise, applies_to, max_redemptions, per_user_limit, expires_at, active,
       coupon_type, assigned_user_email, used_by, is_active, valid_from, valid_till,
       recipient_email, recipient_name, festival_name, emailed_at, email_status, email_error, portal, influencer_id, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(code) DO UPDATE SET
       description = excluded.description,
       discount_type = excluded.discount_type,
       discount_value = excluded.discount_value,
+      commission_per_order_paise = excluded.commission_per_order_paise,
       applies_to = excluded.applies_to,
       max_redemptions = excluded.max_redemptions,
       per_user_limit = excluded.per_user_limit,
@@ -2942,6 +2946,7 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     description,
     discountType,
     discountValue,
+    commissionPerOrderPaise,
     appliesTo,
     maxRedemptions,
     perUserLimit,
@@ -3014,6 +3019,7 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   const festivalName = String(req.body?.festivalName || existing.festivalName || '').trim();
   const discountType = String(req.body?.discountType || existing.discountType || 'flat').trim().toLowerCase() || 'flat';
   const discountValue = Number(req.body?.discountValue ?? existing.discountValue ?? 0);
+  const commissionPerOrderPaise = Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? existing.commissionPerOrderPaise ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
   const appliesToRaw = String(req.body?.appliesTo || existing.appliesTo || 'all').trim().toLowerCase();
   const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
   const productIds = productAppliesTo
@@ -3109,6 +3115,7 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
         description = ?,
         discount_type = ?,
         discount_value = ?,
+        commission_per_order_paise = ?,
         applies_to = ?,
         max_redemptions = ?,
         coupon_type = ?,
@@ -3130,6 +3137,7 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
       description,
       discountType || 'flat',
       discountValue,
+      commissionPerOrderPaise,
       appliesTo,
       maxRedemptions,
       couponType,
@@ -10282,6 +10290,7 @@ function mapCouponRow(row) {
     description: row.description || '',
     discountType: row.discountType || 'flat',
     discountValue: Number(row.discountValue || 0),
+    commissionPerOrderPaise: Math.max(0, Number(row.commissionPerOrderPaise || 0)),
     appliesTo: row.appliesTo || 'all',
     maxRedemptions: row.maxRedemptions == null ? null : Number(row.maxRedemptions),
     perUserLimit: Number(row.perUserLimit || 1),
@@ -10326,6 +10335,7 @@ function getCouponByCode(code) {
               c.description,
               c.discount_type AS discountType,
               c.discount_value AS discountValue,
+              c.commission_per_order_paise AS commissionPerOrderPaise,
               c.applies_to AS appliesTo,
               c.max_redemptions AS maxRedemptions,
               c.per_user_limit AS perUserLimit,
@@ -14461,6 +14471,7 @@ function migrate() {
       description TEXT,
       discount_type TEXT NOT NULL,
       discount_value REAL NOT NULL,
+      commission_per_order_paise INTEGER NOT NULL DEFAULT 0,
       applies_to TEXT NOT NULL DEFAULT 'all',
       max_redemptions INTEGER,
       per_user_limit INTEGER NOT NULL DEFAULT 1,
@@ -14633,6 +14644,9 @@ function migrate() {
 
   if (hasTable('coupons') && !hasColumn('coupons', 'recipient_email')) {
     db.exec('ALTER TABLE coupons ADD COLUMN recipient_email TEXT');
+  }
+  if (hasTable('coupons') && !hasColumn('coupons', 'commission_per_order_paise')) {
+    db.exec('ALTER TABLE coupons ADD COLUMN commission_per_order_paise INTEGER NOT NULL DEFAULT 0');
   }
   if (hasTable('coupons') && !hasColumn('coupons', 'coupon_type')) {
     db.exec("ALTER TABLE coupons ADD COLUMN coupon_type TEXT NOT NULL DEFAULT 'public'");
