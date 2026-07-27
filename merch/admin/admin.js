@@ -1167,6 +1167,14 @@
     return '/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=120';
   }
 
+  function normalizeAdminImageUrl(value, fallback = '') {
+    const raw = String(value || '').trim();
+    if (!raw) return fallback;
+    if (/^(https?:|data:|blob:)/i.test(raw) || raw.startsWith('/')) return raw;
+    if (raw.startsWith('cdn/') || raw.startsWith('booking/') || raw.startsWith('uploads/')) return `/${raw}`;
+    return `/cdn/shop/files/${raw}`;
+  }
+
   function getStatusLabel(status) {
     const map = {
       pending: 'Pending',
@@ -1602,7 +1610,7 @@
                 <div class="admin-coupon-overview__item"><span>Active Coupons</span><strong>${formatCount(couponOverview.active)}</strong></div>
                 <div class="admin-coupon-overview__item"><span>Expired / Disabled</span><strong>${formatCount(couponOverview.expiredOrDisabled)}</strong></div>
                 <div class="admin-coupon-overview__item"><span>Total Redemptions</span><strong>${formatCount(couponOverview.totalRedemptions)}</strong></div>
-                <div class="admin-coupon-overview__item"><span>Total Discount Amount</span><strong>${escapeHtml(money(couponOverview.totalDiscountAmount))}</strong></div>
+                <div class="admin-coupon-overview__item"><span>Total discount</span><strong>${escapeHtml(money(couponOverview.totalDiscountAmount))}</strong></div>
                 <div class="admin-coupon-overview__item admin-coupon-overview__item--wide"><span>Top Performing Coupon</span><strong>${escapeHtml(couponOverview.topCoupon)}</strong></div>
               </div>
             </article>
@@ -1703,18 +1711,19 @@
             </div>
             <div class="admin-toolbar__group">
               <button class="admin-btn admin-btn--soft" type="button" data-action="open-product-modal">Add Product</button>
+              <button class="admin-btn admin-btn--ghost" type="button" data-action="bulk-combo-on" ${selectedCount ? '' : 'disabled'}>Add to Combo</button>
+              <button class="admin-btn admin-btn--ghost" type="button" data-action="bulk-combo-off" ${selectedCount ? '' : 'disabled'}>Remove from Combo</button>
               <button class="admin-btn admin-btn--ghost" type="button" data-action="bulk-archive" ${selectedCount ? '' : 'disabled'}>Archive Selected</button>
               <button class="admin-btn admin-btn--danger" type="button" data-action="bulk-delete" ${selectedCount ? '' : 'disabled'}>Delete Selected</button>
             </div>
           </div>
 
-          <div class="admin-grid admin-grid--stats" style="margin-bottom:18px;">
+          <div class="admin-grid admin-grid--stats admin-product-kpis" style="margin-bottom:18px;">
             ${[
               { label: 'Products in view', value: filtered.length, note: 'Matching current filters', trend: '+8%', up: true },
               { label: 'Low stock', value: lowStockCount, note: `At or below ${LOW_STOCK_THRESHOLD} units remaining`, trend: '-2%', up: false },
               { label: 'Archived', value: state.products.filter((product) => product.archived).length, note: 'Hidden from storefront', trend: '+1%', up: true },
-              { label: 'Featured', value: state.products.filter((product) => product.featured).length, note: 'Highlighted items', trend: '+3%', up: true },
-              { label: 'Avg. price', value: catalogPrice(Math.round(state.products.reduce((sum, product) => sum + product.price, 0) / state.products.length || 0)), note: 'All catalog items', trend: '+5%', up: true },
+              { label: 'Combo products', value: new Set(state.products.filter((product) => product.isCombo).map((product) => Number(product.parentProductId || product.productId || product.id))).size, note: 'Published combo cards', trend: '+1%', up: true },
             ].map((item) => `
               <article class="admin-stat">
                 <div class="admin-stat__top">
@@ -1727,6 +1736,16 @@
                 <p class="admin-stat__note">${escapeHtml(item.note)}</p>
               </article>
             `).join('')}
+          </div>
+
+          <div class="admin-combo-guide" role="note">
+            <strong>How to create a combo product</strong>
+            <ol>
+              <li>Select at least two product variants using the checkboxes below.</li>
+              <li>Click <em>Add to Combo</em>, then add the combo image, details, and overall selling price.</li>
+              <li>The combo appears here as its own product and on the customer merch page.</li>
+              <li>Customers purchase the combo price while component stock is reduced automatically.</li>
+            </ol>
           </div>
 
           ${selectedCount ? `<div class="admin-toolbar" style="margin:0 0 14px;"><strong>${selectedCount} selected</strong><span class="admin-table__muted">Bulk actions available</span></div>` : ''}
@@ -3212,6 +3231,38 @@
     return true;
   }
 
+  function renderComboFormModal(components = [], entity = null) {
+    const selectedItems = entity?.comboItems?.length
+      ? entity.comboItems
+      : components.map((item) => {
+          const source = state.products.find((product) => Number(product.variantId) === Number(item.variantId)) || item;
+          return { variantId: item.variantId, productName: source.name || item.name, imageUrl: source.image || item.imageUrl || getProductFallbackImage(source), sku: source.sku || item.sku, size: source.size || item.size, color: source.color || item.color };
+        });
+    const comboVariant = entity?.variants?.[0] || entity || {};
+    openModal({
+      title: entity ? 'Edit Combo' : 'Create Combo',
+      subtitle: 'Combo Products',
+      body: `
+        <form class="admin-form" data-entity-form="combo" data-entity-id="${escapeHtml(entity?.id || '')}">
+          <div class="admin-form__grid">
+            <label class="admin-field"><span>Combo Name</span><input class="admin-input" name="name" value="${escapeHtml(entity?.name || '')}" required /></label>
+            <label class="admin-field"><span>Overall Combo Price (rupees)</span><input class="admin-input" name="price" type="number" min="1" step="1" value="${escapeHtml(Number(entity?.price || comboVariant.price || 0))}" required /></label>
+            <label class="admin-field admin-field--wide"><span>Combo Image URL</span><input class="admin-input" name="image" value="${escapeHtml(entity?.image || '')}" placeholder="Optional image URL" /></label>
+            <label class="admin-field admin-field--wide"><span>Combo Details</span><textarea class="admin-textarea" name="description" required>${escapeHtml(entity?.description || '')}</textarea></label>
+            <label class="admin-field"><span>Status</span><select class="admin-select" name="status"><option value="published" ${entity?.status !== 'archived' ? 'selected' : ''}>Published</option><option value="archived" ${entity?.status === 'archived' ? 'selected' : ''}>Archived</option></select></label>
+            <div class="admin-field admin-field--wide"><span>Included products and variants</span><div class="admin-combo-items">
+              ${selectedItems.map((item) => { const fallback = getProductFallbackImage(item); const image = normalizeAdminImageUrl(item.imageUrl, fallback); return `<label class="admin-combo-item"><input type="hidden" name="componentVariantId" value="${escapeHtml(item.variantId)}" /><img src="${escapeHtml(image)}" alt="" onerror="this.onerror=null;this.src='${escapeHtml(fallback)}';" /><span><strong>${escapeHtml(item.productName || item.name)}</strong><small>${escapeHtml([item.size, item.color].filter(Boolean).join(' / ') || item.sku || 'Default variant')}</small></span></label>`; }).join('')}
+            </div></div>
+          </div>
+        </form>
+      `,
+      footer: `<button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button><button class="admin-btn admin-btn--primary" type="submit" form="entityFormSubmit">Save Combo</button>`,
+      size: 'lg',
+    });
+    const form = els.adminModalDialog.querySelector('[data-entity-form="combo"]');
+    if (form) form.id = 'entityFormSubmit';
+  }
+
   function renderEntityFormModal(type, entity = null) {
     const config = {
       product: {
@@ -3227,6 +3278,7 @@
           </label>
           <label class="admin-field"><span>New Category Name</span><input class="admin-input" name="newCategoryName" value="" placeholder="Optional future category" /><small class="admin-field__hint">Enter a name to add a new category to the dropdown and storefront.</small></label>
           <label class="admin-field"><span>Size / Ltrs / Metric</span><input class="admin-input" name="size" value="${escapeHtml(entity?.size || '')}" placeholder="e.g. 500ml, 1L, M, 42" /><small class="admin-field__hint">Use litres/ml for liquids, clothing size, or any future product metric.</small></label>
+          <label class="admin-field"><span>Color</span><input class="admin-input" name="color" value="${escapeHtml(entity?.color || '')}" placeholder="e.g. Black, Silver" /></label>
           <label class="admin-field"><span>Price (rupees)</span><input class="admin-input" name="price" type="number" min="0" step="1" value="${escapeHtml(entity?.price || 0)}" required /></label>
           <label class="admin-field"><span>Stock</span><input class="admin-input" name="stock" type="number" min="0" value="${escapeHtml(entity?.stock || 0)}" required /></label>
           <label class="admin-field"><span>Status</span>
@@ -3237,7 +3289,7 @@
           <label class="admin-field admin-field--wide"><span>Image URL</span><input class="admin-input" name="image" value="${escapeHtml(entity?.image || '')}" /></label>
           <label class="admin-field admin-field--wide"><span>Description</span><textarea class="admin-textarea" name="description">${escapeHtml(entity?.description || '')}</textarea></label>
           <label class="admin-field admin-field--wide"><span>Product specifications</span><textarea class="admin-textarea" name="specifications" rows="7" placeholder="One per line: Label: Value">${escapeHtml(formatProductSpecifications(entity?.specifications))}</textarea><small class="admin-field__hint">Add one specification per line in the format <code>Label: Value</code>. These appear under More details.</small></label>
-          <label class="admin-check"><input type="checkbox" name="featured" ${entity?.featured ? 'checked' : ''} /><span>Featured product</span></label>
+          <label class="admin-check"><input type="checkbox" name="comboPurchase" ${entity?.comboPurchase ? 'checked' : ''} /><span>Available for combo purchase</span></label>
           <label class="admin-check"><input type="checkbox" name="archived" ${entity?.archived ? 'checked' : ''} /><span>Archived</span></label>
         `,
       },
@@ -3270,6 +3322,7 @@
           <label class="admin-field"><span>Campaign Name</span><input class="admin-input" name="festivalName" value="${escapeHtml(entity?.festivalName || '')}" /></label>
           <label class="admin-field admin-field--wide"><span>Description</span><input class="admin-input" name="description" value="${escapeHtml(entity?.description || '')}" /></label>
           <label class="admin-field"><span>Discount</span><input class="admin-input" name="discount" type="number" min="1" step="1" value="${escapeHtml(entity?.discount || entity?.discountValue || '')}" required /></label>
+          <label class="admin-field"><span>Commission per Order (rupees)</span><input class="admin-input" name="commissionPerOrder" type="number" min="0" step="1" value="${escapeHtml(Number(entity?.commissionPerOrderPaise || 0) / 100)}" /></label>
           <label class="admin-field" data-coupon-usage-type-field hidden><span>Usage Type</span>
             <select class="admin-select" name="usageType" data-coupon-usage-type>
               <option value="limited" ${getCouponUsageTypeValue(entity) === 'limited' ? 'selected' : ''}>Limited</option>
@@ -3620,6 +3673,7 @@
       newCategoryName,
       newCategorySlug,
       size: String(fd.get('size') || '').trim(),
+      color: String(fd.get('color') || '').trim(),
       price: Number(fd.get('price') || 0),
       priceLabel: catalogPrice(Number(fd.get('price') || 0)),
       stock: Number(fd.get('stock') || 0),
@@ -3627,7 +3681,7 @@
       createdAt: existing?.createdAt || toISODate(today),
       sales: Number(existing?.sales || 0),
       lowStockThreshold: Number(existing?.lowStockThreshold || 10),
-      featured: fd.get('featured') === 'on',
+      comboPurchase: fd.get('comboPurchase') === 'on',
       archived: fd.get('archived') === 'on' || String(fd.get('status')) === 'archived',
       image: String(fd.get('image') || '').trim() || '/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=120',
       description: String(fd.get('description') || '').trim(),
@@ -3681,6 +3735,7 @@
       code: String(fd.get('code') || '').trim().toUpperCase(),
       description: String(fd.get('description') || '').trim(),
       discount: String(fd.get('discount') || '').trim(),
+      commissionPerOrderPaise: Math.max(0, Math.round(Number(fd.get('commissionPerOrder') || 0) * 100)),
       usageCount: isUnlimitedInfluencer ? null : Number.isFinite(usageCount) && usageCount > 0 ? usageCount : null,
       expiry: isUnlimitedInfluencer ? '' : String(fd.get('expiry') || '').trim(),
       usageType,
@@ -3806,6 +3861,9 @@
           sales: Number(product.sales || 0),
           lowStockThreshold: Number(product.lowStockThreshold || LOW_STOCK_THRESHOLD),
           featured: Boolean(product.featured),
+          comboPurchase: Boolean(product.comboPurchase),
+          isCombo: Boolean(product.isCombo),
+          comboItems: Array.isArray(product.comboItems) ? product.comboItems : [],
           image: product.imageUrl || product.image || '',
           description: product.description || '',
           specifications: product.specifications || {},
@@ -3994,8 +4052,10 @@
   }
 
   function selectedProductsOnPage() {
-    const visible = filterProducts().slice((state.productsPage - 1) * 5, (state.productsPage - 1) * 5 + 5);
-    return visible.filter((item) => state.selectedProductIds.includes(item.id));
+    // Selection is stored by row/variant id. Read it from the full catalog so
+    // sorting, filtering, or a page refresh cannot hide selected rows from
+    // the combo/archive/delete actions.
+    return state.products.filter((item) => state.selectedProductIds.includes(item.id));
   }
 
   function renderAll() {
@@ -4113,7 +4173,12 @@
   async function handleAction(action, target) {
     const rawId = String(target?.dataset?.id || target?.closest?.('[data-id]')?.dataset?.id || '');
     const id = Number(rawId || 0);
-    const product = state.products.find((item) => Number(item.id) === id);
+    const product = state.products.find((item) =>
+      Number(item.id) === id ||
+      Number(item.variantId) === id ||
+      Number(item.productId) === id ||
+      Number(item.parentProductId) === id
+    );
     const category = state.categories.find((item) => Number(item.id) === id);
     const order = state.orders.find((item) => Number(item.id) === id);
     const customer = state.customers.find((item) => String(item.id) === rawId);
@@ -4190,7 +4255,7 @@
         renderEntityFormModal('product');
         return;
       case 'edit-product':
-        renderEntityFormModal('product', product);
+        product?.isCombo ? renderComboFormModal([], product) : renderEntityFormModal('product', product);
         return;
       case 'duplicate-product':
         if (product) {
@@ -4219,8 +4284,8 @@
             onConfirm: async () => {
               try {
                 await apiRequest(`/api/merch/admin/products/${encodeURIComponent(productId)}`, { method: 'DELETE' });
-                state.products = state.products.filter((item) => Number(item.parentProductId || item.productId || item.id) !== productId);
                 state.selectedProductIds = state.selectedProductIds.filter((itemId) => itemId !== id);
+                await loadProductData();
                 toast('Product deleted', `${product.name} has been removed from the storefront.`, 'danger');
                 renderAll();
               } catch (error) {
@@ -4247,6 +4312,34 @@
         toast('Bulk archive complete', 'Selected products were archived.', 'warning');
         renderAll();
         return;
+      case 'bulk-combo-on':
+        if (selectedProductsOnPage().length < 2) {
+          toast('Select products', 'Select at least two product variants to create a combo.', 'warning');
+          return;
+        }
+        renderComboFormModal(selectedProductsOnPage());
+        return;
+      case 'bulk-combo-off': {
+        const comboPurchase = false;
+        const productIds = [...new Set(state.products
+          .filter((item) => state.selectedProductIds.includes(item.id))
+          .map((item) => Number(item.parentProductId || item.productId || item.id))
+          .filter((productId) => Number.isInteger(productId) && productId > 0))];
+        try {
+          await Promise.all(productIds.map((productId) => apiRequest(`/api/merch/admin/products/${encodeURIComponent(productId)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ comboPurchase }),
+          })));
+          state.selectedProductIds = [];
+          await loadProductData();
+          toast(comboPurchase ? 'Products added to combo' : 'Products removed from combo', `${productIds.length} product${productIds.length === 1 ? '' : 's'} updated.`, 'success');
+          renderAll();
+        } catch (error) {
+          toast('Combo update failed', error.message || 'Unable to update combo availability.', 'warning');
+        }
+        return;
+      }
       case 'bulk-delete':
         openConfirmModal({
           title: 'Delete selected products',
@@ -4408,6 +4501,17 @@
           const stock = Math.max(0, Number(target.value || 0));
           product.stock = Number.isFinite(stock) ? stock : 0;
           target.value = String(product.stock);
+          try {
+            await apiRequest(`/api/merch/admin/products/${encodeURIComponent(Number(product.parentProductId || product.productId || product.id))}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ variantId: Number(product.variantId || product.id), stock: product.stock }),
+            });
+            toast('Stock updated', `${product.name} now has ${product.stock} unit${product.stock === 1 ? '' : 's'} in stock.`, 'success');
+          } catch (error) {
+            toast('Stock update failed', error.message || 'Unable to save the stock count.', 'warning');
+            await loadProductData();
+          }
           renderProducts();
         }
         return;
@@ -4482,12 +4586,26 @@
         return;
       case 'refund-order':
         if (order) {
-          try {
-            await updateOrderOnServer(order, { status: order.status || 'processing', payment_status: 'refunded' });
-            toast('Refund recorded', `${order.orderNumber} has been flagged for refund.`, 'success');
-          } catch (error) {
-            toast('Refund failed', error.message || 'Unable to record the refund.', 'warning');
+          const deliveredAt = order.deliveredAt || order.updatedAt;
+          const deliveredTime = deliveredAt ? new Date(deliveredAt).getTime() : NaN;
+          const refundWindowMs = 5 * 24 * 60 * 60 * 1000;
+          if (String(order.status || '').toLowerCase() !== 'delivered' || !Number.isFinite(deliveredTime) || Date.now() - deliveredTime > refundWindowMs) {
+            toast('Refund unavailable', 'Refunds are allowed only within 5 days of delivery.', 'warning');
+            return;
           }
+          openConfirmModal({
+            title: 'Approve refund',
+            message: `Approve and record a refund for ${order.orderNumber}? This changes the payment status and cannot be undone here.`,
+            confirmLabel: 'Approve refund',
+            onConfirm: async () => {
+              try {
+                await updateOrderOnServer(order, { status: order.status || 'processing', payment_status: 'refunded' });
+                toast('Refund approved', `${order.orderNumber} has been flagged for refund.`, 'success');
+              } catch (error) {
+                toast('Refund failed', error.message || 'Unable to record the refund.', 'warning');
+              }
+            },
+          });
         }
         return;
       case 'orders-prev':
@@ -4726,6 +4844,38 @@
     const id = form.dataset.entityId ? Number(form.dataset.entityId) : null;
     const existingId = Number.isFinite(id) && id ? id : null;
 
+    if (type === 'combo') {
+      const fd = new FormData(form);
+      const componentVariantIds = fd.getAll('componentVariantId').map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0);
+      const payload = {
+        name: String(fd.get('name') || '').trim(),
+        price: Number(fd.get('price') || 0),
+        image: String(fd.get('image') || '').trim(),
+        description: String(fd.get('description') || '').trim(),
+        status: String(fd.get('status') || 'published'),
+        componentVariantIds,
+      };
+      if (!payload.name || !Number.isFinite(payload.price) || payload.price <= 0 || componentVariantIds.length < 2) {
+        toast('Combo details incomplete', 'Add a name, price, and at least two product variants.', 'warning');
+        return;
+      }
+      try {
+        await apiRequest(existingId ? `/api/merch/admin/combos/${encodeURIComponent(existingId)}` : '/api/merch/admin/combos', {
+          method: existingId ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        toast(existingId ? 'Combo saved' : 'Combo created', `${payload.name} is now available in the merch store.`, 'success');
+        closeModal();
+        state.selectedProductIds = [];
+        await loadProductData();
+        renderAll();
+      } catch (error) {
+        toast('Combo not saved', error.message || 'Unable to save the combo.', 'danger');
+      }
+      return;
+    }
+
     if (type === 'product') {
       const entity = updateProductFromForm(form, existingId ? state.products.find((item) => Number(item.id) === existingId) : null);
       if (!entity.name || !entity.sku) {
@@ -4733,8 +4883,33 @@
         return;
       }
       if (existingId) {
-        toast('Product editing unavailable', 'Existing product editing is still local. New products are synced to the storefront.', 'warning');
-        state.products = state.products.map((item) => (Number(item.id) === existingId ? entity : item));
+        const productId = Number(entity.parentProductId || entity.productId || existingId);
+        try {
+          await apiRequest(`/api/merch/admin/products/${encodeURIComponent(productId)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              variantId: Number(entity.variantId || existingId),
+              name: entity.name,
+              sku: entity.sku,
+              category: state.categories.find((item) => String(item.id) === String(entity.categoryId))?.slug || String(entity.category || '').toLowerCase(),
+              price: entity.price,
+              stock: entity.stock,
+              size: entity.size,
+              color: entity.color,
+              status: entity.status,
+              image: entity.image,
+              description: entity.description,
+              specifications: entity.specifications,
+              comboPurchase: entity.comboPurchase,
+            }),
+          });
+          toast('Product saved', `${entity.name} was updated in the merch store.`, 'success');
+          await loadProductData();
+        } catch (error) {
+          toast('Product not saved', error.message || 'Unable to update the product.', 'danger');
+          return;
+        }
       } else {
         if (entity.newCategoryName && entity.newCategorySlug) {
           const existingCategory = state.categories.find((category) => category.slug === entity.newCategorySlug);
@@ -4760,6 +4935,8 @@
             description: entity.description,
             specifications: entity.specifications,
             size: entity.size,
+            color: entity.color,
+            comboPurchase: entity.comboPurchase,
           }),
           });
         } catch (error) {
@@ -4810,6 +4987,7 @@
         code: entity.code,
         description: entity.description,
         discountValue: Number(entity.discount) || 0,
+        commissionPerOrderPaise: Math.max(0, Math.round(Number(entity.commissionPerOrder || 0) * 100)),
         couponType: entity.couponType,
         appliesTo: entity.appliesTo,
         festivalName: entity.festivalName,

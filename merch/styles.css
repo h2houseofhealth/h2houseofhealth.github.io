@@ -3433,3 +3433,9 @@ body.is-auth-loading .merch-auth-cta {
   text-transform:uppercase;
   font-size:13px;
 }
+/* Combo product cards */
+.combo-product-details { margin: 18px 0; padding: 14px; border: 1px solid rgba(164, 77, 41, .18); border-radius: 12px; background: rgba(164, 77, 41, .04); }
+.combo-product-details__items { display: grid; gap: 8px; margin-top: 10px; }
+.combo-product-details__item { display: flex; align-items: center; gap: 10px; font-size: .9rem; }
+.combo-product-details__item img { width: 42px; height: 42px; object-fit: cover; border-radius: 8px; background: #fff; }
+.combo-product-details__item small { display: block; color: var(--text-muted, #777); margin-top: 2px; }

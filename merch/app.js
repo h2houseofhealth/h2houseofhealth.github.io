@@ -241,20 +241,22 @@
     const slug = String(product?.slug || '').trim().toLowerCase();
     const name = String(product?.name || '').trim().toLowerCase();
     const category = String(product?.category || '').trim().toLowerCase();
-    const source =
-      (slug && PRODUCT_IMAGE_SOURCES[slug]) ||
+    const isCombo = Boolean(product?.isCombo);
+    const source = isCombo ? null : (
+      (!isCombo && slug && PRODUCT_IMAGE_SOURCES[slug]) ||
       (name.includes('water bottle') ? PRODUCT_IMAGE_SOURCES['h2-water-bottle'] : null) ||
       (name.includes('mist') || category === 'sprays' ? PRODUCT_IMAGE_SOURCES['h2-mist-spray'] : null) ||
       (name.includes('hoodie') && name.includes('black') ? PRODUCT_IMAGE_SOURCES['zenith-hoodie-black'] : null) ||
       (name.includes('hoodie') && name.includes('sand') ? PRODUCT_IMAGE_SOURCES['zenith-hoodie-sand'] : null) ||
-      null;
+      null
+    );
     const fallbackImages = Array.isArray(source?.images) ? source.images.filter(Boolean) : [];
-    const productImages = Array.isArray(product?.images) ? product.images.filter(Boolean) : [];
-    const imageUrl = normalizeProductImageUrl(source?.imageUrl || product?.imageUrl || product?.image || product?.image_url || '');
+    const productImages = Array.isArray(product?.images) ? product.images.filter(Boolean).map(normalizeProductImageUrl) : [];
+    const imageUrl = normalizeProductImageUrl(product?.imageUrl || product?.image || product?.image_url || source?.imageUrl || '');
 
     return {
       imageUrl: imageUrl || fallbackImages[0] || '',
-      images: fallbackImages.length ? fallbackImages : (productImages.length ? productImages : (imageUrl ? [imageUrl] : [])),
+      images: productImages.length ? productImages : (fallbackImages.length ? fallbackImages : (imageUrl ? [imageUrl] : [])),
     };
   }
 
@@ -2955,6 +2957,14 @@
       <h1 class="detail-title">${escapeHtml(product.name)}</h1>
       <p class="detail-price">${formatPrice(variant.price)}</p>
       <p class="detail-description">${escapeHtml(product.description)}</p>
+      ${product.isCombo && Array.isArray(product.comboItems) && product.comboItems.length ? `
+        <div class="combo-product-details">
+          <strong>Included in this combo</strong>
+          <div class="combo-product-details__items">
+            ${product.comboItems.map((item) => { const fallback = getProductFallbackImage({ name: item.productName, category: '' }); const image = normalizeProductImageUrl(item.imageUrl || fallback); return `<div class="combo-product-details__item"><img src="${escapeHtml(image)}" alt="" onerror="this.onerror=null;this.src='${escapeHtml(fallback)}';" /><span>${escapeHtml(item.productName)}<small>${escapeHtml([item.size, item.color].filter(Boolean).join(' / ') || item.sku || 'Default variant')}</small></span></div>`; }).join('')}
+          </div>
+        </div>
+      ` : ''}
       ${Object.keys(getProductSpecifications(product, variant)).length ? '<button class="more-details-button" id="moreDetailsButton" type="button" aria-expanded="false" aria-controls="productSpecifications">More details <span aria-hidden="true">＋</span></button>' : ''}
       ${renderProductSpecifications(product, variant)}
 

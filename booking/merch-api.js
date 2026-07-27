@@ -50,6 +50,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       is_active INTEGER NOT NULL DEFAULT 1,
       gst_rate INTEGER NOT NULL DEFAULT 18,
       weight_grams INTEGER NOT NULL DEFAULT 0,
+      combo_purchase INTEGER NOT NULL DEFAULT 0,
+      is_combo INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -59,6 +61,15 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   if (!hasColumn('merch_products', 'specifications_json')) {
     db.exec('ALTER TABLE merch_products ADD COLUMN specifications_json TEXT');
   }
+  if (!hasColumn('merch_products', 'combo_purchase')) {
+    db.exec('ALTER TABLE merch_products ADD COLUMN combo_purchase INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!hasColumn('merch_products', 'is_combo')) {
+    db.exec('ALTER TABLE merch_products ADD COLUMN is_combo INTEGER NOT NULL DEFAULT 0');
+  }
+  // combo_purchase was the old flag-only implementation. Real combo cards
+  // are represented by is_combo products and their component rows below.
+  db.prepare('UPDATE merch_products SET combo_purchase = 0 WHERE is_combo = 0').run();
 
   // Backfill the supplied specification sheets for products created by older releases.
   const specificationBackfill = [
@@ -77,6 +88,15 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   db.prepare("UPDATE merch_products SET image_url = ? WHERE image_url = '/booking/assets/service-iv-shots.jpg'")
     .run('/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138');
 
+  // Replace the generic placeholder used by older catalog rows with the
+  // product photography stored in the CDN files directory.
+  db.prepare("UPDATE merch_products SET image_url = ? WHERE lower(category) = 'hoodies' AND (image_url IS NULL OR image_url LIKE '%merch%signup%image%')")
+    .run('/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146');
+  db.prepare("UPDATE merch_products SET image_url = ? WHERE lower(category) = 'bottles' AND (image_url IS NULL OR image_url LIKE '%merch%signup%image%')")
+    .run('/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113');
+  db.prepare("UPDATE merch_products SET image_url = ? WHERE lower(category) = 'sprays' AND (image_url IS NULL OR image_url LIKE '%merch%signup%image%')")
+    .run('/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138');
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS merch_variants (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,7 +111,36 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     );
   `);
 
+  // Restore the bundled hoodie catalog if it was removed by the previous
+  // soft-delete implementation. Only restore products whose entire variant
+  // set is inactive, so later admin stock edits are never overwritten.
+  const bundledHoodieSlugs = ['zenith-hoodie-black', 'zenith-hoodie-sand'];
+  for (const slug of bundledHoodieSlugs) {
+    const hoodie = db.prepare(`
+      SELECT p.id
+      FROM merch_products p
+      WHERE p.slug = ?
+        AND p.is_active = 0
+        AND EXISTS (SELECT 1 FROM merch_variants v WHERE v.product_id = p.id)
+        AND NOT EXISTS (SELECT 1 FROM merch_variants v WHERE v.product_id = p.id AND v.is_active = 1)
+    `).get(slug);
+    if (!hoodie) continue;
+    db.transaction(() => {
+      db.prepare("UPDATE merch_products SET is_active = 1, updated_at = datetime('now') WHERE id = ?").run(hoodie.id);
+      db.prepare('UPDATE merch_variants SET is_active = 1, stock = 35 WHERE product_id = ?').run(hoodie.id);
+    })();
+  }
+
   db.exec(`
+    CREATE TABLE IF NOT EXISTS merch_combo_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      combo_product_id INTEGER NOT NULL REFERENCES merch_products(id) ON DELETE CASCADE,
+      component_product_id INTEGER NOT NULL REFERENCES merch_products(id),
+      component_variant_id INTEGER NOT NULL REFERENCES merch_variants(id),
+      quantity INTEGER NOT NULL DEFAULT 1,
+      UNIQUE(combo_product_id, component_variant_id)
+    );
+
     CREATE TABLE IF NOT EXISTS merch_orders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       order_number TEXT NOT NULL UNIQUE,
@@ -119,6 +168,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       billing_address TEXT,
       tracking_number TEXT,
       carrier_name TEXT,
+      delivered_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -239,6 +289,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   if (!hasColumn('merch_orders', 'billing_address')) {
     db.exec('ALTER TABLE merch_orders ADD COLUMN billing_address TEXT');
+  }
+  if (!hasColumn('merch_orders', 'delivered_at')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN delivered_at TEXT');
   }
 
   if (!hasColumn('merch_influencers', 'avatar_url')) {
@@ -510,6 +563,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!normalizedCode) return null;
     return db.prepare(`
       SELECT c.id, c.code, c.description, c.discount_type AS discountType, c.discount_value AS discountValue,
+             c.commission_per_order_paise AS commissionPerOrderPaise,
              c.applies_to AS appliesTo, c.active, c.is_active AS isActive, c.portal,
              c.influencer_id AS influencerId, i.name AS influencerName, i.handle AS influencerHandle,
              i.email AS influencerEmail, i.commission_rate AS influencerCommissionRate
@@ -527,6 +581,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!ids.length) return [];
     return db.prepare(`
       SELECT c.id, c.code, c.description, c.discount_type AS discountType, c.discount_value AS discountValue,
+             c.commission_per_order_paise AS commissionPerOrderPaise,
              c.active, c.is_active AS isActive, c.influencer_id AS influencerId,
              COUNT(mo.id) AS usageCount,
              COALESCE(SUM(CASE WHEN mo.payment_status IN ('paid', 'cod_pending') THEN mo.total_amount ELSE 0 END), 0) AS revenue
@@ -769,6 +824,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     const coupons = db.prepare(`
       SELECT c.id, c.code, c.description, c.discount_type AS discountType, c.discount_value AS discountValue,
+             c.commission_per_order_paise AS commissionPerOrderPaise,
              c.applies_to AS appliesTo, c.max_redemptions AS maxRedemptions, c.per_user_limit AS perUserLimit,
              c.expires_at AS expiresAt, c.active, c.coupon_type AS couponType,
              c.is_active AS isActive, c.valid_from AS validFrom, c.valid_till AS validTill,
@@ -1292,10 +1348,22 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
   }
 
-  function buildMerchProductRecord(product, variants = [], sales = null) {
+  function getMerchProductImage(product = {}) {
+    const stored = String(product.imageUrl || product.image_url || '').trim();
+    if (stored && !/\/booking\/|\/merch\/assets\/images\/merch%20signup%20image/i.test(stored)) return stored;
+    const category = String(product.category || '').toLowerCase();
+    const name = String(product.name || '').toLowerCase();
+    if (category === 'bottles' || name.includes('bottle')) return '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113';
+    if (category === 'sprays' || name.includes('mist') || name.includes('spray')) return '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138';
+    if (category === 'hoodies' || name.includes('hoodie')) return '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146';
+    return stored;
+  }
+
+  function buildMerchProductRecord(product, variants = [], sales = null, { includeInactive = false } = {}) {
     const activeVariants = variants.filter((variant) => Number(variant.isActive ?? 1) === 1);
+    const catalogVariants = includeInactive ? variants : activeVariants;
     const priceOverrides = getMerchVariantPriceOverrides(product.slug);
-    const normalizedVariants = activeVariants.map((variant, index) => {
+    const normalizedVariants = catalogVariants.map((variant, index) => {
       const overridePrice = Array.isArray(priceOverrides) ? Number(priceOverrides[index]) : NaN;
       return Number.isFinite(overridePrice) && overridePrice > 0
         ? { ...variant, price: overridePrice }
@@ -1307,7 +1375,34 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const minPrice = priceValues.length ? Math.min(...priceValues) : Number(product.base_price || 0);
     const maxPrice = priceValues.length ? Math.max(...priceValues) : Number(product.base_price || 0);
     const primaryVariant = normalizedVariants[0] || activeVariants[0] || variants[0] || null;
-    const stock = normalizedVariants.reduce((sum, variant) => sum + Number(variant.stock || 0), 0);
+    const comboItems = Number(product.is_combo || 0) === 1
+      ? db.prepare(`
+          SELECT ci.component_variant_id AS variantId, ci.quantity,
+                 cp.id AS productId, cp.name AS productName, cp.image_url AS imageUrl,
+                 cv.sku, cv.size, cv.color, cv.price, cv.stock, cv.is_active AS isActive
+          FROM merch_combo_items ci
+          JOIN merch_products cp ON cp.id = ci.component_product_id
+          JOIN merch_variants cv ON cv.id = ci.component_variant_id
+          WHERE ci.combo_product_id = ?
+          ORDER BY ci.id ASC
+        `).all(Number(product.id)).map((item) => ({ ...item, imageUrl: getMerchProductImage(item) }))
+      : [];
+    const comboStock = comboItems.length
+      ? Math.max(0, Math.min(...comboItems.map((item) => Math.floor(Number(item.stock || 0) / Math.max(1, Number(item.quantity || 1))))))
+      : null;
+    const isCombo = Number(product.is_combo || 0) === 1;
+    const customComboImage = isCombo && product.image_url && !String(product.image_url).startsWith('/booking/')
+      ? [String(product.image_url)]
+      : [];
+    const productImages = isCombo
+      ? [...new Set([...customComboImage, ...comboItems.map((item) => item.imageUrl)].filter(Boolean).map(String))]
+      : (product.image_url ? [getMerchProductImage(product)] : []);
+    const stock = Number(product.is_combo || 0) === 1 && comboStock !== null
+      ? comboStock
+      : normalizedVariants.reduce((sum, variant) => sum + Number(variant.stock || 0), 0);
+    if (Number(product.is_combo || 0) === 1 && comboStock !== null) {
+      normalizedVariants.forEach((variant) => { variant.stock = comboStock; });
+    }
     const salesCount = Number(sales?.sales || 0);
     const orderCount = Number(sales?.orderCount || 0);
 
@@ -1321,9 +1416,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       basePrice: minPrice,
       price: minPrice,
       priceLabel: minPrice === maxPrice ? formatMerchPrice(minPrice) : `${formatMerchPrice(minPrice)} - ${formatMerchPrice(maxPrice)}`,
-      imageUrl: String(product.image_url || ''),
-      image: String(product.image_url || ''),
-      images: product.image_url ? [String(product.image_url)] : [],
+      imageUrl: isCombo ? String(productImages[0] || '') : getMerchProductImage(product),
+      image: isCombo ? String(productImages[0] || '') : getMerchProductImage(product),
+      images: productImages,
       variants: normalizedVariants.map((variant) => ({
         id: Number(variant.id),
         productId: Number(variant.productId),
@@ -1342,6 +1437,19 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       status: Number(product.is_active || 1) === 1 ? 'published' : 'archived',
       archived: Number(product.is_active || 1) !== 1,
       featured: false,
+      comboPurchase: Number(product.combo_purchase || 0) === 1,
+      isCombo: Number(product.is_combo || 0) === 1,
+      comboItems: comboItems.map((item) => ({
+        variantId: Number(item.variantId),
+        productId: Number(item.productId),
+        productName: String(item.productName || ''),
+        imageUrl: String(item.imageUrl || ''),
+        sku: String(item.sku || ''),
+        size: item.size || null,
+        color: item.color || null,
+        quantity: Number(item.quantity || 1),
+        stock: Number(item.stock || 0),
+      })),
       sales: salesCount,
       orderCount,
       gstRate: Number(product.gst_rate || 18),
@@ -1354,7 +1462,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function loadMerchProductCatalog({ includeInactive = false } = {}) {
     const productRows = db.prepare(`
-      SELECT id, name, slug, description, specifications_json, category, base_price, image_url, is_active, gst_rate, weight_grams, created_at, updated_at
+      SELECT id, name, slug, description, specifications_json, category, base_price, image_url, is_active, gst_rate, weight_grams, combo_purchase, is_combo, created_at, updated_at
       FROM merch_products
       ${includeInactive ? '' : 'WHERE is_active = 1'}
       ORDER BY datetime(created_at) DESC, id DESC
@@ -1375,7 +1483,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const catalog = productRows.map((product) => buildMerchProductRecord(
       product,
       variantsByProductId.get(Number(product.id)) || [],
-      salesMap.get(Number(product.id)) || null
+      salesMap.get(Number(product.id)) || null,
+      { includeInactive }
     ));
 
     const featuredIds = new Set(
@@ -1477,6 +1586,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       carrier: String(order.carrierName || order.carrier_name || ''),
       createdAt: order.createdAt || order.created_at || null,
       updatedAt: order.updatedAt || order.updated_at || null,
+      deliveredAt: order.deliveredAt || order.delivered_at || (String(order.status || '').toLowerCase() === 'delivered' ? order.updatedAt || order.updated_at || null : null),
       items: items.map((item) => ({
         id: Number(item.id),
         name: String(item.productName || item.product_name || ''),
@@ -2807,6 +2917,57 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     res.json(loadMerchProductCatalog({ includeInactive: false }));
   });
 
+  function getMerchPurchaseVariant(variantId) {
+    const variant = db.prepare(`
+      SELECT v.*, p.name AS product_name, p.gst_rate, p.is_combo
+      FROM merch_variants v
+      JOIN merch_products p ON p.id = v.product_id
+      WHERE v.id = ? AND v.is_active = 1 AND p.is_active = 1
+    `).get(Number(variantId));
+    if (!variant) return null;
+    const components = Number(variant.is_combo || 0) === 1
+      ? db.prepare(`
+          SELECT ci.component_variant_id AS variantId, ci.quantity, v.stock,
+                 v.sku, v.size, v.color, p.name AS productName
+          FROM merch_combo_items ci
+          JOIN merch_variants v ON v.id = ci.component_variant_id AND v.is_active = 1
+          JOIN merch_products p ON p.id = ci.component_product_id AND p.is_active = 1
+          WHERE ci.combo_product_id = ?
+          ORDER BY ci.id ASC
+        `).all(Number(variant.product_id))
+      : [];
+    if (Number(variant.is_combo || 0) === 1 && !components.length) return null;
+    const stock = Number(variant.is_combo || 0) === 1
+      ? Math.max(0, Math.min(...components.map((item) => Math.floor(Number(item.stock || 0) / Math.max(1, Number(item.quantity || 1))))))
+      : Number(variant.stock || 0);
+    return { variant, components, stock };
+  }
+
+  function normalizeMerchImageInput(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^(https?:|data:|blob:)/i.test(raw) || raw.startsWith('/')) return raw;
+    if (raw.startsWith('cdn/') || raw.startsWith('booking/') || raw.startsWith('uploads/')) return `/${raw}`;
+    return `/cdn/shop/files/${raw}`;
+  }
+
+  function decrementMerchPurchaseVariant(variantId, quantity) {
+    const purchase = getMerchPurchaseVariant(variantId);
+    if (!purchase || purchase.stock < quantity) throw new Error('Insufficient stock for this product.');
+    if (Number(purchase.variant.is_combo || 0) === 1) {
+      const decrement = db.prepare('UPDATE merch_variants SET stock = stock - ? WHERE id = ? AND stock >= ?');
+      for (const component of purchase.components) {
+        const required = Number(quantity) * Math.max(1, Number(component.quantity || 1));
+        const result = decrement.run(required, component.variantId, required);
+        if (!result.changes) throw new Error(`Stock changed while confirming ${purchase.variant.product_name}.`);
+      }
+      return;
+    }
+    const result = db.prepare('UPDATE merch_variants SET stock = stock - ? WHERE id = ? AND stock >= ?')
+      .run(quantity, Number(variantId), quantity);
+    if (!result.changes) throw new Error(`Stock changed while confirming ${purchase.variant.product_name}.`);
+  }
+
   // ─── PUBLIC: Create Razorpay order for checkout ───
   app.post('/api/merch/preview-coupon',(req, res) => {
     const authUser = getMerchAuthUser(req);
@@ -2857,14 +3018,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const validatedItems = [];
 
     for (const item of items) {
-      const variant = db.prepare('SELECT v.*, p.name AS product_name, p.gst_rate FROM merch_variants v JOIN merch_products p ON p.id = v.product_id WHERE v.id = ? AND v.is_active = 1').get(item.variantId);
-      if (!variant) {
+      const purchase = getMerchPurchaseVariant(item.variantId);
+      const variant = purchase?.variant;
+      const quantity = Math.max(1, Math.floor(Number(item.quantity || 0)));
+      if (!purchase) {
         return res.status(400).json({ error: `Variant ${item.variantId} not found` });
       }
-      if (variant.stock < item.quantity) {
-        return res.status(409).json({ error: `Insufficient stock for ${variant.product_name} (available: ${variant.stock})` });
+      if (purchase.stock < quantity) {
+        return res.status(409).json({ error: `Insufficient stock for ${variant.product_name} (available: ${purchase.stock})` });
       }
-      const lineTotal = variant.price * item.quantity;
+      const lineTotal = variant.price * quantity;
       subtotal += lineTotal;
       validatedItems.push({
         variantId: variant.id,
@@ -2873,7 +3036,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '),
         sku: variant.sku,
         unitPrice: variant.price,
-        quantity: item.quantity,
+        quantity,
         lineTotal,
       });
     }
@@ -2980,19 +3143,18 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       return res.status(409).json({ error: 'Order already processed' });
     }
 
-    // Mark as paid, decrement stock
-    const updateOrder = db.prepare(`
-      UPDATE merch_orders SET status = 'processing', payment_status = 'paid', razorpay_payment_id = ?, updated_at = datetime('now')
-      WHERE id = ?
-    `);
-    updateOrder.run(razorpay_payment_id, order.id);
-
-    // Decrement stock for each item
+    // Mark as paid and decrement stock together so an order cannot be confirmed
+    // without its inventory update being persisted.
     const items = db.prepare('SELECT variant_id, quantity FROM merch_order_items WHERE order_id = ?').all(order.id);
-    const decrementStock = db.prepare('UPDATE merch_variants SET stock = stock - ? WHERE id = ?');
-    for (const item of items) {
-      decrementStock.run(item.quantity, item.variant_id);
-    }
+    db.transaction(() => {
+      db.prepare(`
+        UPDATE merch_orders SET status = 'processing', payment_status = 'paid', razorpay_payment_id = ?, updated_at = datetime('now')
+        WHERE id = ? AND status = 'pending'
+      `).run(razorpay_payment_id, order.id);
+      for (const item of items) {
+        decrementMerchPurchaseVariant(item.variant_id, Number(item.quantity || 0));
+      }
+    })();
 
     if (Number(order.couponId || 0) > 0 && Number(order.discountAmount || 0) > 0 && Number(order.customerUserId || 0) > 0) {
       recordMerchCouponRedemption({
@@ -3035,12 +3197,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     let subtotal = 0;
     const validatedItems = [];
     for (const item of items) {
-      const variant = db.prepare('SELECT v.*, p.name AS product_name FROM merch_variants v JOIN merch_products p ON p.id = v.product_id WHERE v.id = ? AND v.is_active = 1').get(item.variantId);
-      if (!variant) return res.status(400).json({ error: `Variant ${item.variantId} not found` });
-      if (variant.stock < item.quantity) return res.status(409).json({ error: `Insufficient stock for ${variant.product_name}` });
-      const lineTotal = variant.price * item.quantity;
+      const purchase = getMerchPurchaseVariant(item.variantId);
+      const variant = purchase?.variant;
+      const quantity = Math.max(1, Math.floor(Number(item.quantity || 0)));
+      if (!purchase) return res.status(400).json({ error: `Variant ${item.variantId} not found` });
+      if (purchase.stock < quantity) return res.status(409).json({ error: `Insufficient stock for ${variant.product_name}` });
+      const lineTotal = variant.price * quantity;
       subtotal += lineTotal;
-      validatedItems.push({ productId: Number(variant.product_id), variantId: variant.id, productName: variant.product_name, variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '), sku: variant.sku, unitPrice: variant.price, quantity: item.quantity, lineTotal });
+      validatedItems.push({ productId: Number(variant.product_id), variantId: variant.id, productName: variant.product_name, variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '), sku: variant.sku, unitPrice: variant.price, quantity, lineTotal });
     }
 
     const couponResult = couponCode
@@ -3098,10 +3262,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     const orderId = result.lastInsertRowid;
     const insertItem = db.prepare('INSERT INTO merch_order_items (order_id, variant_id, product_name, variant_label, sku, unit_price, quantity, line_total) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-    const decrementStock = db.prepare('UPDATE merch_variants SET stock = stock - ? WHERE id = ?');
     for (const item of validatedItems) {
       insertItem.run(orderId, item.variantId, item.productName, item.variantLabel, item.sku, item.unitPrice, item.quantity, item.lineTotal);
-      decrementStock.run(item.quantity, item.variantId);
+      decrementMerchPurchaseVariant(item.variantId, item.quantity);
     }
 
     if (Number(couponResult.coupon?.id || 0) > 0 && Number(discountAmount || 0) > 0 && Number(authUser?.id || 0) > 0) {
@@ -4051,8 +4214,20 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: 'Invalid status' });
     }
+    const existingOrder = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
+    if (!existingOrder) return res.status(404).json({ error: 'Order not found' });
+    if (String(payment_status || '').toLowerCase() === 'refunded') {
+      const deliveredAt = existingOrder.delivered_at || (String(existingOrder.status || '').toLowerCase() === 'delivered' ? existingOrder.updated_at : null);
+      const deliveredTime = deliveredAt ? new Date(deliveredAt).getTime() : NaN;
+      if (String(existingOrder.status || '').toLowerCase() !== 'delivered' || !Number.isFinite(deliveredTime) || Date.now() - deliveredTime > 5 * 24 * 60 * 60 * 1000) {
+        return res.status(400).json({ error: 'Refunds are allowed only within 5 days of delivery.' });
+      }
+    }
     const updates = ['status = ?', "updated_at = datetime('now')"];
     const params = [status];
+    if (String(status).toLowerCase() === 'delivered' && String(existingOrder.status || '').toLowerCase() !== 'delivered') {
+      updates.push("delivered_at = datetime('now')");
+    }
     if (payment_status) {
       updates.push('payment_status = ?');
       params.push(String(payment_status));
@@ -4096,8 +4271,101 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   // ─── ADMIN: Get all products (including inactive) ───
   app.get('/api/merch/admin/products', requireAdmin, (req, res) => {
-    const products = loadMerchProductCatalog({ includeInactive: true });
+    // Legacy deletes were soft-deleted by disabling every variant. Keep those
+    // tombstones out of the admin catalog while retaining normal archived
+    // products, which still have active variants.
+    const products = loadMerchProductCatalog({ includeInactive: true })
+      .filter((product) => Array.isArray(product.variants) && product.variants.some((variant) => Number(variant.isActive ?? 1) === 1));
     res.json(products);
+  });
+
+  // ADMIN: Create a purchasable combo card from existing product variants.
+  app.post('/api/merch/admin/combos', requireAdmin, (req, res) => {
+    const body = req.body || {};
+    const name = String(body.name || '').trim();
+    const slug = String(body.slug || name).trim().toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const priceRupees = Number(body.price || 0);
+    const componentVariantIds = [...new Set((Array.isArray(body.componentVariantIds) ? body.componentVariantIds : [])
+      .map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0))];
+    if (!name || !slug || !Number.isFinite(priceRupees) || priceRupees <= 0 || componentVariantIds.length < 2) {
+      return res.status(400).json({ message: 'Combo name, price, and at least two product variants are required.' });
+    }
+    if (db.prepare('SELECT id FROM merch_products WHERE slug = ?').get(slug)) {
+      return res.status(409).json({ message: 'A product or combo with this name already exists.' });
+    }
+    const placeholders = componentVariantIds.map(() => '?').join(', ');
+    const components = db.prepare(`
+      SELECT v.id AS variantId, v.product_id AS productId, v.sku, v.is_active AS isActive,
+             p.name, p.image_url AS imageUrl, p.is_combo AS isCombo, p.is_active AS productActive
+      FROM merch_variants v JOIN merch_products p ON p.id = v.product_id
+      WHERE v.id IN (${placeholders})
+    `).all(...componentVariantIds);
+    if (components.length !== componentVariantIds.length || components.some((item) => !item.isActive || !item.productActive || item.isCombo)) {
+      return res.status(400).json({ message: 'All selected combo components must be active normal products.' });
+    }
+    const comboSku = `COMBO-${slug.toUpperCase().slice(0, 38)}-${Date.now().toString().slice(-6)}`;
+      const image = normalizeMerchImageInput(body.image) || normalizeMerchImageInput(components[0]?.imageUrl);
+    const description = String(body.description || '').trim();
+    try {
+      const createCombo = db.transaction(() => {
+        const productResult = db.prepare(`
+          INSERT INTO merch_products (name, slug, description, specifications_json, category, base_price, image_url, is_active, gst_rate, weight_grams, combo_purchase, is_combo)
+          VALUES (?, ?, ?, ?, 'combos', ?, ?, ?, 18, 0, 0, 1)
+        `).run(name, slug, description, JSON.stringify({ 'Combo items': components.map((item) => item.name).join(', ') }), Math.round(priceRupees * 100), image, String(body.status || 'published').toLowerCase() === 'published' ? 1 : 0);
+        const productId = Number(productResult.lastInsertRowid);
+        const variantResult = db.prepare(`INSERT INTO merch_variants (product_id, sku, size, color, price, stock) VALUES (?, ?, NULL, NULL, ?, 0)`)
+          .run(productId, comboSku, Math.round(priceRupees * 100));
+        const insertItem = db.prepare('INSERT INTO merch_combo_items (combo_product_id, component_product_id, component_variant_id, quantity) VALUES (?, ?, ?, 1)');
+        components.forEach((item) => insertItem.run(productId, item.productId, item.variantId));
+        return { productId, variantId: Number(variantResult.lastInsertRowid) };
+      });
+      const result = createCombo();
+      const combo = loadMerchProductCatalog({ includeInactive: true }).find((item) => Number(item.id) === result.productId);
+      return res.status(201).json(combo || { id: result.productId, variantId: result.variantId });
+    } catch (error) {
+      console.error('Failed to create merch combo:', error);
+      return res.status(500).json({ message: error.message || 'Unable to create combo.' });
+    }
+  });
+
+  app.patch('/api/merch/admin/combos/:id', requireAdmin, (req, res) => {
+    const comboId = Number(req.params.id);
+    const combo = db.prepare('SELECT id FROM merch_products WHERE id = ? AND is_combo = 1').get(comboId);
+    if (!combo) return res.status(404).json({ message: 'Combo not found.' });
+    const body = req.body || {};
+    const productUpdates = [];
+    const productParams = [];
+    const addProductField = (column, value) => { productUpdates.push(`${column} = ?`); productParams.push(value); };
+    if (body.name !== undefined) addProductField('name', String(body.name || '').trim());
+    if (body.description !== undefined) addProductField('description', String(body.description || '').trim());
+    if (body.image !== undefined) addProductField('image_url', normalizeMerchImageInput(body.image));
+    if (body.status !== undefined) addProductField('is_active', String(body.status).toLowerCase() === 'published' ? 1 : 0);
+    const price = body.price !== undefined ? Math.max(0, Math.round(Number(body.price || 0) * 100)) : null;
+    if (price !== null) addProductField('base_price', price);
+    if (productUpdates.length) {
+      productUpdates.push("updated_at = datetime('now')");
+      productParams.push(comboId);
+    }
+    const componentIds = body.componentVariantIds === undefined ? null : [...new Set((Array.isArray(body.componentVariantIds) ? body.componentVariantIds : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+    try {
+      db.transaction(() => {
+        if (productUpdates.length) db.prepare(`UPDATE merch_products SET ${productUpdates.join(', ')} WHERE id = ?`).run(...productParams);
+        if (price !== null) db.prepare('UPDATE merch_variants SET price = ? WHERE product_id = ?').run(price, comboId);
+        if (componentIds) {
+          if (componentIds.length < 2) throw new Error('A combo needs at least two product variants.');
+          const ph = componentIds.map(() => '?').join(', ');
+          const valid = db.prepare(`SELECT v.id AS variantId, v.product_id AS productId, v.is_active AS isActive, p.is_active AS productActive, p.is_combo AS isCombo FROM merch_variants v JOIN merch_products p ON p.id = v.product_id WHERE v.id IN (${ph})`).all(...componentIds);
+          if (valid.length !== componentIds.length || valid.some((item) => !item.isActive || !item.productActive || item.isCombo)) throw new Error('All combo components must be active normal products.');
+          db.prepare('DELETE FROM merch_combo_items WHERE combo_product_id = ?').run(comboId);
+          const insertItem = db.prepare('INSERT INTO merch_combo_items (combo_product_id, component_product_id, component_variant_id, quantity) VALUES (?, ?, ?, 1)');
+          valid.forEach((item) => insertItem.run(comboId, item.productId, item.variantId));
+        }
+      })();
+      return res.json(loadMerchProductCatalog({ includeInactive: true }).find((item) => Number(item.id) === comboId) || { id: comboId });
+    } catch (error) {
+      return res.status(400).json({ message: error.message || 'Unable to update combo.' });
+    }
   });
 
   // ADMIN: Create a product and its first purchasable variant.
@@ -4116,6 +4384,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       ? body.specifications
       : {};
     const status = String(body.status || 'draft').toLowerCase();
+    const comboPurchase = body.comboPurchase ? 1 : 0;
     const rawImage = String(body.image || '').trim() || (
       category === 'bottles' ? '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113' :
       category === 'sprays' ? '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138' :
@@ -4137,8 +4406,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     const insertProduct = db.prepare(`
-      INSERT INTO merch_products (name, slug, description, specifications_json, category, base_price, image_url, is_active, gst_rate, weight_grams)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO merch_products (name, slug, description, specifications_json, category, base_price, image_url, is_active, gst_rate, weight_grams, combo_purchase)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertVariant = db.prepare(`
       INSERT INTO merch_variants (product_id, sku, size, color, price, stock)
@@ -4156,6 +4425,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         status === 'published' ? 1 : 0,
         Number(body.gstRate || 18),
         Math.max(0, Math.floor(Number(body.weightGrams || 0))),
+        comboPurchase,
       );
       insertVariant.run(
         productResult.lastInsertRowid,
@@ -4178,6 +4448,63 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
   });
 
+  // ADMIN: Update a product and/or one of its variants.
+  app.patch('/api/merch/admin/products/:id', requireAdmin, (req, res) => {
+    const productId = Number(req.params.id);
+    const body = req.body || {};
+    const product = db.prepare('SELECT * FROM merch_products WHERE id = ?').get(productId);
+    if (!product) return res.status(404).json({ message: 'Product not found.' });
+
+    const variantId = Number(body.variantId || 0);
+    let variant = null;
+    if (variantId > 0) {
+      variant = db.prepare('SELECT id FROM merch_variants WHERE id = ? AND product_id = ?').get(variantId, productId);
+      if (!variant) return res.status(404).json({ message: 'Product variant not found.' });
+    }
+
+    const productUpdates = [];
+    const productParams = [];
+    const addProductField = (column, value) => {
+      productUpdates.push(`${column} = ?`);
+      productParams.push(value);
+    };
+    if (body.name !== undefined) addProductField('name', String(body.name || '').trim());
+    if (body.category !== undefined) addProductField('category', String(body.category || '').trim().toLowerCase());
+    if (body.description !== undefined) addProductField('description', String(body.description || '').trim());
+    if (body.image !== undefined) addProductField('image_url', String(body.image || '').trim());
+    if (body.specifications !== undefined) addProductField('specifications_json', JSON.stringify(body.specifications || {}));
+    if (body.status !== undefined) addProductField('is_active', String(body.status).toLowerCase() === 'published' ? 1 : 0);
+    if (body.comboPurchase !== undefined) addProductField('combo_purchase', body.comboPurchase ? 1 : 0);
+    if (body.price !== undefined) addProductField('base_price', Math.max(0, Math.round(Number(body.price || 0) * 100)));
+
+    const variantUpdates = [];
+    const variantParams = [];
+    if (variant) {
+      const addVariantField = (column, value) => { variantUpdates.push(`${column} = ?`); variantParams.push(value); };
+      if (body.sku !== undefined) addVariantField('sku', String(body.sku || '').trim());
+      if (body.size !== undefined) addVariantField('size', String(body.size || '').trim() || null);
+      if (body.color !== undefined) addVariantField('color', String(body.color || '').trim() || null);
+      if (body.price !== undefined) addVariantField('price', Math.max(0, Math.round(Number(body.price || 0) * 100)));
+      if (body.stock !== undefined) addVariantField('stock', Math.max(0, Math.floor(Number(body.stock || 0))));
+      if (variantUpdates.length) {
+        variantParams.push(variantId, productId);
+      }
+    }
+
+    db.transaction(() => {
+      if (productUpdates.length) {
+        productUpdates.push("updated_at = datetime('now')");
+        productParams.push(productId);
+        db.prepare(`UPDATE merch_products SET ${productUpdates.join(', ')} WHERE id = ?`).run(...productParams);
+      }
+      if (variantUpdates.length) {
+        db.prepare(`UPDATE merch_variants SET ${variantUpdates.join(', ')} WHERE id = ? AND product_id = ?`).run(...variantParams);
+      }
+    })();
+    const updated = loadMerchProductCatalog({ includeInactive: true }).find((item) => Number(item.id) === productId);
+    return res.json(updated || { id: productId });
+  });
+
   // ADMIN: Remove a product from the storefront without breaking historical orders.
   app.delete('/api/merch/admin/products/:id', requireAdmin, (req, res) => {
     const productId = Number(req.params.id);
@@ -4193,10 +4520,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     `).get(productId, productId);
     if (!product) return res.status(404).json({ message: 'Product not found.' });
     db.transaction(() => {
-      db.prepare('UPDATE merch_products SET is_active = 0, updated_at = datetime(\'now\') WHERE id = ?').run(productId);
-      db.prepare('UPDATE merch_variants SET is_active = 0 WHERE product_id = ?').run(productId);
+      // Order items retain a snapshot of product details and do not foreign-key
+      // the variant, so removing the catalog rows does not break order history.
+      db.prepare('DELETE FROM merch_variants WHERE product_id = ?').run(Number(product.id));
+      db.prepare('DELETE FROM merch_products WHERE id = ?').run(Number(product.id));
     })();
-    res.json({ message: 'Product removed from storefront.', id: productId, name: product.name });
+    res.json({ message: 'Product permanently removed from the catalog.', id: Number(product.id), name: product.name });
   });
 
   // ─── ADMIN: Get inventory ───
@@ -4354,14 +4683,14 @@ function seedMerchProducts(db) {
   let r = insertProduct.run(products[0].name, products[0].slug, products[0].description, JSON.stringify(products[0].specifications_json), products[0].category, products[0].base_price, products[0].image_url, products[0].gst_rate, products[0].weight_grams);
   let pid = r.lastInsertRowid;
   for (const size of ['S', 'M', 'L', 'XL', 'XXL']) {
-    insertVariant.run(pid, `HM-HOD-BLK-${size}`, size, 'Black', 349900, 25);
+    insertVariant.run(pid, `HM-HOD-BLK-${size}`, size, 'Black', 349900, 35);
   }
 
   // Product 2: Zenith Hoodie Sand
   r = insertProduct.run(products[1].name, products[1].slug, products[1].description, JSON.stringify(products[1].specifications_json), products[1].category, products[1].base_price, products[1].image_url, products[1].gst_rate, products[1].weight_grams);
   pid = r.lastInsertRowid;
   for (const size of ['S', 'M', 'L', 'XL', 'XXL']) {
-    insertVariant.run(pid, `HM-HOD-SND-${size}`, size, 'Sand', 349900, 20);
+    insertVariant.run(pid, `HM-HOD-SND-${size}`, size, 'Sand', 349900, 35);
   }
 
   // Product 3: Water Bottle
