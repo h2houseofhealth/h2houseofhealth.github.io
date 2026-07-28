@@ -862,7 +862,13 @@
   }
 
   function buildApiUrl(path) {
-    return path;
+    const configuredWindowValue = String(window.__API_URL__ || '').trim();
+    const configuredMetaValue = String(document.querySelector('meta[name="api-base-url"]')?.content || '').trim();
+    const hostname = String(window.location.hostname || '').trim().toLowerCase();
+    const isLocalHost = ['localhost', '127.0.0.1', '::1'].includes(hostname);
+    const configuredBase = (configuredWindowValue || (isLocalHost ? '' : configuredMetaValue)).replace(/\/$/, '');
+    if (!configuredBase) return path;
+    return `${configuredBase}${String(path || '').startsWith('/') ? path : `/${path}`}`;
   }
 
   async function apiRequest(path, options = {}) {
@@ -875,20 +881,42 @@
     });
 
     let data = null;
+    let rawResponse = '';
     try {
-      data = await response.json();
+      rawResponse = await response.text();
+      data = rawResponse ? JSON.parse(rawResponse) : null;
     } catch {
       data = null;
     }
 
     if (!response.ok) {
-      const error = new Error(String(data?.message || data?.error || 'Request failed'));
+      const fallbackMessage = response.status === 404
+        ? `API endpoint not found (${response.status}): ${path}`
+        : `Request failed (${response.status})`;
+      const error = new Error(String(data?.message || data?.error || fallbackMessage));
       error.status = response.status;
       error.data = data || {};
+      error.responseText = rawResponse;
       throw error;
     }
 
     return data || {};
+  }
+
+  async function ensureAdminSession() {
+    try {
+      const result = await apiRequest('/api/auth/me');
+      if (String(result?.user?.role || '').toLowerCase() !== 'admin') {
+        throw new Error('Admin access is required.');
+      }
+      return true;
+    } catch (error) {
+      toast('Admin sign-in required', error.message || 'Please sign in with the admin account.', 'warning');
+      window.setTimeout(() => {
+        window.location.replace('/merch/auth.html?returnTo=/merch/admin/index.html');
+      }, 250);
+      return false;
+    }
   }
 
   const categoryList = [
@@ -5018,25 +5046,33 @@
     }
 
     if (type === 'influencer') {
+      if (form.dataset.submitting === 'true') return;
       const entity = updateInfluencerFromForm(form, existingId ? state.influencers.find((item) => Number(item.id) === existingId) : null);
       if (!entity.name || !entity.handle) {
-        toast('Missing details', 'Influencer name and handle are required.', 'warning');
+        toast('Missing details', 'Influencer name and social handle are required.', 'warning');
         return;
       }
-      const method = existingId ? 'PUT' : 'POST';
-      const path = existingId
-        ? `/api/merch/admin/influencers/${encodeURIComponent(existingId)}`
-        : '/api/merch/admin/influencers';
-      await apiRequest(path, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(entity),
-      });
-      toast('Influencer saved', `${entity.name} ${existingId ? 'updated' : 'created'} successfully.`, 'success');
-      closeModal();
-      await loadInfluencerData();
-      await loadCouponData();
-      await loadReportData();
+      try {
+        form.dataset.submitting = 'true';
+        const method = existingId ? 'PUT' : 'POST';
+        const path = existingId
+          ? `/api/merch/admin/influencers/${encodeURIComponent(existingId)}`
+          : '/api/merch/admin/influencers';
+        await apiRequest(path, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(entity),
+        });
+        toast('Influencer saved', `${entity.name} ${existingId ? 'updated' : 'created'} successfully.`, 'success');
+        closeModal();
+        await loadInfluencerData();
+        await loadCouponData();
+        await loadReportData();
+      } catch (error) {
+        toast('Influencer not saved', error.message || 'Unable to save influencer data.', 'danger');
+      } finally {
+        form.dataset.submitting = 'false';
+      }
       return;
     }
   }
@@ -5135,7 +5171,8 @@
     });
   }
 
-  function init() {
+  async function init() {
+    if (!(await ensureAdminSession())) return;
     bindEvents();
     renderAll();
     loadDashboardStats();

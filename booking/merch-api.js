@@ -2884,7 +2884,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (typeof validateCouponForUser !== 'function') {
       return { error: 'Coupon validation is unavailable.' };
     }
-    return validateCouponForUser({ ...args, appliesTo: 'merch', portal: 'merch' });
+    const result = validateCouponForUser({ ...args, appliesTo: 'merch', portal: 'merch' });
+    if (result?.error || !result?.coupon?.influencerId) return result;
+    const influencer = db.prepare('SELECT active FROM merch_influencers WHERE id = ?').get(Number(result.coupon.influencerId));
+    if (!influencer || Number(influencer.active) !== 1) {
+      return { error: 'This influencer coupon is no longer active.' };
+    }
+    return result;
   }
 
   function recordMerchCouponRedemption(payload) {
@@ -2975,6 +2981,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!couponCode) {
       return res.status(400).json({ error: 'couponCode is required' });
     }
+    if (!authUser) {
+      return res.status(401).json({ error: 'Sign in to redeem an influencer coupon.' });
+    }
 
     const subtotalAmountPaise = Number(req.body?.subtotalAmountPaise || 0);
     const couponResult = validateMerchCouponForUser({
@@ -3001,6 +3010,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const authUser = getMerchAuthUser(req);
     const merchProfile = authUser ? ensureMerchCustomerProfileForUser(authUser) : null;
     const couponCode = normalizeMerchCouponCode(req.body?.couponCode);
+    if (couponCode && !authUser) {
+      return res.status(401).json({ error: 'Sign in to redeem an influencer coupon.' });
+    }
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Cart is empty' });
     }
@@ -3906,8 +3918,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   app.post('/api/merch/admin/influencers', requireAdmin, (req, res) => {
     const influencer = normalizeInfluencerPayload(req.body);
-    if (!influencer.name) {
-      return res.status(400).json({ message: 'Influencer name is required' });
+    if (!influencer.name || !influencer.handle) {
+      return res.status(400).json({ message: 'Influencer name and social handle are required' });
     }
     if (influencer.email) {
       const existingByEmail = getInfluencerByEmail(influencer.email);
@@ -3937,7 +3949,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     const result = db.prepare(`
       INSERT INTO merch_influencers (name, handle, email, phone, notes, avatar_url, bio, social_links_json, preferred_payment_details, commission_per_order_paise, paid_commission, active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
     `).run(
       influencer.name,
       influencer.handle || null,
@@ -3972,8 +3984,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       ...req.body,
       active: Object.prototype.hasOwnProperty.call(req.body || {}, 'active') ? req.body.active : existing.active,
     });
-    if (!influencer.name) {
-      return res.status(400).json({ message: 'Influencer name is required' });
+    if (!influencer.name || !influencer.handle) {
+      return res.status(400).json({ message: 'Influencer name and social handle are required' });
     }
     if (influencer.email) {
       const existingByEmail = getInfluencerByEmail(influencer.email);
