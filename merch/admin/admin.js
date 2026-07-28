@@ -16,12 +16,11 @@
   const today = new Date();
   const LOW_STOCK_THRESHOLD = 15;
   const REVENUE_PERIOD_OPTIONS = [
-    { value: 'today', label: 'Today' },
-    { value: 'week', label: 'This Week' },
-    { value: 'month', label: 'This Month' },
-    { value: 'quarter', label: 'This Quarter' },
-    { value: 'year', label: 'This Year' },
-    { value: 'custom', label: 'Custom Date Range', disabled: true },
+    ...Array.from({ length: 12 }, (_, index) => ({
+      value: `month-${String(index + 1).padStart(2, '0')}`,
+      label: new Intl.DateTimeFormat('en-IN', { month: 'long' }).format(new Date(2000, index, 1)),
+    })),
+    { value: 'custom', label: 'Custom Range' },
   ];
   const ORDER_STATUS_PERIOD_OPTIONS = [
     { value: 'today', label: 'Today' },
@@ -423,6 +422,53 @@
     return coupons.map((coupon) => `<span class="admin-chip">${escapeHtml(coupon)}</span>`).join('');
   }
 
+  function getInfluencerCouponRecords(influencer) {
+    const apiDetails = Array.isArray(influencer?.couponDetails) ? influencer.couponDetails : [];
+    const detailByCode = new Map(apiDetails.map((coupon) => [String(coupon.code || '').trim().toUpperCase(), coupon]));
+    const codes = Array.isArray(influencer?.coupons) ? influencer.coupons : [];
+    return codes.map((rawCode) => {
+      const code = String(rawCode || '').trim().toUpperCase();
+      const listedCoupon = Array.isArray(state.coupons)
+        ? state.coupons.find((coupon) => String(coupon.code || '').trim().toUpperCase() === code)
+        : null;
+      return { ...(detailByCode.get(code) || {}), ...(listedCoupon || {}), code };
+    });
+  }
+
+  function couponDiscountLabel(coupon) {
+    const value = Number(coupon?.discountValue ?? coupon?.discount ?? 0);
+    const type = String(coupon?.discountType || coupon?.discount_type || '').toLowerCase();
+    return type.includes('percent') || type === '%' ? `${value}% off` : `₹${value.toLocaleString('en-IN')} off`;
+  }
+
+  function getInfluencerDiscountApplied(influencer) {
+    return getInfluencerCouponRecords(influencer).reduce((sum, coupon) => {
+      return sum + Number(coupon.usageCount || coupon.totalRedemptions || 0) * Number(coupon.discountValue || coupon.discount || 0);
+    }, 0);
+  }
+
+  function getInfluencerCouponWorth(influencer) {
+    return getInfluencerCouponRecords(influencer).reduce((sum, coupon) => {
+      const type = String(coupon.discountType || coupon.discount_type || '').toLowerCase();
+      return sum + (type.includes('percent') || type === '%' ? 0 : Number(coupon.discountValue || coupon.discount || 0));
+    }, 0);
+  }
+
+  function renderAssignedCouponDetails(influencer) {
+    const coupons = getInfluencerCouponRecords(influencer);
+    if (!coupons.length) return '<p class="admin-table__muted" style="margin:0;">No coupons assigned yet.</p>';
+    return `<div class="admin-assigned-coupon-list">${coupons.map((coupon) => {
+      const usage = Number(coupon.usageCount || coupon.totalRedemptions || 0);
+      const limit = coupon.maxRedemptions == null ? '∞' : coupon.maxRedemptions;
+      const expiry = coupon.validTill || coupon.expiresAt || coupon.expiry;
+      const active = Number(coupon.active ?? coupon.isActive ?? 0) === 1;
+      return `<article class="admin-assigned-coupon">
+        <div class="admin-assigned-coupon__head"><strong>${escapeHtml(coupon.code)}</strong><span class="admin-badge ${active ? 'admin-badge--active' : 'admin-badge--inactive'}">${active ? 'Active' : 'Inactive'}</span></div>
+        <div class="admin-assigned-coupon__meta"><span>Discount value <strong>${escapeHtml(couponDiscountLabel(coupon))}</strong></span><span>Used <strong>${usage} / ${escapeHtml(String(limit))}</strong></span><span>Expires <strong>${escapeHtml(expiry ? dateLabel(expiry) : 'No expiry')}</strong></span></div>
+      </article>`;
+    }).join('')}</div>`;
+  }
+
   function renderInfluencerActionLinks(influencer) {
     const id = influencer?.id || '';
     const canEmail = Boolean(String(influencer?.email || '').trim());
@@ -431,9 +477,75 @@
 
     return `
       <button class="admin-action-link" type="button" data-action="edit-influencer" data-id="${id}">Edit Influencer</button>
+      <button class="admin-action-link" type="button" data-action="view-influencer-report" data-id="${id}">View Report</button>
       <button class="admin-action-link" type="button" data-action="download-influencer-report" data-id="${id}">Download Report</button>
       <button class="admin-action-link" type="button" data-action="email-influencer-report" data-id="${id}"${emailTitle}${emailDisabled}>Send to Email</button>
     `;
+  }
+
+  function buildInfluencerReportModalBody(report) {
+    const influencer = report?.influencer || {};
+    const summary = report?.summary || {};
+    const performance = report?.performance || {};
+    const couponRows = Array.isArray(report?.couponPerformance) ? report.couponPerformance : [];
+    const orderRows = Array.isArray(report?.salesHistory?.items) ? report.salesHistory.items : [];
+    const periodLabel = report?.periodLabel || 'all available dates';
+
+    return `
+      <div class="admin-report-detail">
+        <div class="admin-report-detail__intro">
+          <div>
+            <p class="admin-kicker">${escapeHtml(periodLabel)}</p>
+            <h4>${escapeHtml(influencer.name || 'Influencer')} <span>${escapeHtml(influencer.handle || '')}</span></h4>
+            <p>${escapeHtml(influencer.email || 'No email on file')}</p>
+          </div>
+          <span class="admin-badge ${influencer.active ? 'admin-badge--active' : 'admin-badge--inactive'}">${influencer.active ? 'Active' : 'Inactive'}</span>
+        </div>
+        <div class="admin-grid admin-grid--stats">
+          <article class="admin-stat"><p class="admin-stat__label">Orders Referred</p><p class="admin-stat__value">${formatCount(summary.totalOrdersReferred)}</p></article>
+          <article class="admin-stat"><p class="admin-stat__label">Sales Generated</p><p class="admin-stat__value">${money(summary.totalSalesGenerated)}</p></article>
+          <article class="admin-stat"><p class="admin-stat__label">Commission Earned</p><p class="admin-stat__value">${money(summary.totalCommissionEarned)}</p></article>
+          <article class="admin-stat"><p class="admin-stat__label">Commission Paid</p><p class="admin-stat__value">${money(summary.commissionPaid)}</p></article>
+        </div>
+        <div class="admin-card-grid admin-card-grid--2" style="margin-top:16px;">
+          <section class="admin-card"><div class="admin-card__head"><h4 class="admin-card__title">Performance</h4></div><div class="admin-card__body">
+            <p class="admin-list__item-sub">Conversion rate: <strong>${escapeHtml(String(summary.conversionRate ?? performance.conversionRate ?? '0'))}%</strong></p>
+            <p class="admin-list__item-sub">Average order value: <strong>${money(summary.averageOrderValue ?? performance.averageOrderValue)}</strong></p>
+            <p class="admin-list__item-sub">Repeat customer rate: <strong>${escapeHtml(String(performance.repeatCustomerPercentage ?? '0'))}%</strong></p>
+          </div></section>
+          <section class="admin-card"><div class="admin-card__head"><h4 class="admin-card__title">Coupon Performance</h4></div><div class="admin-card__body admin-table-wrap">
+            ${couponRows.length ? `<table class="admin-table"><thead><tr><th>Coupon</th><th>Usage</th><th>Revenue</th></tr></thead><tbody>${couponRows.map((row) => `<tr><td>${escapeHtml(row.code || '')}</td><td>${formatCount(row.usageCount)}</td><td>${money(row.revenueGenerated)}</td></tr>`).join('')}</tbody></table>` : '<p class="admin-table__muted">No coupon activity for this period.</p>'}
+          </div></section>
+        </div>
+        <section class="admin-card" style="margin-top:16px;"><div class="admin-card__head"><h4 class="admin-card__title">Sales History</h4></div><div class="admin-card__body admin-table-wrap">
+          ${orderRows.length ? `<table class="admin-table"><thead><tr><th>Order</th><th>Date</th><th>Status</th><th>Total</th></tr></thead><tbody>${orderRows.map((row) => `<tr><td>${escapeHtml(row.orderNumber || row.id || '')}</td><td>${escapeHtml(dateLabel(row.orderDate || ''))}</td><td>${escapeHtml(row.orderStatus || '')}</td><td>${money(row.orderAmount || 0)}</td></tr>`).join('')}</tbody></table>` : '<p class="admin-table__muted">No attributed orders for this period.</p>'}
+        </div></section>
+      </div>
+    `;
+  }
+
+  async function viewInfluencerReport(influencer) {
+    if (!influencer) return;
+    openModal({
+      title: `${influencer.name || 'Influencer'} Report`,
+      subtitle: 'Loading report data',
+      body: renderEmptyState('Loading report', 'Fetching the latest individual influencer report.'),
+      size: 'lg',
+    });
+    try {
+      const result = await fetchInfluencerReport(influencer.id);
+      const report = result?.report || result;
+      openModal({
+        title: `${report?.influencer?.name || influencer.name || 'Influencer'} Report`,
+        subtitle: 'Individual influencer report',
+        body: buildInfluencerReportModalBody(report),
+        footer: '<button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Close</button>',
+        size: 'lg',
+      });
+    } catch (error) {
+      closeModal();
+      toast('Report unavailable', error.message || 'Unable to load the individual influencer report.', 'warning');
+    }
   }
 
   function csvCell(value) {
@@ -448,6 +560,66 @@
     const parsed = new Date(`${String(monthKey || '').slice(0, 7)}-01T00:00:00`);
     if (Number.isNaN(parsed.getTime())) return String(monthKey || '');
     return new Intl.DateTimeFormat('en-IN', { month: 'short', year: 'numeric' }).format(parsed);
+  }
+
+  function monthKeyFromDate(value) {
+    const key = String(value || '').slice(0, 7);
+    return /^\d{4}-\d{2}$/.test(key) ? key : '';
+  }
+
+  function dateKey(value) {
+    const key = String(value || '').slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(key) ? key : '';
+  }
+
+  function getDateFilterOptions(period, from, to) {
+    if (period === 'custom') {
+      return { from: dateKey(from), to: dateKey(to) };
+    }
+    if (period && /^\d{4}-\d{2}$/.test(period)) {
+      return { from: `${period}-01`, to: `${period}-31` };
+    }
+    return { from: '', to: '' };
+  }
+
+  function matchesDateFilter(value, period, from, to) {
+    const key = dateKey(value);
+    if (!key || !period || period === 'all') return true;
+    const range = getDateFilterOptions(period, from, to);
+    if (period === 'custom' && (!range.from || !range.to)) return true;
+    return Boolean(range.from && range.to && key >= range.from && key <= range.to);
+  }
+
+  function matchesMonthFilter(value, period, from, to) {
+    if (!period || period === 'all') return true;
+    const month = monthKeyFromDate(value);
+    if (!month) return false;
+    if (/^\d{4}-\d{2}$/.test(period)) return month === period;
+    const range = getDateFilterOptions(period, from, to);
+    if (period === 'custom' && (!range.from || !range.to)) return true;
+    return Boolean(range.from && range.to && month >= range.from.slice(0, 7) && month <= range.to.slice(0, 7));
+  }
+
+  function monthOptions(rows, getValue) {
+    return [...new Set(rows.map((row) => monthKeyFromDate(getValue(row))).filter(Boolean))]
+      .sort((left, right) => right.localeCompare(left));
+  }
+
+  function renderDateFilterControls(prefix, period, from, to, rows, getValue) {
+    const options = monthOptions(rows, getValue);
+    return `
+      <div class="admin-date-filter" aria-label="Filter by date">
+        <select class="admin-select" data-input="${prefix}DatePeriod" aria-label="Month">
+          <option value="all" ${period === 'all' ? 'selected' : ''}>All months</option>
+          ${options.map((month) => `<option value="${month}" ${period === month ? 'selected' : ''}>${escapeHtml(reportMonthLabel(month))}</option>`).join('')}
+          <option value="custom" ${period === 'custom' ? 'selected' : ''}>Custom range</option>
+        </select>
+        ${period === 'custom' ? `
+          <input class="admin-input" type="date" data-input="${prefix}DateFrom" value="${escapeHtml(from || '')}" aria-label="Start date" />
+          <input class="admin-input" type="date" data-input="${prefix}DateTo" value="${escapeHtml(to || '')}" aria-label="End date" />
+        ` : ''}
+      </div>
+    `;
   }
 
   function buildMerchReportLines(report) {
@@ -871,6 +1043,28 @@
     return `${configuredBase}${String(path || '').startsWith('/') ? path : `/${path}`}`;
   }
 
+  function exportCouponsCsv() {
+    const rows = (state.coupons || []).filter((coupon) => {
+      const statusMatch = state.couponsStatus === 'all'
+        || (state.couponsStatus === 'active' ? Number(coupon.active ?? coupon.isActive ?? 0) === 1 : Number(coupon.active ?? coupon.isActive ?? 0) !== 1);
+      const typeMatch = state.couponsType === 'all' || getCouponTypeValue(coupon) === state.couponsType;
+      const query = state.couponsSearch.trim().toLowerCase();
+      const searchMatch = !query || [coupon.code, coupon.description, coupon.festivalName, coupon.owner, coupon.influencerName, coupon.recipientEmail]
+        .filter(Boolean).some((value) => String(value).toLowerCase().includes(query));
+      const dateMatch = matchesDateFilter(coupon.createdAt, state.couponsDatePeriod, state.couponsDateFrom, state.couponsDateTo);
+      return statusMatch && typeMatch && searchMatch && dateMatch;
+    });
+    const csvValue = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const header = ['Code', 'Type', 'Discount', 'Usage', 'Expiry', 'Status', 'Owner'];
+    const lines = [header, ...rows.map((coupon) => [
+      coupon.code, getCouponTypeLabel(coupon), coupon.discount || coupon.discountValue || '',
+      coupon.totalRedemptions || coupon.usageCount || 0, coupon.validTill || coupon.expiresAt || coupon.expiry || 'No expiry',
+      Number(coupon.active ?? coupon.isActive ?? 0) === 1 ? 'Active' : 'Inactive', coupon.owner || coupon.influencerName || coupon.recipientEmail || 'General',
+    ])].map((row) => row.map(csvValue).join(','));
+    downloadMerchReportFile(`merch-coupons-${toISODate(today)}.csv`, lines.join('\n'), 'text/csv;charset=utf-8');
+    toast('Export ready', `${rows.length} coupon${rows.length === 1 ? '' : 's'} downloaded.`, 'success');
+  }
+
   async function apiRequest(path, options = {}) {
     const response = await fetch(buildApiUrl(path), {
       credentials: 'include',
@@ -1086,7 +1280,11 @@
     view: 'dashboard',
     sidebarOpen: false,
     notificationsExpanded: false,
-    revenuePeriod: 'month',
+    revenuePeriod: `month-${pad(today.getMonth() + 1)}`,
+    revenueFrom: daysAgo(29),
+    revenueTo: toISODate(today),
+    revenueAppliedFrom: '',
+    revenueAppliedTo: '',
     orderStatusPeriod: 'today',
     orderStatusFrom: toISODate(today),
     orderStatusTo: toISODate(today),
@@ -1119,11 +1317,19 @@
     customersAppliedDateFrom: '',
     customersAppliedDateTo: '',
     couponsSearch: '',
+    couponsStatus: 'all',
+    couponsType: 'all',
+    couponsDatePeriod: 'all',
+    couponsDateFrom: '',
+    couponsDateTo: '',
     couponsLoading: false,
     influencersLoading: false,
     reportsLoading: false,
     influencersSearch: '',
     influencerDetailsFilter: 'all',
+    influencersDatePeriod: 'all',
+    influencersDateFrom: '',
+    influencersDateTo: '',
     reportFrom: daysAgo(29),
     reportTo: toISODate(today),
     reportFormat: 'csv',
@@ -1422,29 +1628,56 @@
   }
 
   function getRevenueForPeriod(period, monthlyRevenueSeries) {
-    const currentMonthKey = `${today.getFullYear()}-${pad(today.getMonth() + 1)}`;
-    if (period === 'month') {
-      return Number(monthlyRevenueSeries.find((row) => String(row.month) === currentMonthKey)?.revenue || 0);
+    if (period === 'custom') {
+      const from = new Date(`${state.revenueAppliedFrom || state.revenueFrom}T00:00:00`);
+      const to = new Date(`${state.revenueAppliedTo || state.revenueTo}T23:59:59`);
+      return state.orders
+        .filter((order) => ['paid', 'cod_pending'].includes(String(order.paymentStatus || '').toLowerCase()))
+        .filter((order) => {
+          const createdAt = new Date(String(order.createdAt || '').replace(' ', 'T'));
+          return !Number.isNaN(createdAt.getTime()) && createdAt >= from && createdAt <= to;
+        })
+        .reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
+    }
+    const monthNumber = Number(String(period).split('-')[1]);
+    const monthKey = `${today.getFullYear()}-${pad(monthNumber)}`;
+    return Number(monthlyRevenueSeries.find((row) => String(row.month) === monthKey)?.revenue || 0);
+  }
+
+  function buildRevenueChartRows(period, monthlyRevenueSeries) {
+    if (period !== 'custom') {
+      const year = today.getFullYear();
+      const monthNumber = Number(String(period).split('-')[1]);
+      const month = pad(monthNumber);
+      const row = monthlyRevenueSeries.find((item) => String(item.month) === `${year}-${month}`);
+      return [{
+        label: new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric' }).format(new Date(year, monthNumber - 1, 1)),
+        value: Number(row?.revenue || 0),
+        display: money(row?.revenue || 0),
+      }];
     }
 
-    const start = new Date(today);
-    start.setHours(0, 0, 0, 0);
-    if (period === 'week') {
-      const day = start.getDay();
-      start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
-    } else if (period === 'quarter') {
-      start.setMonth(Math.floor(start.getMonth() / 3) * 3, 1);
-    } else if (period === 'year') {
-      start.setMonth(0, 1);
-    }
-
-    return state.orders
+    const from = new Date(`${state.revenueAppliedFrom || state.revenueFrom}T00:00:00`);
+    const to = new Date(`${state.revenueAppliedTo || state.revenueTo}T23:59:59`);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) return [];
+    const weeks = new Map();
+    state.orders
       .filter((order) => ['paid', 'cod_pending'].includes(String(order.paymentStatus || '').toLowerCase()))
-      .filter((order) => {
+      .forEach((order) => {
         const createdAt = new Date(String(order.createdAt || '').replace(' ', 'T'));
-        return !Number.isNaN(createdAt.getTime()) && createdAt >= start;
-      })
-      .reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
+        if (Number.isNaN(createdAt.getTime()) || createdAt < from || createdAt > to) return;
+        const weekStart = new Date(createdAt);
+        weekStart.setHours(0, 0, 0, 0);
+        const day = weekStart.getDay();
+        weekStart.setDate(weekStart.getDate() - (day === 0 ? 6 : day - 1));
+        const key = toISODate(weekStart);
+        weeks.set(key, (weeks.get(key) || 0) + Number(order.totalAmount || 0));
+      });
+    return [...weeks.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([key, revenue]) => ({
+      label: `Week of ${dateLabel(key)}`,
+      value: revenue,
+      display: money(revenue),
+    }));
   }
 
   function getCouponOverview() {
@@ -1516,15 +1749,14 @@
     const orderStatusPeriodSubtitle = selectedOrderStatusPeriod.value === 'custom' && state.orderStatusAppliedFrom && state.orderStatusAppliedTo
       ? `From ${dateLabel(state.orderStatusAppliedFrom)} to ${dateLabel(state.orderStatusAppliedTo)}`
       : `Live breakdown for ${selectedOrderStatusPeriod.label.toLowerCase()}`;
-    const currentMonthKey = `${today.getFullYear()}-${pad(today.getMonth() + 1)}`;
-    const selectedRevenuePeriod = REVENUE_PERIOD_OPTIONS.find((option) => option.value === state.revenuePeriod) || REVENUE_PERIOD_OPTIONS[2];
+    const selectedRevenuePeriod = REVENUE_PERIOD_OPTIONS.find((option) => option.value === state.revenuePeriod) || REVENUE_PERIOD_OPTIONS[today.getMonth()];
     const selectedRevenue = getRevenueForPeriod(selectedRevenuePeriod.value, monthlyRevenueSeries);
-    const monthlyRevenueMax = Math.max(1, ...monthlyRevenueSeries.map((row) => Number(row.revenue || 0)));
-    const monthlyChartRows = monthlyRevenueSeries.slice(-6).map((row) => ({
-      label: row.monthLabel || formatMonthLabel(row.month),
-      value: (Number(row.revenue || 0) / monthlyRevenueMax) * 100,
-      display: money(row.revenue || 0),
-    }));
+    const revenueChartRows = buildRevenueChartRows(selectedRevenuePeriod.value, monthlyRevenueSeries);
+    const revenueMax = Math.max(1, ...revenueChartRows.map((row) => Number(row.value || 0)));
+    const revenueChartRowsWithScale = revenueChartRows.map((row) => ({ ...row, value: (Number(row.value || 0) / revenueMax) * 100 }));
+    const revenuePeriodSubtitle = selectedRevenuePeriod.value === 'custom' && state.revenueAppliedFrom && state.revenueAppliedTo
+      ? `Weekly revenue from ${dateLabel(state.revenueAppliedFrom)} to ${dateLabel(state.revenueAppliedTo)}`
+      : `${selectedRevenuePeriod.label} revenue for ${today.getFullYear()}`;
     const activeNotifications = getActiveNotifications();
     const visibleNotifications = state.notificationsExpanded ? activeNotifications : activeNotifications.slice(0, 5);
     const unreadNotificationCount = state.notifications.filter((item) => !item.read && !item.dismissedAt).length;
@@ -1561,12 +1793,12 @@
             <p class="admin-section__desc">Revenue, orders, customer activity, and coupon usage streamed from the merch API.</p>
           </div>
         </div>
-        <div class="admin-section__body admin-card-grid admin-card-grid--3">
-          <article class="admin-card">
+        <div class="admin-section__body admin-card-grid admin-card-grid--2">
+          <article class="admin-card admin-revenue-card">
             <div class="admin-card__head admin-card__head--with-filter">
               <div>
-                <h3 class="admin-card__title">Monthly Revenue</h3>
-                <p class="admin-card__sub">Revenue totals from live orders</p>
+                <h3 class="admin-card__title">Revenue</h3>
+                <p class="admin-card__sub">${escapeHtml(revenuePeriodSubtitle)}</p>
               </div>
               <label class="admin-revenue-filter">
                 <span class="admin-sr-only">Revenue period</span>
@@ -1575,20 +1807,18 @@
                 </select>
               </label>
             </div>
+            ${selectedRevenuePeriod.value === 'custom' ? `
+              <div class="admin-revenue-range">
+                <label><span>From</span><input class="admin-input" type="date" data-input="revenueFrom" value="${escapeHtml(state.revenueFrom)}" /></label>
+                <label><span>To</span><input class="admin-input" type="date" data-input="revenueTo" value="${escapeHtml(state.revenueTo)}" /></label>
+                <button class="admin-btn admin-btn--soft" type="button" data-action="apply-revenue-range">Apply</button>
+                <button class="admin-btn admin-btn--ghost" type="button" data-action="clear-revenue-range" ${state.revenueAppliedFrom || state.revenueAppliedTo ? '' : 'disabled'}>Clear</button>
+              </div>
+            ` : ''}
             <div class="admin-card__body admin-mini-chart">
               <p class="admin-stat__value" style="margin:0 0 10px;">${escapeHtml(money(selectedRevenue))}</p>
-              <p class="admin-table__muted" style="margin:0 0 12px;">${escapeHtml(selectedRevenuePeriod.label)}${selectedRevenuePeriod.value === 'month' ? ` · ${escapeHtml(formatMonthLabel(currentMonthKey))}` : ''}</p>
-              ${renderMiniChart(monthlyChartRows.length ? monthlyChartRows : [{ label: 'No revenue yet', value: 0, display: money(0) }])}
-            </div>
-          </article>
-
-          <article class="admin-card">
-            <div class="admin-card__head">
-              <h3 class="admin-card__title">Revenue Overview Chart</h3>
-              <p class="admin-card__sub">Monthly trend from the backend report feed</p>
-            </div>
-            <div class="admin-card__body admin-mini-chart">
-              ${monthlyChartRows.length ? renderMiniChart(monthlyChartRows) : '<p class="admin-table__muted" style="margin:0;">No monthly revenue data is available yet.</p>'}
+              <p class="admin-table__muted" style="margin:0 0 12px;">${escapeHtml(selectedRevenuePeriod.value === 'custom' ? revenuePeriodSubtitle : `${selectedRevenuePeriod.label} revenue`)}</p>
+              ${renderMiniChart(revenueChartRowsWithScale.length ? revenueChartRowsWithScale : [{ label: 'No revenue yet', value: 0, display: money(0) }])}
             </div>
           </article>
 
@@ -1805,12 +2035,7 @@
                     <td>${escapeHtml(product.sku)}</td>
                     <td>${escapeHtml(product.category)}</td>
                     <td><strong>${escapeHtml(product.priceLabel || catalogPrice(product.price))}</strong></td>
-                    <td>
-                      <div class="admin-list" style="gap:4px;">
-                        <input class="admin-input admin-stock-input" data-action="update-product-stock" data-id="${product.id}" type="number" min="0" value="${escapeHtml(product.stock)}" aria-label="Stock for ${escapeHtml(product.name)} ${escapeHtml(product.variantLabel || '')}" />
-                        <span class="admin-badge ${Number(product.stock || 0) <= LOW_STOCK_THRESHOLD ? 'admin-badge--inactive' : 'admin-badge--active'}">${escapeHtml(getLowStockLabel(product))}</span>
-                      </div>
-                    </td>
+                    <td><span class="admin-badge ${Number(product.stock || 0) <= LOW_STOCK_THRESHOLD ? 'admin-badge--inactive' : 'admin-badge--active'}">${escapeHtml(getLowStockLabel(product))}</span></td>
                     <td><span class="admin-badge ${statusClass(product.status)}">${escapeHtml(getStatusLabel(product.status))}</span></td>
                     <td>${escapeHtml(dateLabel(product.createdAt))}</td>
                     <td>
@@ -1968,6 +2193,7 @@
             Payment: ${escapeHtml(order.paymentMethod.toUpperCase())}<br>
             Payment Status: ${escapeHtml(getStatusLabel(order.paymentStatus))}<br>
             Coupon: ${escapeHtml(order.couponCode || 'None')}<br>
+            Coupon Discount: ${escapeHtml(order.couponCode ? money(order.discountAmount) : 'None')}<br>
             Influencer Coupon: ${escapeHtml(order.influencerCoupon || 'None')}<br>
             Tracking: ${escapeHtml(order.trackingNumber || 'Pending')}<br>
             Carrier: ${escapeHtml(order.carrier || 'Not assigned')}
@@ -2092,6 +2318,8 @@
                     <tr>
                       <th>Order ID</th>
                       <th>Customer</th>
+                      <th>Coupon</th>
+                      <th>Discount</th>
                       <th>Payment</th>
                       <th>Total</th>
                       <th>Status</th>
@@ -2103,6 +2331,8 @@
                       <tr data-action="select-order" data-id="${order.id}" style="cursor:pointer;">
                         <td><strong>${escapeHtml(order.orderNumber)}</strong><br><span class="admin-table__muted">${escapeHtml(dateLabel(order.createdAt))}</span></td>
                         <td>${escapeHtml(order.customerName)}<br><span class="admin-table__muted">${escapeHtml(order.email)}</span></td>
+                        <td>${escapeHtml(order.couponCode || '—')}</td>
+                        <td>${escapeHtml(order.couponCode ? money(order.discountAmount) : '—')}</td>
                         <td>${escapeHtml(order.paymentMethod.toUpperCase())}<br><span class="admin-table__muted">${escapeHtml(getStatusLabel(order.paymentStatus))}</span></td>
                         <td><strong>${escapeHtml(money(order.totalAmount))}</strong></td>
                         <td>
@@ -2195,7 +2425,12 @@
         </div>
         <div class="admin-list__item">
           <p class="admin-list__item-title">Last Order</p>
-          <p class="admin-list__item-sub">${escapeHtml(lastOrderLabel)}</p>
+          <p class="admin-list__item-sub">${escapeHtml(lastOrderLabel)}${customer.lastOrder?.couponCode ? `<br>Coupon: ${escapeHtml(customer.lastOrder.couponCode)} · Discount: ${escapeHtml(money(customer.lastOrder.discountAmount))}` : ''}</p>
+        </div>
+        <div class="admin-list__item">
+          <p class="admin-list__item-title">Coupons Redeemed</p>
+          <p class="admin-list__item-sub">${customer.couponRedemptions?.length ? customer.couponRedemptions.map((entry) => `${escapeHtml(entry.couponCode)} (${escapeHtml(money(entry.discountAmount))})`).join('<br>') : 'None'}</p>
+          ${customer.couponDiscountTotal ? `<p class="admin-list__item-sub">Total discount: ${escapeHtml(money(customer.couponDiscountTotal))}</p>` : ''}
         </div>
         <div class="admin-list__item">
           <p class="admin-list__item-title">Addresses</p>
@@ -2320,6 +2555,7 @@
                       <th>Email</th>
                       <th>Phone</th>
                       <th>Merchandise Orders</th>
+                      <th>Coupon / Discount</th>
                       <th>Last Order</th>
                       <th>Addresses</th>
                       <th>Registration Date</th>
@@ -2332,6 +2568,7 @@
                         <td>${escapeHtml(customer.email)}</td>
                         <td>${escapeHtml(customer.phone)}</td>
                         <td>${escapeHtml(formatCount(customer.merchandiseOrders))}</td>
+                        <td>${customer.lastOrder?.couponCode ? `${escapeHtml(customer.lastOrder.couponCode)}<br><span class="admin-table__muted">${escapeHtml(money(customer.lastOrder.discountAmount))}</span>` : '—'}</td>
                         <td>${escapeHtml(customer.lastOrder?.orderNumber ? `${customer.lastOrder.orderNumber}${customer.lastOrder.createdAt ? ` - ${dateLabel(customer.lastOrder.createdAt)}` : ''}` : customer.lastOrderLabel || 'No orders yet')}</td>
                         <td>${escapeHtml(customer.addressSummary || 'No saved addresses')}</td>
                         <td>${escapeHtml(dateLabel(customer.registrationDate || customer.registeredAt))}</td>
@@ -2369,44 +2606,38 @@
   function renderCoupons() {
     const items = Array.isArray(state.coupons) ? state.coupons : [];
     const query = state.couponsSearch.trim().toLowerCase();
-    const filtered = items.filter((coupon) =>
-      !query ||
-      [
-        coupon.code,
-        coupon.description,
-        coupon.festivalName,
-        coupon.owner,
-        coupon.influencerName,
-        coupon.influencerHandle,
-        coupon.recipientEmail,
-        coupon.recipientName,
-        coupon.appliesTo,
-        coupon.couponType,
-        coupon.ownerType,
-        coupon.discount,
-        coupon.discountValue,
-      ]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(query))
-    );
+    const filtered = items.filter((coupon) => {
+      const matchesSearch = !query || [
+        coupon.code, coupon.description, coupon.festivalName, coupon.owner,
+        coupon.influencerName, coupon.influencerHandle, coupon.recipientEmail,
+        coupon.recipientName, coupon.appliesTo, coupon.couponType, coupon.ownerType,
+        coupon.discount, coupon.discountValue,
+      ].filter(Boolean).some((value) => String(value).toLowerCase().includes(query));
+      return matchesDateFilter(coupon.createdAt, state.couponsDatePeriod, state.couponsDateFrom, state.couponsDateTo) && matchesSearch;
+    });
 
-    const totalCoupons = items.length;
-    const activeCoupons = items.filter((coupon) => Number(coupon.active ?? coupon.isActive ?? 0) === 1).length;
-    const expiredCoupons = items.filter((coupon) => {
+    const statusFiltered = filtered.filter((coupon) => state.couponsStatus === 'all'
+      || (state.couponsStatus === 'active' ? Number(coupon.active ?? coupon.isActive ?? 0) === 1 : Number(coupon.active ?? coupon.isActive ?? 0) !== 1));
+    const typeFiltered = statusFiltered.filter((coupon) => state.couponsType === 'all' || getCouponTypeValue(coupon) === state.couponsType);
+    const filteredCoupons = typeFiltered;
+
+    const totalCoupons = filteredCoupons.length;
+    const activeCoupons = filteredCoupons.filter((coupon) => Number(coupon.active ?? coupon.isActive ?? 0) === 1).length;
+    const expiredCoupons = filteredCoupons.filter((coupon) => {
       const expiry = String(coupon.validTill || coupon.expiresAt || coupon.expiry || '').trim();
       return Boolean(expiry) && new Date(expiry).getTime() < Date.now();
     }).length;
-    const redeemedCoupons = items.reduce((sum, coupon) => sum + Number(coupon.totalRedemptions || coupon.usageCount || 0), 0);
-    const discountGiven = items.reduce((sum, coupon) => {
+    const redeemedCoupons = filteredCoupons.reduce((sum, coupon) => sum + Number(coupon.totalRedemptions || coupon.usageCount || 0), 0);
+    const discountGiven = filteredCoupons.reduce((sum, coupon) => {
       const usage = Number(coupon.totalRedemptions || coupon.usageCount || 0);
       const discountValue = Number(coupon.discountValue || 0);
       return sum + Math.max(0, usage * discountValue);
     }, 0);
-    const activeInfluencerCoupons = items.filter((coupon) => getCouponTypeValue(coupon) === 'influencer' && Number(coupon.active ?? coupon.isActive ?? 0) === 1).length;
+    const activeInfluencerCoupons = filteredCoupons.filter((coupon) => getCouponTypeValue(coupon) === 'influencer' && Number(coupon.active ?? coupon.isActive ?? 0) === 1).length;
 
     const selectedCoupon = state.selectedCouponId == null
       ? null
-      : filtered.find((coupon) => Number(coupon.id) === Number(state.selectedCouponId)) || null;
+      : filteredCoupons.find((coupon) => Number(coupon.id) === Number(state.selectedCouponId)) || null;
     const showCouponDetails = Boolean(selectedCoupon);
 
     const summaryCards = [
@@ -2425,6 +2656,7 @@
             <h2 class="admin-section__title">Coupons</h2>
             <p class="admin-section__desc">Shared coupon infrastructure for Merch and Bookings, surfaced in a merch-first dashboard.</p>
           </div>
+          ${renderDateFilterControls('coupons', state.couponsDatePeriod, state.couponsDateFrom, state.couponsDateTo, items, (coupon) => coupon.createdAt)}
         </div>
         <div class="admin-section__body">
           <div class="admin-card-grid admin-card-grid--3 admin-coupon-stats" style="margin-bottom:16px;">
@@ -2442,7 +2674,19 @@
           <div class="admin-toolbar">
             <div class="admin-toolbar__group" style="flex:1 1 420px;">
               <input class="admin-input" data-input="couponsSearch" value="${escapeHtml(state.couponsSearch)}" placeholder="Search by coupon code, campaign, influencer, or customer email" />
+              <select class="admin-select" data-input="couponsStatus" aria-label="Coupon status">
+                <option value="all" ${state.couponsStatus === 'all' ? 'selected' : ''}>All statuses</option>
+                <option value="active" ${state.couponsStatus === 'active' ? 'selected' : ''}>Active</option>
+                <option value="inactive" ${state.couponsStatus === 'inactive' ? 'selected' : ''}>Inactive</option>
+              </select>
+              <select class="admin-select" data-input="couponsType" aria-label="Coupon type">
+                <option value="all" ${state.couponsType === 'all' ? 'selected' : ''}>All types</option>
+                <option value="general" ${state.couponsType === 'general' ? 'selected' : ''}>General</option>
+                <option value="private" ${state.couponsType === 'private' ? 'selected' : ''}>Private</option>
+                <option value="influencer" ${state.couponsType === 'influencer' ? 'selected' : ''}>Influencer</option>
+              </select>
             </div>
+            <button class="admin-btn admin-btn--ghost" type="button" data-action="export-coupons">Export CSV</button>
             <button class="admin-btn admin-btn--soft" type="button" data-action="open-coupon-modal">Create Coupon</button>
           </div>
 
@@ -2450,12 +2694,12 @@
             <section class="admin-card">
               <div class="admin-card__head">
                 <h3 class="admin-card__title">Coupon List</h3>
-                <p class="admin-card__sub">${filtered.length} coupon(s) matched</p>
+                <p class="admin-card__sub">${filteredCoupons.length} coupon(s) matched</p>
               </div>
               <div class="admin-card__body admin-table-wrap">
                 ${state.couponsLoading ? `
                   <div class="admin-empty">${renderEmptyState('Loading coupons', 'Fetching the shared coupon list from the booking database.')}</div>
-                ` : filtered.length ? `
+                ` : filteredCoupons.length ? `
                   <table class="admin-table">
                     <thead>
                       <tr>
@@ -2471,7 +2715,7 @@
                       </tr>
                     </thead>
                     <tbody>
-                      ${filtered.map((coupon) => {
+                      ${filteredCoupons.map((coupon) => {
                         const typeValue = getCouponTypeValue(coupon);
                         const typeLabel = getCouponTypeLabel(coupon);
                         const ownerLabel =
@@ -2571,6 +2815,26 @@
       if (!month) return { orders: Number(influencer.totalOrders || 0), revenue: Number(influencer.revenue || 0), commission: Number(influencer.commission || 0), couponUsage: Number(influencer.couponUsage || 0) };
       return (influencer.monthlySales || []).find((row) => row.month === month) || { orders: 0, revenue: 0, commission: 0, couponUsage: 0 };
     };
+    const getPeriodStats = (influencer) => {
+      const period = state.influencersDatePeriod;
+      const lifetime = {
+        orders: Number(influencer.totalOrders || 0),
+        revenue: Number(influencer.revenue || 0),
+        commission: Number(influencer.commission || 0),
+        couponUsage: Number(influencer.couponUsage || 0),
+      };
+      if (!period || period === 'all' || (period === 'custom' && (!state.influencersDateFrom || !state.influencersDateTo))) return lifetime;
+      const rows = period === 'custom'
+        ? (influencer.dailySales || []).filter((row) => matchesDateFilter(row.day, period, state.influencersDateFrom, state.influencersDateTo))
+        : (influencer.monthlySales || []).filter((row) => matchesMonthFilter(row.month, period, state.influencersDateFrom, state.influencersDateTo));
+      return rows
+        .reduce((total, row) => ({
+          orders: total.orders + Number(row.orders || 0),
+          revenue: total.revenue + Number(row.revenue || 0),
+          commission: total.commission + Number(row.commission || 0),
+          couponUsage: total.couponUsage + Number(row.couponUsage || 0),
+        }), { orders: 0, revenue: 0, commission: 0, couponUsage: 0 });
+    };
     const getAssignedCouponCount = (influencer) => Array.isArray(influencer?.coupons)
       ? influencer.coupons.length
       : Number(influencer?.assignedCouponCount || influencer?.couponCount || 0);
@@ -2586,9 +2850,9 @@
 
     const visibleInfluencers = filtered;
     const statsSource = filtered;
-    const totalRevenue = statsSource.reduce((sum, influencer) => sum + getMonthStats(influencer).revenue, 0);
-    const totalOrders = statsSource.reduce((sum, influencer) => sum + getMonthStats(influencer).orders, 0);
-    const totalCoupons = statsSource.reduce((sum, influencer) => sum + getMonthStats(influencer).couponUsage, 0);
+    const totalRevenue = statsSource.reduce((sum, influencer) => sum + getPeriodStats(influencer).revenue, 0);
+    const totalOrders = statsSource.reduce((sum, influencer) => sum + getPeriodStats(influencer).orders, 0);
+    const totalCoupons = statsSource.reduce((sum, influencer) => sum + getPeriodStats(influencer).couponUsage, 0);
 
     els.influencersView.innerHTML = `
       <section class="admin-section">
@@ -2597,6 +2861,7 @@
             <h2 class="admin-section__title">Influencer Management</h2>
             <p class="admin-section__desc">Add, edit, deactivate, and assign coupons to campaign partners from one workspace.</p>
           </div>
+          ${renderDateFilterControls('influencers', state.influencersDatePeriod, state.influencersDateFrom, state.influencersDateTo, state.influencers.flatMap((influencer) => influencer.monthlySales || []), (row) => row.month)}
         </div>
         <div class="admin-section__body">
           <div class="admin-grid admin-grid--stats">
@@ -2682,7 +2947,7 @@
                     </div>
                     <div class="admin-list__item">
                       <p class="admin-list__item-title">Assigned Coupons</p>
-                      <div class="admin-chip-row">${renderCouponChips(influencer.coupons)}</div>
+                      ${renderAssignedCouponDetails(influencer)}
                     </div>
                   </div>
                   <div class="admin-grid admin-grid--stats" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-top:14px;">
@@ -2743,7 +3008,6 @@
               <div class="admin-card__body">
                 ${selectedInfluencer ? `
                   <div class="admin-list">
-                    ${month ? `<div class="admin-list__item"><p class="admin-list__item-title">${escapeHtml(reportMonthLabel(month))} Sales</p><p class="admin-list__item-sub">${formatCount(getMonthStats(selectedInfluencer).orders)} orders · ${money(getMonthStats(selectedInfluencer).revenue)} revenue · ${money(getMonthStats(selectedInfluencer).commission)} commission</p></div>` : ''}
                     <div class="admin-list__item">
                       <div class="admin-list__item-head">
                         <div>
@@ -2771,7 +3035,7 @@
                     </div>
                     <div class="admin-list__item">
                       <p class="admin-list__item-title">Assigned Coupons</p>
-                      <div class="admin-chip-row">${renderCouponChips(selectedInfluencer.coupons)}</div>
+                      ${renderAssignedCouponDetails(selectedInfluencer)}
                     </div>
                     <div class="admin-list__item">
                       <p class="admin-list__item-title">Total Orders</p>
@@ -2859,13 +3123,12 @@
     }
 
     const reportTiles = [
-      { title: 'Sales Report', meta: 'Orders, revenue, averages, and top sellers', target: 'sales-report' },
+      { title: 'Revenue Report', meta: 'Payment capture and return impact', target: 'revenue-report' },
       { title: 'Orders Report', meta: 'Fulfillment stages and channel breakdown', target: 'orders-report' },
-      { title: 'Products Report', meta: 'Stock health and performance by SKU', target: 'products-report' },
-      { title: 'Customers Report', meta: 'LTV, repeat rate, and cohorts', target: 'customers-report' },
+      { title: 'Products Report', meta: 'Product-wise units, orders, and sales revenue', target: 'products-report' },
       { title: 'Coupons Report', meta: 'Usage, expiry, and owner split', target: 'coupons-report' },
       { title: 'Influencer Report', meta: 'Campaign performance and revenue contribution', target: 'influencer-report' },
-      { title: 'Revenue Report', meta: 'Payment capture and return impact', target: 'revenue-report' },
+      { title: 'Monthly Influencer Report', meta: 'Month-wise sales and commission by influencer', target: 'monthly-influencer-report' },
     ];
     const summary = state.reports?.summary || {};
     const influencerReports = Array.isArray(state.reports?.influencerReports) ? state.reports.influencerReports : [];
@@ -2886,7 +3149,9 @@
       total: reportOrderTotal,
       segments: reportSegments,
     };
-    const lowStockProducts = getLowStockProducts();
+    const productSalesRows = Array.isArray(state.reports?.productSales)
+      ? state.reports.productSales
+      : (Array.isArray(state.reports?.topProducts) ? state.reports.topProducts : []);
     const couponReportRows = [...(Array.isArray(state.coupons) ? state.coupons : [])]
       .sort((left, right) => Number(right.totalRedemptions || right.usageCount || 0) - Number(left.totalRedemptions || left.usageCount || 0))
       .slice(0, 5);
@@ -2959,34 +3224,36 @@
 
           <section class="admin-card" id="products-report" style="margin-top:18px;">
             <div class="admin-card__head">
-              <h3 class="admin-card__title">Low Stock Report</h3>
-              <p class="admin-card__sub">Products at or below ${LOW_STOCK_THRESHOLD} units remaining</p>
+              <h3 class="admin-card__title">Product Sales Report</h3>
+              <p class="admin-card__sub">Product-wise sales for the selected date range</p>
             </div>
             <div class="admin-card__body admin-table-wrap">
-              ${lowStockProducts.length ? `
+              ${productSalesRows.length ? `
                 <table class="admin-table">
                   <thead>
                     <tr>
                       <th>Product</th>
                       <th>SKU</th>
                       <th>Category</th>
-                      <th>Stock</th>
-                      <th>Status</th>
+                      <th>Units Sold</th>
+                      <th>Orders</th>
+                      <th>Sales Revenue</th>
                     </tr>
                   </thead>
                   <tbody>
-                    ${lowStockProducts.map((product) => `
+                    ${productSalesRows.map((product) => `
                       <tr>
                         <td><strong>${escapeHtml(product.name)}</strong><br><span class="admin-table__muted">${escapeHtml(product.description || '')}</span></td>
                         <td>${escapeHtml(product.sku || '—')}</td>
                         <td>${escapeHtml(product.category || '—')}</td>
-                        <td><strong>${formatCount(product.stock)}</strong></td>
-                        <td><span class="admin-badge admin-badge--inactive">${escapeHtml(getLowStockLabel(product))}</span></td>
+                        <td><strong>${formatCount(product.quantity || 0)}</strong></td>
+                        <td>${formatCount(product.orders || 0)}</td>
+                        <td><strong>${money(product.revenue || 0)}</strong></td>
                       </tr>
                     `).join('')}
                   </tbody>
                 </table>
-              ` : renderEmptyState('No low stock items', `All products are above ${LOW_STOCK_THRESHOLD} units.`)}
+              ` : renderEmptyState('No product sales yet', 'Product-wise sales will appear here when orders are recorded in the selected date range.')}
             </div>
           </section>
 
@@ -3058,7 +3325,7 @@
             </div>
           </section>
 
-          <section class="admin-card" id="customers-report" style="margin-top:18px;">
+          <section class="admin-card" id="monthly-influencer-report" style="margin-top:18px;">
             <div class="admin-card__head">
               <h3 class="admin-card__title">Monthly Influencer Breakdown</h3>
               <p class="admin-card__sub">Month-wise sales and commission by influencer</p>
@@ -3278,8 +3545,8 @@
             <label class="admin-field admin-field--wide"><span>Combo Image URL</span><input class="admin-input" name="image" value="${escapeHtml(entity?.image || '')}" placeholder="Optional image URL" /></label>
             <label class="admin-field admin-field--wide"><span>Combo Details</span><textarea class="admin-textarea" name="description" required>${escapeHtml(entity?.description || '')}</textarea></label>
             <label class="admin-field"><span>Status</span><select class="admin-select" name="status"><option value="published" ${entity?.status !== 'archived' ? 'selected' : ''}>Published</option><option value="archived" ${entity?.status === 'archived' ? 'selected' : ''}>Archived</option></select></label>
-            <div class="admin-field admin-field--wide"><span>Included products and variants</span><div class="admin-combo-items">
-              ${selectedItems.map((item) => { const fallback = getProductFallbackImage(item); const image = normalizeAdminImageUrl(item.imageUrl, fallback); return `<label class="admin-combo-item"><input type="hidden" name="componentVariantId" value="${escapeHtml(item.variantId)}" /><img src="${escapeHtml(image)}" alt="" onerror="this.onerror=null;this.src='${escapeHtml(fallback)}';" /><span><strong>${escapeHtml(item.productName || item.name)}</strong><small>${escapeHtml([item.size, item.color].filter(Boolean).join(' / ') || item.sku || 'Default variant')}</small></span></label>`; }).join('')}
+            <div class="admin-field admin-field--wide"><span>Included products and variants (edit component stock)</span><div class="admin-combo-items">
+              ${selectedItems.map((item) => { const fallback = getProductFallbackImage(item); const image = normalizeAdminImageUrl(item.imageUrl, fallback); return `<label class="admin-combo-item"><input type="hidden" name="componentVariantId" value="${escapeHtml(item.variantId)}" /><img src="${escapeHtml(image)}" alt="" onerror="this.onerror=null;this.src='${escapeHtml(fallback)}';" /><span><strong>${escapeHtml(item.productName || item.name)}</strong><small>${escapeHtml([item.size, item.color].filter(Boolean).join(' / ') || item.sku || 'Default variant')}</small></span><input class="admin-input" name="componentStock" type="number" min="0" value="${escapeHtml(item.stock ?? 0)}" aria-label="Stock for ${escapeHtml(item.productName || item.name)}" /></label>`; }).join('')}
             </div></div>
           </div>
         </form>
@@ -3402,8 +3669,9 @@
           <label class="admin-field"><span>Email</span><input class="admin-input" name="email" value="${escapeHtml(entity?.email || '')}" /></label>
           <label class="admin-field"><span>Phone</span><input class="admin-input" name="phone" value="${escapeHtml(entity?.phone || '')}" /></label>
           <label class="admin-field"><span>Commission per Order (rupees)</span><input class="admin-input" name="commissionPerOrder" type="number" min="0" step="1" value="${escapeHtml(Number(entity?.commissionPerOrderPaise || 0) / 100)}" /></label>
-          <label class="admin-field"><span>Commission Paid (rupees)</span><input class="admin-input" name="paidCommission" type="number" min="0" step="1" value="${escapeHtml(Math.round(Number(entity?.paidCommission || 0) / 100))}" /></label>
-          <label class="admin-field admin-field--wide"><span>Assigned Coupons</span><input class="admin-input" value="${escapeHtml((entity?.coupons || []).join(', '))}" readonly /></label>
+          <label class="admin-field"><span>Discount Applied (rupees)</span><input class="admin-input" value="${escapeHtml(Math.round(getInfluencerDiscountApplied(entity)))}" readonly /><small class="admin-field__hint">Total discount used by customers through assigned coupons.</small></label>
+          <label class="admin-field"><span>Assigned Coupon Worth (rupees)</span><input class="admin-input" value="${escapeHtml(Math.round(getInfluencerCouponWorth(entity)))}" readonly /><small class="admin-field__hint">Configured discount amount across assigned flat-value coupons.</small></label>
+          <div class="admin-field admin-field--wide"><span>Assigned Coupons</span>${renderAssignedCouponDetails(entity)}<div class="admin-chip-row" style="margin-top:10px;">${entity ? `<button class="admin-btn admin-btn--soft" type="button" data-action="assign-coupon" data-id="${escapeHtml(entity.id)}">Edit assignments</button>` : ''}</div><small class="admin-field__hint">Discount value is the offer attached to each coupon; Discount Applied updates after redemptions.</small></div>
           <label class="admin-field admin-field--wide"><span>Notes</span><textarea class="admin-textarea" name="notes">${escapeHtml(entity?.notes || '')}</textarea></label>
           <label class="admin-check"><input type="checkbox" name="active" ${entity?.active !== false ? 'checked' : ''} /><span>Active influencer</span></label>
         `,
@@ -3711,6 +3979,9 @@
       lowStockThreshold: Number(existing?.lowStockThreshold || 10),
       comboPurchase: fd.get('comboPurchase') === 'on',
       archived: fd.get('archived') === 'on' || String(fd.get('status')) === 'archived',
+      productId: existing?.productId || existing?.parentProductId || existing?.id,
+      parentProductId: existing?.parentProductId || existing?.productId || existing?.id,
+      variantId: existing?.variantId || existing?.id,
       image: String(fd.get('image') || '').trim() || '/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=120',
       description: String(fd.get('description') || '').trim(),
       specifications: parseProductSpecifications(fd.get('specifications')),
@@ -3795,7 +4066,7 @@
       phone: String(fd.get('phone') || '').trim(),
       notes: String(fd.get('notes') || '').trim(),
       commissionPerOrderPaise: Math.max(0, Math.round(Number(fd.get('commissionPerOrder') || 0) * 100)),
-      paidCommission: Math.max(0, Math.round(Number(fd.get('paidCommission') || existing?.paidCommission || 0) * 100)),
+      paidCommission: Math.max(0, Math.round(Number(existing?.paidCommission || 0))),
       coupons: existing?.coupons || [],
       totalOrders: Number(existing?.totalOrders || 0),
       revenue: Number(existing?.revenue || 0),
@@ -3954,7 +4225,6 @@
         state.selectedInfluencerId = state.influencers[0].id;
       }
     } catch (error) {
-      state.influencers = [];
       toast('Influencers unavailable', error.message || 'Unable to load influencer data from the admin API.', 'warning');
     } finally {
       state.influencersLoading = false;
@@ -4247,6 +4517,26 @@
         state.orderStatusAppliedTo = '';
         renderDashboard();
         return;
+      case 'apply-revenue-range': {
+        const from = String(state.revenueFrom || '').trim();
+        const to = String(state.revenueTo || '').trim();
+        if (!from || !to || from > to) {
+          toast('Invalid date range', 'Choose a valid From and To date before applying the filter.', 'warning');
+          return;
+        }
+        state.revenueAppliedFrom = from;
+        state.revenueAppliedTo = to;
+        renderDashboard();
+        return;
+      }
+      case 'clear-revenue-range':
+        state.revenueFrom = daysAgo(29);
+        state.revenueTo = toISODate(today);
+        state.revenueAppliedFrom = '';
+        state.revenueAppliedTo = '';
+        state.revenuePeriod = `month-${pad(today.getMonth() + 1)}`;
+        renderDashboard();
+        return;
       case 'open-profile':
         renderProfileModal();
         return;
@@ -4524,25 +4814,6 @@
         state.ordersPage = 1;
         renderOrders();
         return;
-      case 'update-product-stock':
-        if (product && target instanceof HTMLInputElement) {
-          const stock = Math.max(0, Number(target.value || 0));
-          product.stock = Number.isFinite(stock) ? stock : 0;
-          target.value = String(product.stock);
-          try {
-            await apiRequest(`/api/merch/admin/products/${encodeURIComponent(Number(product.parentProductId || product.productId || product.id))}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ variantId: Number(product.variantId || product.id), stock: product.stock }),
-            });
-            toast('Stock updated', `${product.name} now has ${product.stock} unit${product.stock === 1 ? '' : 's'} in stock.`, 'success');
-          } catch (error) {
-            toast('Stock update failed', error.message || 'Unable to save the stock count.', 'warning');
-            await loadProductData();
-          }
-          renderProducts();
-        }
-        return;
       case 'update-order-status':
         if (order && target instanceof HTMLSelectElement) {
           const nextStatus = normalizeOrderStatus(target.value);
@@ -4656,6 +4927,9 @@
       case 'export-customer':
         if (customer) toast('Export ready', `${customer.name}'s profile export is prepared as mock data.`, 'success');
         return;
+      case 'export-coupons':
+        exportCouponsCsv();
+        return;
       case 'select-coupon':
         if (coupon) {
           state.selectedCouponId = Number(state.selectedCouponId) === Number(coupon.id) ? null : coupon.id;
@@ -4730,6 +5004,9 @@
       case 'edit-influencer':
         renderEntityFormModal('influencer', influencer);
         return;
+      case 'view-influencer-report':
+        await viewInfluencerReport(influencer);
+        return;
       case 'toggle-influencer':
         if (influencer) {
           if (influencer.active) {
@@ -4785,13 +5062,12 @@
       case 'open-report-section': {
         const targetId = String(target.dataset.target || '').trim();
         const sectionIdMap = {
-          'sales-report': 'revenue-report',
           'revenue-report': 'revenue-report',
           'orders-report': 'orders-report',
           'products-report': 'products-report',
-          'customers-report': 'customers-report',
           'coupons-report': 'coupons-report',
           'influencer-report': 'influencer-report',
+          'monthly-influencer-report': 'monthly-influencer-report',
         };
         const resolvedId = sectionIdMap[targetId] || targetId;
         const section = document.getElementById(resolvedId);
@@ -4842,11 +5118,19 @@
     if (inputKey === 'customersDateFrom' || inputKey === 'customersDateTo') {
       return;
     }
-    if (inputKey === 'couponsSearch') {
+    if (inputKey === 'couponsSearch' || inputKey === 'couponsStatus' || inputKey === 'couponsType') {
+      renderCoupons();
+      return;
+    }
+    if (inputKey === 'couponsDatePeriod' || inputKey === 'couponsDateFrom' || inputKey === 'couponsDateTo') {
       renderCoupons();
       return;
     }
     if (inputKey === 'influencersSearch' || inputKey === 'influencerDetailsFilter') {
+      renderInfluencers();
+      return;
+    }
+    if (inputKey === 'influencersDatePeriod' || inputKey === 'influencersDateFrom' || inputKey === 'influencersDateTo') {
       renderInfluencers();
       return;
     }
@@ -4875,6 +5159,7 @@
     if (type === 'combo') {
       const fd = new FormData(form);
       const componentVariantIds = fd.getAll('componentVariantId').map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0);
+      const componentStocks = fd.getAll('componentStock').map((value) => Math.max(0, Math.floor(Number(value || 0))));
       const payload = {
         name: String(fd.get('name') || '').trim(),
         price: Number(fd.get('price') || 0),
@@ -4882,6 +5167,7 @@
         description: String(fd.get('description') || '').trim(),
         status: String(fd.get('status') || 'published'),
         componentVariantIds,
+        componentStocks: componentVariantIds.map((variantId, index) => ({ variantId, stock: componentStocks[index] ?? 0 })),
       };
       if (!payload.name || !Number.isFinite(payload.price) || payload.price <= 0 || componentVariantIds.length < 2) {
         toast('Combo details incomplete', 'Add a name, price, and at least two product variants.', 'warning');

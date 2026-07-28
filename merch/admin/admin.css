@@ -382,6 +382,20 @@ a {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
+.admin-date-filter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: min(100%, 260px);
+}
+
+.admin-date-filter .admin-select,
+.admin-date-filter .admin-input {
+  min-width: 142px;
+}
+
 .admin-grid--stats.admin-product-kpis {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -846,6 +860,53 @@ a {
   min-height: 100%;
 }
 
+.admin-assigned-coupon-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.admin-assigned-coupon {
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: var(--admin-radius-sm);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.admin-assigned-coupon__head,
+.admin-assigned-coupon__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.admin-assigned-coupon__head strong {
+  overflow-wrap: anywhere;
+}
+
+.admin-assigned-coupon__meta {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin-top: 7px;
+  color: var(--admin-muted);
+  font-size: 12px;
+}
+
+.admin-assigned-coupon__meta span {
+  padding-right: 10px;
+  border-right: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.admin-assigned-coupon__meta span:last-child {
+  padding-right: 0;
+  border-right: 0;
+}
+
+.admin-assigned-coupon__meta strong {
+  color: var(--admin-text);
+}
+
 .admin-mini-chart {
   display: grid;
   gap: 10px;
@@ -1244,6 +1305,29 @@ a {
   box-shadow: inset 0 0 0 18px rgba(255, 255, 255, 0.9);
   justify-self: center;
   margin-inline: auto;
+}
+
+.admin-revenue-card {
+  grid-column: auto;
+}
+
+.admin-revenue-range {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  padding: 0 18px 16px;
+}
+
+.admin-revenue-range label {
+  display: grid;
+  gap: 3px;
+  min-width: 140px;
+  color: var(--admin-muted);
+  font-size: 11px;
+}
+
+.admin-revenue-range .admin-input {
+  width: 100%;
 }
 
 .admin-chart-ring--empty {
@@ -1777,6 +1861,24 @@ a {
     width: 100%;
   }
 
+  .admin-date-filter {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .admin-revenue-card {
+    grid-column: auto;
+  }
+
+  .admin-revenue-range {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .admin-revenue-range label {
+    flex: 1 1 140px;
+  }
+
   .admin-status-filter {
     flex-basis: auto;
     width: 100%;
@@ -1816,3 +1918,4 @@ a {
 .admin-combo-item img { width: 42px; height: 42px; object-fit: cover; border-radius: 7px; background: #f5f1ed; }
 .admin-combo-item span { display: grid; gap: 2px; }
 .admin-combo-item small { color: var(--admin-muted); }
+.admin-combo-item .admin-input { width: 110px; margin-left: auto; }
