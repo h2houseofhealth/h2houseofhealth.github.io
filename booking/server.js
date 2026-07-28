@@ -174,6 +174,30 @@ async function sendMailgunEmail({ to, from, subject, text, html }) {
     html,
   });
 }
+
+async function sendConfiguredEmail({ to, from, subject, text, html }) {
+  const normalizedTo = String(to || '').trim().toLowerCase();
+  const normalizedFrom = String(from || '').trim();
+  if (!normalizedTo) {
+    throw new Error('Recipient email is required');
+  }
+  if (!normalizedFrom) {
+    throw new Error('Sender email is required');
+  }
+
+  if (mg) {
+    await sendMailgunEmail({ to: normalizedTo, from: normalizedFrom, subject, text, html });
+    return { delivery: 'mailgun' };
+  }
+
+  const transporter = getTransporter();
+  if (transporter) {
+    await transporter.sendMail({ from: normalizedFrom, to: normalizedTo, subject, text, html });
+    return { delivery: 'smtp' };
+  }
+
+  throw new Error('Email service is not configured');
+}
 const SERVICE_CATALOG = [
   {
     category: 'EXPERIENCE SESSION',
@@ -784,6 +808,13 @@ mountMerchApi(app, {
   RAZORPAY_KEY_SECRET,
   JWT_SECRET,
   jwt,
+  sendMerchEmail: ({ to, subject, text, html }) => sendConfiguredEmail({
+    to,
+    from: MAIL_FROM,
+    subject,
+    text,
+    html,
+  }),
   couponHelpers: {
     normalizeCouponCode,
     validateCouponForUser,
@@ -832,6 +863,7 @@ app.get('/auth/google/callback', ensureGoogleOAuthConfigured, (req, res, next) =
       }
 
       const token = setAuthCookie(req, res, user);
+      app.locals.merchGuestOrderSync?.(user);
       return res.redirect(`/booking/#auth_token=${encodeURIComponent(token)}`);
     });
   })(req, res, next);
@@ -1034,6 +1066,7 @@ app.post('/api/auth/register/complete', (req, res) => {
     membershipPeopleCount: null,
     membershipSubscriptionId: null,
   };
+  app.locals.merchGuestOrderSync?.(user);
   transferGuestBookingsToUserByEmail(email, user.id);
   const token = setAuthCookie(req, res, user);
   return res.status(201).json({ user, token });
@@ -1099,6 +1132,7 @@ app.post('/api/auth/login', (req, res) => {
     } catch {
       syncedUser = null;
     }
+    app.locals.merchGuestOrderSync?.(syncedUser || user);
     transferGuestBookingsToUserByEmail(normalizedEmail, Number(user.id));
 
     const authSource = syncedUser || user;
@@ -2338,6 +2372,7 @@ app.get('/api/membership-orders/:orderId/invoice-link', requireAuth, (req, res) 
 });
 
 app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
+  app.locals.merchGuestOrderSync?.(req.user);
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId) || orderId <= 0) {
     return res.status(400).json({ message: 'order id is required' });
@@ -2358,6 +2393,7 @@ app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
     return res.status(404).json({ message: 'merch order not found' });
   }
 
+  const isAdmin = String(req.user?.role || '').trim().toLowerCase() === 'admin';
   let invoiceUserId = Number(order.customerUserId || 0) || 0;
   let ownsOrder = invoiceUserId === Number(req.user.id);
   if (!ownsOrder && Number(order.customerId || 0) > 0) {
@@ -2370,17 +2406,22 @@ app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
     }
   }
 
-  if (req.user.role !== 'admin' && !ownsOrder) {
+  if (!isAdmin && !ownsOrder) {
     return res.status(403).json({ message: 'forbidden' });
   }
   if (!Number.isInteger(invoiceUserId) || invoiceUserId <= 0) {
-    return res.status(409).json({ message: 'invoice is available only for linked customer accounts' });
+    if (isAdmin) {
+      invoiceUserId = Number(req.user.id);
+    } else {
+      return res.status(409).json({ message: 'invoice is available only for linked customer accounts' });
+    }
   }
 
   const token = createInvoiceAccessToken({
     scope: 'merch_invoice',
     orderId: order.id,
     userId: invoiceUserId,
+    isAdmin,
   });
 
   const invoiceUrl = `${getRequestOrigin(req)}/invoice/merch?token=${encodeURIComponent(token)}`;
@@ -2388,6 +2429,117 @@ app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
     invoiceUrl,
     invoiceDownloadUrl: `${invoiceUrl}&format=pdf&download=1`,
   });
+});
+
+app.post('/api/merch/orders/:id/invoice-email', requireAuth, async (req, res) => {
+  app.locals.merchGuestOrderSync?.(req.user);
+  const orderId = Number(req.params.id);
+  if (!Number.isInteger(orderId) || orderId <= 0) {
+    return res.status(400).json({ message: 'order id is required' });
+  }
+
+  const order = db
+    .prepare(
+      `SELECT id,
+              order_number AS orderNumber,
+              customer_name AS customerName,
+              customer_email AS customerEmail,
+              customer_user_id AS customerUserId,
+              customer_id AS customerId,
+              payment_status AS paymentStatus
+       FROM merch_orders
+       WHERE id = ?`
+    )
+    .get(orderId);
+  if (!order) {
+    return res.status(404).json({ message: 'merch order not found' });
+  }
+
+  const isAdmin = String(req.user?.role || '').trim().toLowerCase() === 'admin';
+  let invoiceUserId = Number(order.customerUserId || 0) || 0;
+  let ownsOrder = invoiceUserId === Number(req.user.id);
+  let recipientEmail = '';
+  if (!ownsOrder && Number(order.customerId || 0) > 0) {
+    const profile = db
+      .prepare('SELECT id, user_id AS userId, email FROM merch_customer_profiles WHERE id = ?')
+      .get(Number(order.customerId));
+    if (profile) {
+      invoiceUserId = Number(profile.userId || invoiceUserId || 0);
+      ownsOrder = Number(profile.userId || 0) === Number(req.user.id);
+      recipientEmail = String(profile.email || '').trim().toLowerCase();
+    }
+  }
+  if (!recipientEmail && Number(req.user?.id || 0) === Number(invoiceUserId || 0) && !isAdmin) {
+    recipientEmail = String(req.user?.email || '').trim().toLowerCase();
+  }
+  if (!recipientEmail) {
+    recipientEmail = String(order.customerEmail || '').trim().toLowerCase();
+  }
+  if (isAdmin && String(req.body?.recipientEmail || '').trim()) {
+    recipientEmail = String(req.body.recipientEmail || '').trim().toLowerCase();
+  }
+
+  if (!isAdmin && !ownsOrder) {
+    return res.status(403).json({ message: 'forbidden' });
+  }
+  if (!recipientEmail || !isValidEmail(recipientEmail)) {
+    return res.status(400).json({ message: 'A valid recipient email is required' });
+  }
+
+  if (!Number.isInteger(invoiceUserId) || invoiceUserId <= 0) {
+    invoiceUserId = Number(req.user.id);
+  }
+
+  const token = createInvoiceAccessToken({
+    scope: 'merch_invoice',
+    orderId: order.id,
+    userId: invoiceUserId,
+    isAdmin,
+  });
+  const invoiceUrl = `${getRequestOrigin(req)}/invoice/merch?token=${encodeURIComponent(token)}`;
+  const invoiceDownloadUrl = `${invoiceUrl}&format=pdf&download=1`;
+  const subject = `${order.orderNumber || `Order #${order.id}`} invoice from H2 House of Health`;
+  const greeting = order.customerName ? `Hi ${order.customerName},` : 'Hi,';
+  const text =
+    `${greeting}\n\n` +
+    `Your invoice for ${order.orderNumber || `Order #${order.id}`} is ready.\n\n` +
+    `View invoice: ${invoiceUrl}\n` +
+    `Download PDF: ${invoiceDownloadUrl}\n\n` +
+    `If you need anything else, please reply to this email.`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #1f2937;">
+      <p style="margin: 0 0 12px;">${escapeHtml(greeting)}</p>
+      <p style="margin: 0 0 12px;">Your invoice for <strong>${escapeHtml(order.orderNumber || `Order #${order.id}`)}</strong> is ready.</p>
+      <p style="margin: 0 0 12px;">You can open the secure invoice page or download the PDF directly.</p>
+      <p style="margin: 0 0 8px;">
+        <a href="${escapeHtml(invoiceUrl)}" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#111827;color:#fff;text-decoration:none;font-weight:600;">View Invoice</a>
+      </p>
+      <p style="margin: 0 0 12px;">
+        <a href="${escapeHtml(invoiceDownloadUrl)}" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#9f3e1f;color:#fff;text-decoration:none;font-weight:600;">Download PDF</a>
+      </p>
+      <p style="margin: 0; color: #6b7280;">If you need anything else, please reply to this email.</p>
+    </div>
+  `;
+
+  try {
+    await sendConfiguredEmail({
+      to: recipientEmail,
+      from: MAIL_FROM,
+      subject,
+      text,
+      html,
+    });
+    return res.json({
+      success: true,
+      message: 'Invoice email sent',
+      recipientEmail,
+      invoiceUrl,
+      invoiceDownloadUrl,
+    });
+  } catch (error) {
+    console.error('Failed to send merch invoice email:', error);
+    return res.status(500).json({ message: error.message || 'Unable to send invoice email' });
+  }
 });
 
 app.get('/api/admin/discount-phones', requireAuth, requireAdmin, (_req, res) => {
@@ -2463,6 +2615,7 @@ app.get('/api/admin/coupons', requireAuth, requireAdmin, (req, res) => {
               c.description,
               c.discount_type AS discountType,
               c.discount_value AS discountValue,
+              c.commission_per_order_paise AS commissionPerOrderPaise,
               c.applies_to AS appliesTo,
               c.max_redemptions AS maxRedemptions,
               c.per_user_limit AS perUserLimit,
@@ -2504,6 +2657,22 @@ app.get('/api/admin/coupons', requireAuth, requireAdmin, (req, res) => {
   res.json({ coupons });
 });
 
+app.get('/api/admin/coupons/generate-code', requireAuth, requireAdmin, (req, res) => {
+  const prefix = String(req.query?.prefix || 'H2')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '')
+    .slice(0, 10) || 'H2';
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    Pragma: 'no-cache',
+    Expires: '0',
+    'Surrogate-Control': 'no-store',
+  });
+  const code = generateUniqueCouponCode(prefix);
+  res.status(200).json({ code });
+});
+
 app.patch('/api/admin/coupons/:id/active', requireAuth, requireAdmin, (req, res) => {
   const couponId = Number(req.params.id);
   if (!Number.isInteger(couponId)) {
@@ -2537,6 +2706,7 @@ app.get('/api/coupons/general', requireAuth, (req, res) => {
                 description,
                 discount_type AS discountType,
                 discount_value AS discountValue,
+                commission_per_order_paise AS commissionPerOrderPaise,
                 applies_to AS appliesTo,
                 max_redemptions AS maxRedemptions,
                 per_user_limit AS perUserLimit,
@@ -2552,7 +2722,7 @@ app.get('/api/coupons/general', requireAuth, (req, res) => {
                 created_at AS createdAt
          FROM coupons
          WHERE portal = 'booking'
-         WHERE active = 1
+           AND active = 1
            AND COALESCE(is_active, 1) = 1
            AND COALESCE(coupon_type, 'public') = 'public'
            AND (valid_from IS NULL OR datetime(valid_from) <= datetime('now'))
@@ -2642,14 +2812,26 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   const festivalName = String(req.body?.festivalName || '').trim();
   const discountType = 'flat';
   const discountValue = Number(req.body?.discountValue || 0);
+  const commissionPerOrderPaise = Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
   const appliesToRaw = String(req.body?.appliesTo || 'all').trim().toLowerCase();
-  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) ? appliesToRaw : 'all';
+  const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
+  const productIds = productAppliesTo
+    ? [...new Set(productAppliesTo[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
+    : [];
+  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || '').trim().toLowerCase();
   const influencerId = Number(req.body?.influencerId || req.body?.influencer_id || 0);
   const sendEmail = req.body?.sendEmail !== false;
-  const portal = String(req.body?.portal || 'booking')
+  const portalRaw = String(req.body?.portal || 'booking')
     .trim()
     .toLowerCase();
+  const portal = ['booking', 'merch'].includes(portalRaw) ? portalRaw : 'booking';
+  if (portal === 'merch' && productAppliesTo) {
+    for (const productId of productIds) {
+      const product = db.prepare('SELECT id FROM merch_products WHERE id = ?').get(productId);
+      if (!product) return res.status(400).json({ message: 'Product not found.' });
+    }
+  }
   let couponType = String(req.body?.couponType || '').trim().toLowerCase();
   if (!['public', 'private'].includes(couponType)) {
     couponType = recipientEmail ? 'private' : 'public';
@@ -2658,11 +2840,18 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   const maxRedemptionsRaw = req.body?.maxRedemptions;
   let maxRedemptions =
     maxRedemptionsRaw === '' || maxRedemptionsRaw == null ? null : Number(maxRedemptionsRaw);
+  const perUserLimitRaw = req.body?.perUserLimit ?? req.body?.sessionLimit;
+  const perUserLimit = perUserLimitRaw === '' || perUserLimitRaw == null ? 1 : Number(perUserLimitRaw);
+  const active = req.body?.active == null ? 1 : Number(req.body?.active) === 1 ? 1 : 0;
   const validFrom = String(req.body?.validFrom || '').trim();
   const validTill = String(req.body?.validTill || req.body?.expiresAt || '').trim();
 
   if (!code) {
     code = generateUniqueCouponCode();
+  }
+  const existingCouponWithCode = getCouponByCode(code);
+  if (existingCouponWithCode && String(existingCouponWithCode.portal || 'booking').trim().toLowerCase() !== portal) {
+    return res.status(409).json({ message: 'Coupon code already exists in another portal.' });
   }
   if (!Number.isFinite(discountValue) || discountValue <= 0) {
     return res.status(400).json({ message: 'discountValue must be greater than 0.' });
@@ -2687,6 +2876,9 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   }
   if (maxRedemptions != null && (!Number.isInteger(maxRedemptions) || maxRedemptions <= 0)) {
     return res.status(400).json({ message: 'maxRedemptions must be a positive integer.' });
+  }
+  if (!Number.isInteger(perUserLimit) || perUserLimit <= 0) {
+    return res.status(400).json({ message: 'perUserLimit must be a positive integer.' });
   }
   if (validFrom) {
     const parsedStart = new Date(validFrom);
@@ -2724,14 +2916,15 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
 
   db.prepare(
     `INSERT INTO coupons (
-      code, description, discount_type, discount_value, applies_to, max_redemptions, per_user_limit, expires_at, active,
+      code, description, discount_type, discount_value, commission_per_order_paise, applies_to, max_redemptions, per_user_limit, expires_at, active,
       coupon_type, assigned_user_email, used_by, is_active, valid_from, valid_till,
       recipient_email, recipient_name, festival_name, emailed_at, email_status, email_error, portal, influencer_id, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, 1, ?, ?, '[]', 1, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(code) DO UPDATE SET
       description = excluded.description,
       discount_type = excluded.discount_type,
       discount_value = excluded.discount_value,
+      commission_per_order_paise = excluded.commission_per_order_paise,
       applies_to = excluded.applies_to,
       max_redemptions = excluded.max_redemptions,
       per_user_limit = excluded.per_user_limit,
@@ -2747,17 +2940,21 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
       email_status = excluded.email_status,
       email_error = excluded.email_error,
       influencer_id = excluded.influencer_id,
-      active = 1`
+      active = excluded.active`
   ).run(
     code,
     description,
     discountType,
     discountValue,
+    commissionPerOrderPaise,
     appliesTo,
     maxRedemptions,
+    perUserLimit,
     validTill || null,
+    active,
     couponType,
     assignedUserEmail || null,
+    active,
     validFrom || null,
     validTill || null,
     assignedUserEmail || null,
@@ -2822,8 +3019,13 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   const festivalName = String(req.body?.festivalName || existing.festivalName || '').trim();
   const discountType = String(req.body?.discountType || existing.discountType || 'flat').trim().toLowerCase() || 'flat';
   const discountValue = Number(req.body?.discountValue ?? existing.discountValue ?? 0);
+  const commissionPerOrderPaise = Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? existing.commissionPerOrderPaise ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
   const appliesToRaw = String(req.body?.appliesTo || existing.appliesTo || 'all').trim().toLowerCase();
-  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) ? appliesToRaw : 'all';
+  const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
+  const productIds = productAppliesTo
+    ? [...new Set(productAppliesTo[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
+    : [];
+  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || existing.recipientEmail || '').trim().toLowerCase();
   const recipientName = String(req.body?.recipientName || existing.recipientName || '').trim();
   const influencerIdRaw = Object.prototype.hasOwnProperty.call(req.body || {}, 'influencerId')
@@ -2832,21 +3034,44 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
       ? req.body.influencer_id
       : existing.influencerId;
   const influencerId = Number(influencerIdRaw || 0);
-  const portal = String(req.body?.portal || existing.portal || 'booking')
+  const portalRaw = String(req.body?.portal || existing.portal || 'booking')
     .trim()
     .toLowerCase();
+  const portal = ['booking', 'merch'].includes(portalRaw) ? portalRaw : 'booking';
+  if (portal === 'merch' && productAppliesTo) {
+    for (const productId of productIds) {
+      if (!db.prepare('SELECT id FROM merch_products WHERE id = ?').get(productId)) {
+        return res.status(400).json({ message: 'Product not found.' });
+      }
+    }
+  }
   let couponType = String(req.body?.couponType || existing.couponType || '').trim().toLowerCase();
   if (!['public', 'private'].includes(couponType)) {
     couponType = recipientEmail ? 'private' : 'public';
   }
   const singleUse = Boolean(req.body?.singleUse) || couponType === 'private';
+  const supportsInfluencerUnlimited = portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0;
+  const hasMaxRedemptions = supportsInfluencerUnlimited && Object.prototype.hasOwnProperty.call(req.body || {}, 'maxRedemptions');
   const maxRedemptionsRaw = req.body?.maxRedemptions;
   let maxRedemptions =
-    maxRedemptionsRaw === '' || maxRedemptionsRaw == null
+    !hasMaxRedemptions
       ? existing.maxRedemptions ?? null
+      : maxRedemptionsRaw === '' || maxRedemptionsRaw == null
+      ? null
       : Number(maxRedemptionsRaw);
+  const perUserLimitRaw = req.body?.perUserLimit ?? req.body?.sessionLimit;
+  const perUserLimit =
+    perUserLimitRaw === '' || perUserLimitRaw == null
+      ? Number(existing.perUserLimit || 1)
+      : Number(perUserLimitRaw);
   const validFrom = String(req.body?.validFrom || existing.validFrom || '').trim();
-  const validTill = String(req.body?.validTill || req.body?.expiresAt || existing.validTill || existing.expiresAt || '').trim();
+  const hasValidTill = supportsInfluencerUnlimited && (
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'validTill') ||
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'expiresAt')
+  );
+  const validTill = hasValidTill
+    ? String(req.body?.validTill ?? req.body?.expiresAt ?? '').trim()
+    : String(existing.validTill || existing.expiresAt || '').trim();
   const active = req.body?.active == null ? Number(existing.active || existing.isActive || 1) : Number(req.body?.active) === 1 ? 1 : 0;
 
   if (!code) {
@@ -2863,6 +3088,9 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   }
   if (maxRedemptions != null && (!Number.isInteger(maxRedemptions) || maxRedemptions <= 0)) {
     return res.status(400).json({ message: 'maxRedemptions must be a positive integer.' });
+  }
+  if (!Number.isInteger(perUserLimit) || perUserLimit <= 0) {
+    return res.status(400).json({ message: 'perUserLimit must be a positive integer.' });
   }
   if (validFrom && Number.isNaN(new Date(validFrom).getTime())) {
     return res.status(400).json({ message: 'validFrom must be a valid date.' });
@@ -2887,6 +3115,7 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
         description = ?,
         discount_type = ?,
         discount_value = ?,
+        commission_per_order_paise = ?,
         applies_to = ?,
         max_redemptions = ?,
         coupon_type = ?,
@@ -2901,13 +3130,14 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
         active = ?,
         portal = ?,
         influencer_id = ?,
-        per_user_limit = 1
+        per_user_limit = ?
        WHERE id = ?`
     ).run(
       code,
       description,
       discountType || 'flat',
       discountValue,
+      commissionPerOrderPaise,
       appliesTo,
       maxRedemptions,
       couponType,
@@ -2922,6 +3152,7 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
       active,
       portal,
       portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0 ? influencerId : null,
+      perUserLimit,
       couponId
     );
   } catch (error) {
@@ -10059,6 +10290,7 @@ function mapCouponRow(row) {
     description: row.description || '',
     discountType: row.discountType || 'flat',
     discountValue: Number(row.discountValue || 0),
+    commissionPerOrderPaise: Math.max(0, Number(row.commissionPerOrderPaise || 0)),
     appliesTo: row.appliesTo || 'all',
     maxRedemptions: row.maxRedemptions == null ? null : Number(row.maxRedemptions),
     perUserLimit: Number(row.perUserLimit || 1),
@@ -10103,6 +10335,7 @@ function getCouponByCode(code) {
               c.description,
               c.discount_type AS discountType,
               c.discount_value AS discountValue,
+              c.commission_per_order_paise AS commissionPerOrderPaise,
               c.applies_to AS appliesTo,
               c.max_redemptions AS maxRedemptions,
               c.per_user_limit AS perUserLimit,
@@ -10177,12 +10410,17 @@ function getCouponById(couponId) {
   return mapCouponRow(row);
 }
 
-function generateUniqueCouponCode() {
+function generateUniqueCouponCode(prefix = 'H2') {
+  const normalizedPrefix = String(prefix || 'H2')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '')
+    .slice(0, 10) || 'H2';
   for (let attempt = 0; attempt < 6; attempt += 1) {
-    const candidate = generateCouponCode('H2');
+    const candidate = generateCouponCode(normalizedPrefix);
     if (!getCouponByCode(candidate)) return candidate;
   }
-  return generateCouponCode(`H2${Date.now().toString(36).toUpperCase()}`);
+  return generateCouponCode(`${normalizedPrefix}${Date.now().toString(36).toUpperCase()}`);
 }
 
 function getCouponRedemptionStats(couponId, userId) {
@@ -10215,7 +10453,7 @@ function calculateCouponDiscountPaise(coupon, subtotalAmountPaise) {
   return Math.min(discountPaise, Math.max(0, subtotal - 100));
 }
 
-function validateCouponForUser({ code, userId, appliesTo, subtotalAmountPaise, singleBookingAmountPaise, portal }) {
+function validateCouponForUser({ code, userId, appliesTo, productIds = [], productLineTotals = {}, productSubtotalAmountPaise, subtotalAmountPaise, singleBookingAmountPaise, portal }) {
   const normalizedCode = normalizeCouponCode(code);
   if (!normalizedCode) {
     return {
@@ -10244,8 +10482,21 @@ function validateCouponForUser({ code, userId, appliesTo, subtotalAmountPaise, s
   if (coupon.validTill && new Date(coupon.validTill).getTime() <= Date.now()) {
     return { error: 'This coupon has expired.' };
   }
-  if (!['all', appliesTo].includes(String(coupon.appliesTo || 'all'))) {
+  const couponAppliesTo = String(coupon.appliesTo || 'all').trim().toLowerCase();
+  const productRestriction = couponAppliesTo.match(/^product:([\d,]+)$/);
+  const restrictedProductIds = productRestriction
+    ? [...new Set(productRestriction[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
+    : [];
+  const productIdSet = new Set((Array.isArray(productIds) ? productIds : [productIds]).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0));
+  const appliesToProduct = productRestriction && restrictedProductIds.some((id) => productIdSet.has(id));
+  if (!['all', appliesTo].includes(couponAppliesTo) && !appliesToProduct) {
     return { error: 'This coupon is not valid for this payment.' };
+  }
+  const restrictedProductSubtotalPaise = productRestriction
+    ? Math.max(0, Math.round(restrictedProductIds.reduce((sum, id) => sum + Number(productLineTotals?.[id] || 0), 0) || productSubtotalAmountPaise || 0))
+    : 0;
+  if (appliesToProduct && restrictedProductSubtotalPaise <= 0) {
+    return { error: 'This coupon is only valid when the selected product is in the cart.' };
   }
   const assignedEmail = String(coupon.assignedUserEmail || coupon.recipientEmail || '').trim().toLowerCase();
   if (coupon.couponType === 'private' || assignedEmail) {
@@ -10283,7 +10534,11 @@ function validateCouponForUser({ code, userId, appliesTo, subtotalAmountPaise, s
   const subtotalPaise = Math.max(0, Math.round(Number(subtotalAmountPaise || 0)));
   const discountBasePaise = Math.max(
     0,
-    Math.round(Number(isAssignedSingleBookingServiceCoupon ? singleBookingAmountPaise : subtotalPaise || 0))
+    Math.round(Number(isAssignedSingleBookingServiceCoupon
+      ? singleBookingAmountPaise
+      : appliesToProduct
+        ? restrictedProductSubtotalPaise
+        : subtotalPaise || 0))
   );
   const discountAmountPaise = calculateCouponDiscountPaise(coupon, discountBasePaise);
   if (discountAmountPaise <= 0) {
@@ -10558,6 +10813,7 @@ function createInvoiceAccessToken(payload) {
       bookingId: payload?.bookingId != null ? Number(payload.bookingId) : undefined,
       userId: payload?.userId != null ? Number(payload.userId) : undefined,
       orderId: payload?.orderId != null ? String(payload.orderId) : undefined,
+      isAdmin: payload?.isAdmin === true,
     },
     JWT_SECRET,
     { expiresIn: '30d' }
@@ -10574,6 +10830,7 @@ function verifyInvoiceAccessToken(token) {
       bookingId: payload?.bookingId != null ? Number(payload.bookingId) : null,
       userId: payload?.userId != null ? Number(payload.userId) : null,
       orderId: payload?.orderId != null ? String(payload.orderId) : '',
+      isAdmin: payload?.isAdmin === true,
     };
   } catch {
     return null;
@@ -12696,7 +12953,9 @@ function findOrCreateGoogleUser(profile) {
   const existingUser = getUserProfileByEmail(email);
   if (existingUser) {
     db.prepare('UPDATE users SET google_id = ? WHERE id = ?').run(googleId, Number(existingUser.id));
-    return syncMembershipForUser({ userId: Number(existingUser.id), email }) || getUserProfileById(Number(existingUser.id));
+    const user = syncMembershipForUser({ userId: Number(existingUser.id), email }) || getUserProfileById(Number(existingUser.id));
+    app.locals.merchGuestOrderSync?.(user);
+    return user;
   }
 
   const result = db
@@ -12707,7 +12966,9 @@ function findOrCreateGoogleUser(profile) {
     .run(name || 'User', email, googleId);
 
   const userId = Number(result.lastInsertRowid);
-  return syncMembershipForUser({ userId, email }) || getUserProfileById(userId);
+  const user = syncMembershipForUser({ userId, email }) || getUserProfileById(userId);
+  app.locals.merchGuestOrderSync?.(user);
+  return user;
 }
 
 function setAuthCookie(req, res, user) {
@@ -14210,6 +14471,7 @@ function migrate() {
       description TEXT,
       discount_type TEXT NOT NULL,
       discount_value REAL NOT NULL,
+      commission_per_order_paise INTEGER NOT NULL DEFAULT 0,
       applies_to TEXT NOT NULL DEFAULT 'all',
       max_redemptions INTEGER,
       per_user_limit INTEGER NOT NULL DEFAULT 1,
@@ -14382,6 +14644,9 @@ function migrate() {
 
   if (hasTable('coupons') && !hasColumn('coupons', 'recipient_email')) {
     db.exec('ALTER TABLE coupons ADD COLUMN recipient_email TEXT');
+  }
+  if (hasTable('coupons') && !hasColumn('coupons', 'commission_per_order_paise')) {
+    db.exec('ALTER TABLE coupons ADD COLUMN commission_per_order_paise INTEGER NOT NULL DEFAULT 0');
   }
   if (hasTable('coupons') && !hasColumn('coupons', 'coupon_type')) {
     db.exec("ALTER TABLE coupons ADD COLUMN coupon_type TEXT NOT NULL DEFAULT 'public'");

@@ -14,6 +14,23 @@
   };
 
   const today = new Date();
+  const LOW_STOCK_THRESHOLD = 15;
+  const REVENUE_PERIOD_OPTIONS = [
+    { value: 'today', label: 'Today' },
+    { value: 'week', label: 'This Week' },
+    { value: 'month', label: 'This Month' },
+    { value: 'quarter', label: 'This Quarter' },
+    { value: 'year', label: 'This Year' },
+    { value: 'custom', label: 'Custom Date Range', disabled: true },
+  ];
+  const ORDER_STATUS_PERIOD_OPTIONS = [
+    { value: 'today', label: 'Today' },
+    { value: 'week', label: 'This Week' },
+    { value: 'month', label: 'This Month' },
+    { value: 'quarter', label: 'This Quarter' },
+    { value: 'year', label: 'This Year' },
+    { value: 'custom', label: 'Custom Range' },
+  ];
 
   function pad(num) {
     return String(num).padStart(2, '0');
@@ -30,13 +47,20 @@
   }
 
   function money(paise) {
-  const amount = Number(paise || 0) / 100;
+    const amount = Number(paise || 0) / 100;
 
-  return '\u20B9' + amount.toLocaleString('en-IN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
+    return '\u20B9' + amount.toLocaleString('en-IN', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    });
+  }
+
+  function catalogPrice(value) {
+    return '\u20B9' + Number(value || 0).toLocaleString('en-IN', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    });
+  }
 
   function dateLabel(value) {
     const parsed = new Date(String(value || '').replace(' ', 'T'));
@@ -91,16 +115,178 @@
     if (Number(coupon?.influencerId || 0) > 0 || coupon?.influencerName || coupon?.influencer) return 'influencer';
     const explicitType = String(coupon?.couponType || coupon?.coupon_type || coupon?.ownerType || '').trim().toLowerCase();
     if (explicitType === 'public' || explicitType === 'general') return 'general';
-    if (explicitType === 'private' || explicitType === 'influencer') return 'influencer';
+    if (explicitType === 'private') return 'private';
+    if (explicitType === 'influencer') return 'influencer';
     return 'general';
   }
 
   function getCouponTypeLabel(coupon) {
-    return getCouponTypeValue(coupon) === 'influencer' ? 'Influencer Coupon' : 'General Coupon';
+    const typeValue = getCouponTypeValue(coupon);
+    if (typeValue === 'influencer') return 'Influencer Coupon';
+    if (typeValue === 'private') return 'Private Coupon';
+    return 'General Coupon';
   }
 
   function formatCount(value) {
     return Number(value || 0).toLocaleString('en-IN');
+  }
+
+  function getLowStockProducts(products = state.products) {
+    return (Array.isArray(products) ? products : [])
+      .filter((product) => !product.archived && Number(product.stock || 0) > 0 && Number(product.stock || 0) <= LOW_STOCK_THRESHOLD)
+      .sort((a, b) => Number(a.stock || 0) - Number(b.stock || 0));
+  }
+
+  function getLowStockLabel(product) {
+    const stock = Number(product?.stock || 0);
+    if (stock <= 0) return 'Out of stock';
+    if (stock <= LOW_STOCK_THRESHOLD) return `Low stock (${stock} left)`;
+    return `In stock (${stock})`;
+  }
+
+  const ORDER_STATUS_META = {
+    pending: { label: 'Pending', color: '#d97706' },
+    processing: { label: 'Processing', color: '#2563eb' },
+    shipped: { label: 'Shipped', color: '#0f766e' },
+    delivered: { label: 'Delivered', color: '#16a34a' },
+    cancelled: { label: 'Cancelled', color: '#dc2626' },
+    returned: { label: 'Returned', color: '#7c3aed' },
+  };
+
+  function normalizeOrderStatus(status) {
+    const value = String(status || 'pending')
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, '_')
+      .replace(/^order_/, '');
+    return ORDER_STATUS_META[value] ? value : 'pending';
+  }
+
+  function buildOrderStatusDistribution(orders) {
+    const breakdown = Object.fromEntries(Object.keys(ORDER_STATUS_META).map((status) => [status, 0]));
+
+    for (const order of Array.isArray(orders) ? orders : []) {
+      const status = normalizeOrderStatus(order?.status ?? order?.orderStatus);
+      breakdown[status] += 1;
+    }
+
+    const total = Object.values(breakdown).reduce((sum, value) => sum + Number(value || 0), 0);
+    const segments = Object.entries(breakdown)
+      .filter(([, count]) => count > 0)
+      .map(([status, count]) => ({
+        status,
+        label: ORDER_STATUS_META[status].label,
+        color: ORDER_STATUS_META[status].color,
+        count,
+        percent: total ? (count / total) * 100 : 0,
+      }));
+
+    return { total, breakdown, segments };
+  }
+
+  function getOrderStatusPeriodDates(period, fromValue, toValue) {
+    const start = new Date(today);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+
+    if (period === 'custom') {
+      const from = new Date(`${fromValue || toISODate(today)}T00:00:00`);
+      const to = new Date(`${toValue || fromValue || toISODate(today)}T00:00:00`);
+      if (!Number.isNaN(from.getTime()) && !Number.isNaN(to.getTime())) {
+        from.setHours(0, 0, 0, 0);
+        to.setHours(0, 0, 0, 0);
+        to.setDate(to.getDate() + 1);
+        return { start: from, end: to };
+      }
+    }
+
+    if (period === 'week') {
+      const day = start.getDay();
+      start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
+      end.setTime(start.getTime());
+      end.setDate(end.getDate() + 7);
+    } else if (period === 'month') {
+      start.setDate(1);
+      end.setTime(start.getTime());
+      end.setMonth(end.getMonth() + 1);
+    } else if (period === 'quarter') {
+      start.setMonth(Math.floor(start.getMonth() / 3) * 3, 1);
+      end.setTime(start.getTime());
+      end.setMonth(end.getMonth() + 3);
+    } else if (period === 'year') {
+      start.setMonth(0, 1);
+      end.setTime(start.getTime());
+      end.setFullYear(end.getFullYear() + 1);
+    }
+
+    return { start, end };
+  }
+
+  function filterOrdersByStatusPeriod(orders, period, fromValue, toValue) {
+    // Keep this client-side adapter isolated so it can be replaced with an API
+    // request later without changing the chart, counters, or summary renderer.
+    const { start, end } = getOrderStatusPeriodDates(period, fromValue, toValue);
+    return (Array.isArray(orders) ? orders : []).filter((order) => {
+      const createdAt = getOrderCreatedAt(order);
+      return !Number.isNaN(createdAt.getTime()) && createdAt >= start && createdAt < end;
+    });
+  }
+
+  function getOrderStatusPeriodSummary(period, label, count, fromValue, toValue) {
+    if (period === 'custom' && fromValue && toValue) {
+      return `${formatCount(count)} order(s) from ${dateLabel(fromValue)} to ${dateLabel(toValue)}.`;
+    }
+    return `${formatCount(count)} order(s) in ${label.toLowerCase()}.`;
+  }
+
+  function renderOrderStatusRing(distribution) {
+    const segments = Array.isArray(distribution?.segments) ? distribution.segments : [];
+    const total = Number(distribution?.total || 0);
+
+    if (!segments.length || !total) {
+      return `
+        <div class="admin-chart-ring admin-chart-ring--empty">
+          <span>
+            <strong>0</strong>
+            <small>No orders</small>
+          </span>
+        </div>
+      `;
+    }
+
+    let start = 0;
+    const slices = segments.map((segment) => {
+      const end = start + segment.percent;
+      const slice = `${segment.color} ${start}% ${end}%`;
+      start = end;
+      return slice;
+    });
+
+    return `
+      <div class="admin-chart-ring" style="background: conic-gradient(${slices.join(', ')})">
+        <span>
+          <strong>${formatCount(total)}</strong>
+          <small>Total Orders</small>
+        </span>
+      </div>
+    `;
+  }
+
+  function renderStatusLegend(distribution) {
+    const segments = Array.isArray(distribution?.segments) ? distribution.segments : [];
+    if (!segments.length) {
+      return '<span class="admin-chip">No status data</span>';
+    }
+
+    return segments
+      .map((segment) => `
+        <span class="admin-chip admin-chip--status">
+          <span class="admin-chip__swatch" style="background:${segment.color};"></span>
+          ${escapeHtml(segment.label)} ${formatCount(segment.count)}
+        </span>
+      `)
+      .join('');
   }
 
   function normalizeCouponCodes(value) {
@@ -112,6 +298,10 @@
           .filter(Boolean)
       )
     );
+  }
+
+  function isLikelyEmail(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
   }
 
   function getInfluencerById(id) {
@@ -129,6 +319,103 @@
     ).trim();
   }
 
+  const COUPON_CATEGORY_OPTIONS = [
+    { value: 'public', label: 'Public Coupon' },
+    { value: 'seasonal', label: 'Seasonal Coupon' },
+    { value: 'festival', label: 'Festival Coupon' },
+    { value: 'first_purchase', label: 'First Purchase Coupon' },
+    { value: 'influencer', label: 'Influencer Coupon' },
+    { value: 'private', label: 'Private Coupon' },
+  ];
+
+  const COUPON_CATEGORY_DEFAULTS = {
+    public: {
+      codePrefix: 'MERCH',
+      campaignName: 'Public Merch Coupon',
+      description: 'Public merch offer for all eligible customers.',
+      discount: 100,
+      usageCount: 100,
+      expiryDays: 30,
+    },
+    seasonal: {
+      codePrefix: 'SEASON',
+      campaignName: 'Seasonal Merch Coupon',
+      description: 'Seasonal merch offer for a limited period.',
+      discount: 100,
+      usageCount: 100,
+      expiryDays: 45,
+    },
+    festival: {
+      codePrefix: 'FEST',
+      campaignName: 'Festival Merch Coupon',
+      description: 'Festival merch offer for a limited period.',
+      discount: 100,
+      usageCount: 100,
+      expiryDays: 21,
+    },
+    first_purchase: {
+      codePrefix: 'FIRST',
+      campaignName: 'First Purchase Coupon',
+      description: 'First merch purchase offer for eligible customers.',
+      discount: 100,
+      usageCount: 1,
+      expiryDays: 30,
+    },
+    influencer: {
+      codePrefix: 'INFL',
+      campaignName: 'Influencer Merch Coupon',
+      description: 'Influencer merch campaign coupon.',
+      discount: 100,
+      usageCount: 100,
+      expiryDays: 30,
+    },
+    private: {
+      codePrefix: 'PRIVATE',
+      campaignName: 'Private Merch Coupon',
+      description: 'Private merch offer for one customer.',
+      discount: 100,
+      usageCount: 1,
+      expiryDays: 30,
+    },
+  };
+
+  function addDaysIso(days) {
+    const date = new Date(today);
+    date.setDate(date.getDate() + Number(days || 0));
+    return toISODate(date);
+  }
+
+  function getCouponCategoryValue(coupon) {
+    const explicitCategory = String(coupon?.couponCategory || coupon?.category || '').trim().toLowerCase();
+    if (COUPON_CATEGORY_DEFAULTS[explicitCategory]) return explicitCategory;
+    if (Number(coupon?.influencerId || 0) > 0 || coupon?.influencerName || coupon?.influencer) return 'influencer';
+    if (String(coupon?.couponType || coupon?.coupon_type || '').trim().toLowerCase() === 'private') return 'private';
+    const campaignName = String(coupon?.festivalName || '').trim().toLowerCase();
+    if (campaignName.includes('first')) return 'first_purchase';
+    if (campaignName.includes('festival')) return 'festival';
+    if (campaignName.includes('season')) return 'seasonal';
+    return 'public';
+  }
+
+  function getCouponCategoryDefaults(categoryValue) {
+    return COUPON_CATEGORY_DEFAULTS[categoryValue] || COUPON_CATEGORY_DEFAULTS.public;
+  }
+
+  function getCouponUsageTypeValue(coupon) {
+    const explicitType = String(coupon?.usageType || '').trim().toLowerCase();
+    if (explicitType === 'unlimited') return 'unlimited';
+    if (explicitType === 'limited') return 'limited';
+    const hasLimit = coupon?.maxRedemptions != null || coupon?.usageCount != null;
+    const hasExpiry = Boolean(String(coupon?.validTill || coupon?.expiresAt || coupon?.expiry || '').trim());
+    return hasLimit || hasExpiry ? 'limited' : 'unlimited';
+  }
+
+  function normalizeCouponDateValue(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    return raw.slice(0, 10);
+  }
+
   function renderCouponChips(coupons = []) {
     if (!Array.isArray(coupons) || !coupons.length) {
       return '<p class="admin-table__muted" style="margin:0;">No coupons assigned yet.</p>';
@@ -136,8 +423,416 @@
     return coupons.map((coupon) => `<span class="admin-chip">${escapeHtml(coupon)}</span>`).join('');
   }
 
+  function renderInfluencerActionLinks(influencer) {
+    const id = influencer?.id || '';
+    const canEmail = Boolean(String(influencer?.email || '').trim());
+    const emailTitle = canEmail ? '' : ' title="Add an email address before sending a report."';
+    const emailDisabled = canEmail ? '' : ' disabled';
+
+    return `
+      <button class="admin-action-link" type="button" data-action="edit-influencer" data-id="${id}">Edit Influencer</button>
+      <button class="admin-action-link" type="button" data-action="download-influencer-report" data-id="${id}">Download Report</button>
+      <button class="admin-action-link" type="button" data-action="email-influencer-report" data-id="${id}"${emailTitle}${emailDisabled}>Send to Email</button>
+    `;
+  }
+
+  function csvCell(value) {
+    const text = String(value ?? '');
+    if (/[",\n]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  }
+
+  function reportMonthLabel(monthKey) {
+    const parsed = new Date(`${String(monthKey || '').slice(0, 7)}-01T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return String(monthKey || '');
+    return new Intl.DateTimeFormat('en-IN', { month: 'short', year: 'numeric' }).format(parsed);
+  }
+
+  function buildMerchReportLines(report) {
+    const summary = report?.summary || {};
+    const influencerRows = Array.isArray(report?.influencerReports) ? report.influencerReports : [];
+    const monthlyRows = Array.isArray(report?.monthlyInfluencerReports) ? report.monthlyInfluencerReports : [];
+    const periodLabel = [state.reportFrom, state.reportTo].filter(Boolean).join(' to ') || 'all available dates';
+
+    return {
+      summary,
+      influencerRows,
+      monthlyRows,
+      periodLabel,
+    };
+  }
+
+  function buildMerchReportCsv(report) {
+    const { summary, influencerRows, monthlyRows, periodLabel } = buildMerchReportLines(report);
+    const rows = [
+      ['Merch influencer report'],
+      ['Period', periodLabel],
+      ['Orders', summary.orderCount || 0],
+      ['Revenue', summary.revenue || 0],
+      ['Influencers', influencerRows.length],
+      ['Monthly rows', monthlyRows.length],
+      [],
+      ['Month', 'Influencer', 'Handle', 'Orders', 'Revenue', 'Commission', 'Coupon Usage'],
+      ...monthlyRows.map((row) => [
+        row.monthLabel || reportMonthLabel(row.month),
+        row.name || '',
+        row.handle || '',
+        row.orders || 0,
+        row.revenue || 0,
+        row.commission || 0,
+        row.couponUsage || 0,
+      ]),
+    ];
+
+    return rows.map((row) => row.map(csvCell).join(',')).join('\n');
+  }
+
+  function buildMerchReportTsv(report) {
+    const { summary, influencerRows, monthlyRows, periodLabel } = buildMerchReportLines(report);
+    const rows = [
+      ['Merch influencer report'],
+      ['Period', periodLabel],
+      ['Orders', summary.orderCount || 0],
+      ['Revenue', summary.revenue || 0],
+      ['Influencers', influencerRows.length],
+      ['Monthly rows', monthlyRows.length],
+      [],
+      ['Month', 'Influencer', 'Handle', 'Orders', 'Revenue', 'Commission', 'Coupon Usage'],
+      ...monthlyRows.map((row) => [
+        row.monthLabel || reportMonthLabel(row.month),
+        row.name || '',
+        row.handle || '',
+        row.orders || 0,
+        row.revenue || 0,
+        row.commission || 0,
+        row.couponUsage || 0,
+      ]),
+    ];
+
+    return rows.map((row) => row.join('\t')).join('\n');
+  }
+
+  function buildMerchReportHtml(report) {
+    const { summary, monthlyRows, periodLabel } = buildMerchReportLines(report);
+    const rows = monthlyRows.map((row) => `
+      <tr>
+        <td>${escapeHtml(row.monthLabel || reportMonthLabel(row.month))}</td>
+        <td>${escapeHtml(row.name || '')}</td>
+        <td>${escapeHtml(row.handle || '')}</td>
+        <td>${formatCount(row.orders)}</td>
+        <td>${money(row.revenue)}</td>
+        <td>${money(row.commission)}</td>
+        <td>${formatCount(row.couponUsage)}</td>
+      </tr>
+    `).join('');
+
+    return `
+      <!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>Merch Influencer Report</title>
+          <style>
+            body { font-family: Arial, sans-serif; color: #1f2937; margin: 24px; }
+            h1, h2, p { margin: 0 0 12px; }
+            .meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-width: 720px; margin-bottom: 20px; }
+            .meta div { border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px 14px; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #e5e7eb; padding: 10px 12px; text-align: left; }
+            th { background: #f9fafb; }
+          </style>
+        </head>
+        <body>
+          <h1>Merch influencer report</h1>
+          <p>Period: ${escapeHtml(periodLabel)}</p>
+          <div class="meta">
+            <div><strong>Orders</strong><br />${escapeHtml(String(summary.orderCount || 0))}</div>
+            <div><strong>Revenue</strong><br />${escapeHtml(money(summary.revenue || 0))}</div>
+            <div><strong>Influencers</strong><br />${escapeHtml(String((report?.influencerReports || []).length))}</div>
+            <div><strong>Monthly rows</strong><br />${escapeHtml(String(monthlyRows.length))}</div>
+          </div>
+          <h2>Monthly Influencer Breakdown</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Month</th>
+                <th>Influencer</th>
+                <th>Handle</th>
+                <th>Orders</th>
+                <th>Revenue</th>
+                <th>Commission</th>
+                <th>Coupon Usage</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows || '<tr><td colspan="7">No monthly rows available.</td></tr>'}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+  }
+
+  function buildInfluencerReportHtml(report) {
+    const influencer = report?.influencer || {};
+    const summary = report?.summary || {};
+    const analytics = report?.analytics || {};
+    const performance = report?.performance || {};
+    const commission = report?.commission || {};
+    const couponRows = Array.isArray(report?.couponPerformance) ? report.couponPerformance : [];
+    const orderRows = Array.isArray(report?.salesHistory?.items) ? report.salesHistory.items : [];
+    const commissionRows = Array.isArray(report?.commissionHistory) ? report.commissionHistory : [];
+    const trendRows = Array.isArray(analytics.monthlyTrend) ? analytics.monthlyTrend : [];
+    const productRows = Array.isArray(performance.topSellingProducts) ? performance.topSellingProducts : [];
+    const notificationRows = Array.isArray(report?.notifications) ? report.notifications : [];
+    const generatedAt = report?.generatedAt ? `${dateLabel(report.generatedAt)} ${timeLabel(report.generatedAt)}` : timeLabel(new Date().toISOString());
+
+    return `
+      <!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>${escapeHtml(influencer.name || 'Influencer')} report</title>
+          <style>
+            :root { color-scheme: light; }
+            body { font-family: Arial, sans-serif; color: #1f2937; margin: 24px; background: #fff; font-size: 13px; line-height: 1.45; }
+            h1, h2, h3, p { margin: 0 0 10px; }
+            h1 { font-size: 26px; line-height: 1.1; }
+            h2 { font-size: 18px; line-height: 1.15; }
+            h3 { font-size: 15px; line-height: 1.2; }
+            .hero { display: grid; gap: 12px; margin-bottom: 20px; }
+            .meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+            .meta div, .panel { border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px 14px; background: #fff; }
+            .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+            .stats div { border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px 14px; }
+            .stats strong { display: block; font-size: 14px; margin-top: 4px; }
+            table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+            th, td { border: 1px solid #e5e7eb; padding: 8px 10px; text-align: left; vertical-align: top; font-size: 12px; }
+            th { background: #f9fafb; }
+            .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; }
+            .muted { color: #6b7280; font-size: 13px; }
+            .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+            .chip { display: inline-flex; border: 1px solid #e5e7eb; border-radius: 999px; padding: 5px 9px; font-size: 11px; background: #fafafa; }
+            .section { margin-bottom: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="hero">
+            <div class="muted">Generated ${escapeHtml(generatedAt)}</div>
+            <h1>Influencer report</h1>
+            <p class="muted">${escapeHtml(influencer.name || 'Unnamed influencer')} ${influencer.handle ? `• ${escapeHtml(influencer.handle)}` : ''}</p>
+          </div>
+
+          <div class="meta">
+            <div><strong>Profile</strong><br />${escapeHtml([influencer.email, influencer.phone].filter(Boolean).join(' • ') || 'No contact info')}</div>
+            <div><strong>Status</strong><br />${escapeHtml(Number(influencer.active ?? 1) === 1 ? 'Active' : 'Inactive')}</div>
+            <div><strong>Commission per Order</strong><br />${escapeHtml(money(influencer.commissionPerOrderPaise || 0))}</div>
+            <div><strong>Coupons</strong><br />${escapeHtml(String(couponRows.length))}</div>
+          </div>
+
+          <div class="stats">
+            <div><span>Orders</span><strong>${escapeHtml(String(summary.totalOrdersReferred || influencer.totalOrders || 0))}</strong></div>
+            <div><span>Revenue</span><strong>${escapeHtml(money(summary.totalSalesGenerated || influencer.revenue || 0))}</strong></div>
+            <div><span>Commission Earned</span><strong>${escapeHtml(money(summary.totalCommissionEarned || commission.totalEarned || influencer.commission || 0))}</strong></div>
+            <div><span>Commission Paid</span><strong>${escapeHtml(money(summary.commissionPaid || commission.totalPaid || influencer.paidCommission || 0))}</strong></div>
+          </div>
+
+          <div class="grid-2">
+            <section class="panel">
+              <h2>Coupon Performance</h2>
+              <div class="chips">
+                ${couponRows.length ? couponRows.map((coupon) => `<span class="chip">${escapeHtml(coupon.code || '')}${coupon.usageCount != null ? ` · ${formatCount(coupon.usageCount)} uses` : ''}</span>`).join('') : '<span class="muted">No coupon history yet.</span>'}
+              </div>
+            </section>
+            <section class="panel">
+              <h2>Notifications</h2>
+              <div class="chips">
+                ${notificationRows.length ? notificationRows.slice(0, 6).map((note) => `<span class="chip">${escapeHtml(note.title || 'Update')}</span>`).join('') : '<span class="muted">No recent activity.</span>'}
+              </div>
+            </section>
+          </div>
+
+          <section class="section">
+            <h2>Monthly Trend</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Month</th>
+                  <th>Orders</th>
+                  <th>Sales</th>
+                  <th>Commission</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${trendRows.length ? trendRows.map((row) => `
+                  <tr>
+                    <td>${escapeHtml(row.label || reportMonthLabel(row.month))}</td>
+                    <td>${formatCount(row.orders)}</td>
+                    <td>${escapeHtml(money(row.sales || row.revenue || 0))}</td>
+                    <td>${escapeHtml(money(row.commission || 0))}</td>
+                  </tr>
+                `).join('') : '<tr><td colspan="4">No monthly activity yet.</td></tr>'}
+              </tbody>
+            </table>
+          </section>
+
+          <section class="section">
+            <h2>Top Products</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Qty</th>
+                  <th>Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${productRows.length ? productRows.map((row) => `
+                  <tr>
+                    <td>${escapeHtml(row.name || '')}</td>
+                    <td>${formatCount(row.quantity)}</td>
+                    <td>${escapeHtml(money(row.revenue || 0))}</td>
+                  </tr>
+                `).join('') : '<tr><td colspan="3">No product breakdown yet.</td></tr>'}
+              </tbody>
+            </table>
+          </section>
+
+          <section class="section">
+            <h2>Recent Orders</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Order</th>
+                  <th>Date</th>
+                  <th>Customer</th>
+                  <th>Coupon</th>
+                  <th>Status</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${orderRows.length ? orderRows.map((row) => `
+                  <tr>
+                    <td>${escapeHtml(row.orderNumber || row.id || '')}</td>
+                    <td>${escapeHtml(dateLabel(row.orderDate || row.createdAt || ''))}</td>
+                    <td>${escapeHtml(row.customerName || '-')}</td>
+                    <td>${escapeHtml(row.couponUsed || '-')}</td>
+                    <td>${escapeHtml(row.paymentStatus || row.orderStatus || '-')}</td>
+                    <td>${escapeHtml(money(row.orderAmount || 0))}</td>
+                  </tr>
+                `).join('') : '<tr><td colspan="6">No order history yet.</td></tr>'}
+              </tbody>
+            </table>
+          </section>
+
+          <section class="section">
+            <h2>Commission History</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th>Reference</th>
+                  <th>Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${commissionRows.length ? commissionRows.map((row) => `
+                  <tr>
+                    <td>${escapeHtml(dateLabel(row.paymentDate || ''))}</td>
+                    <td>${escapeHtml(money(row.amount || 0))}</td>
+                    <td>${escapeHtml(row.status || '')}</td>
+                    <td>${escapeHtml(row.referenceNumber || '-')}</td>
+                    <td>${escapeHtml(row.note || '-')}</td>
+                  </tr>
+                `).join('') : '<tr><td colspan="5">No commission payments recorded yet.</td></tr>'}
+              </tbody>
+            </table>
+          </section>
+        </body>
+      </html>
+    `;
+  }
+
+  function downloadMerchReportFile(filename, content, mimeType) {
+    const blob = new Blob([content], { type: mimeType });
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(objectUrl);
+  }
+
+  async function fetchInfluencerReport(influencerId) {
+    return apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencerId)}/report`);
+  }
+
+  function buildInfluencerReportFilename(influencer, extension = 'html') {
+    const slug = slugify(influencer?.name || influencer?.handle || `influencer-${influencer?.id || 'report'}`) || `influencer-${influencer?.id || 'report'}`;
+    return `merch-influencer-report-${slug}.${extension}`;
+  }
+
+  async function downloadInfluencerReport(influencer) {
+    if (!influencer) return;
+    try {
+      const result = await fetchInfluencerReport(influencer.id);
+      const report = result?.report || result;
+      downloadMerchReportFile(
+        buildInfluencerReportFilename(influencer, 'html'),
+        buildInfluencerReportHtml(report),
+        'text/html;charset=utf-8'
+      );
+      toast('Download ready', `${influencer.name}'s detailed report has been downloaded.`, 'success');
+    } catch (error) {
+      toast('Download failed', error.message || 'Unable to download the influencer report.', 'warning');
+    }
+  }
+
+  async function emailInfluencerReport(influencer) {
+    if (!influencer) return;
+    if (!String(influencer.email || '').trim()) {
+      toast('Email unavailable', `${influencer.name} does not have an email address on file.`, 'warning');
+      return;
+    }
+
+    try {
+      await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencer.id)}/report/email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      toast('Report emailed', `A detailed report was sent to ${influencer.email}.`, 'success');
+    } catch (error) {
+      toast('Email failed', error.message || 'Unable to send the influencer report email.', 'danger');
+    }
+  }
+
   function uniqueId(prefix) {
     return `${prefix}-${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-4)}`;
+  }
+
+  async function fetchGeneratedCouponCode(prefixValue = 'H2') {
+    const params = new URLSearchParams({
+      prefix: String(prefixValue || 'H2'),
+      _ts: String(Date.now()),
+    });
+    const result = await apiRequest(`/api/admin/coupons/generate-code?${params.toString()}`, {
+      cache: 'no-store',
+    });
+    const code = String(result?.code || '').trim().toUpperCase();
+    if (!code) {
+      throw new Error('The coupon generator did not return a code.');
+    }
+    return code;
   }
 
   async function copyTextToClipboard(text) {
@@ -167,7 +862,13 @@
   }
 
   function buildApiUrl(path) {
-    return path;
+    const configuredWindowValue = String(window.__API_URL__ || '').trim();
+    const configuredMetaValue = String(document.querySelector('meta[name="api-base-url"]')?.content || '').trim();
+    const hostname = String(window.location.hostname || '').trim().toLowerCase();
+    const isLocalHost = ['localhost', '127.0.0.1', '::1'].includes(hostname);
+    const configuredBase = (configuredWindowValue || (isLocalHost ? '' : configuredMetaValue)).replace(/\/$/, '');
+    if (!configuredBase) return path;
+    return `${configuredBase}${String(path || '').startsWith('/') ? path : `/${path}`}`;
   }
 
   async function apiRequest(path, options = {}) {
@@ -180,20 +881,42 @@
     });
 
     let data = null;
+    let rawResponse = '';
     try {
-      data = await response.json();
+      rawResponse = await response.text();
+      data = rawResponse ? JSON.parse(rawResponse) : null;
     } catch {
       data = null;
     }
 
     if (!response.ok) {
-      const error = new Error(String(data?.message || data?.error || 'Request failed'));
+      const fallbackMessage = response.status === 404
+        ? `API endpoint not found (${response.status}): ${path}`
+        : `Request failed (${response.status})`;
+      const error = new Error(String(data?.message || data?.error || fallbackMessage));
       error.status = response.status;
       error.data = data || {};
+      error.responseText = rawResponse;
       throw error;
     }
 
     return data || {};
+  }
+
+  async function ensureAdminSession() {
+    try {
+      const result = await apiRequest('/api/auth/me');
+      if (String(result?.user?.role || '').toLowerCase() !== 'admin') {
+        throw new Error('Admin access is required.');
+      }
+      return true;
+    } catch (error) {
+      toast('Admin sign-in required', error.message || 'Please sign in with the admin account.', 'warning');
+      window.setTimeout(() => {
+        window.location.replace('/merch/auth.html?returnTo=/merch/admin/index.html');
+      }, 250);
+      return false;
+    }
   }
 
   const categoryList = [
@@ -221,6 +944,13 @@
       archived: false,
       image: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146',
       description: 'Heavyweight 450 GSM organic cotton blend hoodie in black.',
+      variants: [
+        { id: 1, size: 'S', color: 'Black', price: 3499, stock: 25, sku: 'HM-HOD-BLK-S' },
+        { id: 2, size: 'M', color: 'Black', price: 3499, stock: 30, sku: 'HM-HOD-BLK-M' },
+        { id: 3, size: 'L', color: 'Black', price: 3499, stock: 20, sku: 'HM-HOD-BLK-L' },
+        { id: 4, size: 'XL', color: 'Black', price: 3499, stock: 15, sku: 'HM-HOD-BLK-XL' },
+        { id: 5, size: 'XXL', color: 'Black', price: 3499, stock: 10, sku: 'HM-HOD-BLK-XXL' },
+      ],
     },
     {
       id: 2,
@@ -240,6 +970,13 @@
       archived: false,
       image: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.30034b.jpg?v=1770377146',
       description: 'Earth-toned variant of the Zenith heavyweight hoodie.',
+      variants: [
+        { id: 6, size: 'S', color: 'Sand', price: 3499, stock: 20, sku: 'HM-HOD-SND-S' },
+        { id: 7, size: 'M', color: 'Sand', price: 3499, stock: 25, sku: 'HM-HOD-SND-M' },
+        { id: 8, size: 'L', color: 'Sand', price: 3499, stock: 18, sku: 'HM-HOD-SND-L' },
+        { id: 9, size: 'XL', color: 'Sand', price: 3499, stock: 12, sku: 'HM-HOD-SND-XL' },
+        { id: 10, size: 'XXL', color: 'Sand', price: 3499, stock: 8, sku: 'HM-HOD-SND-XXL' },
+      ],
     },
     {
       id: 3,
@@ -259,6 +996,12 @@
       archived: false,
       image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113',
       description: 'Hydrogen-rich water bottle with 300ml and 500ml variants.',
+      variants: [
+        { id: 11, size: '300ml', color: 'Silver', price: 6999, stock: 40, sku: 'HM-BTL-300-SLV' },
+        { id: 12, size: '500ml', color: 'Silver', price: 6499, stock: 35, sku: 'HM-BTL-500-SLV' },
+        { id: 13, size: '300ml', color: 'Black', price: 7499, stock: 30, sku: 'HM-BTL-300-BLK' },
+        { id: 14, size: '500ml', color: 'Black', price: 8499, stock: 25, sku: 'HM-BTL-500-BLK' },
+      ],
     },
     {
       id: 4,
@@ -278,24 +1021,82 @@
       archived: false,
       image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138',
       description: 'Hydrogen mist and spray range with white and rose-gold variants.',
+      variants: [
+        { id: 15, size: '50ml', color: 'White', price: 2499, stock: 50, sku: 'HM-SPR-050-WHT' },
+        { id: 16, size: '100ml', color: 'White', price: 3499, stock: 40, sku: 'HM-SPR-100-WHT' },
+        { id: 17, size: '50ml', color: 'Rose Gold', price: 2799, stock: 35, sku: 'HM-SPR-050-RSG' },
+        { id: 18, size: '100ml', color: 'Rose Gold', price: 3799, stock: 30, sku: 'HM-SPR-100-RSG' },
+      ],
     },
   ];
+
+  function expandProductVariants(products) {
+    return products.flatMap((product) => {
+      const variants = Array.isArray(product.variants) && product.variants.length
+        ? product.variants
+        : [{ id: product.id, size: '', color: '', price: product.price, stock: product.stock, sku: product.primarySku || product.sku }];
+      return variants.map((variant) => ({
+        ...product,
+        ...variant,
+        id: variant.id,
+        productId: product.id,
+        parentProductId: product.id,
+        variantId: variant.id,
+        sku: variant.sku || product.primarySku || product.sku,
+        price: Number(variant.price || product.price || 0),
+        priceLabel: catalogPrice(Number(variant.price || product.price || 0)),
+        stock: Number(variant.stock || 0),
+        variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '),
+      }));
+    });
+  }
 
   const ordersList = [];
   const customersList = [];
   const couponsList = [];
   const influencersList = [];
-  const notificationsList = [];
+  const NOTIFICATION_META = {
+    'New Order': { icon: '&#128994;', className: 'admin-notification__icon--success' },
+    'Low Stock': { icon: '&#128992;', className: 'admin-notification__icon--warning' },
+    'Out of Stock': { icon: '&#128308;', className: 'admin-notification__icon--danger' },
+    'Payment Failed': { icon: '&#128308;', className: 'admin-notification__icon--danger' },
+    'Payment Received': { icon: '&#128994;', className: 'admin-notification__icon--success' },
+    'New Customer': { icon: '&#128994;', className: 'admin-notification__icon--info' },
+    'Coupon Expiring': { icon: '&#128992;', className: 'admin-notification__icon--warning' },
+    'Coupon Created': { icon: '&#128994;', className: 'admin-notification__icon--info' },
+    'Coupon Disabled': { icon: '&#128308;', className: 'admin-notification__icon--danger' },
+    'Influencer Referral': { icon: '&#128994;', className: 'admin-notification__icon--info' },
+    'Order Cancelled': { icon: '&#128308;', className: 'admin-notification__icon--danger' },
+    'Order Refunded': { icon: '&#128992;', className: 'admin-notification__icon--warning' },
+  };
+
+  // Shape this feed like an API response so the sample data can be replaced without changing the renderer.
+  const notificationsList = [
+    { id: 'note-1038', type: 'Low Stock', title: 'Low Stock', message: 'Hydrogen Mist Spray has only 4 units remaining.', time: new Date(Date.now() - 2 * 60000).toISOString(), read: false },
+    { id: 'note-1037', type: 'New Order', title: 'New Order', message: 'Order #HM-1038 placed by Rahul Sharma.', time: new Date(Date.now() - 5 * 60000).toISOString(), read: false },
+    { id: 'note-1036', type: 'Payment Failed', title: 'Payment Failed', message: 'Order #HM-1035 payment failed.', time: new Date(Date.now() - 12 * 60000).toISOString(), read: false },
+    { id: 'note-1035', type: 'Payment Received', title: 'Payment Received', message: 'Payment received for Order #HM-1034.', time: new Date(Date.now() - 38 * 60000).toISOString(), read: true },
+    { id: 'note-1034', type: 'New Customer', title: 'New Customer', message: 'Ananya Mehta created a new merch account.', time: new Date(Date.now() - 2 * 3600000).toISOString(), read: true },
+    { id: 'note-1033', type: 'Coupon Expiring', title: 'Coupon Expiring', message: 'WELCOME10 expires in 2 days.', time: new Date(Date.now() - 5 * 3600000).toISOString(), read: true },
+    { id: 'note-1032', type: 'Influencer Referral', title: 'Influencer Referral', message: 'Maya Rao referred a new order with H2MAYA.', time: new Date(Date.now() - 24 * 3600000).toISOString(), read: true },
+    { id: 'note-1031', type: 'Order Cancelled', title: 'Order Cancelled', message: 'Order #HM-1031 was cancelled by the customer.', time: new Date(Date.now() - 27 * 3600000).toISOString(), read: true },
+  ];
 
   const initialState = {
     view: 'dashboard',
     sidebarOpen: false,
-    notificationsOpen: false,
+    notificationsExpanded: false,
+    revenuePeriod: 'month',
+    orderStatusPeriod: 'today',
+    orderStatusFrom: toISODate(today),
+    orderStatusTo: toISODate(today),
+    orderStatusAppliedFrom: toISODate(today),
+    orderStatusAppliedTo: toISODate(today),
     selectedProductIds: [],
     selectedProductId: 101,
-    selectedOrderId: 50031,
+    selectedOrderId: null,
     selectedCustomerId: null,
-    selectedCouponId: 1,
+    selectedCouponId: null,
     selectedInfluencerId: null,
     productsSearch: '',
     productsCategory: 'all',
@@ -305,13 +1106,24 @@
     ordersLoading: false,
     ordersSearch: '',
     ordersStatus: 'all',
+    ordersTodayOnly: false,
+    ordersDateFrom: '',
+    ordersDateTo: '',
+    ordersAppliedDateFrom: '',
+    ordersAppliedDateTo: '',
     ordersPage: 1,
     customersSearch: '',
+    customersTodayOnly: false,
+    customersDateFrom: '',
+    customersDateTo: '',
+    customersAppliedDateFrom: '',
+    customersAppliedDateTo: '',
     couponsSearch: '',
     couponsLoading: false,
     influencersLoading: false,
     reportsLoading: false,
     influencersSearch: '',
+    influencerDetailsFilter: 'all',
     reportFrom: daysAgo(29),
     reportTo: toISODate(today),
     reportFormat: 'csv',
@@ -332,7 +1144,7 @@
 
   const state = {
     ...initialState,
-    products: productsList,
+    products: expandProductVariants(productsList),
     categories: categoryList,
     orders: ordersList,
     customers: customersList,
@@ -343,6 +1155,7 @@
     modalType: '',
     modalEntityId: null,
     customersLoading: false,
+    dashboardStats: null,
     reports: null,
   };
 
@@ -361,8 +1174,7 @@
     influencersView: document.getElementById('influencersView'),
     reportsView: document.getElementById('reportsView'),
     settingsView: document.getElementById('settingsView'),
-    notificationsDrawer: document.getElementById('notificationsDrawer'),
-    notificationsList: document.getElementById('notificationsList'),
+    notificationBadgeCount: document.getElementById('notificationBadgeCount'),
     adminModal: document.getElementById('adminModal'),
     adminModalDialog: document.getElementById('adminModalDialog'),
     toastRegion: document.getElementById('toastRegion'),
@@ -372,6 +1184,23 @@
 
   function getCategoryName(categoryId) {
     return state.categories.find((item) => Number(item.id) === Number(categoryId))?.name || 'Uncategorized';
+  }
+
+  function getProductFallbackImage(product) {
+    const category = String(product?.category || '').toLowerCase();
+    const name = String(product?.name || '').toLowerCase();
+    if (category.includes('spray') || category === 'sprays' || name.includes('mist') || name.includes('spray')) return '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138';
+    if (category.includes('bottle') || category === 'bottles' || name.includes('bottle')) return '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113';
+    if (category.includes('hoodie') || name.includes('hoodie')) return '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg';
+    return '/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=120';
+  }
+
+  function normalizeAdminImageUrl(value, fallback = '') {
+    const raw = String(value || '').trim();
+    if (!raw) return fallback;
+    if (/^(https?:|data:|blob:)/i.test(raw) || raw.startsWith('/')) return raw;
+    if (raw.startsWith('cdn/') || raw.startsWith('booking/') || raw.startsWith('uploads/')) return `/${raw}`;
+    return `/cdn/shop/files/${raw}`;
   }
 
   function getStatusLabel(status) {
@@ -415,9 +1244,40 @@
     els.sidebarOverlay.hidden = !state.sidebarOpen;
   }
 
-  function setNotificationsOpen(isOpen) {
-    state.notificationsOpen = Boolean(isOpen);
-    els.notificationsDrawer.hidden = !state.notificationsOpen;
+  function getActiveNotifications() {
+    return state.notifications
+      .filter((item) => !item.dismissedAt)
+      .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+  }
+
+  function relativeTime(value) {
+    const parsed = new Date(value);
+    const seconds = Math.max(0, Math.floor((Date.now() - parsed.getTime()) / 1000));
+    if (seconds < 60) return 'Just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} minute${Math.floor(seconds / 60) === 1 ? '' : 's'} ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} hour${Math.floor(seconds / 3600) === 1 ? '' : 's'} ago`;
+    if (seconds < 172800) return 'Yesterday';
+    return `${Math.floor(seconds / 86400)} days ago`;
+  }
+
+  function renderNotificationItem(item) {
+    const meta = NOTIFICATION_META[item.type] || { icon: '&#128276;', className: 'admin-notification__icon--info' };
+    return `
+      <article class="admin-notification ${item.read ? '' : 'is-unread'}">
+        <span class="admin-notification__icon ${meta.className}" aria-hidden="true">${meta.icon}</span>
+        <div class="admin-notification__content">
+          <div class="admin-notification__title-row">
+            <h4>${escapeHtml(item.title || item.type || 'Notification')}</h4>
+            ${item.read ? '' : '<span class="admin-notification__unread" aria-label="Unread"></span>'}
+          </div>
+          <p>${escapeHtml(item.message)}</p>
+          <time datetime="${escapeHtml(item.time)}">${escapeHtml(relativeTime(item.time))}</time>
+        </div>
+        <button class="admin-notification__close" type="button" data-action="dismiss-notification" data-notification-id="${escapeHtml(item.id)}" aria-label="Close ${escapeHtml(item.title || 'notification')}">
+          <span aria-hidden="true">&times;</span><span>Close</span>
+        </button>
+      </article>
+    `;
   }
 
   function openModal({ title, subtitle = '', body = '', footer = '', size = 'md' }) {
@@ -473,13 +1333,13 @@
     const revenue = state.orders
       .filter((order) => ['paid', 'refunded'].includes(order.paymentStatus) || order.status === 'delivered' || order.status === 'shipped')
       .reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
-    const pending = state.orders.filter((order) => order.status === 'pending').length;
-    const processing = state.orders.filter((order) => order.status === 'processing').length;
-    const shipped = state.orders.filter((order) => order.status === 'shipped').length;
-    const delivered = state.orders.filter((order) => order.status === 'delivered').length;
-    const cancelled = state.orders.filter((order) => order.status === 'cancelled').length;
-    const returned = state.orders.filter((order) => order.status === 'returned').length;
-    const lowStock = state.products.filter((product) => Number(product.stock) <= Number(product.lowStockThreshold || 10) && product.status !== 'archived').length;
+    const pending = state.orders.filter((order) => normalizeOrderStatus(order.status ?? order.orderStatus) === 'pending').length;
+    const processing = state.orders.filter((order) => normalizeOrderStatus(order.status ?? order.orderStatus) === 'processing').length;
+    const shipped = state.orders.filter((order) => normalizeOrderStatus(order.status ?? order.orderStatus) === 'shipped').length;
+    const delivered = state.orders.filter((order) => normalizeOrderStatus(order.status ?? order.orderStatus) === 'delivered').length;
+    const cancelled = state.orders.filter((order) => normalizeOrderStatus(order.status ?? order.orderStatus) === 'cancelled').length;
+    const returned = state.orders.filter((order) => normalizeOrderStatus(order.status ?? order.orderStatus) === 'returned').length;
+    const lowStock = state.products.filter((product) => product.status !== 'archived' && Number(product.stock || 0) > 0 && Number(product.stock || 0) <= LOW_STOCK_THRESHOLD).length;
 
     return [
       { label: "Today's Orders", value: todayOrders, note: 'Placed since midnight', trend: '+18%', up: true },
@@ -491,7 +1351,7 @@
       { label: 'Delivered Orders', value: delivered, note: `${cancelled} cancelled`, trend: '+14%', up: true },
       { label: 'Cancelled Orders', value: cancelled, note: `${returned} returned`, trend: '-2%', up: false },
       { label: 'Returned Orders', value: returned, note: 'Post-delivery returns', trend: '-1%', up: false },
-      { label: 'Low Stock Products', value: lowStock, note: 'Needs replenishment', trend: '-5%', up: false },
+      { label: 'Low Stock Products', value: lowStock, note: `At or below ${LOW_STOCK_THRESHOLD} units remaining`, trend: '-5%', up: false },
     ];
   }
 
@@ -528,6 +1388,107 @@
       .join('');
   }
 
+  function formatMonthLabel(monthKey) {
+    if (!monthKey) return 'Unknown';
+    const parsed = new Date(`${String(monthKey)}-01T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return String(monthKey);
+    return new Intl.DateTimeFormat('en-IN', {
+      month: 'short',
+      year: 'numeric',
+    }).format(parsed);
+  }
+
+  function buildMonthlyRevenueSeries(orders = []) {
+    const monthlyMap = new Map();
+    for (const order of Array.isArray(orders) ? orders : []) {
+      const paymentStatus = String(order.paymentStatus || '').toLowerCase();
+      if (!['paid', 'cod_pending'].includes(paymentStatus)) continue;
+      const monthKey = String(order.createdAt || '').slice(0, 7);
+      if (!monthKey) continue;
+      const entry = monthlyMap.get(monthKey) || { month: monthKey, revenue: 0, orders: 0 };
+      entry.revenue += Number(order.totalAmount || 0);
+      entry.orders += 1;
+      monthlyMap.set(monthKey, entry);
+    }
+    return [...monthlyMap.values()]
+      .sort((left, right) => String(left.month).localeCompare(String(right.month)))
+      .map((row) => ({
+        month: row.month,
+        monthLabel: formatMonthLabel(row.month),
+        revenue: row.revenue,
+        orders: row.orders,
+        display: money(row.revenue),
+      }));
+  }
+
+  function getRevenueForPeriod(period, monthlyRevenueSeries) {
+    const currentMonthKey = `${today.getFullYear()}-${pad(today.getMonth() + 1)}`;
+    if (period === 'month') {
+      return Number(monthlyRevenueSeries.find((row) => String(row.month) === currentMonthKey)?.revenue || 0);
+    }
+
+    const start = new Date(today);
+    start.setHours(0, 0, 0, 0);
+    if (period === 'week') {
+      const day = start.getDay();
+      start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
+    } else if (period === 'quarter') {
+      start.setMonth(Math.floor(start.getMonth() / 3) * 3, 1);
+    } else if (period === 'year') {
+      start.setMonth(0, 1);
+    }
+
+    return state.orders
+      .filter((order) => ['paid', 'cod_pending'].includes(String(order.paymentStatus || '').toLowerCase()))
+      .filter((order) => {
+        const createdAt = new Date(String(order.createdAt || '').replace(' ', 'T'));
+        return !Number.isNaN(createdAt.getTime()) && createdAt >= start;
+      })
+      .reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
+  }
+
+  function getCouponOverview() {
+    const coupons = Array.isArray(state.coupons) ? state.coupons : [];
+    const isActive = (coupon) => Number(coupon.active ?? coupon.isActive ?? 0) === 1;
+    const isExpired = (coupon) => {
+      const expiry = String(coupon.validTill || coupon.expiresAt || coupon.expiry || '').trim();
+      return Boolean(expiry) && new Date(expiry).getTime() < Date.now();
+    };
+    const redemptionsFor = (coupon) => Number(coupon.totalRedemptions || coupon.redemptions || coupon.usageCount || 0);
+    const totalRedemptions = coupons.reduce((sum, coupon) => sum + redemptionsFor(coupon), 0);
+    const totalDiscountAmount = coupons.reduce((sum, coupon) => {
+      const explicitAmount = Number(coupon.totalDiscountAmount || coupon.discountAmount || 0);
+      const discountValue = Number(coupon.discountValue || coupon.discount || 0);
+      return sum + (explicitAmount || redemptionsFor(coupon) * discountValue);
+    }, 0);
+    const topCoupon = [...coupons].sort((left, right) => redemptionsFor(right) - redemptionsFor(left))[0];
+
+    return {
+      total: coupons.length,
+      active: coupons.filter(isActive).length,
+      expiredOrDisabled: coupons.filter((coupon) => !isActive(coupon) || isExpired(coupon)).length,
+      totalRedemptions,
+      totalDiscountAmount,
+      topCoupon: topCoupon && redemptionsFor(topCoupon) > 0 ? `${topCoupon.code || 'Coupon'} · ${formatCount(redemptionsFor(topCoupon))} redemptions` : 'No redemption data yet',
+    };
+  }
+
+  function getDashboardSnapshot() {
+    const stats = state.dashboardStats || {};
+    const report = state.reports || {};
+    const orders = Array.isArray(state.orders) ? state.orders : [];
+    const monthlyRevenueSeries = Array.isArray(stats.monthlyRevenueSeries) && stats.monthlyRevenueSeries.length
+      ? stats.monthlyRevenueSeries
+      : Array.isArray(report.monthlyRevenueSeries) && report.monthlyRevenueSeries.length
+        ? report.monthlyRevenueSeries
+        : buildMonthlyRevenueSeries(orders);
+    return {
+      summary: stats.summary || report.summary || {},
+      monthlyRevenueSeries,
+      statusBreakdown: stats.statusBreakdown || report.statusBreakdown || {},
+    };
+  }
+
   function renderEmptyState(title, message, actionLabel = '', actionId = '') {
     return `
       <div class="admin-list__item" style="padding:18px;">
@@ -539,6 +1500,36 @@
   }
 
   function renderDashboard() {
+    const dashboard = getDashboardSnapshot();
+    const summary = dashboard.summary || {};
+    const monthlyRevenueSeries = Array.isArray(dashboard.monthlyRevenueSeries) ? dashboard.monthlyRevenueSeries : [];
+    const couponOverview = getCouponOverview();
+    const selectedOrderStatusPeriod = ORDER_STATUS_PERIOD_OPTIONS.find((option) => option.value === state.orderStatusPeriod) || ORDER_STATUS_PERIOD_OPTIONS[0];
+    const filteredOrderStatusOrders = filterOrdersByStatusPeriod(
+      state.orders,
+      selectedOrderStatusPeriod.value,
+      state.orderStatusAppliedFrom,
+      state.orderStatusAppliedTo
+    );
+    const liveOrderDistribution = buildOrderStatusDistribution(filteredOrderStatusOrders);
+    const liveOrderCount = liveOrderDistribution.total;
+    const orderStatusPeriodSubtitle = selectedOrderStatusPeriod.value === 'custom' && state.orderStatusAppliedFrom && state.orderStatusAppliedTo
+      ? `From ${dateLabel(state.orderStatusAppliedFrom)} to ${dateLabel(state.orderStatusAppliedTo)}`
+      : `Live breakdown for ${selectedOrderStatusPeriod.label.toLowerCase()}`;
+    const currentMonthKey = `${today.getFullYear()}-${pad(today.getMonth() + 1)}`;
+    const selectedRevenuePeriod = REVENUE_PERIOD_OPTIONS.find((option) => option.value === state.revenuePeriod) || REVENUE_PERIOD_OPTIONS[2];
+    const selectedRevenue = getRevenueForPeriod(selectedRevenuePeriod.value, monthlyRevenueSeries);
+    const monthlyRevenueMax = Math.max(1, ...monthlyRevenueSeries.map((row) => Number(row.revenue || 0)));
+    const monthlyChartRows = monthlyRevenueSeries.slice(-6).map((row) => ({
+      label: row.monthLabel || formatMonthLabel(row.month),
+      value: (Number(row.revenue || 0) / monthlyRevenueMax) * 100,
+      display: money(row.revenue || 0),
+    }));
+    const activeNotifications = getActiveNotifications();
+    const visibleNotifications = state.notificationsExpanded ? activeNotifications : activeNotifications.slice(0, 5);
+    const unreadNotificationCount = state.notifications.filter((item) => !item.read && !item.dismissedAt).length;
+    if (els.notificationBadgeCount) els.notificationBadgeCount.textContent = String(unreadNotificationCount);
+
     els.dashboardView.innerHTML = `
       <section class="admin-section">
         <div class="admin-section__head">
@@ -548,212 +1539,131 @@
           </div>
         </div>
         <div class="admin-section__body">
+          <div class="admin-card-grid admin-card-grid--1">
+            <article class="admin-card">
+              <div class="admin-card__head">
+                <h3 class="admin-card__title">Live Notifications</h3>
+                <p class="admin-card__sub">Latest activity from your merch operations</p>
+              </div>
+              <div class="admin-card__body admin-notifications">
+                ${visibleNotifications.length ? visibleNotifications.map(renderNotificationItem).join('') : renderEmptyState('All caught up', 'There are no active notifications right now.')}
+              </div>
+              ${activeNotifications.length > 5 ? `<div class="admin-card__foot admin-notifications__foot"><button class="admin-btn admin-btn--soft" type="button" data-action="toggle-notifications">${state.notificationsExpanded ? 'Show Less' : 'View More'}</button></div>` : ''}
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="admin-section">
+        <div class="admin-section__head">
+          <div>
+            <h2 class="admin-section__title">Revenue Overview</h2>
+            <p class="admin-section__desc">Revenue, orders, customer activity, and coupon usage streamed from the merch API.</p>
+          </div>
+        </div>
+        <div class="admin-section__body admin-card-grid admin-card-grid--3">
+          <article class="admin-card">
+            <div class="admin-card__head admin-card__head--with-filter">
+              <div>
+                <h3 class="admin-card__title">Monthly Revenue</h3>
+                <p class="admin-card__sub">Revenue totals from live orders</p>
+              </div>
+              <label class="admin-revenue-filter">
+                <span class="admin-sr-only">Revenue period</span>
+                <select class="admin-select" data-input="revenuePeriod" aria-label="Revenue period">
+                  ${REVENUE_PERIOD_OPTIONS.map((option) => `<option value="${option.value}"${option.value === selectedRevenuePeriod.value ? ' selected' : ''}${option.disabled ? ' disabled' : ''}>${option.label}</option>`).join('')}
+                </select>
+              </label>
+            </div>
+            <div class="admin-card__body admin-mini-chart">
+              <p class="admin-stat__value" style="margin:0 0 10px;">${escapeHtml(money(selectedRevenue))}</p>
+              <p class="admin-table__muted" style="margin:0 0 12px;">${escapeHtml(selectedRevenuePeriod.label)}${selectedRevenuePeriod.value === 'month' ? ` · ${escapeHtml(formatMonthLabel(currentMonthKey))}` : ''}</p>
+              ${renderMiniChart(monthlyChartRows.length ? monthlyChartRows : [{ label: 'No revenue yet', value: 0, display: money(0) }])}
+            </div>
+          </article>
+
+          <article class="admin-card">
+            <div class="admin-card__head">
+              <h3 class="admin-card__title">Revenue Overview Chart</h3>
+              <p class="admin-card__sub">Monthly trend from the backend report feed</p>
+            </div>
+            <div class="admin-card__body admin-mini-chart">
+              ${monthlyChartRows.length ? renderMiniChart(monthlyChartRows) : '<p class="admin-table__muted" style="margin:0;">No monthly revenue data is available yet.</p>'}
+            </div>
+          </article>
+
+          <article class="admin-card">
+            <div class="admin-card__head admin-card__head--with-filter admin-order-status__head">
+              <div>
+                <h3 class="admin-card__title">Order Status Distribution</h3>
+                <p class="admin-card__sub">${escapeHtml(orderStatusPeriodSubtitle)}</p>
+              </div>
+              <div class="admin-status-filter">
+                <label>
+                  <span class="admin-sr-only">Order status period</span>
+                  <select class="admin-select" data-input="orderStatusPeriod" aria-label="Order status period">
+                    ${ORDER_STATUS_PERIOD_OPTIONS.map((option) => `<option value="${option.value}"${option.value === selectedOrderStatusPeriod.value ? ' selected' : ''}>${option.label}</option>`).join('')}
+                  </select>
+                </label>
+                ${selectedOrderStatusPeriod.value === 'custom' ? `
+                  <div class="admin-order-status-range">
+                    <label><span>From</span><input class="admin-input" type="date" data-input="orderStatusFrom" value="${escapeHtml(state.orderStatusFrom)}" /></label>
+                    <label><span>To</span><input class="admin-input" type="date" data-input="orderStatusTo" value="${escapeHtml(state.orderStatusTo)}" /></label>
+                    <button class="admin-btn admin-btn--soft" type="button" data-action="apply-order-status-range">Apply</button>
+                    <button class="admin-btn admin-btn--ghost" type="button" data-action="clear-order-status-range" ${state.orderStatusAppliedFrom || state.orderStatusAppliedTo || state.orderStatusFrom || state.orderStatusTo ? '' : 'disabled'}>Clear</button>
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+            <div class="admin-card__body" style="display:grid;gap:12px;">
+              ${renderOrderStatusRing(liveOrderDistribution)}
+              <div class="admin-chip-row" style="justify-content:center;">
+                ${renderStatusLegend(liveOrderDistribution)}
+              </div>
+              <p class="admin-table__muted" style="margin:0;">${escapeHtml(getOrderStatusPeriodSummary(selectedOrderStatusPeriod.value, selectedOrderStatusPeriod.label, liveOrderCount, state.orderStatusAppliedFrom, state.orderStatusAppliedTo))}</p>
+            </div>
+          </article>
+        </div>
+      </section>
+      <section class="admin-section">
+        <div class="admin-section__body">
           <div class="admin-card-grid admin-card-grid--2">
             <article class="admin-card">
               <div class="admin-card__head">
-                <h3 class="admin-card__title">Catalog Sync</h3>
-                <p class="admin-card__sub">Pulled from the storefront product list</p>
+                <h3 class="admin-card__title">Coupon Overview</h3>
+                <p class="admin-card__sub">Current coupon performance summary</p>
+              </div>
+              <div class="admin-card__body admin-coupon-overview">
+                <div class="admin-coupon-overview__item"><span>Total Coupons</span><strong>${formatCount(couponOverview.total)}</strong></div>
+                <div class="admin-coupon-overview__item"><span>Active Coupons</span><strong>${formatCount(couponOverview.active)}</strong></div>
+                <div class="admin-coupon-overview__item"><span>Expired / Disabled</span><strong>${formatCount(couponOverview.expiredOrDisabled)}</strong></div>
+                <div class="admin-coupon-overview__item"><span>Total Redemptions</span><strong>${formatCount(couponOverview.totalRedemptions)}</strong></div>
+                <div class="admin-coupon-overview__item"><span>Total discount</span><strong>${escapeHtml(money(couponOverview.totalDiscountAmount))}</strong></div>
+                <div class="admin-coupon-overview__item admin-coupon-overview__item--wide"><span>Top Performing Coupon</span><strong>${escapeHtml(couponOverview.topCoupon)}</strong></div>
+              </div>
+            </article>
+
+            <article class="admin-card">
+              <div class="admin-card__head">
+                <h3 class="admin-card__title">Top Selling Products</h3>
+                <p class="admin-card__sub">Using storefront catalog prices</p>
               </div>
               <div class="admin-card__body admin-list">
-                ${state.products.map((product) => `
+                ${state.products.slice(0, 5).map((product) => `
                   <div class="admin-list__item">
                     <div class="admin-list__item-head">
                       <div>
                         <p class="admin-list__item-title">${escapeHtml(product.name)}</p>
                         <p class="admin-list__item-sub">${escapeHtml(product.category)}</p>
                       </div>
-                      <span class="admin-badge ${statusClass(product.status)}">${escapeHtml(getStatusLabel(product.status))}</span>
+                      <strong>${escapeHtml(product.priceLabel || catalogPrice(product.price))}</strong>
                     </div>
-                    <p class="admin-table__muted">${escapeHtml(product.priceLabel || money(product.price))} · ${escapeHtml(product.primarySku || 'SKU pending')}</p>
                   </div>
                 `).join('')}
               </div>
             </article>
-
-            <article class="admin-card">
-              <div class="admin-card__head">
-                <h3 class="admin-card__title">Wiring Status</h3>
-                <p class="admin-card__sub">What is connected right now</p>
-              </div>
-              <div class="admin-card__body admin-list">
-                <div class="admin-list__item">
-                  <p class="admin-list__item-title">Products</p>
-                  <p class="admin-list__item-sub">Connected to the storefront catalog data.</p>
-                </div>
-                <div class="admin-list__item">
-                  <p class="admin-list__item-title">Orders</p>
-                  <p class="admin-list__item-sub">Synced from the merch order table and refreshed on admin load.</p>
-                </div>
-                <div class="admin-list__item">
-                  <p class="admin-list__item-title">Customers</p>
-                  <p class="admin-list__item-sub">Built from live merch profiles and completed orders.</p>
-                </div>
-                <div class="admin-list__item">
-                  <p class="admin-list__item-title">Coupons and Influencers</p>
-                  <p class="admin-list__item-sub">Loaded from the shared coupon store and merch influencer table.</p>
-                </div>
-              </div>
-            </article>
-          </div>
         </div>
       </section>
-
-      <div class="admin-view__split">
-        <section class="admin-section">
-          <div class="admin-section__head">
-            <div>
-              <h2 class="admin-section__title">Revenue Overview</h2>
-              <p class="admin-section__desc">Monthly sales trend and distribution snapshots.</p>
-            </div>
-          </div>
-          <div class="admin-section__body admin-card-grid admin-card-grid--2">
-            <article class="admin-card">
-              <div class="admin-card__head">
-                <h3 class="admin-card__title">Monthly Revenue</h3>
-                <p class="admin-card__sub">Waiting for backend revenue data</p>
-              </div>
-              <div class="admin-card__body">
-                <p class="admin-table__muted" style="margin:0;">Revenue graphs will appear here after the reports API is connected.</p>
-              </div>
-            </article>
-            <article class="admin-card">
-              <div class="admin-card__head">
-                <h3 class="admin-card__title">Order Status Distribution</h3>
-                <p class="admin-card__sub">Waiting for order data</p>
-              </div>
-              <div class="admin-card__body" style="display:grid;gap:12px;">
-                <div class="admin-chart-ring" style="margin-inline:auto;">
-                  <span>
-                    <strong>API</strong>
-                    <small>Pending</small>
-                  </span>
-                </div>
-                <p class="admin-table__muted" style="margin:0;">Order distribution charts will render once the backend returns real counts.</p>
-              </div>
-            </article>
-          </div>
-        </section>
-
-        <section class="admin-section">
-          <div class="admin-section__head">
-            <div>
-              <h2 class="admin-section__title">Quick Activity</h2>
-              <p class="admin-section__desc">No live operational feed is connected yet.</p>
-            </div>
-          </div>
-          <div class="admin-section__body admin-list">
-            <div class="admin-list__item">
-              <p class="admin-list__item-title">Orders</p>
-              <p class="admin-list__item-sub">This panel will show new orders, payment alerts, and fulfillment changes.</p>
-            </div>
-            <div class="admin-list__item">
-              <p class="admin-list__item-title">Stock</p>
-              <p class="admin-list__item-sub">Low-stock and replenishment alerts will appear here.</p>
-            </div>
-            <div class="admin-list__item">
-              <p class="admin-list__item-title">Coupons</p>
-              <p class="admin-list__item-sub">Coupon expiry and usage spikes will appear here.</p>
-            </div>
-            <div class="admin-list__item">
-              <p class="admin-list__item-title">Customers</p>
-              <p class="admin-list__item-sub">New registrations and customer activity will appear here.</p>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <div class="admin-card-grid admin-card-grid--2">
-        <section class="admin-card">
-          <div class="admin-card__head">
-            <h3 class="admin-card__title">Recent Orders</h3>
-            <p class="admin-card__sub">Waiting for the order API</p>
-          </div>
-          <div class="admin-card__body">
-            <p class="admin-table__muted" style="margin:0;">No live order data is connected yet.</p>
-          </div>
-        </section>
-
-        <section class="admin-card">
-          <div class="admin-card__head">
-            <h3 class="admin-card__title">Latest Customers</h3>
-            <p class="admin-card__sub">Waiting for customer API data</p>
-          </div>
-          <div class="admin-card__body">
-            <p class="admin-table__muted" style="margin:0;">Customer profiles will appear here after the backend is wired.</p>
-          </div>
-        </section>
-      </div>
-
-      <div class="admin-card-grid admin-card-grid--3">
-        <section class="admin-card">
-          <div class="admin-card__head">
-            <h3 class="admin-card__title">Recent Payments</h3>
-            <p class="admin-card__sub">Waiting for payment data</p>
-          </div>
-          <div class="admin-card__body">
-            <p class="admin-table__muted" style="margin:0;">Payment entries will appear when the checkout and payment APIs are connected.</p>
-          </div>
-        </section>
-
-        <section class="admin-card">
-          <div class="admin-card__head">
-            <h3 class="admin-card__title">Recent Coupon Usage</h3>
-            <p class="admin-card__sub">Waiting for coupon usage data</p>
-          </div>
-          <div class="admin-card__body">
-            <p class="admin-table__muted" style="margin:0;">Coupon performance metrics will appear once a real source is wired in.</p>
-          </div>
-        </section>
-
-        <section class="admin-card">
-          <div class="admin-card__head">
-            <h3 class="admin-card__title">Top Selling Products</h3>
-            <p class="admin-card__sub">Using storefront catalog prices</p>
-          </div>
-          <div class="admin-card__body admin-list">
-            ${state.products.map((product) => `
-              <div class="admin-list__item">
-                <div class="admin-list__item-head">
-                  <div>
-                    <p class="admin-list__item-title">${escapeHtml(product.name)}</p>
-                    <p class="admin-list__item-sub">${escapeHtml(product.category)}</p>
-                  </div>
-                  <strong>${escapeHtml(product.priceLabel || money(product.price))}</strong>
-                </div>
-              </div>
-            `).join('')}
-          </div>
-        </section>
-      </div>
-
-      <div class="admin-card-grid admin-card-grid--2">
-        <section class="admin-card">
-          <div class="admin-card__head">
-            <h3 class="admin-card__title">Top Categories</h3>
-            <p class="admin-card__sub">Storefront categories only</p>
-          </div>
-          <div class="admin-card__body">
-            <div class="admin-list">
-              ${state.categories.map((category) => `
-                <div class="admin-list__item">
-                  <p class="admin-list__item-title">${escapeHtml(category.name)}</p>
-                  <p class="admin-list__item-sub">${escapeHtml(category.description)}</p>
-                </div>
-              `).join('')}
-            </div>
-          </div>
-        </section>
-
-        <section class="admin-card">
-          <div class="admin-card__head">
-            <h3 class="admin-card__title">Revenue Overview Chart</h3>
-            <p class="admin-card__sub">Pending revenue API</p>
-          </div>
-          <div class="admin-card__body">
-            <p class="admin-table__muted" style="margin:0;">Revenue charts are intentionally blank until we connect live reporting data.</p>
-          </div>
-        </section>
-      </div>
     `;
   }
 
@@ -795,7 +1705,7 @@
     const start = (state.productsPage - 1) * pageSize;
     const pageItems = filtered.slice(start, start + pageSize);
     const selectedCount = state.selectedProductIds.length;
-    const lowStockCount = state.products.filter((product) => !product.archived && product.stock <= product.lowStockThreshold).length;
+    const lowStockCount = getLowStockProducts(filtered).length;
 
     els.productsView.innerHTML = `
       <section class="admin-section">
@@ -829,19 +1739,19 @@
             </div>
             <div class="admin-toolbar__group">
               <button class="admin-btn admin-btn--soft" type="button" data-action="open-product-modal">Add Product</button>
-              <button class="admin-btn admin-btn--ghost" type="button" data-action="bulk-duplicate" ${selectedCount ? '' : 'disabled'}>Duplicate Selected</button>
+              <button class="admin-btn admin-btn--ghost" type="button" data-action="bulk-combo-on" ${selectedCount ? '' : 'disabled'}>Add to Combo</button>
+              <button class="admin-btn admin-btn--ghost" type="button" data-action="bulk-combo-off" ${selectedCount ? '' : 'disabled'}>Remove from Combo</button>
               <button class="admin-btn admin-btn--ghost" type="button" data-action="bulk-archive" ${selectedCount ? '' : 'disabled'}>Archive Selected</button>
               <button class="admin-btn admin-btn--danger" type="button" data-action="bulk-delete" ${selectedCount ? '' : 'disabled'}>Delete Selected</button>
             </div>
           </div>
 
-          <div class="admin-grid admin-grid--stats" style="margin-bottom:18px;">
+          <div class="admin-grid admin-grid--stats admin-product-kpis" style="margin-bottom:18px;">
             ${[
               { label: 'Products in view', value: filtered.length, note: 'Matching current filters', trend: '+8%', up: true },
-              { label: 'Low stock', value: lowStockCount, note: 'Needs replenishment', trend: '-2%', up: false },
+              { label: 'Low stock', value: lowStockCount, note: `At or below ${LOW_STOCK_THRESHOLD} units remaining`, trend: '-2%', up: false },
               { label: 'Archived', value: state.products.filter((product) => product.archived).length, note: 'Hidden from storefront', trend: '+1%', up: true },
-              { label: 'Featured', value: state.products.filter((product) => product.featured).length, note: 'Highlighted items', trend: '+3%', up: true },
-              { label: 'Avg. price', value: money(Math.round(state.products.reduce((sum, product) => sum + product.price, 0) / state.products.length || 0)), note: 'All catalog items', trend: '+5%', up: true },
+              { label: 'Combo products', value: new Set(state.products.filter((product) => product.isCombo).map((product) => Number(product.parentProductId || product.productId || product.id))).size, note: 'Published combo cards', trend: '+1%', up: true },
             ].map((item) => `
               <article class="admin-stat">
                 <div class="admin-stat__top">
@@ -856,6 +1766,16 @@
             `).join('')}
           </div>
 
+          <div class="admin-combo-guide" role="note">
+            <strong>How to create a combo product</strong>
+            <ol>
+              <li>Select at least two product variants using the checkboxes below.</li>
+              <li>Click <em>Add to Combo</em>, then add the combo image, details, and overall selling price.</li>
+              <li>The combo appears here as its own product and on the customer merch page.</li>
+              <li>Customers purchase the combo price while component stock is reduced automatically.</li>
+            </ol>
+          </div>
+
           ${selectedCount ? `<div class="admin-toolbar" style="margin:0 0 14px;"><strong>${selectedCount} selected</strong><span class="admin-table__muted">Bulk actions available</span></div>` : ''}
 
           <div class="admin-table-wrap">
@@ -865,6 +1785,7 @@
                   <th><input type="checkbox" data-action="toggle-product-page-selection" ${pageItems.length && pageItems.every((item) => state.selectedProductIds.includes(item.id)) ? 'checked' : ''} /></th>
                   <th>Image</th>
                   <th>Product</th>
+                  <th>Variant</th>
                   <th>SKU</th>
                   <th>Category</th>
                   <th>Price</th>
@@ -878,18 +1799,23 @@
                 ${pageItems.map((product) => `
                   <tr>
                     <td><input type="checkbox" data-action="toggle-product-selection" data-id="${product.id}" ${state.selectedProductIds.includes(product.id) ? 'checked' : ''} /></td>
-                    <td><img class="admin-thumb" src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}" /></td>
+                    <td><img class="admin-thumb" src="${escapeHtml(product.image || getProductFallbackImage(product))}" alt="${escapeHtml(product.name)}" onerror="this.onerror=null;this.src='${escapeHtml(getProductFallbackImage(product))}';" /></td>
                     <td><strong>${escapeHtml(product.name)}</strong><br><span class="admin-table__muted">${escapeHtml(product.description)}</span></td>
+                    <td>${escapeHtml(product.variantLabel || 'Default variant')}</td>
                     <td>${escapeHtml(product.sku)}</td>
                     <td>${escapeHtml(product.category)}</td>
-                    <td><strong>${escapeHtml(product.priceLabel || money(product.price))}</strong></td>
-                    <td>${escapeHtml(product.stock)}</td>
+                    <td><strong>${escapeHtml(product.priceLabel || catalogPrice(product.price))}</strong></td>
+                    <td>
+                      <div class="admin-list" style="gap:4px;">
+                        <input class="admin-input admin-stock-input" data-action="update-product-stock" data-id="${product.id}" type="number" min="0" value="${escapeHtml(product.stock)}" aria-label="Stock for ${escapeHtml(product.name)} ${escapeHtml(product.variantLabel || '')}" />
+                        <span class="admin-badge ${Number(product.stock || 0) <= LOW_STOCK_THRESHOLD ? 'admin-badge--inactive' : 'admin-badge--active'}">${escapeHtml(getLowStockLabel(product))}</span>
+                      </div>
+                    </td>
                     <td><span class="admin-badge ${statusClass(product.status)}">${escapeHtml(getStatusLabel(product.status))}</span></td>
                     <td>${escapeHtml(dateLabel(product.createdAt))}</td>
                     <td>
                       <div class="admin-actions">
                         <button class="admin-action-link" type="button" data-action="edit-product" data-id="${product.id}">Edit</button>
-                        <button class="admin-action-link" type="button" data-action="duplicate-product" data-id="${product.id}">Duplicate</button>
                         <button class="admin-action-link" type="button" data-action="archive-product" data-id="${product.id}">${product.archived ? 'Restore' : 'Archive'}</button>
                         <button class="admin-action-link" type="button" data-action="delete-product" data-id="${product.id}">Delete</button>
                       </div>
@@ -962,8 +1888,22 @@
     `;
   }
 
+  function getOrderCreatedAt(order) {
+    const rawValue = order?.createdAt ?? order?.created_at ?? order?.orderDate ?? order?.date ?? '';
+    const raw = String(rawValue).trim();
+    if (!raw) return new Date('invalid');
+    return new Date(/^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T00:00:00` : raw.replace(' ', 'T'));
+  }
+
   function filteredOrders() {
     const query = state.ordersSearch.trim().toLowerCase();
+    const todayStart = new Date(`${toISODate(today)}T00:00:00`);
+    const tomorrowStart = new Date(todayStart);
+    tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+    const rangeStart = state.ordersAppliedDateFrom ? new Date(`${state.ordersAppliedDateFrom}T00:00:00`) : null;
+    const rangeEnd = state.ordersAppliedDateTo ? new Date(`${state.ordersAppliedDateTo}T00:00:00`) : null;
+    if (rangeEnd) rangeEnd.setDate(rangeEnd.getDate() + 1);
+
     return [...state.orders].filter((order) => {
       const matchesStatus = state.ordersStatus === 'all' || order.status === state.ordersStatus;
       const matchesQuery =
@@ -971,7 +1911,11 @@
         [order.orderNumber, order.customerName, order.email, order.phone]
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(query));
-      return matchesStatus && matchesQuery;
+      const createdAt = getOrderCreatedAt(order);
+      const matchesToday = !state.ordersTodayOnly || (createdAt >= todayStart && createdAt < tomorrowStart);
+      const matchesFrom = !rangeStart || (createdAt >= rangeStart);
+      const matchesTo = !rangeEnd || (createdAt < rangeEnd);
+      return matchesStatus && matchesQuery && matchesToday && matchesFrom && matchesTo;
     });
   }
 
@@ -1028,6 +1972,14 @@
             Tracking: ${escapeHtml(order.trackingNumber || 'Pending')}<br>
             Carrier: ${escapeHtml(order.carrier || 'Not assigned')}
           </p>
+        </div>
+        <div class="admin-list__item">
+          <p class="admin-list__item-title">Invoice &amp; Receipt</p>
+          <div class="admin-actions">
+            <button class="admin-action-link" type="button" data-action="open-order-invoice" data-id="${order.id}">View Invoice</button>
+            <button class="admin-action-link" type="button" data-action="email-order-invoice" data-id="${order.id}">Email Invoice</button>
+            <button class="admin-action-link" type="button" data-action="download-order-invoice" data-id="${order.id}">Download PDF</button>
+          </div>
         </div>
         <div class="admin-list__item">
           <p class="admin-list__item-title">Order Timeline</p>
@@ -1088,8 +2040,10 @@
     if (state.ordersPage > totalPages) state.ordersPage = totalPages;
     const start = (state.ordersPage - 1) * pageSize;
     const pageItems = filtered.slice(start, start + pageSize);
-    const selectedOrder = state.orders.find((order) => Number(order.id) === Number(state.selectedOrderId)) || filtered[0] || state.orders[0];
-    if (selectedOrder) state.selectedOrderId = selectedOrder.id;
+    const selectedOrder = state.selectedOrderId == null
+      ? null
+      : filtered.find((order) => Number(order.id) === Number(state.selectedOrderId)) || null;
+    const showOrderDetails = Boolean(selectedOrder);
 
     els.ordersView.innerHTML = `
       <section class="admin-section">
@@ -1104,18 +2058,29 @@
             <div class="admin-toolbar__group" style="flex:1 1 420px;">
               <input class="admin-input" data-input="ordersSearch" value="${escapeHtml(state.ordersSearch)}" placeholder="Search by order ID, customer name, email, or phone" />
             </div>
-            <div class="admin-toolbar__group">
-              <button class="admin-btn ${state.ordersStatus === 'all' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="all">All</button>
-              <button class="admin-btn ${state.ordersStatus === 'pending' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="pending">Pending</button>
-              <button class="admin-btn ${state.ordersStatus === 'processing' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="processing">Processing</button>
-              <button class="admin-btn ${state.ordersStatus === 'shipped' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="shipped">Shipped</button>
-              <button class="admin-btn ${state.ordersStatus === 'delivered' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="delivered">Delivered</button>
-              <button class="admin-btn ${state.ordersStatus === 'cancelled' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="cancelled">Cancelled</button>
-              <button class="admin-btn ${state.ordersStatus === 'returned' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="returned">Returned</button>
+            <div class="admin-orders-filter-row">
+              <div class="admin-toolbar__group">
+                <div class="admin-orders-date-range${state.ordersAppliedDateFrom || state.ordersAppliedDateTo ? ' is-active' : ''}" aria-label="Order date range">
+                  <label class="admin-orders-date-field"><span>From</span><input class="admin-input" type="date" data-input="ordersDateFrom" value="${escapeHtml(state.ordersDateFrom)}" /></label>
+                  <label class="admin-orders-date-field"><span>To</span><input class="admin-input" type="date" data-input="ordersDateTo" value="${escapeHtml(state.ordersDateTo)}" /></label>
+                  <button class="admin-btn ${state.ordersAppliedDateFrom || state.ordersAppliedDateTo ? 'admin-btn--primary' : 'admin-btn--soft'}" type="button" data-action="apply-orders-date-range">Apply</button>
+                  <button class="admin-btn admin-btn--ghost" type="button" data-action="clear-orders-date-range" ${state.ordersAppliedDateFrom || state.ordersAppliedDateTo || state.ordersDateFrom || state.ordersDateTo ? '' : 'disabled'}>Clear</button>
+                </div>
+              </div>
+              <div class="admin-toolbar__group">
+                <button class="admin-btn ${state.ordersStatus === 'all' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="all">All</button>
+                <button class="admin-btn ${state.ordersTodayOnly ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-action="toggle-orders-today">Today</button>
+                <button class="admin-btn ${state.ordersStatus === 'pending' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="pending">Pending</button>
+                <button class="admin-btn ${state.ordersStatus === 'processing' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="processing">Processing</button>
+                <button class="admin-btn ${state.ordersStatus === 'shipped' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="shipped">Shipped</button>
+                <button class="admin-btn ${state.ordersStatus === 'delivered' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="delivered">Delivered</button>
+                <button class="admin-btn ${state.ordersStatus === 'cancelled' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="cancelled">Cancelled</button>
+                <button class="admin-btn ${state.ordersStatus === 'returned' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="returned">Returned</button>
+              </div>
             </div>
           </div>
 
-          <div class="admin-grid admin-grid--two">
+          <div class="admin-grid admin-grid--two" ${showOrderDetails ? '' : 'style="grid-template-columns:1fr;"'}>
             <section class="admin-card">
               <div class="admin-card__head">
                 <h3 class="admin-card__title">Order List</h3>
@@ -1140,10 +2105,16 @@
                         <td>${escapeHtml(order.customerName)}<br><span class="admin-table__muted">${escapeHtml(order.email)}</span></td>
                         <td>${escapeHtml(order.paymentMethod.toUpperCase())}<br><span class="admin-table__muted">${escapeHtml(getStatusLabel(order.paymentStatus))}</span></td>
                         <td><strong>${escapeHtml(money(order.totalAmount))}</strong></td>
-                        <td><span class="admin-badge ${statusClass(order.status)}">${escapeHtml(getStatusLabel(order.status))}</span></td>
+                        <td>
+                          <select class="admin-select admin-order-status-select" data-action="update-order-status" data-id="${order.id}" aria-label="Status for ${escapeHtml(order.orderNumber)}">
+                            ${Object.keys(ORDER_STATUS_META).map((status) => `<option value="${status}" ${normalizeOrderStatus(order.status) === status ? 'selected' : ''}>${escapeHtml(getStatusLabel(status))}</option>`).join('')}
+                          </select>
+                        </td>
                         <td>
                           <div class="admin-actions">
-                            <button class="admin-action-link" type="button" data-action="advance-order" data-id="${order.id}">Next Step</button>
+                            <button class="admin-action-link" type="button" data-action="open-order-invoice" data-id="${order.id}">Invoice</button>
+                            <button class="admin-action-link" type="button" data-action="email-order-invoice" data-id="${order.id}">Email</button>
+                            <button class="admin-action-link" type="button" data-action="download-order-invoice" data-id="${order.id}">Download</button>
                             <button class="admin-action-link" type="button" data-action="cancel-order" data-id="${order.id}">Cancel</button>
                             <button class="admin-action-link" type="button" data-action="refund-order" data-id="${order.id}">Refund</button>
                           </div>
@@ -1164,26 +2135,27 @@
               </div>
             </section>
 
-            <section class="admin-side-panel">
-              <article class="admin-card">
-                <div class="admin-card__head">
-                  <h3 class="admin-card__title">Order Details</h3>
-                  <p class="admin-card__sub">Customer, shipping, timeline, and payment info</p>
-                </div>
-                <div class="admin-card__body">
-                  ${renderOrderDetail(selectedOrder)}
-                </div>
-                <div class="admin-card__foot">
-                  <div class="admin-footer-actions">
-                    <button class="admin-btn admin-btn--ghost" type="button" data-action="advance-order" data-id="${selectedOrder?.id || ''}">Accept / Process</button>
-                    <button class="admin-btn admin-btn--ghost" type="button" data-action="ship-order" data-id="${selectedOrder?.id || ''}">Ship</button>
-                    <button class="admin-btn admin-btn--ghost" type="button" data-action="deliver-order" data-id="${selectedOrder?.id || ''}">Deliver</button>
-                    <button class="admin-btn admin-btn--danger" type="button" data-action="cancel-order" data-id="${selectedOrder?.id || ''}">Cancel</button>
-                    <button class="admin-btn admin-btn--soft" type="button" data-action="refund-order" data-id="${selectedOrder?.id || ''}">Refund</button>
+            ${showOrderDetails ? `
+              <section class="admin-side-panel">
+                <article class="admin-card">
+                  <div class="admin-card__head">
+                    <h3 class="admin-card__title">Order Details</h3>
+                    <p class="admin-card__sub">Customer, shipping, timeline, and payment info</p>
                   </div>
-                </div>
-              </article>
-            </section>
+                  <div class="admin-card__body">
+                    ${renderOrderDetail(selectedOrder)}
+                  </div>
+                  <div class="admin-card__foot">
+                    <div class="admin-footer-actions">
+                      <button class="admin-btn admin-btn--ghost" type="button" data-action="ship-order" data-id="${selectedOrder?.id || ''}">Ship</button>
+                      <button class="admin-btn admin-btn--ghost" type="button" data-action="deliver-order" data-id="${selectedOrder?.id || ''}">Deliver</button>
+                      <button class="admin-btn admin-btn--danger" type="button" data-action="cancel-order" data-id="${selectedOrder?.id || ''}">Cancel</button>
+                      <button class="admin-btn admin-btn--soft" type="button" data-action="refund-order" data-id="${selectedOrder?.id || ''}">Refund</button>
+                    </div>
+                  </div>
+                </article>
+              </section>
+            ` : ''}
           </div>
         </div>
       </section>
@@ -1237,6 +2209,13 @@
     `;
   }
 
+  function getCustomerCreatedAt(customer) {
+    const rawValue = customer?.registrationDate ?? customer?.registeredAt ?? customer?.createdAt ?? customer?.created_at ?? '';
+    const raw = String(rawValue).trim();
+    if (!raw) return new Date('invalid');
+    return new Date(/^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T00:00:00` : raw.replace(' ', 'T'));
+  }
+
   function renderCustomers() {
     if (state.customersLoading && !state.customers.length) {
       els.customersView.innerHTML = `
@@ -1273,9 +2252,14 @@
     }
 
     const query = state.customersSearch.trim().toLowerCase();
-    const filtered = state.customers.filter((customer) =>
-      !query ||
-      [
+    const todayStart = new Date(`${toISODate(today)}T00:00:00`);
+    const tomorrowStart = new Date(todayStart);
+    tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+    const rangeStart = state.customersAppliedDateFrom ? new Date(`${state.customersAppliedDateFrom}T00:00:00`) : null;
+    const rangeEnd = state.customersAppliedDateTo ? new Date(`${state.customersAppliedDateTo}T00:00:00`) : null;
+    if (rangeEnd) rangeEnd.setDate(rangeEnd.getDate() + 1);
+    const filtered = state.customers.filter((customer) => {
+      const matchesQuery = !query || [
         customer.name,
         customer.email,
         customer.phone,
@@ -1284,10 +2268,17 @@
         String(customer.merchandiseOrders || ''),
       ]
         .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(query))
-    );
-    const selectedCustomer = state.customers.find((customer) => String(customer.id) === String(state.selectedCustomerId)) || filtered[0] || state.customers[0];
-    if (selectedCustomer) state.selectedCustomerId = selectedCustomer.id;
+        .some((value) => String(value).toLowerCase().includes(query));
+      const createdAt = getCustomerCreatedAt(customer);
+      const matchesToday = !state.customersTodayOnly || (createdAt >= todayStart && createdAt < tomorrowStart);
+      const matchesFrom = !rangeStart || (createdAt >= rangeStart);
+      const matchesTo = !rangeEnd || (createdAt < rangeEnd);
+      return !Number.isNaN(createdAt.getTime()) && matchesQuery && matchesToday && matchesFrom && matchesTo;
+    });
+    const selectedCustomer = state.selectedCustomerId == null
+      ? null
+      : filtered.find((customer) => String(customer.id) === String(state.selectedCustomerId)) || null;
+    const showCustomerDetails = Boolean(selectedCustomer);
 
     els.customersView.innerHTML = `
       <section class="admin-section">
@@ -1302,9 +2293,20 @@
             <div class="admin-toolbar__group" style="flex:1 1 420px;">
               <input class="admin-input" data-input="customersSearch" value="${escapeHtml(state.customersSearch)}" placeholder="Search by name, email, phone, address, or last order" />
             </div>
+            <div class="admin-orders-filter-row">
+              <div class="admin-toolbar__group">
+                <div class="admin-orders-date-range${state.customersAppliedDateFrom || state.customersAppliedDateTo ? ' is-active' : ''}">
+                  <button class="admin-btn ${state.customersTodayOnly ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-action="toggle-customers-today">Today</button>
+                  <label class="admin-orders-date-field"><span>From</span><input class="admin-input" type="date" data-input="customersDateFrom" value="${escapeHtml(state.customersDateFrom)}" /></label>
+                  <label class="admin-orders-date-field"><span>To</span><input class="admin-input" type="date" data-input="customersDateTo" value="${escapeHtml(state.customersDateTo)}" /></label>
+                  <button class="admin-btn admin-btn--soft" type="button" data-action="apply-customers-date-range">Apply</button>
+                  <button class="admin-btn admin-btn--ghost" type="button" data-action="clear-customers-date-range" ${state.customersAppliedDateFrom || state.customersAppliedDateTo || state.customersDateFrom || state.customersDateTo ? '' : 'disabled'}>Clear</button>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div class="admin-grid admin-grid--two">
+          <div class="admin-grid admin-grid--two" ${showCustomerDetails ? '' : 'style="grid-template-columns:1fr;"'}>
             <section class="admin-card">
               <div class="admin-card__head">
                 <h3 class="admin-card__title">Customer List</h3>
@@ -1339,23 +2341,25 @@
                 </table>
               </div>
             </section>
-            <section class="admin-side-panel">
-              <article class="admin-card">
-                <div class="admin-card__head">
-                  <h3 class="admin-card__title">Customer Profile</h3>
-                  <p class="admin-card__sub">Merchandise orders, addresses, and first interaction date</p>
-                </div>
-                <div class="admin-card__body">
-                  ${renderCustomerDetail(selectedCustomer)}
-                </div>
-                <div class="admin-card__foot">
-                  <div class="admin-footer-actions">
-                    <button class="admin-btn admin-btn--ghost" type="button" data-action="message-customer" data-id="${selectedCustomer?.id || ''}">Message</button>
-                    <button class="admin-btn admin-btn--soft" type="button" data-action="export-customer" data-id="${selectedCustomer?.id || ''}">Export Profile</button>
+            ${showCustomerDetails ? `
+              <section class="admin-side-panel">
+                <article class="admin-card">
+                  <div class="admin-card__head">
+                    <h3 class="admin-card__title">Customer Profile</h3>
+                    <p class="admin-card__sub">Merchandise orders, addresses, and first interaction date</p>
                   </div>
-                </div>
-              </article>
-            </section>
+                  <div class="admin-card__body">
+                    ${renderCustomerDetail(selectedCustomer)}
+                  </div>
+                  <div class="admin-card__foot">
+                    <div class="admin-footer-actions">
+                      <button class="admin-btn admin-btn--ghost" type="button" data-action="message-customer" data-id="${selectedCustomer?.id || ''}">Message</button>
+                      <button class="admin-btn admin-btn--soft" type="button" data-action="export-customer" data-id="${selectedCustomer?.id || ''}">Export Profile</button>
+                    </div>
+                  </div>
+                </article>
+              </section>
+            ` : ''}
           </div>
         </div>
       </section>
@@ -1400,14 +2404,16 @@
     }, 0);
     const activeInfluencerCoupons = items.filter((coupon) => getCouponTypeValue(coupon) === 'influencer' && Number(coupon.active ?? coupon.isActive ?? 0) === 1).length;
 
-    const selectedCoupon = items.find((coupon) => Number(coupon.id) === Number(state.selectedCouponId)) || filtered[0] || items[0] || null;
-    if (selectedCoupon) state.selectedCouponId = selectedCoupon.id;
+    const selectedCoupon = state.selectedCouponId == null
+      ? null
+      : filtered.find((coupon) => Number(coupon.id) === Number(state.selectedCouponId)) || null;
+    const showCouponDetails = Boolean(selectedCoupon);
 
     const summaryCards = [
       { label: 'Total Coupons', value: totalCoupons, note: 'Shared coupon store' },
       { label: 'Active Coupons', value: activeCoupons, note: 'Currently usable' },
       { label: 'Expired Coupons', value: expiredCoupons, note: 'Needs review' },
-      { label: 'Coupons Redeemed', value: redeemedCoupons, note: 'Lifetime redemptions' },
+      { label: 'Coupons Usage', value: redeemedCoupons, note: 'Lifetime redemptions' },
       { label: 'Discount Given', value: `Rs. ${discountGiven.toLocaleString('en-IN')}`, note: 'Approx. total discount' },
       { label: 'Active Influencer Coupons', value: activeInfluencerCoupons, note: 'Assigned creator codes' },
     ];
@@ -1421,12 +2427,14 @@
           </div>
         </div>
         <div class="admin-section__body">
-          <div class="admin-grid admin-grid--3" style="margin-bottom:16px;">
+          <div class="admin-card-grid admin-card-grid--3 admin-coupon-stats" style="margin-bottom:16px;">
             ${summaryCards.map((card) => `
-              <article class="admin-stat">
-                <p class="admin-stat__label">${escapeHtml(card.label)}</p>
-                <p class="admin-stat__value">${escapeHtml(card.value)}</p>
-                <p class="admin-stat__note">${escapeHtml(card.note)}</p>
+              <article class="admin-card admin-coupon-stat">
+                <div class="admin-card__body">
+                  <p class="admin-stat__label">${escapeHtml(card.label)}</p>
+                  <p class="admin-stat__value">${escapeHtml(card.value)}</p>
+                  <p class="admin-stat__note">${escapeHtml(card.note)}</p>
+                </div>
               </article>
             `).join('')}
           </div>
@@ -1438,7 +2446,7 @@
             <button class="admin-btn admin-btn--soft" type="button" data-action="open-coupon-modal">Create Coupon</button>
           </div>
 
-          <div class="admin-grid admin-grid--two" style="margin-top:16px;">
+          <div class="admin-grid admin-grid--two" style="margin-top:16px;${showCouponDetails ? '' : 'grid-template-columns:1fr;'}">
             <section class="admin-card">
               <div class="admin-card__head">
                 <h3 class="admin-card__title">Coupon List</h3>
@@ -1455,7 +2463,6 @@
                         <th>Coupon Type</th>
                         <th>Discount</th>
                         <th>Usage</th>
-                        <th>Session Limit</th>
                         <th>Expiry Date</th>
                         <th>Status</th>
                         <th>Owner</th>
@@ -1466,18 +2473,20 @@
                     <tbody>
                       ${filtered.map((coupon) => {
                         const typeValue = getCouponTypeValue(coupon);
-                        const typeLabel = typeValue === 'influencer' ? 'Influencer Coupon' : 'General Coupon';
-                        const ownerLabel = getCouponInfluencerLabel(coupon) || (typeValue === 'influencer' ? 'Influencer' : 'General');
+                        const typeLabel = getCouponTypeLabel(coupon);
+                        const ownerLabel =
+                          typeValue === 'private'
+                            ? coupon.recipientEmail || 'Private'
+                            : getCouponInfluencerLabel(coupon) || (typeValue === 'influencer' ? 'Influencer' : 'General');
                         const expiryValue = coupon.validTill || coupon.expiresAt || coupon.expiry || '';
                         const statusValue = Number(coupon.active ?? coupon.isActive ?? 0) === 1 ? 'active' : 'inactive';
                         const usageCount = Number(coupon.totalRedemptions || coupon.usageCount || 0);
                         return `
                           <tr data-action="select-coupon" data-id="${coupon.id}" style="cursor:pointer;">
                             <td><strong>${escapeHtml(coupon.code || '-')}</strong></td>
-                            <td><span class="admin-badge ${typeValue === 'influencer' ? 'admin-badge--influencer' : 'admin-badge--general'}">${escapeHtml(typeLabel)}</span></td>
+                            <td><span class="admin-badge ${typeValue === 'influencer' ? 'admin-badge--influencer' : typeValue === 'private' ? 'admin-badge--private' : 'admin-badge--general'}">${escapeHtml(typeLabel)}</span></td>
                             <td>${escapeHtml(coupon.discount || coupon.discountValue || '-')}</td>
                             <td>${escapeHtml(String(usageCount))}</td>
-                            <td>${escapeHtml(String(coupon.sessionLimit || coupon.perUserLimit || 1))}</td>
                             <td>${escapeHtml(expiryValue ? dateLabel(expiryValue) : 'No expiry')}</td>
                             <td><span class="admin-badge ${statusClass(statusValue)}">${escapeHtml(getStatusLabel(statusValue))}</span></td>
                             <td>${escapeHtml(ownerLabel)}</td>
@@ -1486,10 +2495,6 @@
                               <div class="admin-actions">
                                 <button class="admin-action-link" type="button" data-action="select-coupon" data-id="${coupon.id}">View</button>
                                 <button class="admin-action-link" type="button" data-action="edit-coupon" data-id="${coupon.id}">Edit</button>
-                                <button class="admin-action-link" type="button" data-action="assign-coupon-owner" data-id="${coupon.id}">Assign Influencer</button>
-                                <button class="admin-action-link" type="button" data-action="toggle-coupon" data-id="${coupon.id}">${statusValue === 'active' ? 'Disable' : 'Enable'}</button>
-                                <button class="admin-action-link" type="button" data-action="copy-coupon" data-id="${coupon.id}">Copy Coupon</button>
-                                <button class="admin-action-link" type="button" data-action="delete-coupon" data-id="${coupon.id}">Delete</button>
                               </div>
                             </td>
                           </tr>
@@ -1501,10 +2506,14 @@
               </div>
             </section>
 
-            <section class="admin-card">
-              <div class="admin-card__head">
-                <h3 class="admin-card__title">Coupon Details</h3>
-                <p class="admin-card__sub">Usage, expiry, and owner context</p>
+            ${showCouponDetails ? `
+              <section class="admin-card">
+              <div class="admin-card__head admin-card__head--with-close">
+                <div>
+                  <h3 class="admin-card__title">Coupon Details</h3>
+                  <p class="admin-card__sub">Usage, expiry, and owner context</p>
+                </div>
+                <button class="admin-card__close" type="button" data-action="close-coupon-details" aria-label="Close coupon details">&times;</button>
               </div>
               <div class="admin-card__body">
                 ${selectedCoupon ? `
@@ -1520,8 +2529,7 @@
                       <p class="admin-list__item-title">Usage Statistics</p>
                       <p class="admin-list__item-sub">
                         Times used: ${escapeHtml(String(selectedCoupon.totalRedemptions || selectedCoupon.usageCount || 0))}<br>
-                        Remaining usage: ${escapeHtml(selectedCoupon.maxRedemptions == null ? 'Unlimited' : String(Math.max(0, Number(selectedCoupon.maxRedemptions || 0) - Number(selectedCoupon.totalRedemptions || 0))))}<br>
-                        Remaining session limit: ${escapeHtml(selectedCoupon.sessionLimit == null ? '—' : String(selectedCoupon.sessionLimit))}
+                        Remaining usage: ${escapeHtml(selectedCoupon.maxRedemptions == null ? 'Unlimited' : String(Math.max(0, Number(selectedCoupon.maxRedemptions || 0) - Number(selectedCoupon.totalRedemptions || 0))))}
                       </p>
                     </div>
                     <div class="admin-list__item">
@@ -1547,7 +2555,8 @@
                   <button class="admin-btn admin-btn--soft" type="button" data-action="open-coupon-modal">Create New</button>
                 </div>
               </div>
-            </section>
+              </section>
+            ` : ''}
           </div>
         </div>
       </section>
@@ -1556,20 +2565,30 @@
 
   function renderInfluencers() {
     const query = state.influencersSearch.trim().toLowerCase();
-    const filtered = state.influencers.filter((influencer) =>
-      !query ||
-      [influencer.name, influencer.handle, influencer.email, influencer.phone]
+    const selectedInfluencerFilter = String(state.influencerDetailsFilter || 'all');
+    const month = '';
+    const getMonthStats = (influencer) => {
+      if (!month) return { orders: Number(influencer.totalOrders || 0), revenue: Number(influencer.revenue || 0), commission: Number(influencer.commission || 0), couponUsage: Number(influencer.couponUsage || 0) };
+      return (influencer.monthlySales || []).find((row) => row.month === month) || { orders: 0, revenue: 0, commission: 0, couponUsage: 0 };
+    };
+    const getAssignedCouponCount = (influencer) => Array.isArray(influencer?.coupons)
+      ? influencer.coupons.length
+      : Number(influencer?.assignedCouponCount || influencer?.couponCount || 0);
+    const filtered = state.influencers.filter((influencer) => {
+      const matchesDetails = selectedInfluencerFilter === 'all' || String(influencer.id) === selectedInfluencerFilter;
+      const matchesSearch = !query || [influencer.name, influencer.handle, influencer.email, influencer.phone]
         .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(query))
-    );
-    const selectedInfluencer = getInfluencerById(state.selectedInfluencerId) || filtered[0] || state.influencers[0] || null;
+        .some((value) => String(value).toLowerCase().includes(query));
+      return matchesDetails && matchesSearch;
+    });
+    const selectedInfluencer = filtered.find((influencer) => String(influencer.id) === String(state.selectedInfluencerId)) || filtered[0] || null;
     if (selectedInfluencer) state.selectedInfluencerId = selectedInfluencer.id;
 
     const visibleInfluencers = filtered;
-    const statsSource = filtered.length ? filtered : state.influencers;
-    const totalRevenue = statsSource.reduce((sum, influencer) => sum + Number(influencer.revenue || 0), 0);
-    const totalOrders = statsSource.reduce((sum, influencer) => sum + Number(influencer.totalOrders || 0), 0);
-    const totalCoupons = statsSource.reduce((sum, influencer) => sum + Number(influencer.couponUsage || 0), 0);
+    const statsSource = filtered;
+    const totalRevenue = statsSource.reduce((sum, influencer) => sum + getMonthStats(influencer).revenue, 0);
+    const totalOrders = statsSource.reduce((sum, influencer) => sum + getMonthStats(influencer).orders, 0);
+    const totalCoupons = statsSource.reduce((sum, influencer) => sum + getMonthStats(influencer).couponUsage, 0);
 
     els.influencersView.innerHTML = `
       <section class="admin-section">
@@ -1623,6 +2642,12 @@
             <div class="admin-toolbar__group" style="flex:1 1 420px;">
               <input class="admin-input" data-input="influencersSearch" value="${escapeHtml(state.influencersSearch)}" placeholder="Search by name, handle, email, or phone" />
             </div>
+            <div class="admin-toolbar__group" style="flex:0 1 220px;">
+              <select class="admin-select" data-input="influencerDetailsFilter" aria-label="Influencer Details">
+                <option value="all" ${selectedInfluencerFilter === 'all' ? 'selected' : ''}>All Influencers</option>
+                ${state.influencers.map((influencer) => `<option value="${escapeHtml(influencer.id)}" ${String(influencer.id) === selectedInfluencerFilter ? 'selected' : ''}>${escapeHtml(influencer.name || influencer.handle || `Influencer ${influencer.id}`)}</option>`).join('')}
+              </select>
+            </div>
             <button class="admin-btn admin-btn--soft" type="button" data-action="open-influencer-modal">Add Influencer</button>
           </div>
 
@@ -1632,7 +2657,14 @@
                 <div class="admin-card__head">
                   <div class="admin-list__item-head">
                     <div>
-                      <h3 class="admin-card__title">${escapeHtml(influencer.name)}</h3>
+                      <button
+                        class="admin-action-link"
+                        type="button"
+                        data-action="select-influencer"
+                        data-id="${influencer.id}"
+                        aria-label="View ${escapeHtml(influencer.name)} profile"
+                        style="padding:0;border:0;background:none;font:inherit;font-weight:700;text-align:left;cursor:pointer;"
+                      >${escapeHtml(influencer.name)}</button>
                       <p class="admin-card__sub">${escapeHtml(influencer.handle)}</p>
                     </div>
                     <span class="admin-badge ${influencer.active ? 'admin-badge--active' : 'admin-badge--inactive'}">${influencer.active ? 'Active' : 'Inactive'}</span>
@@ -1654,27 +2686,42 @@
                     </div>
                   </div>
                   <div class="admin-grid admin-grid--stats" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-top:14px;">
-                    <article class="admin-stat" style="padding:12px;">
+                    ${(() => { const stats = getMonthStats(influencer); return `<article class="admin-stat" style="padding:12px;">
                       <p class="admin-stat__label">Orders</p>
-                      <p class="admin-stat__value" style="font-size:20px;">${formatCount(influencer.totalOrders)}</p>
+                      <p class="admin-stat__value" style="font-size:20px;">${formatCount(stats.orders)}</p>
                     </article>
                     <article class="admin-stat" style="padding:12px;">
                       <p class="admin-stat__label">Revenue</p>
-                      <p class="admin-stat__value" style="font-size:20px;">${money(influencer.revenue)}</p>
-                    </article>
+                      <p class="admin-stat__value" style="font-size:20px;">${money(stats.revenue)}</p>
+                    </article>`; })()}
                     <article class="admin-stat" style="padding:12px;">
                       <p class="admin-stat__label">Coupon Use</p>
                       <p class="admin-stat__value" style="font-size:20px;">${formatCount(influencer.couponUsage)}</p>
                     </article>
                     <article class="admin-stat" style="padding:12px;">
-                      <p class="admin-stat__label">Campaigns</p>
-                      <p class="admin-stat__value" style="font-size:20px;">${formatCount(influencer.activeCampaigns)}</p>
+                      <p class="admin-stat__label">No. of Coupons Assigned</p>
+                      <p class="admin-stat__value" style="font-size:20px;">${formatCount(getAssignedCouponCount(influencer))}</p>
+                    </article>
+                  </div>
+                  <div class="admin-grid admin-grid--stats" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:12px;">
+                    <article class="admin-stat" style="padding:12px;">
+                      <p class="admin-stat__label">Commission Earned</p>
+                      <p class="admin-stat__value" style="font-size:20px;">${money(getMonthStats(influencer).commission)}</p>
+                      <p class="admin-stat__note">Based on the influencer's commission rate and attributed revenue.</p>
+                    </article>
+                    <article class="admin-stat" style="padding:12px;">
+                      <p class="admin-stat__label">Commission Paid</p>
+                      <p class="admin-stat__value" style="font-size:20px;">${money(influencer.paidCommission)}</p>
+                      <p class="admin-stat__note">Processed commission payments already recorded.</p>
+                    </article>
+                    <article class="admin-stat" style="padding:12px;">
+                      <p class="admin-stat__label">Commission per Order</p>
+                      <p class="admin-stat__value" style="font-size:20px;">${money(influencer.commissionPerOrderPaise || 0)}</p>
+                      <p class="admin-stat__note">Fixed amount credited for each attributed order.</p>
                     </article>
                   </div>
                   <div class="admin-actions" style="margin-top:12px;">
-                    <button class="admin-action-link" type="button" data-action="edit-influencer" data-id="${influencer.id}">Edit Influencer</button>
-                    <button class="admin-action-link" type="button" data-action="toggle-influencer" data-id="${influencer.id}">${influencer.active ? 'Deactivate Influencer' : 'Reactivate Influencer'}</button>
-                    <button class="admin-action-link" type="button" data-action="assign-coupon" data-id="${influencer.id}">Assign Coupons</button>
+                    ${renderInfluencerActionLinks(influencer)}
                   </div>
                 </div>
               </article>
@@ -1688,7 +2735,7 @@
           </div>
 
           <div class="admin-grid admin-grid--two" style="margin-top:18px;">
-            <section class="admin-card">
+            <section class="admin-card" id="influencer-profile-panel" tabindex="-1">
               <div class="admin-card__head">
                 <h3 class="admin-card__title">Influencer Profile</h3>
                 <p class="admin-card__sub">Full partner profile and coupon summary</p>
@@ -1696,6 +2743,7 @@
               <div class="admin-card__body">
                 ${selectedInfluencer ? `
                   <div class="admin-list">
+                    ${month ? `<div class="admin-list__item"><p class="admin-list__item-title">${escapeHtml(reportMonthLabel(month))} Sales</p><p class="admin-list__item-sub">${formatCount(getMonthStats(selectedInfluencer).orders)} orders · ${money(getMonthStats(selectedInfluencer).revenue)} revenue · ${money(getMonthStats(selectedInfluencer).commission)} commission</p></div>` : ''}
                     <div class="admin-list__item">
                       <div class="admin-list__item-head">
                         <div>
@@ -1727,27 +2775,26 @@
                     </div>
                     <div class="admin-list__item">
                       <p class="admin-list__item-title">Total Orders</p>
-                      <p class="admin-list__item-sub">${formatCount(selectedInfluencer.totalOrders)}</p>
+                      <p class="admin-list__item-sub">${formatCount(getMonthStats(selectedInfluencer).orders)}</p>
                     </div>
                     <div class="admin-list__item">
                       <p class="admin-list__item-title">Revenue Generated</p>
-                      <p class="admin-list__item-sub">${money(selectedInfluencer.revenue)}</p>
+                      <p class="admin-list__item-sub">${money(getMonthStats(selectedInfluencer).revenue)}</p>
                     </div>
                     <div class="admin-list__item">
                       <p class="admin-list__item-title">Coupon Usage</p>
                       <p class="admin-list__item-sub">${formatCount(selectedInfluencer.couponUsage)}</p>
                     </div>
                     <div class="admin-list__item">
-                      <p class="admin-list__item-title">Active Campaigns</p>
-                      <p class="admin-list__item-sub">${formatCount(selectedInfluencer.activeCampaigns)}</p>
+                      <p class="admin-list__item-title">No. of Coupons Assigned in Influencer</p>
+                      <p class="admin-list__item-sub">${formatCount(getAssignedCouponCount(selectedInfluencer))}</p>
                     </div>
                   </div>
                 ` : '<p class="admin-table__muted">No influencer selected.</p>'}
               </div>
               <div class="admin-card__foot">
                 <div class="admin-footer-actions">
-                  <button class="admin-btn admin-btn--soft" type="button" data-action="assign-coupon" data-id="${selectedInfluencer?.id || ''}">Assign Coupons</button>
-                  <button class="admin-btn admin-btn--ghost" type="button" data-action="edit-influencer" data-id="${selectedInfluencer?.id || ''}">Edit Influencer</button>
+                  ${selectedInfluencer ? renderInfluencerActionLinks(selectedInfluencer) : ''}
                 </div>
               </div>
             </section>
@@ -1760,10 +2807,11 @@
                 ${selectedInfluencer ? `
                   <div class="admin-mini-chart">
                     ${renderMiniChart([
-                      { label: 'Orders', value: Math.min(100, Number(selectedInfluencer.totalOrders || 0)), display: formatCount(selectedInfluencer.totalOrders) },
-                      { label: 'Revenue', value: Math.min(100, Math.round(Number(selectedInfluencer.revenue || 0) / 100000)), display: money(selectedInfluencer.revenue) },
+                      { label: 'Orders', value: Math.min(100, Number(getMonthStats(selectedInfluencer).orders || 0)), display: formatCount(getMonthStats(selectedInfluencer).orders) },
+                      { label: 'Revenue', value: Math.min(100, Math.round(Number(getMonthStats(selectedInfluencer).revenue || 0) / 100000)), display: money(getMonthStats(selectedInfluencer).revenue) },
+                      { label: 'Commission', value: Math.min(100, Math.round(Number(getMonthStats(selectedInfluencer).commission || 0) / 10000)), display: money(getMonthStats(selectedInfluencer).commission) },
                       { label: 'Coupon Usage', value: Math.min(100, Number(selectedInfluencer.couponUsage || 0)), display: formatCount(selectedInfluencer.couponUsage) },
-                      { label: 'Campaigns', value: Math.min(100, Number(selectedInfluencer.activeCampaigns || 0) * 20), display: `${formatCount(selectedInfluencer.activeCampaigns)} active` },
+                      { label: 'Coupons Assigned', value: Math.min(100, getAssignedCouponCount(selectedInfluencer) * 20), display: formatCount(getAssignedCouponCount(selectedInfluencer)) },
                     ])}
                   </div>
                 ` : '<p class="admin-table__muted" style="margin:0;">Select an influencer to inspect their performance snapshot.</p>'}
@@ -1811,17 +2859,37 @@
     }
 
     const reportTiles = [
-      { title: 'Sales Report', meta: 'Orders, revenue, averages, and top sellers' },
-      { title: 'Orders Report', meta: 'Fulfillment stages and channel breakdown' },
-      { title: 'Products Report', meta: 'Stock health and performance by SKU' },
-      { title: 'Customers Report', meta: 'LTV, repeat rate, and cohorts' },
-      { title: 'Coupons Report', meta: 'Usage, expiry, and owner split' },
-      { title: 'Influencer Report', meta: 'Campaign performance and revenue contribution' },
-      { title: 'Revenue Report', meta: 'Payment capture and return impact' },
+      { title: 'Sales Report', meta: 'Orders, revenue, averages, and top sellers', target: 'sales-report' },
+      { title: 'Orders Report', meta: 'Fulfillment stages and channel breakdown', target: 'orders-report' },
+      { title: 'Products Report', meta: 'Stock health and performance by SKU', target: 'products-report' },
+      { title: 'Customers Report', meta: 'LTV, repeat rate, and cohorts', target: 'customers-report' },
+      { title: 'Coupons Report', meta: 'Usage, expiry, and owner split', target: 'coupons-report' },
+      { title: 'Influencer Report', meta: 'Campaign performance and revenue contribution', target: 'influencer-report' },
+      { title: 'Revenue Report', meta: 'Payment capture and return impact', target: 'revenue-report' },
     ];
     const summary = state.reports?.summary || {};
     const influencerReports = Array.isArray(state.reports?.influencerReports) ? state.reports.influencerReports : [];
-    const statusBreakdown = state.reports?.statusBreakdown || {};
+    const monthlyInfluencerReports = Array.isArray(state.reports?.monthlyInfluencerReports) ? state.reports.monthlyInfluencerReports : [];
+    const liveStatusDistribution = buildOrderStatusDistribution(state.orders);
+    const statusBreakdown = state.reports?.statusBreakdown || liveStatusDistribution.breakdown;
+    const reportOrderTotal = summary.orderCount ?? liveStatusDistribution.total ?? 0;
+    const reportSegments = Object.entries(statusBreakdown)
+      .filter(([, count]) => Number(count || 0) > 0)
+      .map(([status, count]) => ({
+        status,
+        label: ORDER_STATUS_META[normalizeOrderStatus(status)]?.label || getStatusLabel(status),
+        color: ORDER_STATUS_META[normalizeOrderStatus(status)]?.color || '#9ca3af',
+        count: Number(count || 0),
+        percent: reportOrderTotal ? (Number(count || 0) / reportOrderTotal) * 100 : 0,
+      }));
+    const reportDistribution = {
+      total: reportOrderTotal,
+      segments: reportSegments,
+    };
+    const lowStockProducts = getLowStockProducts();
+    const couponReportRows = [...(Array.isArray(state.coupons) ? state.coupons : [])]
+      .sort((left, right) => Number(right.totalRedemptions || right.usageCount || 0) - Number(left.totalRedemptions || left.usageCount || 0))
+      .slice(0, 5);
 
     els.reportsView.innerHTML = `
       <section class="admin-section">
@@ -1839,27 +2907,27 @@
               <select class="admin-select" data-input="reportFormat">
                 <option value="csv" ${state.reportFormat === 'csv' ? 'selected' : ''}>CSV</option>
                 <option value="excel" ${state.reportFormat === 'excel' ? 'selected' : ''}>Excel</option>
-                <option value="pdf" ${state.reportFormat === 'pdf' ? 'selected' : ''}>PDF</option>
+                <option value="pdf" ${state.reportFormat === 'pdf' ? 'selected' : ''}>Printable HTML</option>
               </select>
             </div>
             <div class="admin-toolbar__group">
-              <button class="admin-btn admin-btn--ghost" type="button" data-action="export-report" data-format="csv">Export CSV</button>
-              <button class="admin-btn admin-btn--ghost" type="button" data-action="export-report" data-format="excel">Export Excel</button>
-              <button class="admin-btn admin-btn--ghost" type="button" data-action="export-report" data-format="pdf">Export PDF</button>
+              <button class="admin-btn admin-btn--ghost" type="button" data-action="export-report">Download Report</button>
+              <button class="admin-btn admin-btn--soft" type="button" data-action="email-report">Send via Email</button>
             </div>
           </div>
 
           <div class="admin-report-grid">
             ${reportTiles.map((tile) => `
-              <article class="admin-report-card">
+              <button class="admin-report-card admin-report-card--interactive" type="button" data-action="open-report-section" data-target="${escapeHtml(tile.target)}">
                 <h3 class="admin-report-card__title">${escapeHtml(tile.title)}</h3>
                 <p class="admin-report-card__meta">${escapeHtml(tile.meta)}</p>
-              </article>
+                <span class="admin-report-card__link">View report</span>
+              </button>
             `).join('')}
           </div>
 
           <div class="admin-card-grid admin-card-grid--2" style="margin-top:18px;">
-            <section class="admin-card">
+            <section class="admin-card" id="revenue-report">
               <div class="admin-card__head">
                 <h3 class="admin-card__title">Revenue Report</h3>
                 <p class="admin-card__sub">Date-filtered merch summary</p>
@@ -1874,26 +2942,88 @@
               </div>
             </section>
 
-            <section class="admin-card">
+            <section class="admin-card" id="orders-report">
               <div class="admin-card__head">
                 <h3 class="admin-card__title">Order Status Distribution</h3>
                 <p class="admin-card__sub">Filtered by selected date range</p>
               </div>
               <div class="admin-card__body" style="display:grid;place-items:center;gap:14px;">
-                <div class="admin-chart-ring">
-                  <span>
-                    <strong>${formatCount(summary.orderCount || state.orders.length)}</strong>
-                    <small>Orders</small>
-                  </span>
-                </div>
+                ${renderOrderStatusRing(reportDistribution)}
                 <div class="admin-chip-row">
-                  ${Object.entries(statusBreakdown).map(([status, count]) => `<span class="admin-chip">${escapeHtml(getStatusLabel(status))} ${formatCount(count)}</span>`).join('') || '<span class="admin-chip">No status data</span>'}
+                  ${renderStatusLegend(reportDistribution)}
                 </div>
+                <p class="admin-table__muted" style="margin:0;">${formatCount(reportOrderTotal)} order(s) in the selected range.</p>
               </div>
             </section>
           </div>
 
-          <section class="admin-card" style="margin-top:18px;">
+          <section class="admin-card" id="products-report" style="margin-top:18px;">
+            <div class="admin-card__head">
+              <h3 class="admin-card__title">Low Stock Report</h3>
+              <p class="admin-card__sub">Products at or below ${LOW_STOCK_THRESHOLD} units remaining</p>
+            </div>
+            <div class="admin-card__body admin-table-wrap">
+              ${lowStockProducts.length ? `
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th>SKU</th>
+                      <th>Category</th>
+                      <th>Stock</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${lowStockProducts.map((product) => `
+                      <tr>
+                        <td><strong>${escapeHtml(product.name)}</strong><br><span class="admin-table__muted">${escapeHtml(product.description || '')}</span></td>
+                        <td>${escapeHtml(product.sku || '—')}</td>
+                        <td>${escapeHtml(product.category || '—')}</td>
+                        <td><strong>${formatCount(product.stock)}</strong></td>
+                        <td><span class="admin-badge admin-badge--inactive">${escapeHtml(getLowStockLabel(product))}</span></td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              ` : renderEmptyState('No low stock items', `All products are above ${LOW_STOCK_THRESHOLD} units.`)}
+            </div>
+          </section>
+
+          <section class="admin-card" id="coupons-report" style="margin-top:18px;">
+            <div class="admin-card__head">
+              <h3 class="admin-card__title">Coupons Report</h3>
+              <p class="admin-card__sub">Usage, expiry, and owner split</p>
+            </div>
+            <div class="admin-card__body admin-table-wrap">
+              ${couponReportRows.length ? `
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Coupon</th>
+                      <th>Type</th>
+                      <th>Usage</th>
+                      <th>Status</th>
+                      <th>Owner</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${couponReportRows.map((coupon) => `
+                      <tr>
+                        <td><strong>${escapeHtml(coupon.code || '')}</strong></td>
+                        <td>${escapeHtml(getCouponTypeLabel(coupon))}</td>
+                        <td>${formatCount(coupon.totalRedemptions || coupon.usageCount || 0)}</td>
+                        <td><span class="admin-badge ${Number(coupon.active ?? coupon.isActive ?? 0) === 1 ? 'admin-badge--active' : 'admin-badge--inactive'}">${Number(coupon.active ?? coupon.isActive ?? 0) === 1 ? 'Active' : 'Inactive'}</span></td>
+                        <td>${escapeHtml(coupon.influencerName || coupon.owner || 'Store')}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              ` : renderEmptyState('No coupons found', 'Coupon usage will appear here once live order data is recorded.')}
+            </div>
+          </section>
+
+          <section class="admin-card" id="influencer-report" style="margin-top:18px;">
             <div class="admin-card__head">
               <h3 class="admin-card__title">Influencer Report</h3>
               <p class="admin-card__sub">Orders, revenue, coupon usage, and commission from stored influencer attribution</p>
@@ -1919,12 +3049,49 @@
                         <td>${formatCount(row.orders)}</td>
                         <td><strong>${money(row.revenue)}</strong></td>
                         <td>${formatCount(row.couponUsage)}</td>
-                        <td>${money(row.commission)}<br><span class="admin-table__muted">${escapeHtml(row.commissionRate)}%</span></td>
+                        <td>${money(row.commission)}<br><span class="admin-table__muted">Fixed per order</span></td>
                       </tr>
                     `).join('')}
                   </tbody>
                 </table>
               ` : renderEmptyState('No influencer attribution yet', 'Assign coupons to influencers and capture merch orders to populate this report.')}
+            </div>
+          </section>
+
+          <section class="admin-card" id="customers-report" style="margin-top:18px;">
+            <div class="admin-card__head">
+              <h3 class="admin-card__title">Monthly Influencer Breakdown</h3>
+              <p class="admin-card__sub">Month-wise sales and commission by influencer</p>
+            </div>
+            <div class="admin-card__body admin-table-wrap">
+              ${monthlyInfluencerReports.length ? `
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Month</th>
+                      <th>Influencer</th>
+                      <th>Handle</th>
+                      <th>Orders</th>
+                      <th>Revenue</th>
+                      <th>Commission</th>
+                      <th>Coupon Usage</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${monthlyInfluencerReports.map((row) => `
+                      <tr>
+                        <td><strong>${escapeHtml(row.monthLabel || row.month)}</strong></td>
+                        <td>${escapeHtml(row.name || '')}</td>
+                        <td class="admin-table__muted">${escapeHtml(row.handle || '—')}</td>
+                        <td>${formatCount(row.orders)}</td>
+                        <td><strong>${money(row.revenue)}</strong></td>
+                        <td>${money(row.commission)}</td>
+                        <td>${formatCount(row.couponUsage)}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              ` : renderEmptyState('No monthly influencer activity yet', 'Capture orders across multiple months to see the sales and commission trend here.')}
             </div>
           </section>
         </div>
@@ -1985,25 +3152,6 @@
     `;
   }
 
-  function renderNotifications() {
-    els.notificationsList.innerHTML = state.notifications
-      .map(
-        (item) => `
-          <div class="admin-list__item">
-            <div class="admin-list__item-head">
-              <div>
-                <p class="admin-list__item-title">${escapeHtml(item.title)}</p>
-                <p class="admin-list__item-sub">${escapeHtml(item.message)}</p>
-              </div>
-              <span class="admin-badge ${statusClass(item.type)}">${escapeHtml(item.type)}</span>
-            </div>
-            <p class="admin-table__muted">${escapeHtml(timeLabel(item.time))}</p>
-          </div>
-        `
-      )
-      .join('');
-  }
-
   function renderProfileModal() {
     openModal({
       title: 'Admin Profile',
@@ -2039,6 +3187,110 @@
     });
   }
 
+  function getCouponProductOptions(entity = null) {
+    const selectedAppliesTo = String(entity?.appliesTo || '').trim().toLowerCase();
+    const selectedIds = new Set(
+      (selectedAppliesTo.match(/^product:(.+)$/)?.[1] || '')
+        .split(',')
+        .map((id) => Number(id.trim()))
+        .filter((id) => Number.isInteger(id) && id > 0)
+    );
+    const products = [];
+    for (const product of Array.isArray(state.products) ? state.products : []) {
+      const productId = Number(product.productId || product.id);
+      if (!Number.isInteger(productId) || productId <= 0) continue;
+      const variantLabel = [product.size, product.color].filter(Boolean).join(' / ');
+      products.push({
+        id: productId,
+        name: product.name || `Product ${productId}`,
+        label: variantLabel ? `${product.name || `Product ${productId}`} — ${variantLabel}` : product.name || `Product ${productId}`,
+        selected: selectedIds.has(productId),
+      });
+    }
+    return {
+      allSelected: !selectedIds.size || selectedAppliesTo === 'merch' || selectedAppliesTo === 'all',
+      products,
+    };
+  }
+
+  function couponProductsSummary(form) {
+    const allSelected = form.querySelector('[data-coupon-product-all]')?.checked;
+    const selected = [...form.querySelectorAll('[data-coupon-product-id]:checked')];
+    if (allSelected || !selected.length) return 'All Merch Products';
+    if (selected.length === 1) return selected[0].dataset.couponProductName || '1 Product Selected';
+    return `${selected.length} Products Selected`;
+  }
+
+  function syncCouponProductSelection(checkbox) {
+    const form = checkbox.closest('[data-entity-form="coupon"]');
+    if (!form) return;
+    const allCheckbox = form.querySelector('[data-coupon-product-all]');
+    const productCheckboxes = [...form.querySelectorAll('[data-coupon-product-id]')];
+    if (checkbox === allCheckbox && allCheckbox.checked) {
+      productCheckboxes.forEach((productCheckbox) => { productCheckbox.checked = false; });
+    } else if (checkbox === allCheckbox && !allCheckbox.checked && !productCheckboxes.some((productCheckbox) => productCheckbox.checked)) {
+      allCheckbox.checked = true;
+    } else if (checkbox !== allCheckbox && productCheckboxes.some((productCheckbox) => productCheckbox.checked)) {
+      allCheckbox.checked = false;
+    } else if (checkbox !== allCheckbox && !productCheckboxes.some((productCheckbox) => productCheckbox.checked)) {
+      allCheckbox.checked = true;
+    }
+    const trigger = form.querySelector('[data-coupon-products-toggle]');
+    if (trigger) trigger.textContent = couponProductsSummary(form);
+  }
+
+  function filterCouponProductOptions(input) {
+    const dropdown = input.closest('[data-coupon-products-dropdown]');
+    if (!dropdown) return;
+    const query = String(input.value || '').trim().toLowerCase();
+    dropdown.querySelectorAll('[data-coupon-product-option]').forEach((option) => {
+      option.hidden = Boolean(query) && !String(option.dataset.couponProductSearch || '').includes(query);
+    });
+  }
+
+  function closeCouponProductDropdown() {
+    const dropdown = document.querySelector('[data-coupon-products-dropdown].is-open, [data-influencer-coupon-dropdown].is-open');
+    if (!dropdown) return false;
+    const menu = dropdown.querySelector('[data-coupon-products-menu], [data-influencer-coupon-menu]');
+    const toggle = dropdown.querySelector('[data-coupon-products-toggle], [data-influencer-coupon-toggle]');
+    if (menu) menu.hidden = true;
+    toggle?.setAttribute('aria-expanded', 'false');
+    dropdown.classList.remove('is-open');
+    return true;
+  }
+
+  function renderComboFormModal(components = [], entity = null) {
+    const selectedItems = entity?.comboItems?.length
+      ? entity.comboItems
+      : components.map((item) => {
+          const source = state.products.find((product) => Number(product.variantId) === Number(item.variantId)) || item;
+          return { variantId: item.variantId, productName: source.name || item.name, imageUrl: source.image || item.imageUrl || getProductFallbackImage(source), sku: source.sku || item.sku, size: source.size || item.size, color: source.color || item.color };
+        });
+    const comboVariant = entity?.variants?.[0] || entity || {};
+    openModal({
+      title: entity ? 'Edit Combo' : 'Create Combo',
+      subtitle: 'Combo Products',
+      body: `
+        <form class="admin-form" data-entity-form="combo" data-entity-id="${escapeHtml(entity?.id || '')}">
+          <div class="admin-form__grid">
+            <label class="admin-field"><span>Combo Name</span><input class="admin-input" name="name" value="${escapeHtml(entity?.name || '')}" required /></label>
+            <label class="admin-field"><span>Overall Combo Price (rupees)</span><input class="admin-input" name="price" type="number" min="1" step="1" value="${escapeHtml(Number(entity?.price || comboVariant.price || 0))}" required /></label>
+            <label class="admin-field admin-field--wide"><span>Combo Image URL</span><input class="admin-input" name="image" value="${escapeHtml(entity?.image || '')}" placeholder="Optional image URL" /></label>
+            <label class="admin-field admin-field--wide"><span>Combo Details</span><textarea class="admin-textarea" name="description" required>${escapeHtml(entity?.description || '')}</textarea></label>
+            <label class="admin-field"><span>Status</span><select class="admin-select" name="status"><option value="published" ${entity?.status !== 'archived' ? 'selected' : ''}>Published</option><option value="archived" ${entity?.status === 'archived' ? 'selected' : ''}>Archived</option></select></label>
+            <div class="admin-field admin-field--wide"><span>Included products and variants</span><div class="admin-combo-items">
+              ${selectedItems.map((item) => { const fallback = getProductFallbackImage(item); const image = normalizeAdminImageUrl(item.imageUrl, fallback); return `<label class="admin-combo-item"><input type="hidden" name="componentVariantId" value="${escapeHtml(item.variantId)}" /><img src="${escapeHtml(image)}" alt="" onerror="this.onerror=null;this.src='${escapeHtml(fallback)}';" /><span><strong>${escapeHtml(item.productName || item.name)}</strong><small>${escapeHtml([item.size, item.color].filter(Boolean).join(' / ') || item.sku || 'Default variant')}</small></span></label>`; }).join('')}
+            </div></div>
+          </div>
+        </form>
+      `,
+      footer: `<button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button><button class="admin-btn admin-btn--primary" type="submit" form="entityFormSubmit">Save Combo</button>`,
+      size: 'lg',
+    });
+    const form = els.adminModalDialog.querySelector('[data-entity-form="combo"]');
+    if (form) form.id = 'entityFormSubmit';
+  }
+
   function renderEntityFormModal(type, entity = null) {
     const config = {
       product: {
@@ -2049,19 +3301,23 @@
           <label class="admin-field"><span>SKU</span><input class="admin-input" name="sku" value="${escapeHtml(entity?.sku || '')}" required /></label>
           <label class="admin-field"><span>Category</span>
             <select class="admin-select" name="categoryId">
-              ${state.categories.map((category) => `<option value="${category.id}" ${Number(entity?.categoryId) === Number(category.id) ? 'selected' : ''}>${escapeHtml(category.name)}</option>`).join('')}
+              ${state.categories.map((category) => `<option value="${category.id}" ${String(entity?.categoryId ?? '') === String(category.id) ? 'selected' : ''}>${escapeHtml(category.name)}</option>`).join('')}
             </select>
           </label>
-          <label class="admin-field"><span>Price (paise)</span><input class="admin-input" name="price" type="number" min="0" value="${escapeHtml(entity?.price || 0)}" required /></label>
+          <label class="admin-field"><span>New Category Name</span><input class="admin-input" name="newCategoryName" value="" placeholder="Optional future category" /><small class="admin-field__hint">Enter a name to add a new category to the dropdown and storefront.</small></label>
+          <label class="admin-field"><span>Size / Ltrs / Metric</span><input class="admin-input" name="size" value="${escapeHtml(entity?.size || '')}" placeholder="e.g. 500ml, 1L, M, 42" /><small class="admin-field__hint">Use litres/ml for liquids, clothing size, or any future product metric.</small></label>
+          <label class="admin-field"><span>Color</span><input class="admin-input" name="color" value="${escapeHtml(entity?.color || '')}" placeholder="e.g. Black, Silver" /></label>
+          <label class="admin-field"><span>Price (rupees)</span><input class="admin-input" name="price" type="number" min="0" step="1" value="${escapeHtml(entity?.price || 0)}" required /></label>
           <label class="admin-field"><span>Stock</span><input class="admin-input" name="stock" type="number" min="0" value="${escapeHtml(entity?.stock || 0)}" required /></label>
           <label class="admin-field"><span>Status</span>
             <select class="admin-select" name="status">
-              ${['published', 'draft', 'archived'].map((status) => `<option value="${status}" ${String(entity?.status || 'draft') === status ? 'selected' : ''}>${getStatusLabel(status)}</option>`).join('')}
+              ${['published', 'draft', 'archived'].map((status) => `<option value="${status}" ${String(entity?.status || 'published') === status ? 'selected' : ''}>${getStatusLabel(status)}</option>`).join('')}
             </select>
           </label>
           <label class="admin-field admin-field--wide"><span>Image URL</span><input class="admin-input" name="image" value="${escapeHtml(entity?.image || '')}" /></label>
           <label class="admin-field admin-field--wide"><span>Description</span><textarea class="admin-textarea" name="description">${escapeHtml(entity?.description || '')}</textarea></label>
-          <label class="admin-check"><input type="checkbox" name="featured" ${entity?.featured ? 'checked' : ''} /><span>Featured product</span></label>
+          <label class="admin-field admin-field--wide"><span>Product specifications</span><textarea class="admin-textarea" name="specifications" rows="7" placeholder="One per line: Label: Value">${escapeHtml(formatProductSpecifications(entity?.specifications))}</textarea><small class="admin-field__hint">Add one specification per line in the format <code>Label: Value</code>. These appear under More details.</small></label>
+          <label class="admin-check"><input type="checkbox" name="comboPurchase" ${entity?.comboPurchase ? 'checked' : ''} /><span>Available for combo purchase</span></label>
           <label class="admin-check"><input type="checkbox" name="archived" ${entity?.archived ? 'checked' : ''} /><span>Archived</span></label>
         `,
       },
@@ -2080,32 +3336,60 @@
         title: entity ? 'Edit Coupon' : 'Create Coupon',
         subtitle: 'Coupons',
         fields: `
-          <label class="admin-field"><span>Coupon Code</span><input class="admin-input" name="code" value="${escapeHtml(entity?.code || '')}" required /></label>
-          <label class="admin-field"><span>Campaign / Offer Name</span><input class="admin-input" name="festivalName" value="${escapeHtml(entity?.festivalName || '')}" placeholder="Seasonal, Festival, First Purchase" /></label>
-          <label class="admin-field"><span>Description</span><input class="admin-input" name="description" value="${escapeHtml(entity?.description || '')}" placeholder="Coupon notes or offer details" /></label>
-          <label class="admin-field"><span>Discount</span><input class="admin-input" name="discount" value="${escapeHtml(entity?.discount || '')}" required /></label>
-          <label class="admin-field"><span>Usage Count</span><input class="admin-input" name="usageCount" type="number" min="0" value="${escapeHtml(entity?.usageCount || 0)}" /></label>
-          <label class="admin-field"><span>Session Limit</span><input class="admin-input" name="sessionLimit" type="number" min="1" value="${escapeHtml(entity?.sessionLimit || 1)}" /></label>
-          <label class="admin-field"><span>Expiry</span><input class="admin-input" name="expiry" type="date" value="${escapeHtml(entity?.expiry || toISODate(today))}" /></label>
-          <label class="admin-field"><span>Coupon Type</span>
-            <select class="admin-select" name="couponType">
-              <option value="general" ${getCouponTypeValue(entity) === 'general' ? 'selected' : ''}>General Coupon</option>
-              <option value="influencer" ${getCouponTypeValue(entity) === 'influencer' ? 'selected' : ''}>Influencer Coupon</option>
+          <label class="admin-field admin-field--wide"><span>Coupon Category</span>
+            <select class="admin-select" name="couponCategory" data-coupon-category>
+              ${COUPON_CATEGORY_OPTIONS.map((option) => `<option value="${option.value}" ${getCouponCategoryValue(entity) === option.value ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}
             </select>
           </label>
-          <label class="admin-field"><span>Assigned Influencer</span>
+          <label class="admin-field"><span>Coupon Code</span>
+            <span class="admin-input-action">
+              <input class="admin-input" name="code" value="${escapeHtml(entity?.code || '')}" required />
+              <button class="admin-btn admin-btn--soft" type="button" data-coupon-generate-code>Generate</button>
+            </span>
+          </label>
+          <label class="admin-field"><span>Campaign Name</span><input class="admin-input" name="festivalName" value="${escapeHtml(entity?.festivalName || '')}" /></label>
+          <label class="admin-field admin-field--wide"><span>Description</span><input class="admin-input" name="description" value="${escapeHtml(entity?.description || '')}" /></label>
+          <label class="admin-field"><span>Discount</span><input class="admin-input" name="discount" type="number" min="1" step="1" value="${escapeHtml(entity?.discount || entity?.discountValue || '')}" required /></label>
+          <label class="admin-field"><span>Commission per Order (rupees)</span><input class="admin-input" name="commissionPerOrder" type="number" min="0" step="1" value="${escapeHtml(Number(entity?.commissionPerOrderPaise || 0) / 100)}" /></label>
+          <label class="admin-field" data-coupon-usage-type-field hidden><span>Usage Type</span>
+            <select class="admin-select" name="usageType" data-coupon-usage-type>
+              <option value="limited" ${getCouponUsageTypeValue(entity) === 'limited' ? 'selected' : ''}>Limited</option>
+              <option value="unlimited" ${getCouponUsageTypeValue(entity) === 'unlimited' ? 'selected' : ''}>Unlimited</option>
+            </select>
+          </label>
+          <label class="admin-field" data-coupon-usage-limit-field><span>Usage Limit</span><input class="admin-input" name="usageCount" type="number" min="1" value="${escapeHtml(entity?.maxRedemptions || entity?.usageCount || '')}" /></label>
+          <label class="admin-field" data-coupon-expiry-field><span>Expiry Date</span><input class="admin-input" name="expiry" type="date" value="${escapeHtml(normalizeCouponDateValue(entity?.validTill || entity?.expiresAt || entity?.expiry))}" /></label>
+          <label class="admin-field" data-coupon-influencer-field><span>Assigned Influencer</span>
             <select class="admin-select" name="influencerId">
               <option value="">Unassigned</option>
               ${state.influencers.map((influencer) => `<option value="${influencer.id}" ${Number(entity?.influencerId || 0) === Number(influencer.id) ? 'selected' : ''}>${escapeHtml(influencer.name)}${influencer.handle ? ` (${escapeHtml(influencer.handle)})` : ''}</option>`).join('')}
             </select>
           </label>
-          <label class="admin-field"><span>Owner Email</span><input class="admin-input" name="recipientEmail" type="email" value="${escapeHtml(entity?.recipientEmail || '')}" placeholder="Only for private customer coupons" /></label>
-          <label class="admin-field"><span>Applies To</span>
-            <select class="admin-select" name="appliesTo">
-              <option value="merch" ${String(entity?.appliesTo || 'merch') === 'merch' ? 'selected' : ''}>Merch</option>
-              <option value="all" ${String(entity?.appliesTo) === 'all' ? 'selected' : ''}>All</option>
-            </select>
-          </label>
+          <label class="admin-field" data-coupon-owner-field><span>Owner Email</span><input class="admin-input" name="recipientEmail" type="email" value="${escapeHtml(entity?.recipientEmail || '')}" placeholder="customer@example.com" /></label>
+          ${(() => {
+            const productOptions = getCouponProductOptions(entity);
+            return `
+              <div class="admin-field admin-field--wide admin-product-multiselect" data-coupon-products-dropdown>
+                <span>Applies To</span>
+                <button class="admin-product-multiselect__trigger" type="button" data-coupon-products-toggle aria-expanded="false">${escapeHtml(productOptions.allSelected ? 'All Merch Products' : productOptions.products.filter((product) => product.selected).length === 1 ? productOptions.products.find((product) => product.selected)?.label || '1 Product Selected' : `${productOptions.products.filter((product) => product.selected).length} Products Selected`)}</button>
+                <div class="admin-product-multiselect__menu" data-coupon-products-menu hidden>
+                  <input class="admin-input" type="search" data-input="couponProductSearch" placeholder="Search products" aria-label="Search products" />
+                  <div class="admin-product-multiselect__options">
+                    <label class="admin-product-multiselect__option" data-coupon-product-option data-coupon-product-search="all merch products">
+                      <input type="checkbox" name="appliesToAll" value="merch" data-coupon-product-checkbox data-coupon-product-all ${productOptions.allSelected ? 'checked' : ''} />
+                      <span>All Merch Products</span>
+                    </label>
+                    ${productOptions.products.map((product) => `
+                      <label class="admin-product-multiselect__option" data-coupon-product-option data-coupon-product-search="${escapeHtml(product.label).toLowerCase()}">
+                        <input type="checkbox" name="appliesToProduct" value="${product.id}" data-coupon-product-checkbox data-coupon-product-id="${product.id}" data-coupon-product-name="${escapeHtml(product.label)}" ${product.selected ? 'checked' : ''} />
+                        <span>${escapeHtml(product.label)}</span>
+                      </label>
+                    `).join('')}
+                  </div>
+                </div>
+              </div>
+            `;
+          })()}
           <label class="admin-check"><input type="checkbox" name="status" ${String(entity?.status || 'active') === 'active' ? 'checked' : ''} /><span>Active</span></label>
         `,
       },
@@ -2117,7 +3401,8 @@
           <label class="admin-field"><span>Social Handle</span><input class="admin-input" name="handle" value="${escapeHtml(entity?.handle || '')}" required /></label>
           <label class="admin-field"><span>Email</span><input class="admin-input" name="email" value="${escapeHtml(entity?.email || '')}" /></label>
           <label class="admin-field"><span>Phone</span><input class="admin-input" name="phone" value="${escapeHtml(entity?.phone || '')}" /></label>
-          <label class="admin-field"><span>Commission %</span><input class="admin-input" name="commissionRate" type="number" min="0" max="100" step="0.01" value="${escapeHtml(entity?.commissionRate ?? 10)}" /></label>
+          <label class="admin-field"><span>Commission per Order (rupees)</span><input class="admin-input" name="commissionPerOrder" type="number" min="0" step="1" value="${escapeHtml(Number(entity?.commissionPerOrderPaise || 0) / 100)}" /></label>
+          <label class="admin-field"><span>Commission Paid (rupees)</span><input class="admin-input" name="paidCommission" type="number" min="0" step="1" value="${escapeHtml(Math.round(Number(entity?.paidCommission || 0) / 100))}" /></label>
           <label class="admin-field admin-field--wide"><span>Assigned Coupons</span><input class="admin-input" value="${escapeHtml((entity?.coupons || []).join(', '))}" readonly /></label>
           <label class="admin-field admin-field--wide"><span>Notes</span><textarea class="admin-textarea" name="notes">${escapeHtml(entity?.notes || '')}</textarea></label>
           <label class="admin-check"><input type="checkbox" name="active" ${entity?.active !== false ? 'checked' : ''} /><span>Active influencer</span></label>
@@ -2127,6 +3412,24 @@
 
     const selected = config[type];
     if (!selected) return;
+
+    const isEditingCoupon = type === 'coupon' && Boolean(entity);
+    const couponIsInfluencer = isEditingCoupon && getCouponCategoryValue(entity) === 'influencer';
+    const couponManagementActions = isEditingCoupon ? `
+      <div class="admin-modal__management-actions">
+        ${couponIsInfluencer ? '<button class="admin-btn admin-btn--ghost" type="button" data-action="assign-coupon-owner" data-id="' + escapeHtml(entity.id) + '">Assign Influencer</button>' : ''}
+        <button class="admin-btn admin-btn--ghost" type="button" data-action="copy-coupon" data-id="${escapeHtml(entity.id)}">Copy Coupon</button>
+        <button class="admin-btn admin-btn--ghost" type="button" data-action="toggle-coupon" data-id="${escapeHtml(entity.id)}">${Number(entity.active ?? entity.isActive ?? 0) === 1 ? 'Disable' : 'Enable'}</button>
+        <button class="admin-btn admin-btn--danger" type="button" data-action="delete-coupon" data-id="${escapeHtml(entity.id)}">Delete</button>
+      </div>
+    ` : '';
+    const isEditingInfluencer = type === 'influencer' && Boolean(entity);
+    const influencerManagementActions = isEditingInfluencer ? `
+      <div class="admin-modal__management-actions">
+        <button class="admin-btn admin-btn--ghost" type="button" data-action="assign-coupon" data-id="${escapeHtml(entity.id)}">Assign Coupons</button>
+        <button class="admin-btn ${entity.active ? 'admin-btn--danger' : 'admin-btn--ghost'}" type="button" data-action="toggle-influencer" data-id="${escapeHtml(entity.id)}">${entity.active ? 'Deactivate Influencer' : 'Activate Influencer'}</button>
+      </div>
+    ` : '';
 
     openModal({
       title: selected.title,
@@ -2139,6 +3442,8 @@
         </form>
       `,
       footer: `
+        ${couponManagementActions}
+        ${influencerManagementActions}
         <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button>
         <button class="admin-btn admin-btn--primary" type="submit" form="entityFormSubmit">Save</button>
       `,
@@ -2146,16 +3451,136 @@
     });
 
     const form = els.adminModalDialog.querySelector(`[data-entity-form="${type}"]`);
-    if (form) form.id = 'entityFormSubmit';
+    if (form) {
+      form.id = 'entityFormSubmit';
+      if (type === 'coupon') {
+        initializeCouponCategoryForm(form, entity);
+      }
+    }
+  }
+
+  function initializeCouponCategoryForm(form, entity = null) {
+    const categorySelect = form.querySelector('[name="couponCategory"]');
+    const codeInput = form.querySelector('[name="code"]');
+    const generateButton = form.querySelector('[data-coupon-generate-code]');
+    const influencerField = form.querySelector('[data-coupon-influencer-field]');
+    const ownerField = form.querySelector('[data-coupon-owner-field]');
+    const usageTypeField = form.querySelector('[data-coupon-usage-type-field]');
+    const usageTypeSelect = form.querySelector('[name="usageType"]');
+    const usageLimitField = form.querySelector('[data-coupon-usage-limit-field]');
+    const expiryField = form.querySelector('[data-coupon-expiry-field]');
+    const influencerSelect = form.querySelector('[name="influencerId"]');
+    const ownerEmailInput = form.querySelector('[name="recipientEmail"]');
+    const activeInput = form.querySelector('[name="status"]');
+    const productsDropdown = form.querySelector('[data-coupon-products-dropdown]');
+    const productsToggle = form.querySelector('[data-coupon-products-toggle]');
+    const productsMenu = form.querySelector('[data-coupon-products-menu]');
+    const productsSearch = form.querySelector('[data-input="couponProductSearch"]');
+
+    productsToggle?.addEventListener('click', () => {
+      const isOpen = !productsMenu?.hidden;
+      if (productsMenu) productsMenu.hidden = isOpen;
+      productsToggle.setAttribute('aria-expanded', String(!isOpen));
+      productsDropdown?.classList.toggle('is-open', !isOpen);
+      if (!isOpen) productsSearch?.focus();
+    });
+    productsSearch?.addEventListener('input', () => filterCouponProductOptions(productsSearch));
+    form.querySelectorAll('[data-coupon-product-checkbox]').forEach((checkbox) => {
+      checkbox.addEventListener('change', () => syncCouponProductSelection(checkbox));
+    });
+
+    const generateCodeForCategory = async () => {
+      if (!codeInput) return;
+      const category = String(categorySelect?.value || 'public').trim().toLowerCase();
+      if (category === 'influencer') return;
+      const defaults = getCouponCategoryDefaults(category);
+      const originalLabel = generateButton?.textContent || 'Generate';
+      if (generateButton) {
+        generateButton.disabled = true;
+        generateButton.textContent = 'Generating...';
+      }
+      try {
+        const code = await fetchGeneratedCouponCode(defaults.codePrefix);
+        codeInput.value = code;
+      } catch (error) {
+        toast('Code unavailable', error.message || 'Unable to generate a coupon code.', 'danger');
+      } finally {
+        if (generateButton) {
+          generateButton.disabled = false;
+          generateButton.textContent = originalLabel;
+        }
+      }
+    };
+
+    const applyCategory = ({ overwriteDefaults = false, regenerateCode = false } = {}) => {
+      const category = String(categorySelect?.value || 'public').trim().toLowerCase();
+      const defaults = getCouponCategoryDefaults(category);
+      const isInfluencer = category === 'influencer';
+      const isPrivate = category === 'private';
+
+      if (influencerField) influencerField.hidden = !isInfluencer;
+      if (ownerField) ownerField.hidden = !isPrivate;
+      if (usageTypeField) usageTypeField.hidden = !isInfluencer;
+      if (generateButton) {
+        generateButton.hidden = isInfluencer;
+        generateButton.disabled = isInfluencer;
+      }
+      if (!isInfluencer && influencerSelect) influencerSelect.value = '';
+      if (!isPrivate && ownerEmailInput) ownerEmailInput.value = '';
+
+      const defaultValues = {
+        festivalName: defaults.campaignName,
+        description: defaults.description,
+        discount: defaults.discount,
+        usageCount: defaults.usageCount,
+        expiry: addDaysIso(defaults.expiryDays),
+        appliesTo: 'merch',
+      };
+
+      Object.entries(defaultValues).forEach(([name, value]) => {
+        const input = form.querySelector(`[name="${name}"]`);
+        if (!input) return;
+        if (overwriteDefaults || !String(input.value || '').trim()) {
+          input.value = value;
+        }
+      });
+
+      if (isInfluencer && usageTypeSelect && (overwriteDefaults || !usageTypeSelect.value)) {
+        usageTypeSelect.value = 'limited';
+      }
+      const isUnlimitedInfluencer = isInfluencer && usageTypeSelect?.value === 'unlimited';
+      if (usageLimitField) usageLimitField.hidden = isUnlimitedInfluencer;
+      if (expiryField) expiryField.hidden = isUnlimitedInfluencer;
+      if (isUnlimitedInfluencer) {
+        const usageInput = form.querySelector('[name="usageCount"]');
+        const expiryInput = form.querySelector('[name="expiry"]');
+        if (usageInput) usageInput.value = '';
+        if (expiryInput) expiryInput.value = '';
+      }
+
+      if (activeInput && !entity) activeInput.checked = true;
+      if (regenerateCode && !isInfluencer) generateCodeForCategory();
+    };
+
+    applyCategory({ overwriteDefaults: !entity, regenerateCode: !entity });
+    categorySelect?.addEventListener('change', () => applyCategory({ overwriteDefaults: true, regenerateCode: true }));
+    usageTypeSelect?.addEventListener('change', () => applyCategory({ overwriteDefaults: false }));
+    generateButton?.addEventListener('click', () => generateCodeForCategory());
   }
 
   function renderInfluencerAssignmentModal(influencer) {
     if (!influencer) return;
-    const availableCoupons = Array.isArray(state.coupons)
-      ? state.coupons
-          .map((coupon) => String(coupon.code || '').trim().toUpperCase())
-          .filter(Boolean)
-      : [];
+    const assignedCoupons = normalizeCouponCodes(influencer.coupons || []);
+    const availableCouponMap = new Map(
+      (Array.isArray(state.coupons) ? state.coupons : [])
+        .filter((coupon) => getCouponTypeValue(coupon) === 'influencer')
+        .map((coupon) => [String(coupon.code || '').trim().toUpperCase(), coupon])
+        .filter(([code]) => Boolean(code))
+    );
+    assignedCoupons.forEach((code) => {
+      if (!availableCouponMap.has(code)) availableCouponMap.set(code, { code });
+    });
+    const availableCoupons = [...availableCouponMap.values()].sort((left, right) => String(left.code || '').localeCompare(String(right.code || '')));
 
     openModal({
       title: `Assign Coupons to ${influencer.name}`,
@@ -2163,14 +3588,25 @@
       body: `
         <form class="admin-form" data-form="influencer-coupons" data-influencer-id="${escapeHtml(influencer.id)}">
           <div class="admin-form__grid">
-            <label class="admin-field admin-field--wide">
+            <div class="admin-field admin-field--wide admin-product-multiselect" data-influencer-coupon-dropdown>
               <span>Assigned Coupons</span>
-              <textarea class="admin-textarea" name="coupons" rows="4" placeholder="Enter coupon codes separated by commas or new lines">${escapeHtml((influencer.coupons || []).join(', '))}</textarea>
-            </label>
-            <label class="admin-field admin-field--wide">
-              <span>Available Coupon Codes</span>
-              <input class="admin-input" type="text" value="${escapeHtml(availableCoupons.length ? availableCoupons.join(', ') : 'No coupons synced yet')}" readonly />
-            </label>
+              <div class="admin-chip-row admin-influencer-coupon-chips" data-influencer-coupon-chips></div>
+              <button class="admin-product-multiselect__trigger" type="button" data-influencer-coupon-toggle aria-expanded="false">Choose coupons</button>
+              <div class="admin-product-multiselect__menu" data-influencer-coupon-menu hidden>
+                <input class="admin-input" type="search" data-influencer-coupon-search placeholder="Search influencer coupons" aria-label="Search influencer coupons" />
+                <div class="admin-product-multiselect__options">
+                  ${availableCoupons.length ? availableCoupons.map((coupon) => {
+                    const code = String(coupon.code || '').trim().toUpperCase();
+                    return `
+                      <label class="admin-product-multiselect__option" data-influencer-coupon-option data-influencer-coupon-search="${escapeHtml(`${code} ${coupon.description || ''}`).toLowerCase()}">
+                        <input type="checkbox" name="couponCodes" value="${escapeHtml(code)}" data-influencer-coupon-checkbox ${assignedCoupons.includes(code) ? 'checked' : ''} />
+                        <span>${escapeHtml(code)}</span>
+                      </label>
+                    `;
+                  }).join('') : '<p class="admin-table__muted" style="margin:8px;">No influencer coupons available.</p>'}
+                </div>
+              </div>
+            </div>
             <label class="admin-field admin-field--wide">
               <span>Campaign Notes</span>
               <textarea class="admin-textarea" name="notes" rows="2" placeholder="Optional campaign note">${escapeHtml(influencer.notes || '')}</textarea>
@@ -2186,7 +3622,44 @@
     });
 
     const form = els.adminModalDialog.querySelector('[data-form="influencer-coupons"]');
-    if (form) form.id = 'influencerCouponForm';
+    if (form) {
+      form.id = 'influencerCouponForm';
+      const dropdown = form.querySelector('[data-influencer-coupon-dropdown]');
+      const toggle = form.querySelector('[data-influencer-coupon-toggle]');
+      const menu = form.querySelector('[data-influencer-coupon-menu]');
+      const search = form.querySelector('[data-influencer-coupon-search]');
+      const chips = form.querySelector('[data-influencer-coupon-chips]');
+      const renderAssignedChips = () => {
+        const selected = [...form.querySelectorAll('[data-influencer-coupon-checkbox]:checked')].map((checkbox) => checkbox.value);
+        chips.innerHTML = selected.length
+          ? selected.map((code) => `<button class="admin-chip admin-chip--removable" type="button" data-remove-influencer-coupon="${escapeHtml(code)}"><span>${escapeHtml(code)}</span><span aria-hidden="true">&times;</span></button>`).join('')
+          : '<span class="admin-table__muted">No coupons assigned yet.</span>';
+        toggle.textContent = selected.length ? `${selected.length} Coupon${selected.length === 1 ? '' : 's'} Selected` : 'Choose coupons';
+      };
+      const filterOptions = () => {
+        const query = String(search.value || '').trim().toLowerCase();
+        form.querySelectorAll('[data-influencer-coupon-option]').forEach((option) => {
+          option.hidden = Boolean(query) && !String(option.dataset.influencerCouponSearch || '').includes(query);
+        });
+      };
+      toggle.addEventListener('click', () => {
+        const isOpen = !menu.hidden;
+        menu.hidden = isOpen;
+        toggle.setAttribute('aria-expanded', String(!isOpen));
+        dropdown.classList.toggle('is-open', !isOpen);
+        if (!isOpen) search.focus();
+      });
+      search.addEventListener('input', filterOptions);
+      form.querySelectorAll('[data-influencer-coupon-checkbox]').forEach((checkbox) => checkbox.addEventListener('change', renderAssignedChips));
+      form.addEventListener('click', (event) => {
+        const removeButton = event.target.closest('[data-remove-influencer-coupon]');
+        if (!removeButton) return;
+        const checkbox = [...form.querySelectorAll('[data-influencer-coupon-checkbox]')].find((item) => item.value === removeButton.dataset.removeInfluencerCoupon);
+        if (checkbox) checkbox.checked = false;
+        renderAssignedChips();
+      });
+      renderAssignedChips();
+    }
   }
 
   async function updateInfluencerCouponsFromForm(form) {
@@ -2197,7 +3670,7 @@
       return;
     }
 
-    const coupons = normalizeCouponCodes(form.querySelector('[name="coupons"]')?.value);
+    const coupons = normalizeCouponCodes([...form.querySelectorAll('[data-influencer-coupon-checkbox]:checked')].map((checkbox) => checkbox.value));
     const notes = String(form.querySelector('[name="notes"]')?.value || '').trim();
     await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencerId)}/coupons`, {
       method: 'PUT',
@@ -2214,27 +3687,51 @@
 
   function updateProductFromForm(form, existing = null) {
     const fd = new FormData(form);
-    const categoryId = Number(fd.get('categoryId'));
-    const category = state.categories.find((item) => Number(item.id) === categoryId);
+    const categoryIdValue = String(fd.get('categoryId') || '').trim();
+    const categoryId = /^\d+$/.test(categoryIdValue) ? Number(categoryIdValue) : categoryIdValue;
+    const category = state.categories.find((item) => String(item.id) === String(categoryId));
+    const newCategoryName = String(fd.get('newCategoryName') || '').trim();
+    const newCategorySlug = slugify(newCategoryName);
     const product = {
       id: existing?.id || Number(uniqueId('prod').replace(/\D/g, '').slice(0, 6)),
       name: String(fd.get('name') || '').trim(),
       sku: String(fd.get('sku') || '').trim(),
       categoryId,
       category: category?.name || 'Uncategorized',
+      newCategoryName,
+      newCategorySlug,
+      size: String(fd.get('size') || '').trim(),
+      color: String(fd.get('color') || '').trim(),
       price: Number(fd.get('price') || 0),
-      priceLabel: existing?.priceLabel || money(Number(fd.get('price') || 0)),
+      priceLabel: catalogPrice(Number(fd.get('price') || 0)),
       stock: Number(fd.get('stock') || 0),
       status: String(fd.get('status') || 'draft'),
       createdAt: existing?.createdAt || toISODate(today),
       sales: Number(existing?.sales || 0),
       lowStockThreshold: Number(existing?.lowStockThreshold || 10),
-      featured: fd.get('featured') === 'on',
+      comboPurchase: fd.get('comboPurchase') === 'on',
       archived: fd.get('archived') === 'on' || String(fd.get('status')) === 'archived',
       image: String(fd.get('image') || '').trim() || '/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=120',
       description: String(fd.get('description') || '').trim(),
+      specifications: parseProductSpecifications(fd.get('specifications')),
     };
     return product;
+  }
+
+  function parseProductSpecifications(value) {
+    return String(value || '').split(/\r?\n/).reduce((result, line) => {
+      const separator = line.indexOf(':');
+      if (separator < 1) return result;
+      const label = line.slice(0, separator).trim();
+      const specificationValue = line.slice(separator + 1).trim();
+      if (label && specificationValue) result[label] = specificationValue;
+      return result;
+    }, {});
+  }
+
+  function formatProductSpecifications(specifications) {
+    if (!specifications || typeof specifications !== 'object') return '';
+    return Object.entries(specifications).map(([label, value]) => `${label}: ${value}`).join('\n');
   }
 
   function updateCategoryFromForm(form, existing = null) {
@@ -2251,27 +3748,40 @@
 
   function updateCouponFromForm(form, existing = null) {
     const fd = new FormData(form);
+    const couponCategory = String(fd.get('couponCategory') || 'public').trim().toLowerCase();
     const influencerId = Number(fd.get('influencerId') || 0);
     const recipientEmail = String(fd.get('recipientEmail') || '').trim().toLowerCase();
-    const couponType = recipientEmail ? 'private' : 'public';
+    const couponType = couponCategory === 'private' ? 'private' : 'public';
+    const usageType = couponCategory === 'influencer'
+      ? String(fd.get('usageType') || 'limited').trim().toLowerCase()
+      : '';
+    const isUnlimitedInfluencer = couponCategory === 'influencer' && usageType === 'unlimited';
     const influencer = getInfluencerById(influencerId);
+    const usageCount = Number(fd.get('usageCount') || 0);
     return {
       id: existing?.id || Date.now(),
       code: String(fd.get('code') || '').trim().toUpperCase(),
       description: String(fd.get('description') || '').trim(),
       discount: String(fd.get('discount') || '').trim(),
-      usageCount: Number(fd.get('usageCount') || 0),
-      sessionLimit: Number(fd.get('sessionLimit') || 1),
-      expiry: String(fd.get('expiry') || toISODate(today)),
+      commissionPerOrderPaise: Math.max(0, Math.round(Number(fd.get('commissionPerOrder') || 0) * 100)),
+      usageCount: isUnlimitedInfluencer ? null : Number.isFinite(usageCount) && usageCount > 0 ? usageCount : null,
+      expiry: isUnlimitedInfluencer ? '' : String(fd.get('expiry') || '').trim(),
+      usageType,
       status: fd.get('status') === 'on' ? 'active' : 'inactive',
       couponType,
-      ownerType: influencerId ? 'influencer' : 'general',
-      appliesTo: String(fd.get('appliesTo') || 'merch').trim().toLowerCase() === 'all' ? 'all' : 'merch',
-      owner: influencer?.name || (influencerId ? 'Influencer' : 'General'),
-      recipientName: influencer?.name || '',
-      recipientEmail,
-      influencerId,
+      ownerType: couponCategory === 'influencer' ? 'influencer' : couponCategory === 'private' ? 'private' : 'general',
+      appliesTo: fd.get('appliesToAll') === 'merch'
+        ? 'merch'
+        : (() => {
+            const productIds = [...new Set(fd.getAll('appliesToProduct').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
+            return productIds.length ? `product:${productIds.join(',')}` : 'merch';
+          })(),
+      owner: couponCategory === 'influencer' ? influencer?.name || 'Influencer' : couponCategory === 'private' ? recipientEmail : 'General',
+      recipientName: couponCategory === 'influencer' ? influencer?.name || '' : '',
+      recipientEmail: couponCategory === 'private' ? recipientEmail : '',
+      influencerId: couponCategory === 'influencer' ? influencerId : 0,
       festivalName: String(fd.get('festivalName') || '').trim(),
+      couponCategory,
     };
   }
 
@@ -2284,7 +3794,8 @@
       email: String(fd.get('email') || '').trim(),
       phone: String(fd.get('phone') || '').trim(),
       notes: String(fd.get('notes') || '').trim(),
-      commissionRate: Number(fd.get('commissionRate') || 10),
+      commissionPerOrderPaise: Math.max(0, Math.round(Number(fd.get('commissionPerOrder') || 0) * 100)),
+      paidCommission: Math.max(0, Math.round(Number(fd.get('paidCommission') || existing?.paidCommission || 0) * 100)),
       coupons: existing?.coupons || [],
       totalOrders: Number(existing?.totalOrders || 0),
       revenue: Number(existing?.revenue || 0),
@@ -2325,6 +3836,79 @@
     } finally {
       state.couponsLoading = false;
       renderCoupons();
+      renderDashboard();
+    }
+  }
+
+  async function loadDashboardStats() {
+    try {
+      const result = await apiRequest('/api/merch/admin/stats');
+      state.dashboardStats = result || null;
+    } catch (error) {
+      state.dashboardStats = null;
+    } finally {
+      renderDashboard();
+      if (state.view === 'reports') renderReports();
+    }
+  }
+
+  async function loadProductData() {
+    try {
+      const result = await apiRequest('/api/merch/admin/products');
+      const categoryIds = { hoodies: 1, bottles: 2, sprays: 3 };
+      const unknownCategories = new Map();
+      const products = Array.isArray(result) ? result.map((product) => {
+        const variants = Array.isArray(product.variants) ? product.variants : [];
+        const firstVariant = variants[0] || {};
+        const price = Number(firstVariant.price || product.basePrice || 0) / 100;
+        const categorySlug = String(product.category || '').trim().toLowerCase();
+        const categoryId = categoryIds[categorySlug] || `custom-${categorySlug}`;
+        if (!categoryIds[categorySlug] && categorySlug && !unknownCategories.has(categorySlug)) {
+          unknownCategories.set(categorySlug, {
+            id: categoryId,
+            name: categorySlug.split('-').map((word) => word ? word[0].toUpperCase() + word.slice(1) : '').join(' '),
+            slug: categorySlug,
+            active: true,
+            productCount: 0,
+            description: `Products in the ${categorySlug.replace(/-/g, ' ')} category.`,
+          });
+        }
+        return {
+          id: Number(product.id),
+          name: product.name,
+          slug: product.slug,
+          primarySku: product.primarySku || firstVariant.sku || '',
+          categoryId,
+          category: state.categories.find((item) => String(item.id) === String(categoryId))?.name || unknownCategories.get(categorySlug)?.name || categorySlug,
+          price,
+          priceLabel: catalogPrice(price),
+          stock: Number(product.stock || 0),
+          status: product.status === 'published' ? 'published' : 'archived',
+          archived: Boolean(product.archived),
+          createdAt: product.createdAt || '',
+          sales: Number(product.sales || 0),
+          lowStockThreshold: Number(product.lowStockThreshold || LOW_STOCK_THRESHOLD),
+          featured: Boolean(product.featured),
+          comboPurchase: Boolean(product.comboPurchase),
+          isCombo: Boolean(product.isCombo),
+          comboItems: Array.isArray(product.comboItems) ? product.comboItems : [],
+          image: product.imageUrl || product.image || '',
+          description: product.description || '',
+          specifications: product.specifications || {},
+          variants: variants.map((variant) => ({
+            ...variant,
+            price: Number(variant.price || 0) / 100,
+            stock: Number(variant.stock || 0),
+          })),
+        };
+      }) : [];
+      unknownCategories.forEach((category) => {
+        if (!state.categories.some((item) => String(item.id) === String(category.id))) state.categories.push(category);
+      });
+      state.products = expandProductVariants(products);
+      renderAll();
+    } catch (error) {
+      toast('Products unavailable', error.message || 'Unable to load products from the merch API.', 'warning');
     }
   }
 
@@ -2334,9 +3918,6 @@
     try {
       const result = await apiRequest('/api/merch/admin/orders');
       state.orders = Array.isArray(result.orders) ? result.orders : [];
-      if (!state.selectedOrderId && state.orders[0]) {
-        state.selectedOrderId = state.orders[0].id;
-      }
     } catch (error) {
       state.orders = [];
       toast('Orders unavailable', error.message || 'Unable to load merch orders from the admin API.', 'warning');
@@ -2344,6 +3925,7 @@
       state.ordersLoading = false;
       renderOrders();
       renderDashboard();
+      if (state.view === 'reports') renderReports();
     }
   }
 
@@ -2393,6 +3975,57 @@
     } finally {
       state.reportsLoading = false;
       renderReports();
+      renderDashboard();
+    }
+  }
+
+  function downloadCurrentReport() {
+    if (!state.reports) {
+      toast('Reports unavailable', 'Load the report data before downloading.', 'warning');
+      return;
+    }
+
+    const format = String(state.reportFormat || 'csv').toLowerCase();
+    const report = state.reports;
+    const startLabel = String(state.reportFrom || 'start').replace(/[^0-9-]/g, '');
+    const endLabel = String(state.reportTo || 'end').replace(/[^0-9-]/g, '');
+    const baseName = `merch-influencer-report-${startLabel}-${endLabel}`;
+
+    if (format === 'excel') {
+      downloadMerchReportFile(`${baseName}.xls`, buildMerchReportTsv(report), 'application/vnd.ms-excel;charset=utf-8');
+      toast('Download ready', 'The Excel-friendly report has been downloaded.', 'success');
+      return;
+    }
+
+    if (format === 'pdf') {
+      downloadMerchReportFile(`${baseName}.html`, buildMerchReportHtml(report), 'text/html;charset=utf-8');
+      toast('Download ready', 'The printable report has been downloaded as HTML. Open it and print to PDF if needed.', 'success');
+      return;
+    }
+
+    downloadMerchReportFile(`${baseName}.csv`, buildMerchReportCsv(report), 'text/csv;charset=utf-8');
+    toast('Download ready', 'The CSV report has been downloaded.', 'success');
+  }
+
+  async function emailCurrentReport() {
+    if (!state.reports) {
+      toast('Reports unavailable', 'Load the report data before sending it by email.', 'warning');
+      return;
+    }
+
+    try {
+      await apiRequest('/api/merch/admin/reports/email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          startDate: state.reportFrom,
+          endDate: state.reportTo,
+          format: state.reportFormat || 'csv',
+        }),
+      });
+      toast('Report emailed', 'The current merch influencer report has been emailed successfully.', 'success');
+    } catch (error) {
+      toast('Email failed', error.message || 'Unable to send the report email.', 'danger');
     }
   }
 
@@ -2447,8 +4080,10 @@
   }
 
   function selectedProductsOnPage() {
-    const visible = filterProducts().slice((state.productsPage - 1) * 5, (state.productsPage - 1) * 5 + 5);
-    return visible.filter((item) => state.selectedProductIds.includes(item.id));
+    // Selection is stored by row/variant id. Read it from the full catalog so
+    // sorting, filtering, or a page refresh cannot hide selected rows from
+    // the combo/archive/delete actions.
+    return state.products.filter((item) => state.selectedProductIds.includes(item.id));
   }
 
   function renderAll() {
@@ -2472,7 +4107,6 @@
     renderInfluencers();
     renderReports();
     renderSettings();
-    renderNotifications();
   }
 
   async function updateOrderOnServer(order, payload) {
@@ -2487,10 +4121,92 @@
     return response;
   }
 
+  async function fetchOrderInvoiceLink(orderId) {
+    const id = Number(orderId);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error('Order details are unavailable.');
+    }
+    return apiRequest(`/api/merch/orders/${encodeURIComponent(id)}/invoice-link`);
+  }
+
+  function openInvoiceDocument(url) {
+    const targetUrl = buildApiUrl(url);
+    const opened = window.open(targetUrl, '_blank', 'noopener,noreferrer');
+    if (!opened) {
+      toast('Invoice unavailable', 'The invoice could not open. Please allow popups and try again.', 'warning');
+    }
+  }
+
+  function getInvoiceFilename(headerValue, orderId) {
+    const header = String(headerValue || '');
+    const utfMatch = header.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utfMatch) {
+      try {
+        return decodeURIComponent(utfMatch[1]);
+      } catch {}
+    }
+    const match = header.match(/filename="?([^";]+)"?/i);
+    if (match?.[1]) return match[1];
+    return `Invoice-Merch-${String(orderId || 'Order').replace(/[^a-z0-9_-]+/gi, '-')}.pdf`;
+  }
+
+  async function openOrderInvoice(orderId) {
+    try {
+      const data = await fetchOrderInvoiceLink(orderId);
+      if (!data.invoiceUrl) throw new Error('Invoice link missing.');
+      openInvoiceDocument(data.invoiceUrl);
+    } catch (error) {
+      toast('Invoice unavailable', error.message || 'Unable to open the invoice.', 'warning');
+    }
+  }
+
+  async function downloadOrderInvoice(orderId) {
+    try {
+      const data = await fetchOrderInvoiceLink(orderId);
+      const downloadUrl = data.invoiceDownloadUrl || data.invoiceUrl;
+      if (!downloadUrl) throw new Error('Invoice download link missing.');
+      const response = await fetch(buildApiUrl(downloadUrl), { credentials: 'include' });
+      if (!response.ok || !(response.headers.get('content-type') || '').includes('application/pdf')) {
+        throw new Error('Unable to generate the invoice PDF.');
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = getInvoiceFilename(response.headers.get('content-disposition'), orderId);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      toast('Download unavailable', error.message || 'Unable to download the invoice.', 'warning');
+    }
+  }
+
+  async function emailOrderInvoice(orderId) {
+    try {
+      const id = Number(orderId);
+      if (!Number.isInteger(id) || id <= 0) throw new Error('Order details are unavailable.');
+      const result = await apiRequest(`/api/merch/orders/${encodeURIComponent(id)}/invoice-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      toast('Invoice emailed', `Sent to ${result.recipientEmail || 'the customer email on file'}.`, 'success');
+    } catch (error) {
+      toast('Email unavailable', error.message || 'Unable to email the invoice.', 'warning');
+    }
+  }
+
   async function handleAction(action, target) {
     const rawId = String(target?.dataset?.id || target?.closest?.('[data-id]')?.dataset?.id || '');
     const id = Number(rawId || 0);
-    const product = state.products.find((item) => Number(item.id) === id);
+    const product = state.products.find((item) =>
+      Number(item.id) === id ||
+      Number(item.variantId) === id ||
+      Number(item.productId) === id ||
+      Number(item.parentProductId) === id
+    );
     const category = state.categories.find((item) => Number(item.id) === id);
     const order = state.orders.find((item) => Number(item.id) === id);
     const customer = state.customers.find((item) => String(item.id) === rawId);
@@ -2498,11 +4214,38 @@
     const influencer = state.influencers.find((item) => Number(item.id) === id);
 
     switch (action) {
-      case 'open-notifications':
-        setNotificationsOpen(true);
+      case 'toggle-notifications':
+        state.notificationsExpanded = !state.notificationsExpanded;
+        renderDashboard();
         return;
-      case 'close-notifications':
-        setNotificationsOpen(false);
+      case 'dismiss-notification': {
+        const notificationId = String(target?.dataset?.notificationId || '');
+        const notification = state.notifications.find((item) => String(item.id) === notificationId);
+        if (!notification) return;
+        notification.read = true;
+        notification.dismissedAt = new Date().toISOString();
+        renderDashboard();
+        return;
+      }
+      case 'apply-order-status-range': {
+        const from = String(state.orderStatusFrom || '').trim();
+        const to = String(state.orderStatusTo || '').trim();
+        if (!from || !to || from > to) {
+          toast('Invalid date range', 'Choose a valid From and To date before applying the filter.', 'warning');
+          return;
+        }
+        state.orderStatusAppliedFrom = from;
+        state.orderStatusAppliedTo = to;
+        renderDashboard();
+        return;
+      }
+      case 'clear-order-status-range':
+        state.orderStatusPeriod = 'today';
+        state.orderStatusFrom = '';
+        state.orderStatusTo = '';
+        state.orderStatusAppliedFrom = '';
+        state.orderStatusAppliedTo = '';
+        renderDashboard();
         return;
       case 'open-profile':
         renderProfileModal();
@@ -2540,7 +4283,7 @@
         renderEntityFormModal('product');
         return;
       case 'edit-product':
-        renderEntityFormModal('product', product);
+        product?.isCombo ? renderComboFormModal([], product) : renderEntityFormModal('product', product);
         return;
       case 'duplicate-product':
         if (product) {
@@ -2561,15 +4304,21 @@
         return;
       case 'delete-product':
         if (product) {
+          const productId = Number(product.parentProductId || product.productId || product.id);
           openConfirmModal({
             title: 'Delete product',
-            message: `Delete ${product.name}? This placeholder action removes the item from the in-memory catalog.`,
+            message: `Remove ${product.name} from the customer storefront? Existing order history will be preserved.`,
             confirmLabel: 'Delete',
-            onConfirm: () => {
-              state.products = state.products.filter((item) => Number(item.id) !== id);
-              state.selectedProductIds = state.selectedProductIds.filter((itemId) => itemId !== id);
-              toast('Product deleted', `${product.name} has been removed.`, 'danger');
-              renderAll();
+            onConfirm: async () => {
+              try {
+                await apiRequest(`/api/merch/admin/products/${encodeURIComponent(productId)}`, { method: 'DELETE' });
+                state.selectedProductIds = state.selectedProductIds.filter((itemId) => itemId !== id);
+                await loadProductData();
+                toast('Product deleted', `${product.name} has been removed from the storefront.`, 'danger');
+                renderAll();
+              } catch (error) {
+                toast('Delete failed', error.message || 'Unable to remove the product.', 'warning');
+              }
             },
           });
         }
@@ -2591,17 +4340,53 @@
         toast('Bulk archive complete', 'Selected products were archived.', 'warning');
         renderAll();
         return;
+      case 'bulk-combo-on':
+        if (selectedProductsOnPage().length < 2) {
+          toast('Select products', 'Select at least two product variants to create a combo.', 'warning');
+          return;
+        }
+        renderComboFormModal(selectedProductsOnPage());
+        return;
+      case 'bulk-combo-off': {
+        const comboPurchase = false;
+        const productIds = [...new Set(state.products
+          .filter((item) => state.selectedProductIds.includes(item.id))
+          .map((item) => Number(item.parentProductId || item.productId || item.id))
+          .filter((productId) => Number.isInteger(productId) && productId > 0))];
+        try {
+          await Promise.all(productIds.map((productId) => apiRequest(`/api/merch/admin/products/${encodeURIComponent(productId)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ comboPurchase }),
+          })));
+          state.selectedProductIds = [];
+          await loadProductData();
+          toast(comboPurchase ? 'Products added to combo' : 'Products removed from combo', `${productIds.length} product${productIds.length === 1 ? '' : 's'} updated.`, 'success');
+          renderAll();
+        } catch (error) {
+          toast('Combo update failed', error.message || 'Unable to update combo availability.', 'warning');
+        }
+        return;
+      }
       case 'bulk-delete':
         openConfirmModal({
           title: 'Delete selected products',
-          message: 'Remove all selected products from this mock catalog?',
+          message: 'Remove all selected products from the customer storefront? Existing order history will be preserved.',
           confirmLabel: 'Delete',
-          onConfirm: () => {
-            const ids = new Set(state.selectedProductIds);
-            state.products = state.products.filter((item) => !ids.has(item.id));
-            state.selectedProductIds = [];
-            toast('Bulk delete complete', 'Selected products were removed.', 'danger');
-            renderAll();
+          onConfirm: async () => {
+            const ids = [...new Set(state.products
+              .filter((item) => state.selectedProductIds.includes(item.id))
+              .map((item) => Number(item.parentProductId || item.productId || item.id))
+              .filter((itemId) => Number.isInteger(itemId) && itemId > 0))];
+            try {
+              await Promise.all(ids.map((productId) => apiRequest(`/api/merch/admin/products/${encodeURIComponent(productId)}`, { method: 'DELETE' })));
+              state.selectedProductIds = [];
+              await loadProductData();
+              toast('Bulk delete complete', 'Selected products were removed from the storefront.', 'danger');
+              renderAll();
+            } catch (error) {
+              toast('Bulk delete failed', error.message || 'Unable to remove the selected products.', 'warning');
+            }
           },
         });
         return;
@@ -2663,8 +4448,131 @@
         return;
       case 'select-order':
         if (order) {
-          state.selectedOrderId = order.id;
+          state.selectedOrderId = Number(state.selectedOrderId) === Number(order.id) ? null : order.id;
           renderOrders();
+        }
+        return;
+      case 'toggle-customers-today':
+        state.customersTodayOnly = !state.customersTodayOnly;
+        if (state.customersTodayOnly) {
+          state.customersDateFrom = '';
+          state.customersDateTo = '';
+          state.customersAppliedDateFrom = '';
+          state.customersAppliedDateTo = '';
+        }
+        renderCustomers();
+        return;
+      case 'apply-customers-date-range': {
+        const from = String(state.customersDateFrom || '').trim();
+        const to = String(state.customersDateTo || '').trim();
+        if (!from || !to) {
+          toast('Date range incomplete', 'Choose both a From and To date before applying the customer filter.', 'warning');
+          return;
+        }
+        if (from > to) {
+          toast('Invalid date range', 'The From date must be on or before the To date.', 'warning');
+          return;
+        }
+        state.customersTodayOnly = false;
+        state.customersAppliedDateFrom = from;
+        state.customersAppliedDateTo = to;
+        renderCustomers();
+        return;
+      }
+      case 'clear-customers-date-range':
+        state.customersTodayOnly = false;
+        state.customersDateFrom = '';
+        state.customersDateTo = '';
+        state.customersAppliedDateFrom = '';
+        state.customersAppliedDateTo = '';
+        renderCustomers();
+        return;
+      case 'toggle-orders-today':
+        state.ordersTodayOnly = !state.ordersTodayOnly;
+        if (state.ordersTodayOnly) {
+          state.ordersDateFrom = '';
+          state.ordersDateTo = '';
+          state.ordersAppliedDateFrom = '';
+          state.ordersAppliedDateTo = '';
+        }
+        state.ordersPage = 1;
+        renderOrders();
+        return;
+      case 'apply-orders-date-range': {
+        const from = String(state.ordersDateFrom || '').trim();
+        const to = String(state.ordersDateTo || '').trim();
+        if (!from || !to) {
+          toast('Date range incomplete', 'Choose both a From and To date before applying the filter.', 'warning');
+          return;
+        }
+        if (from && to && from > to) {
+          toast('Invalid date range', 'The From date must be on or before the To date.', 'warning');
+          return;
+        }
+        state.ordersTodayOnly = false;
+        state.ordersAppliedDateFrom = from;
+        state.ordersAppliedDateTo = to;
+        state.ordersPage = 1;
+        renderOrders();
+        return;
+      }
+      case 'clear-orders-date-range':
+        state.ordersDateFrom = '';
+        state.ordersDateTo = '';
+        state.ordersAppliedDateFrom = '';
+        state.ordersAppliedDateTo = '';
+        state.ordersPage = 1;
+        renderOrders();
+        return;
+      case 'update-product-stock':
+        if (product && target instanceof HTMLInputElement) {
+          const stock = Math.max(0, Number(target.value || 0));
+          product.stock = Number.isFinite(stock) ? stock : 0;
+          target.value = String(product.stock);
+          try {
+            await apiRequest(`/api/merch/admin/products/${encodeURIComponent(Number(product.parentProductId || product.productId || product.id))}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ variantId: Number(product.variantId || product.id), stock: product.stock }),
+            });
+            toast('Stock updated', `${product.name} now has ${product.stock} unit${product.stock === 1 ? '' : 's'} in stock.`, 'success');
+          } catch (error) {
+            toast('Stock update failed', error.message || 'Unable to save the stock count.', 'warning');
+            await loadProductData();
+          }
+          renderProducts();
+        }
+        return;
+      case 'update-order-status':
+        if (order && target instanceof HTMLSelectElement) {
+          const nextStatus = normalizeOrderStatus(target.value);
+          const payload = { status: nextStatus };
+          if (nextStatus === 'shipped' && !order.trackingNumber) {
+            payload.tracking_number = `TRK-${Math.floor(10000 + Math.random() * 90000)}-HM`;
+            payload.carrier_name = order.carrier || 'Shiprocket';
+          }
+          try {
+            await updateOrderOnServer(order, payload);
+            toast('Order updated', `${order.orderNumber} moved to ${getStatusLabel(nextStatus)}.`, 'success');
+          } catch (error) {
+            toast('Order update failed', error.message || 'Unable to update the order status.', 'warning');
+            renderOrders();
+          }
+        }
+        return;
+      case 'open-order-invoice':
+        if (order) {
+          await openOrderInvoice(order.id);
+        }
+        return;
+      case 'download-order-invoice':
+        if (order) {
+          await downloadOrderInvoice(order.id);
+        }
+        return;
+      case 'email-order-invoice':
+        if (order) {
+          await emailOrderInvoice(order.id);
         }
         return;
       case 'advance-order':
@@ -2706,12 +4614,26 @@
         return;
       case 'refund-order':
         if (order) {
-          try {
-            await updateOrderOnServer(order, { status: order.status || 'processing', payment_status: 'refunded' });
-            toast('Refund recorded', `${order.orderNumber} has been flagged for refund.`, 'success');
-          } catch (error) {
-            toast('Refund failed', error.message || 'Unable to record the refund.', 'warning');
+          const deliveredAt = order.deliveredAt || order.updatedAt;
+          const deliveredTime = deliveredAt ? new Date(deliveredAt).getTime() : NaN;
+          const refundWindowMs = 5 * 24 * 60 * 60 * 1000;
+          if (String(order.status || '').toLowerCase() !== 'delivered' || !Number.isFinite(deliveredTime) || Date.now() - deliveredTime > refundWindowMs) {
+            toast('Refund unavailable', 'Refunds are allowed only within 5 days of delivery.', 'warning');
+            return;
           }
+          openConfirmModal({
+            title: 'Approve refund',
+            message: `Approve and record a refund for ${order.orderNumber}? This changes the payment status and cannot be undone here.`,
+            confirmLabel: 'Approve refund',
+            onConfirm: async () => {
+              try {
+                await updateOrderOnServer(order, { status: order.status || 'processing', payment_status: 'refunded' });
+                toast('Refund approved', `${order.orderNumber} has been flagged for refund.`, 'success');
+              } catch (error) {
+                toast('Refund failed', error.message || 'Unable to record the refund.', 'warning');
+              }
+            },
+          });
         }
         return;
       case 'orders-prev':
@@ -2724,7 +4646,7 @@
         return;
       case 'select-customer':
         if (customer) {
-          state.selectedCustomerId = customer.id;
+          state.selectedCustomerId = String(state.selectedCustomerId) === String(customer.id) ? null : customer.id;
           renderCustomers();
         }
         return;
@@ -2736,9 +4658,13 @@
         return;
       case 'select-coupon':
         if (coupon) {
-          state.selectedCouponId = coupon.id;
+          state.selectedCouponId = Number(state.selectedCouponId) === Number(coupon.id) ? null : coupon.id;
           renderCoupons();
         }
+        return;
+      case 'close-coupon-details':
+        state.selectedCouponId = null;
+        renderCoupons();
         return;
       case 'open-coupon-modal':
         renderEntityFormModal('coupon');
@@ -2747,7 +4673,10 @@
         renderEntityFormModal('coupon', coupon);
         return;
       case 'assign-coupon-owner':
-        renderEntityFormModal('coupon', coupon);
+        if (coupon && getCouponTypeValue(coupon) === 'influencer') {
+          renderEntityFormModal('coupon', coupon);
+          window.setTimeout(() => els.adminModalDialog.querySelector('[name="influencerId"]')?.focus(), 0);
+        }
         return;
       case 'toggle-coupon':
         if (coupon) {
@@ -2758,6 +4687,7 @@
             body: JSON.stringify({ active: nextActive }),
           });
           toast('Coupon updated', `${coupon.code} is now ${nextActive ? 'active' : 'inactive'}.`, 'success');
+          closeModal();
           await loadCouponData();
         }
         return;
@@ -2784,6 +4714,14 @@
         if (influencer) {
           state.selectedInfluencerId = influencer.id;
           renderInfluencers();
+          window.setTimeout(() => {
+            const section = document.getElementById('influencer-profile-panel');
+            if (!section) return;
+            section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            if (typeof section.focus === 'function') {
+              section.focus({ preventScroll: true });
+            }
+          }, 0);
         }
         return;
       case 'open-influencer-modal':
@@ -2807,6 +4745,7 @@
                   body: JSON.stringify({ active: 0 }),
                 });
                 toast('Influencer deactivated', `${influencer.name} is now inactive.`, 'warning');
+                closeModal();
                 await loadInfluencerData();
               },
             });
@@ -2817,6 +4756,7 @@
               body: JSON.stringify({ active: 1 }),
             });
             toast('Influencer reactivated', `${influencer.name} is now active again.`, 'success');
+            closeModal();
             await loadInfluencerData();
           }
         }
@@ -2826,9 +4766,45 @@
           renderInfluencerAssignmentModal(influencer);
         }
         return;
-      case 'export-report':
-        toast('Export started', `${String(target.dataset.format || 'csv').toUpperCase()} export for the current date range is mocked.`, 'success');
+      case 'download-influencer-report':
+        if (influencer) {
+          await downloadInfluencerReport(influencer);
+        }
         return;
+      case 'email-influencer-report':
+        if (influencer) {
+          await emailInfluencerReport(influencer);
+        }
+        return;
+      case 'export-report':
+        downloadCurrentReport();
+        return;
+      case 'email-report':
+        await emailCurrentReport();
+        return;
+      case 'open-report-section': {
+        const targetId = String(target.dataset.target || '').trim();
+        const sectionIdMap = {
+          'sales-report': 'revenue-report',
+          'revenue-report': 'revenue-report',
+          'orders-report': 'orders-report',
+          'products-report': 'products-report',
+          'customers-report': 'customers-report',
+          'coupons-report': 'coupons-report',
+          'influencer-report': 'influencer-report',
+        };
+        const resolvedId = sectionIdMap[targetId] || targetId;
+        const section = document.getElementById(resolvedId);
+        if (section) {
+          section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          section.classList.add('admin-report-target--active');
+          window.clearTimeout(section.__reportHighlightTimer);
+          section.__reportHighlightTimer = window.setTimeout(() => {
+            section.classList.remove('admin-report-target--active');
+          }, 2200);
+        }
+        return;
+      }
       default:
         return;
     }
@@ -2856,16 +4832,33 @@
       renderOrders();
       return;
     }
+    if (inputKey === 'ordersDateFrom' || inputKey === 'ordersDateTo') {
+      return;
+    }
     if (inputKey === 'customersSearch') {
       renderCustomers();
+      return;
+    }
+    if (inputKey === 'customersDateFrom' || inputKey === 'customersDateTo') {
       return;
     }
     if (inputKey === 'couponsSearch') {
       renderCoupons();
       return;
     }
-    if (inputKey === 'influencersSearch') {
+    if (inputKey === 'influencersSearch' || inputKey === 'influencerDetailsFilter') {
       renderInfluencers();
+      return;
+    }
+    if (inputKey === 'revenuePeriod') {
+      renderDashboard();
+      return;
+    }
+    if (inputKey === 'orderStatusPeriod') {
+      renderDashboard();
+      return;
+    }
+    if (inputKey === 'orderStatusFrom' || inputKey === 'orderStatusTo') {
       return;
     }
     if (inputKey === 'reportFrom' || inputKey === 'reportTo' || inputKey === 'reportFormat') {
@@ -2879,6 +4872,38 @@
     const id = form.dataset.entityId ? Number(form.dataset.entityId) : null;
     const existingId = Number.isFinite(id) && id ? id : null;
 
+    if (type === 'combo') {
+      const fd = new FormData(form);
+      const componentVariantIds = fd.getAll('componentVariantId').map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0);
+      const payload = {
+        name: String(fd.get('name') || '').trim(),
+        price: Number(fd.get('price') || 0),
+        image: String(fd.get('image') || '').trim(),
+        description: String(fd.get('description') || '').trim(),
+        status: String(fd.get('status') || 'published'),
+        componentVariantIds,
+      };
+      if (!payload.name || !Number.isFinite(payload.price) || payload.price <= 0 || componentVariantIds.length < 2) {
+        toast('Combo details incomplete', 'Add a name, price, and at least two product variants.', 'warning');
+        return;
+      }
+      try {
+        await apiRequest(existingId ? `/api/merch/admin/combos/${encodeURIComponent(existingId)}` : '/api/merch/admin/combos', {
+          method: existingId ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        toast(existingId ? 'Combo saved' : 'Combo created', `${payload.name} is now available in the merch store.`, 'success');
+        closeModal();
+        state.selectedProductIds = [];
+        await loadProductData();
+        renderAll();
+      } catch (error) {
+        toast('Combo not saved', error.message || 'Unable to save the combo.', 'danger');
+      }
+      return;
+    }
+
     if (type === 'product') {
       const entity = updateProductFromForm(form, existingId ? state.products.find((item) => Number(item.id) === existingId) : null);
       if (!entity.name || !entity.sku) {
@@ -2886,11 +4911,68 @@
         return;
       }
       if (existingId) {
-        state.products = state.products.map((item) => (Number(item.id) === existingId ? entity : item));
-        toast('Product saved', `${entity.name} updated successfully.`, 'success');
+        const productId = Number(entity.parentProductId || entity.productId || existingId);
+        try {
+          await apiRequest(`/api/merch/admin/products/${encodeURIComponent(productId)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              variantId: Number(entity.variantId || existingId),
+              name: entity.name,
+              sku: entity.sku,
+              category: state.categories.find((item) => String(item.id) === String(entity.categoryId))?.slug || String(entity.category || '').toLowerCase(),
+              price: entity.price,
+              stock: entity.stock,
+              size: entity.size,
+              color: entity.color,
+              status: entity.status,
+              image: entity.image,
+              description: entity.description,
+              specifications: entity.specifications,
+              comboPurchase: entity.comboPurchase,
+            }),
+          });
+          toast('Product saved', `${entity.name} was updated in the merch store.`, 'success');
+          await loadProductData();
+        } catch (error) {
+          toast('Product not saved', error.message || 'Unable to update the product.', 'danger');
+          return;
+        }
       } else {
-        state.products.unshift(entity);
-        toast('Product added', `${entity.name} added to the catalog.`, 'success');
+        if (entity.newCategoryName && entity.newCategorySlug) {
+          const existingCategory = state.categories.find((category) => category.slug === entity.newCategorySlug);
+          if (!existingCategory) {
+            state.categories.push({ id: `custom-${entity.newCategorySlug}`, name: entity.newCategoryName, slug: entity.newCategorySlug, active: true, productCount: 0, description: `Products in the ${entity.newCategoryName} category.` });
+          }
+        }
+        const selectedCategory = entity.newCategorySlug
+          ? { slug: entity.newCategorySlug }
+          : state.categories.find((category) => String(category.id) === String(entity.categoryId));
+        try {
+          await apiRequest('/api/merch/admin/products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: entity.name,
+            sku: entity.sku,
+            category: selectedCategory?.slug || 'uncategorized',
+            price: entity.price,
+            stock: entity.stock,
+            status: entity.status,
+            image: entity.image,
+            description: entity.description,
+            specifications: entity.specifications,
+            size: entity.size,
+            color: entity.color,
+            comboPurchase: entity.comboPurchase,
+          }),
+          });
+        } catch (error) {
+          toast('Product not saved', error.message || 'Unable to save the product. Please try again.', 'danger');
+          return;
+        }
+        toast('Product added', `${entity.name} is now available in the merch store.`, 'success');
+        await loadProductData();
       }
       closeModal();
       renderAll();
@@ -2921,10 +5003,19 @@
         toast('Missing details', 'Coupon code and discount are required.', 'warning');
         return;
       }
+      if (entity.couponCategory === 'influencer' && !entity.influencerId) {
+        toast('Missing influencer', 'Choose an assigned influencer for this coupon.', 'warning');
+        return;
+      }
+      if (entity.couponCategory === 'private' && (!entity.recipientEmail || !isLikelyEmail(entity.recipientEmail))) {
+        toast('Missing owner email', 'Enter a valid owner email for this private coupon.', 'warning');
+        return;
+      }
       const payload = {
         code: entity.code,
         description: entity.description,
         discountValue: Number(entity.discount) || 0,
+        commissionPerOrderPaise: Math.max(0, Math.round(Number(entity.commissionPerOrder || 0) * 100)),
         couponType: entity.couponType,
         appliesTo: entity.appliesTo,
         festivalName: entity.festivalName,
@@ -2934,7 +5025,9 @@
         validTill: entity.expiry || null,
         singleUse: entity.couponType === 'private',
         sendEmail: false,
-        maxRedemptions: entity.couponType === 'private' ? 1 : null,
+        maxRedemptions: entity.usageCount,
+        perUserLimit: 1,
+        active: entity.status === 'active' ? 1 : 0,
         portal: 'merch'
       };
       const method = existingId ? 'PUT' : 'POST';
@@ -2953,24 +5046,33 @@
     }
 
     if (type === 'influencer') {
+      if (form.dataset.submitting === 'true') return;
       const entity = updateInfluencerFromForm(form, existingId ? state.influencers.find((item) => Number(item.id) === existingId) : null);
       if (!entity.name || !entity.handle) {
-        toast('Missing details', 'Influencer name and handle are required.', 'warning');
+        toast('Missing details', 'Influencer name and social handle are required.', 'warning');
         return;
       }
-      const method = existingId ? 'PUT' : 'POST';
-      const path = existingId
-        ? `/api/merch/admin/influencers/${encodeURIComponent(existingId)}`
-        : '/api/merch/admin/influencers';
-      await apiRequest(path, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(entity),
-      });
-      toast('Influencer saved', `${entity.name} ${existingId ? 'updated' : 'created'} successfully.`, 'success');
-      closeModal();
-      await loadInfluencerData();
-      await loadCouponData();
+      try {
+        form.dataset.submitting = 'true';
+        const method = existingId ? 'PUT' : 'POST';
+        const path = existingId
+          ? `/api/merch/admin/influencers/${encodeURIComponent(existingId)}`
+          : '/api/merch/admin/influencers';
+        await apiRequest(path, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(entity),
+        });
+        toast('Influencer saved', `${entity.name} ${existingId ? 'updated' : 'created'} successfully.`, 'success');
+        closeModal();
+        await loadInfluencerData();
+        await loadCouponData();
+        await loadReportData();
+      } catch (error) {
+        toast('Influencer not saved', error.message || 'Unable to save influencer data.', 'danger');
+      } finally {
+        form.dataset.submitting = 'false';
+      }
       return;
     }
   }
@@ -2980,9 +5082,14 @@
       const target = event.target instanceof Element ? event.target : null;
       if (!target) return;
 
+      const openProductDropdown = document.querySelector('[data-coupon-products-dropdown].is-open, [data-influencer-coupon-dropdown].is-open');
+      if (openProductDropdown && !target.closest('[data-coupon-products-dropdown], [data-influencer-coupon-dropdown]')) {
+        closeCouponProductDropdown();
+      }
+
       const actionTarget = target.closest('[data-action]');
       if (actionTarget) {
-        if (actionTarget instanceof HTMLInputElement && actionTarget.type === 'checkbox') return;
+        if (actionTarget instanceof HTMLInputElement || actionTarget instanceof HTMLSelectElement) return;
         event.preventDefault();
         handleAction(actionTarget.dataset.action, actionTarget);
         return;
@@ -3013,7 +5120,7 @@
     document.addEventListener('change', (event) => {
       const target = event.target;
       if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement)) return;
-      if (target instanceof HTMLInputElement && target.dataset.action) {
+      if ((target instanceof HTMLInputElement || target instanceof HTMLSelectElement) && target.dataset.action) {
         handleAction(target.dataset.action, target);
         return;
       }
@@ -3052,28 +5159,35 @@
         closeModal();
       }
     });
-    els.notificationsDrawer?.addEventListener('click', (event) => {
-      const closeTarget = event.target instanceof Element ? event.target.closest('[data-action="close-notifications"]') : null;
-      if (closeTarget) setNotificationsOpen(false);
-    });
-
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
+        if (closeCouponProductDropdown()) {
+          event.preventDefault();
+          return;
+        }
         setSidebarOpen(false);
-        setNotificationsOpen(false);
         closeModal();
       }
     });
   }
 
-  function init() {
+  async function init() {
+    if (!(await ensureAdminSession())) return;
     bindEvents();
     renderAll();
+    loadDashboardStats();
+    loadProductData();
     loadOrderData();
     loadCustomerData();
     loadInfluencerData();
     loadCouponData();
     loadReportData();
+    setInterval(() => {
+      if (document.hidden) return;
+      loadDashboardStats();
+      loadOrderData();
+      loadReportData();
+    }, 60000);
   }
 
   if (document.readyState === 'loading') {

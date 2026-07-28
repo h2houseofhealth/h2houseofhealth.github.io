@@ -1,10 +1,10 @@
-/* House Merch – Storefront App */
+﻿/* House Merch â€“ Storefront App */
 /* Vanilla JS SPA following booking portal patterns */
 
 (function () {
   'use strict';
 
-  // ─── API Configuration ───
+  // â”€â”€â”€ API Configuration â”€â”€â”€
   function resolveApiUrl() {
     const meta = document.querySelector('meta[name="api-base-url"]');
     const configured = meta ? String(meta.content || '').trim() : '';
@@ -17,6 +17,7 @@
 
   const API_URL = resolveApiUrl();
   const AUTH_TOKEN_STORAGE_KEY = 'booking_portal_auth_token';
+  const CONFIRMATION_STORAGE_KEY = 'merch_booking_confirmation';
 
   function buildApiUrl(path) {
     if (/^https?:\/\//i.test(String(path || ''))) return String(path);
@@ -62,14 +63,14 @@
     return data || {};
   }
 
-  // ─── State ───
+  // â”€â”€â”€ State â”€â”€â”€
   const state = {
     products: [],
     cart: [],
     selectedCategory: 'all',
     sortBy: 'newest',
     searchQuery: '',
-    currentView: 'shop', // 'shop' | 'detail'
+    currentView: 'shop', // 'shop' | 'detail' | 'confirmation' | 'tracking'
     selectedProduct: null,
     selectedVariant: null,
     quantity: 1,
@@ -80,14 +81,29 @@
     merchAddresses: [],
     merchWishlistItems: [],
     merchCartItems: [],
+    merchCouponHistory: [],
+    influencerDashboard: null,
+    influencerDashboardLoading: false,
+    influencerSalesSearch: '',
+    influencerSalesStatus: 'all',
+    influencerSalesFrom: '',
+    influencerSalesTo: '',
+    influencerSalesPage: 1,
+    influencerSalesMonth: 'all',
     accountDrawerOpen: false,
     accountDrawerTrigger: null,
+    accountActiveSection: null,
     accountProfileEditing: false,
     accountProfileMessage: '',
     accountAddressMessage: '',
     accountAddressFormMode: null,
     accountEditingAddressId: null,
     accountOrdersExpanded: false,
+    accountOrderFilterFrom: '',
+    accountOrderFilterTo: '',
+    accountOrderFilterAppliedFrom: '',
+    accountOrderFilterAppliedTo: '',
+    accountOrderFilterMessage: '',
     checkoutModalOpen: false,
     checkoutSelectedAddressId: '',
     checkoutMessage: '',
@@ -95,11 +111,12 @@
     merchCouponPreview: null,
     merchCouponError: '',
     merchCouponLoading: false,
+    latestConfirmation: null,
   };
 
   const FALLBACK_PRODUCT_IMAGE = '/booking/assets/service-hydrogen-session.jpg';
 
-  // ─── Product Data (Static catalog until API is built) ───
+  // â”€â”€â”€ Product Data (Static catalog until API is built) â”€â”€â”€
   const PRODUCTS = [
     {
       id: 1,
@@ -154,6 +171,7 @@
       name: 'H2 Molecular Hydrogen Water Bottle',
       slug: 'molecular-hydrogen-water-bottle',
       description: 'Generate hydrogen-rich water on the go. This portable bottle uses advanced PEM/SPE electrolysis technology to infuse your water with molecular hydrogen (H₂) in just 3 minutes. BPA-free, USB-C rechargeable, and built to last.',
+      specifications: { 'Product Name': 'Hydrogen-Rich Water Bottle', Capacity: '460ml', 'Electrolytic Material': 'Platinum-Titanium', 'Membrane Electrode': 'PEM + SPE', 'Main Material': 'Glass', 'Shell Material': 'Stainless Steel', 'Battery Type': '700mAh Lithium Polymer', 'Working Time': '5 minutes per cycle (3,000+ ppb)', Size: 'Ø7cm × 24cm', 'Colours Available': 'Blue / Black / Silver / Gold' },
       category: 'bottles',
       basePrice: 6499.00,
       images: [
@@ -176,6 +194,7 @@
       name: 'H2 Hydrogen Mist Spray',
       slug: 'hydrogen-mist-spray',
       description: 'Refresh and rejuvenate your skin anywhere. This compact hydrogen mist spray delivers antioxidant-rich hydrogen water directly to your face and body. Perfect for post-workout recovery, skincare routines, or a quick pick-me-up throughout the day.',
+      specifications: { 'Product Name': 'Hydrogen Mist Sprayer', 'Atomisation Amount': '0.8–1.2 ml/min', 'Hydrogen Concentration': '1000 ppb', 'Water Tank Capacity': '13ml', 'Main Material': 'PC (Polycarbonate)', 'Negative Potential': '< −300mV', 'Battery Capacity': '500mAh', 'Power Supply': 'DC 5V / Micro USB' },
       category: 'sprays',
       basePrice: 2499.00,
       images: [
@@ -227,21 +246,52 @@
     const slug = String(product?.slug || '').trim().toLowerCase();
     const name = String(product?.name || '').trim().toLowerCase();
     const category = String(product?.category || '').trim().toLowerCase();
-    const source =
-      (slug && PRODUCT_IMAGE_SOURCES[slug]) ||
+    const isCombo = Boolean(product?.isCombo);
+    const source = isCombo ? null : (
+      (!isCombo && slug && PRODUCT_IMAGE_SOURCES[slug]) ||
       (name.includes('water bottle') ? PRODUCT_IMAGE_SOURCES['h2-water-bottle'] : null) ||
       (name.includes('mist') || category === 'sprays' ? PRODUCT_IMAGE_SOURCES['h2-mist-spray'] : null) ||
       (name.includes('hoodie') && name.includes('black') ? PRODUCT_IMAGE_SOURCES['zenith-hoodie-black'] : null) ||
       (name.includes('hoodie') && name.includes('sand') ? PRODUCT_IMAGE_SOURCES['zenith-hoodie-sand'] : null) ||
-      null;
+      null
+    );
     const fallbackImages = Array.isArray(source?.images) ? source.images.filter(Boolean) : [];
-    const productImages = Array.isArray(product?.images) ? product.images.filter(Boolean) : [];
-    const imageUrl = String(source?.imageUrl || product?.imageUrl || product?.image || product?.image_url || '').trim();
+    const productImages = Array.isArray(product?.images) ? product.images.filter(Boolean).map(normalizeProductImageUrl) : [];
+    const imageUrl = normalizeProductImageUrl(product?.imageUrl || product?.image || product?.image_url || source?.imageUrl || '');
 
     return {
       imageUrl: imageUrl || fallbackImages[0] || '',
-      images: fallbackImages.length ? fallbackImages : (productImages.length ? productImages : (imageUrl ? [imageUrl] : [])),
+      images: productImages.length ? productImages : (fallbackImages.length ? fallbackImages : (imageUrl ? [imageUrl] : [])),
     };
+  }
+
+  function normalizeProductImageUrl(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^(https?:|data:|blob:)/i.test(raw)) return raw;
+    if (raw.startsWith('/')) return raw;
+    if (raw.startsWith('cdn/') || raw.startsWith('booking/') || raw.startsWith('uploads/')) return `/${raw}`;
+    return `/cdn/shop/files/${raw}`;
+  }
+
+  function getProductFallbackImage(product) {
+    const category = String(product?.category || '').toLowerCase();
+    const name = String(product?.name || '').toLowerCase();
+    if (category === 'sprays' || name.includes('mist') || name.includes('spray')) return '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138';
+    if (category === 'bottles' || name.includes('bottle')) return '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113';
+    if (category === 'hoodies' || name.includes('hoodie')) return '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg';
+    return FALLBACK_PRODUCT_IMAGE;
+  }
+
+  function renderDynamicCategoryOptions() {
+    const categories = [...new Set(state.products.map((product) => String(product.category || '').trim()).filter(Boolean))];
+    const currentValue = state.selectedCategory;
+    els.categoryFilter.innerHTML = [
+      '<option value="all">All Categories</option>',
+      ...categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(getCategoryLabel(category))}</option>`),
+    ].join('');
+    els.categoryFilter.value = categories.includes(currentValue) ? currentValue : 'all';
+    state.selectedCategory = els.categoryFilter.value;
   }
 
   function getGalleryVariantPrice(product, index) {
@@ -272,9 +322,22 @@
     return getGalleryVariantForIndex(product, index);
   }
 
-  // ─── Utility ───
-  function formatPrice(paise) {
-    return '₹' + (paise / 100).toLocaleString('en-IN');
+  // â”€â”€â”€ Utility â”€â”€â”€
+  const LOW_STOCK_THRESHOLD = 15;
+
+  function formatPrice(amountInr) {
+    return '₹' + Number(amountInr || 0).toLocaleString('en-IN', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    });
+  }
+
+  function formatMoneyFromPaise(paise) {
+    return formatPrice(Math.max(0, Math.round(Number(paise || 0) / 100)));
+  }
+
+  function normalizeCatalogAmount(valueInPaise) {
+    return Math.max(0, Math.round(Number(valueInPaise || 0) / 100));
   }
 
   function getPriceRange(product) {
@@ -282,12 +345,49 @@
     const min = Math.min(...prices);
     const max = Math.max(...prices);
     if (min === max) return formatPrice(min);
-    return `${formatPrice(min)} – ${formatPrice(max)}`;
+    return `${formatPrice(min)} - ${formatPrice(max)}`;
   }
 
   function getDefaultPurchasableVariant(product) {
     const variants = Array.isArray(product?.variants) ? product.variants : [];
     return variants.find((variant) => Number(variant?.stock || 0) > 0) || variants[0] || null;
+  }
+
+  function getVariantLabel(variant) {
+    return [variant?.size, variant?.color].filter(Boolean).join(' / ') || 'Default variant';
+  }
+
+  function getLowStockVariants(product) {
+    return (Array.isArray(product?.variants) ? product.variants : [])
+      .filter((variant) => Number(variant?.stock || 0) > 0 && Number(variant?.stock || 0) <= LOW_STOCK_THRESHOLD)
+      .sort((a, b) => Number(a.stock || 0) - Number(b.stock || 0));
+  }
+
+  function getVariantStockState(variant) {
+    const stock = Number(variant?.stock || 0);
+    const label = getVariantLabel(variant);
+
+    if (stock <= 0) {
+      return {
+        label: 'Out of stock',
+        className: 'out-of-stock',
+        detail: `${label} is unavailable right now.`,
+      };
+    }
+
+    if (stock <= LOW_STOCK_THRESHOLD) {
+      return {
+        label: `Low stock (${stock} left)`,
+        className: 'low-stock',
+        detail: `${label} is running low. Restock soon.`,
+      };
+    }
+
+    return {
+      label: `In stock (${stock} available)`,
+      className: 'in-stock',
+      detail: `${label} is available for purchase.`,
+    };
   }
 
   function escapeHtml(str) {
@@ -317,9 +417,213 @@
     }).format(parsed);
   }
 
+  function getOrderDateKey(order) {
+    const value = order?.createdAt || order?.created_at || order?.orderDate || order?.order_date || '';
+    if (!value) return '';
+    const raw = String(value).trim();
+    const directDate = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (directDate) return directDate[1];
+    const parsed = new Date(raw.replace(' ', 'T'));
+    if (Number.isNaN(parsed.getTime())) return '';
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  function getFilteredMerchOrders(orders) {
+    const from = state.accountOrderFilterAppliedFrom;
+    const to = state.accountOrderFilterAppliedTo;
+    if (!from && !to) return orders;
+    return orders.filter((order) => {
+      const orderDate = getOrderDateKey(order);
+      if (!orderDate) return false;
+      if (from && orderDate < from) return false;
+      if (to && orderDate > to) return false;
+      return true;
+    });
+  }
+
   function formatOrderStatus(status) {
     const label = String(status || 'pending').replace(/_/g, ' ');
     return label.charAt(0).toUpperCase() + label.slice(1);
+  }
+
+  function formatTrackingDateTime(value) {
+    if (!value) return 'Pending';
+    const parsed = new Date(String(value).replace(' ', 'T'));
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    const date = new Intl.DateTimeFormat('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }).format(parsed);
+    const time = new Intl.DateTimeFormat('en-IN', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    }).format(parsed);
+    return `${date}, ${time}`;
+  }
+
+  function addTrackingOffset(value, hours) {
+    const parsed = value ? new Date(String(value).replace(' ', 'T')) : null;
+    if (!parsed || Number.isNaN(parsed.getTime())) return null;
+    parsed.setHours(parsed.getHours() + hours);
+    return parsed.toISOString();
+  }
+
+  function normalizeTrackingStatus(status) {
+    const normalized = String(status || 'processing').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (normalized === 'pending') return 'processing';
+    if (normalized === 'packed') return 'packed';
+    if (normalized === 'shipped') return 'shipped';
+    if (normalized === 'out_for_delivery') return 'out_for_delivery';
+    if (normalized === 'delivered') return 'delivered';
+    return normalized === 'processing' ? 'processing' : normalized;
+  }
+
+  function getTrackingSteps(order) {
+    const statusOrder = ['processing', 'packed', 'shipped', 'out_for_delivery', 'delivered'];
+    const labels = ['Order Placed', 'Packed', 'Shipped', 'Out for Delivery', 'Delivered'];
+    const status = normalizeTrackingStatus(order?.status);
+    const currentIndex = Math.max(0, statusOrder.indexOf(status));
+    const createdAt = order?.createdAt || null;
+    const updatedAt = order?.updatedAt || createdAt;
+    const backendTimeline = Array.isArray(order?.timeline) ? order.timeline : [];
+    const timelineTime = (label) => {
+      const match = backendTimeline.find((entry) => String(entry?.label || '').toLowerCase().includes(label));
+      return match?.time || null;
+    };
+    const fallbackTimes = [
+      createdAt,
+      currentIndex >= 1 ? timelineTime('pack') || addTrackingOffset(createdAt, 6) || updatedAt : null,
+      currentIndex >= 2 ? timelineTime('ship') || timelineTime('tracking') || updatedAt || addTrackingOffset(createdAt, 24) : null,
+      currentIndex >= 3 ? timelineTime('delivery') || updatedAt || addTrackingOffset(createdAt, 48) : null,
+      currentIndex >= 4 ? timelineTime('delivered') || updatedAt || addTrackingOffset(createdAt, 72) : null,
+    ];
+
+    return labels.map((label, index) => ({
+      label,
+      time: fallbackTimes[index],
+      isComplete: index <= currentIndex,
+      isCurrent: index === currentIndex,
+      note: index === 2 && (order?.carrier || order?.carrierName || order?.trackingNumber)
+        ? [order.carrier || order.carrierName, order.trackingNumber].filter(Boolean).join(' - ')
+        : '',
+    }));
+  }
+
+  function findProductForOrderItem(item) {
+    const name = String(item?.name || item?.productName || '').trim().toLowerCase();
+    const sku = String(item?.sku || '').trim().toLowerCase();
+    const products = Array.isArray(state.products) ? state.products : [];
+    return products.find((product) => {
+      const productName = String(product.name || '').trim().toLowerCase();
+      const variants = Array.isArray(product.variants) ? product.variants : [];
+      return productName === name || productName.includes(name) || name.includes(productName)
+        || variants.some((variant) => String(variant.sku || '').trim().toLowerCase() === sku);
+    }) || null;
+  }
+
+  function getTrackingProductSummary(order) {
+    const items = Array.isArray(order?.items) ? order.items : [];
+    const item = items[0] || {};
+    const product = findProductForOrderItem(item);
+    const imageSource = product ? resolveProductImageSource(product) : null;
+    return {
+      name: item.name || item.productName || order?.service || 'House Merch Order',
+      variantLabel: item.variantLabel || '',
+      quantity: Number(item.qty || item.quantity || 0) || 1,
+      imageUrl: imageSource?.imageUrl || product?.imageUrl || FALLBACK_PRODUCT_IMAGE,
+      extraCount: Math.max(0, items.length - 1),
+    };
+  }
+
+  function getFallbackTrackingOrder(orderId) {
+    const confirmation = state.latestConfirmation || getStoredConfirmation();
+    if (!confirmation || String(confirmation.orderId || '') !== String(orderId || '')) return null;
+    return {
+      id: confirmation.orderId,
+      orderNumber: confirmation.bookingId,
+      status: 'processing',
+      createdAt: confirmation.createdAt,
+      updatedAt: confirmation.createdAt,
+      totalAmount: confirmation.totalAmount,
+      items: (Array.isArray(confirmation.items) ? confirmation.items : []).map((item) => ({
+        name: item.productName,
+        productName: item.productName,
+        variantLabel: item.variantLabel,
+        quantity: item.quantity,
+        qty: item.quantity,
+      })),
+    };
+  }
+
+  function getTrackingOrderById(orderId) {
+    return getOrderById(orderId) || getFallbackTrackingOrder(orderId);
+  }
+
+  function renderTrackingTimeline(order) {
+    return `
+      <div class="tracking-timeline" aria-label="Order tracking timeline">
+        ${getTrackingSteps(order).map((step) => `
+          <article class="tracking-step${step.isComplete ? ' is-complete' : ''}${step.isCurrent ? ' is-current' : ''}">
+            <div class="tracking-step__marker" aria-hidden="true">${step.isComplete ? confirmationIcon('check') : ''}</div>
+            <div class="tracking-step__body">
+              <h3>${escapeHtml(step.label)}</h3>
+              <p>${escapeHtml(formatTrackingDateTime(step.time))}</p>
+              ${step.note ? `<small>${escapeHtml(step.note)}</small>` : ''}
+            </div>
+          </article>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function OrderTrackingPage(order) {
+    if (!order) {
+      return `
+        <div class="order-tracking__inner">
+          <button class="tracking-back-btn" type="button" data-tracking-action="back">&larr; Back</button>
+          <div class="tracking-empty">
+            <h1 id="orderTrackingTitle">Order tracking</h1>
+            <p>We could not find this merchandise order in your account yet.</p>
+          </div>
+        </div>
+      `;
+    }
+
+    const product = getTrackingProductSummary(order);
+    const statusLabel = formatOrderStatus(order.status || 'processing');
+    return `
+      <div class="order-tracking__inner">
+        <button class="tracking-back-btn" type="button" data-tracking-action="back">&larr; Back</button>
+        <article class="tracking-card">
+          <header class="tracking-product">
+            <img src="${escapeHtml(product.imageUrl)}" alt="${escapeHtml(product.name)}" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
+            <div class="tracking-product__meta">
+              <h1 id="orderTrackingTitle">${escapeHtml(product.name)}</h1>
+              <p>${escapeHtml([product.variantLabel, `Qty: ${product.quantity}`].filter(Boolean).join(' - '))}</p>
+              ${product.extraCount ? `<small>+${product.extraCount} more item${product.extraCount > 1 ? 's' : ''}</small>` : ''}
+            </div>
+            <span class="tracking-status-badge">${escapeHtml(statusLabel)}</span>
+          </header>
+          ${renderTrackingTimeline(order)}
+          <footer class="tracking-details">
+            <div>
+              <span>Order ID</span>
+              <strong>${escapeHtml(order.orderNumber || `Order #${order.id}`)}</strong>
+            </div>
+            <div>
+              <span>Expected Delivery</span>
+              <strong>${escapeHtml(order.status === 'delivered' ? 'Delivered' : 'Pending')}</strong>
+            </div>
+            <button class="btn btn-outline account-action-btn" type="button" data-tracking-action="invoice" data-order-id="${escapeHtml(String(order.id || ''))}">Invoice</button>
+          </footer>
+        </article>
+      </div>
+    `;
   }
 
   function formatCustomerPhone(phone) {
@@ -419,6 +723,13 @@
       : imageUrl
         ? [imageUrl]
         : [];
+    const normalizedVariants = variants.map((variant) => ({
+      ...variant,
+      price: normalizeCatalogAmount(variant?.price || 0),
+    }));
+    const normalizedPrices = normalizedVariants.map((variant) => Number(variant.price || 0));
+    const basePrice = normalizeCatalogAmount(product?.basePrice || product?.base_price || 0);
+    const price = normalizeCatalogAmount(product?.price || product?.basePrice || product?.base_price || 0);
 
     return {
       ...product,
@@ -426,22 +737,83 @@
       name: String(product?.name || ''),
       slug: String(product?.slug || ''),
       description: String(product?.description || ''),
+      specifications: normalizeSpecifications(product?.specifications || product?.specifications_json, product),
       category: String(product?.category || ''),
-      basePrice: Number(product?.basePrice || product?.base_price || 0),
+      basePrice,
       imageUrl,
       image: imageUrl,
       images,
-      variants,
-      price: Number(product?.price || product?.basePrice || product?.base_price || 0),
-      priceLabel: String(product?.priceLabel || ''),
+      variants: normalizedVariants,
+      price,
+      priceLabel: normalizedPrices.length > 1
+        ? `${formatPrice(Math.min(...normalizedPrices))} - ${formatPrice(Math.max(...normalizedPrices))}`
+        : formatPrice(price || basePrice),
       createdAt: String(product?.createdAt || ''),
     };
+  }
+
+  function normalizeSpecifications(value, product = null) {
+    if (!value) return inferSpecifications(product);
+    if (typeof value === 'object' && !Array.isArray(value)) return value;
+    try {
+      const parsed = JSON.parse(String(value));
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : inferSpecifications(product);
+    } catch {
+      return inferSpecifications(product);
+    }
+  }
+
+  function inferSpecifications(product) {
+    const category = String(product?.category || '').toLowerCase();
+    const name = String(product?.name || '').toLowerCase();
+    if (category === 'bottles' || name.includes('bottle')) return { 'Product type': 'Hydrogen-rich water bottle', 'Recommended use': 'Use with clean drinking water; follow the product cycle instructions' };
+    if (category === 'sprays' || name.includes('mist') || name.includes('spray')) return { 'Product type': 'Hydrogen mist sprayer', 'Recommended use': 'Fill with clean water and use as directed' };
+    if (category === 'hoodies' || name.includes('hoodie')) return { 'Product type': 'Premium pullover hoodie', Care: 'Machine wash cold; air dry' };
+    return {};
+  }
+
+  function getProductSpecifications(product, variant = null) {
+    const specifications = { ...normalizeSpecifications(product?.specifications, product) };
+    const category = String(product?.category || '').toLowerCase();
+    const selectedSize = String(variant?.size || '').trim();
+    const selectedColor = String(variant?.color || '').trim();
+
+    // Variant-dependent values must follow the option selected by the customer.
+    if (selectedSize && (category === 'bottles' || String(product?.name || '').toLowerCase().includes('bottle'))) {
+      specifications.Capacity = selectedSize;
+    }
+    if (selectedSize && (category === 'sprays' || String(product?.name || '').toLowerCase().includes('mist') || String(product?.name || '').toLowerCase().includes('spray'))) {
+      specifications['Product Size'] = selectedSize;
+    }
+    if (selectedColor && category === 'hoodies') {
+      specifications.Colour = selectedColor;
+    }
+    if (selectedColor) {
+      specifications['Selected Colour'] = selectedColor;
+    }
+    if (selectedSize) {
+      specifications['Selected Size'] = selectedSize;
+    }
+    return specifications;
+  }
+
+  function renderProductSpecifications(product, variant = null) {
+    const specifications = getProductSpecifications(product, variant);
+    const entries = Object.entries(specifications).filter(([label, value]) => String(label).trim() && String(value).trim());
+    if (!entries.length) return '';
+    return `
+      <div class="product-specifications" id="productSpecifications" hidden>
+        <h2>Specifications</h2>
+        <dl>${entries.map(([label, value]) => `<div class="product-specification"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl>
+      </div>
+    `;
   }
 
   async function loadMerchProducts() {
     try {
       const result = await api('/api/merch/products');
       state.products = Array.isArray(result) ? result.map(normalizeMerchProduct) : [];
+      renderDynamicCategoryOptions();
     } catch (error) {
       state.products = [];
       console.error('Unable to load merch products:', error);
@@ -460,9 +832,14 @@
         }
       }
     }
+
+    if (state.currentView === 'tracking') {
+      const trackingOrderId = getTrackingOrderIdFromHash();
+      if (trackingOrderId) showOrderTracking(trackingOrderId);
+    }
   }
 
-  // ─── Elements ───
+  // â”€â”€â”€ Elements â”€â”€â”€
   const els = {
     productGrid: document.getElementById('productGrid'),
     productEmpty: document.getElementById('productEmpty'),
@@ -493,6 +870,8 @@
     cartBadge: document.getElementById('cartBadge'),
     cartShopBtn: document.getElementById('cartShopBtn'),
     checkoutBtn: document.getElementById('checkoutBtn'),
+    bookingConfirmation: document.getElementById('bookingConfirmation'),
+    orderTracking: document.getElementById('orderTracking'),
     merchAuthCta: document.getElementById('merchAuthCta'),
     accountDrawer: document.getElementById('accountDrawer'),
     accountDrawerOverlay: document.getElementById('accountDrawerOverlay'),
@@ -500,7 +879,7 @@
     accountDrawerContent: document.getElementById('accountDrawerContent'),
   };
 
-  // ─── Cart (localStorage for now) ───
+  // â”€â”€â”€ Cart (localStorage for now) â”€â”€â”€
   function loadCart() {
     try {
       const saved = localStorage.getItem('merch_cart');
@@ -609,8 +988,8 @@
     els.cartCouponPreview.innerHTML = `
       <strong>${escapeHtml(preview.code || '')}</strong>
       <span>${escapeHtml(preview.description || 'Coupon applied')}</span>
-      <span>Discount: ${formatPrice(Number(preview.discountAmountInr || 0) * 100)}</span>
-      <span>Payable: ${formatPrice(Number(preview.payableAmountInr || 0) * 100)}</span>
+      <span>Discount: ${formatPrice(Number(preview.discountAmountInr || 0))}</span>
+      <span>Payable: ${formatPrice(Number(preview.payableAmountInr || 0))}</span>
     `;
   }
 
@@ -625,14 +1004,6 @@
       return;
     }
 
-    if (!state.currentUser) {
-      state.merchCouponPreview = null;
-      state.merchCouponError = 'Sign in to apply merch coupons.';
-      showCheckoutNotice('Sign in required', 'Sign in to apply a merch coupon.', { variant: 'error' });
-      renderMerchCouponPreview();
-      return;
-    }
-
     state.merchCouponLoading = true;
     try {
       const result = await api('/api/merch/preview-coupon', {
@@ -640,7 +1011,13 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           couponCode: code,
-          subtotalAmountPaise: getCartTotal(),
+          subtotalAmountPaise: Math.round(getCartTotal() * 100),
+          productIds: state.cart.map((item) => Number(item.productId)).filter(Boolean),
+          productLineTotals: state.cart.reduce((totals, item) => {
+            const productId = Number(item.productId || 0);
+            if (productId) totals[productId] = Number(totals[productId] || 0) + Math.round(item.price * item.quantity * 100);
+            return totals;
+          }, {}),
         }),
       });
       state.merchCouponPreview = result.coupon || null;
@@ -656,7 +1033,7 @@
     }
   }
 
-  // ─── Render: Cart Badge ───
+  // â”€â”€â”€ Render: Cart Badge â”€â”€â”€
   function renderCartBadge() {
     const count = getCartCount();
     if (count > 0) {
@@ -667,7 +1044,7 @@
     }
   }
 
-  // ─── Render: Cart Drawer ───
+  // â”€â”€â”€ Render: Cart Drawer â”€â”€â”€
   function renderCart() {
     if (state.cart.length === 0) {
       els.cartItems.innerHTML = '';
@@ -715,6 +1092,342 @@
     });
   }
 
+  function getStoredConfirmation() {
+    try {
+      const raw = window.sessionStorage?.getItem(CONFIRMATION_STORAGE_KEY) || '';
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function saveConfirmation(confirmation) {
+    state.latestConfirmation = confirmation;
+    try {
+      window.sessionStorage?.setItem(CONFIRMATION_STORAGE_KEY, JSON.stringify(confirmation));
+    } catch {
+      // Session storage is a convenience for the redirect; the in-memory state still renders.
+    }
+  }
+
+  function formatConfirmationDate(value) {
+    const parsed = value ? new Date(value) : new Date();
+    const date = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+    return new Intl.DateTimeFormat('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      weekday: 'long',
+    }).format(date);
+  }
+
+  function formatConfirmationTime(value) {
+    const parsed = value ? new Date(value) : new Date();
+    const date = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+    return new Intl.DateTimeFormat('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    }).format(date);
+  }
+
+  function getConfirmationLocation(address) {
+    const parts = [
+      address?.line1,
+      address?.line2,
+      address?.city,
+      address?.state,
+      address?.postalCode,
+      address?.country,
+    ].filter(Boolean);
+    return parts.length ? parts.join(', ') : String(address?.full || 'Hyderabad, Telangana').trim();
+  }
+
+  function buildConfirmationData({ order, verifyResult, customer, address, cartItems }) {
+    const createdAt = new Date().toISOString();
+    const items = Array.isArray(cartItems) ? cartItems : [];
+    const itemCount = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+    return {
+      bookingId: String(order?.orderNumber || verifyResult?.orderNumber || 'BK20260717001'),
+      orderId: verifyResult?.orderId || order?.orderId || null,
+      createdAt,
+      dateLabel: formatConfirmationDate(createdAt),
+      timeLabel: `${formatConfirmationTime(createdAt)} - Order received`,
+      service: itemCount > 1 ? `House Merch Order (${itemCount} items)` : 'House Merch Order',
+      locationTitle: 'Delivery Location',
+      location: getConfirmationLocation(address),
+      email: String(customer?.email || order?.customer?.email || 'example@email.com').trim(),
+      customerName: String(customer?.name || order?.customer?.name || 'H2 Customer').trim(),
+      totalAmount: Number(order?.amount || 0),
+      items: items.map((item) => ({
+        productName: item.productName,
+        variantLabel: item.variantLabel,
+        quantity: item.quantity,
+      })),
+    };
+  }
+
+  function confirmationIcon(name) {
+    const icons = {
+      check: '<path d="M7 12.2 10.4 15.6 18 8" />',
+      copy: '<rect x="9" y="9" width="9" height="11" rx="1.5" /><path d="M6 15H5a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 5 4h8a1.5 1.5 0 0 1 1.5 1.5v1" />',
+      calendar: '<rect x="4" y="5" width="16" height="15" rx="2" /><path d="M8 3v4M16 3v4M4 10h16" />',
+      user: '<circle cx="12" cy="8" r="3.5" /><path d="M5 20a7 7 0 0 1 14 0" />',
+      map: '<path d="M12 21s7-5.2 7-12a7 7 0 1 0-14 0c0 6.8 7 12 7 12Z" /><circle cx="12" cy="9" r="2.4" />',
+      truck: '<path d="M3 7h10v9H3zM13 10h4l3 3v3h-7z" /><circle cx="7" cy="18" r="1.8" /><circle cx="17" cy="18" r="1.8" />',
+      home: '<path d="m4 11 8-7 8 7" /><path d="M6.5 10.5V20h11v-9.5" /><path d="M10 20v-6h4v6" />',
+      bag: '<path d="M6.5 8.5h11l-1 11h-9z" /><path d="M9 8.5a3 3 0 0 1 6 0" />',
+      mail: '<rect x="3.5" y="5.5" width="17" height="13" rx="2" /><path d="m4.5 7 7.5 6 7.5-6" />',
+      whatsapp: '<path d="M19.1 4.9A9.4 9.4 0 0 0 4.2 16.1L3 21l5-1.2A9.4 9.4 0 0 0 21.4 8.2a9.3 9.3 0 0 0-2.3-3.3Z" /><path d="M8.4 8.7c.2-.5.4-.6.7-.6h.5c.2 0 .4.1.5.4l.7 1.7c.1.2.1.4 0 .6l-.4.5c-.1.2-.1.4 0 .5.5.9 1.2 1.6 2.1 2.1.2.1.4.1.5 0l.6-.7c.2-.2.4-.2.6-.1l1.7.8c.3.1.4.3.4.5 0 .4-.2 1.1-.6 1.4-.5.5-1.4.6-2.4.3-2.6-.8-4.8-3-5.7-5.6-.3-.8-.1-1.5.2-1.8Z" />',
+      shield: '<path d="M12 3 5 6v5.5c0 4 2.8 7.2 7 8.5 4.2-1.3 7-4.5 7-8.5V6z" /><path d="m9 12 2 2 4-5" />',
+      bell: '<path d="M18 16H6c1.2-1.4 1.8-3 1.8-5V9a4.2 4.2 0 0 1 8.4 0v2c0 2 .6 3.6 1.8 5Z" /><path d="M10 19a2.3 2.3 0 0 0 4 0" />',
+      heart: '<path d="M20.5 8.8c0 5-8.5 10.2-8.5 10.2S3.5 13.8 3.5 8.8A4.3 4.3 0 0 1 12 7.5a4.3 4.3 0 0 1 8.5 1.3Z" />',
+    };
+    return `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.check}</svg>`;
+  }
+
+  function BookingSuccessHeader(data) {
+    return `
+      <div class="booking-success-header">
+        <div class="booking-confetti" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div class="booking-success-icon">${confirmationIcon('check')}</div>
+        <h1 id="bookingConfirmationTitle">Booking Confirmed!</h1>
+        <p>Your booking has been confirmed successfully.</p>
+        <p>Your confirmation email will be available soon.</p>
+      </div>
+    `;
+  }
+
+  function BookingIdCard(data) {
+    return `
+      <div class="booking-id-card">
+        <span>Booking ID</span>
+        <strong>${escapeHtml(data.bookingId)}</strong>
+        <button class="booking-copy-btn" type="button" data-confirmation-action="copy-id" aria-label="Copy booking ID">
+          ${confirmationIcon('copy')}
+        </button>
+      </div>
+    `;
+  }
+
+  function BookingUpdatesCard() {
+    return `
+      <section class="booking-updates-card" aria-label="Booking status updates">
+        <h2>We'll keep you updated</h2>
+        <div class="booking-updates-grid">
+          <article class="booking-update-item">
+            <div class="booking-update-icon">${confirmationIcon('mail')}</div>
+            <div>
+              <h3>Email Confirmation</h3>
+              <strong>Preparing...</strong>
+              <p>We're preparing your confirmation email.</p>
+            </div>
+          </article>
+          <article class="booking-update-item">
+            <div class="booking-update-icon">${confirmationIcon('whatsapp')}</div>
+            <div>
+              <h3>WhatsApp Updates <span>Coming Soon</span></h3>
+              <strong>Coming Soon</strong>
+              <p>We'll notify you on WhatsApp when your order is shipped.</p>
+            </div>
+          </article>
+        </div>
+      </section>
+    `;
+  }
+
+  function BookingDetailsCard(data) {
+    const details = [
+      { icon: 'calendar', label: 'Date & Time', lines: [data.dateLabel, data.timeLabel] },
+      { icon: 'user', label: 'Service', lines: [data.service] },
+      { icon: 'map', label: data.locationTitle || 'Location', lines: ['H2 House of Health', data.location] },
+      {
+        icon: 'truck',
+        label: 'Estimated Delivery Date',
+        lines: ['27 Jul 2026 - 31 Jul 2026', "We'll notify you once your order is shipped."],
+        isDelivery: true,
+      },
+    ];
+    return `
+      <div class="booking-details-card">
+        ${details.map((item) => `
+          <article class="booking-detail-item${item.isDelivery ? ' booking-detail-item--delivery' : ''}">
+            <div class="booking-detail-icon">${confirmationIcon(item.icon)}</div>
+            <div>
+              <h2>${escapeHtml(item.label)}</h2>
+              ${item.lines.map((line, index) => (
+                item.isDelivery && index === 0
+                  ? `<strong>${escapeHtml(line)}</strong>`
+                  : `<p>${escapeHtml(line)}</p>`
+              )).join('')}
+            </div>
+          </article>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function BookingActions() {
+    return `
+      <div class="booking-actions">
+        <button class="booking-action-btn booking-action-btn--accent" type="button" data-confirmation-action="track">
+          ${confirmationIcon('truck')} <span>Track My Order</span>
+        </button>
+        <button class="booking-action-btn booking-action-btn--neutral" type="button" data-confirmation-action="home">
+          ${confirmationIcon('home')} <span>Back to Home</span>
+        </button>
+        <button class="booking-action-btn booking-action-btn--primary" type="button" data-confirmation-action="shop">
+          ${confirmationIcon('bag')} <span>Continue Shopping</span>
+        </button>
+      </div>
+    `;
+  }
+
+
+  function BookingFeatureCards() {
+    const features = [
+      { icon: 'shield', title: 'Secure Booking', text: 'Your booking is safe with us.' },
+      { icon: 'calendar', title: 'Easy Reschedule', text: 'Reschedule or modify your booking anytime.' },
+      { icon: 'bell', title: 'Timely Reminders', text: "We'll remind you before your session." },
+      { icon: 'heart', title: 'Premium Experience', text: 'We are here to make your experience exceptional.' },
+    ];
+    return `
+      <div class="booking-feature-cards">
+        ${features.map((feature) => `
+          <article class="booking-feature-card">
+            <div class="booking-feature-icon">${confirmationIcon(feature.icon)}</div>
+            <div>
+              <h2>${escapeHtml(feature.title)}</h2>
+              <p>${escapeHtml(feature.text)}</p>
+            </div>
+          </article>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function BookingConfirmationPage(data) {
+    return `
+      <div class="booking-confirmation__inner">
+        ${BookingSuccessHeader(data)}
+        ${BookingIdCard(data)}
+        ${BookingUpdatesCard(data)}
+        ${BookingDetailsCard(data)}
+        ${BookingActions(data)}
+        ${BookingFeatureCards(data)}
+      </div>
+    `;
+  }
+
+  function bindBookingConfirmationActions(data) {
+    if (!els.bookingConfirmation) return;
+    els.bookingConfirmation.querySelectorAll('[data-confirmation-action]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const action = button.dataset.confirmationAction;
+        if (action === 'copy-id') {
+          try {
+            await navigator.clipboard?.writeText(data.bookingId);
+            button.classList.add('is-copied');
+            setTimeout(() => button.classList.remove('is-copied'), 1200);
+          } catch {
+            showCheckoutNotice('Copy unavailable', `Booking ID: ${data.bookingId}`);
+          }
+          return;
+        }
+        if (action === 'home') {
+          window.location.href = '/';
+          return;
+        }
+        if (action === 'shop') {
+          window.location.href = '/merch/';
+          return;
+        }
+        if (action === 'track') {
+          if (data.orderId) {
+            window.location.hash = `track-order/${encodeURIComponent(data.orderId)}`;
+          } else {
+            showCheckoutNotice('Track My Order', 'Order details are unavailable for tracking yet.');
+          }
+        }
+      });
+    });
+  }
+
+  function showBookingConfirmation(data = null) {
+    const confirmation = data || state.latestConfirmation || getStoredConfirmation() || buildConfirmationData({});
+    state.currentView = 'confirmation';
+    state.latestConfirmation = confirmation;
+
+    els.productDetail.hidden = true;
+    els.shopSection.hidden = true;
+    if (els.orderTracking) els.orderTracking.hidden = true;
+    document.querySelector('.merch-hero').hidden = true;
+    document.querySelector('.merch-categories').hidden = true;
+    if (els.bookingConfirmation) {
+      els.bookingConfirmation.hidden = false;
+      els.bookingConfirmation.innerHTML = BookingConfirmationPage(confirmation);
+      bindBookingConfirmationActions(confirmation);
+    }
+    closeCart();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function getTrackingOrderIdFromHash() {
+    const match = String(window.location.hash || '').match(/^#track-order\/([^/?#]+)/);
+    return match ? decodeURIComponent(match[1]) : '';
+  }
+
+  function bindOrderTrackingActions(order) {
+    if (!els.orderTracking) return;
+    els.orderTracking.querySelectorAll('[data-tracking-action]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const action = button.dataset.trackingAction;
+        if (action === 'back') {
+          if (state.accountDrawerOpen) closeAccountDrawer();
+          window.history.length > 1 ? window.history.back() : showShop();
+          return;
+        }
+        if (action === 'invoice' && order?.id) {
+          await openMerchInvoice(order.id);
+        }
+      });
+    });
+  }
+
+  function showOrderTracking(orderId) {
+    const order = getTrackingOrderById(orderId);
+    state.currentView = 'tracking';
+
+    els.productDetail.hidden = true;
+    els.shopSection.hidden = true;
+    if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
+    document.querySelector('.merch-hero').hidden = true;
+    document.querySelector('.merch-categories').hidden = true;
+    if (els.orderTracking) {
+      els.orderTracking.hidden = false;
+      els.orderTracking.innerHTML = OrderTrackingPage(order);
+      bindOrderTrackingActions(order);
+    }
+    closeCart();
+    closeAccountDrawer();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function routeFromLocation() {
+    const trackingOrderId = getTrackingOrderIdFromHash();
+    if (trackingOrderId) {
+      showOrderTracking(trackingOrderId);
+      return true;
+    }
+    if (window.location.hash === '#booking-confirmation') {
+      showBookingConfirmation();
+      return true;
+    }
+    return false;
+  }
+
   function openCart() {
     els.cartDrawer.hidden = false;
     els.cartOverlay.hidden = false;
@@ -756,11 +1469,10 @@
     const avatarStyle = profile.avatarUrl
       ? ` style="background-image:url('${escapeHtml(profile.avatarUrl)}')"`
       : '';
-
     if (!state.currentUser) {
       els.merchAuthCta.innerHTML = `
         <a href="/merch/auth.html?returnTo=%2Fmerch%2F" class="header-book-now-btn">
-          Sign Up / Login
+           Sign Up / Login
         </a>
       `;
       return;
@@ -783,7 +1495,461 @@
     `;
 
     const button = document.getElementById('merchAccountBtn');
-    button?.addEventListener('click', openAccountDrawer);
+    button?.addEventListener('click', (event) => {
+      event.preventDefault();
+      openAccountDrawer();
+    });
+
+  }
+
+  function getInfluencerDashboardData() {
+    return state.influencerDashboard || null;
+  }
+
+  function getInfluencerSalesRows() {
+    const dashboard = getInfluencerDashboardData();
+    const rows = Array.isArray(dashboard?.salesHistory?.items) ? [...dashboard.salesHistory.items] : [];
+    const search = String(state.influencerSalesSearch || '').trim().toLowerCase();
+    const status = String(state.influencerSalesStatus || 'all').trim().toLowerCase();
+    const from = String(state.influencerSalesFrom || '').trim();
+    const to = String(state.influencerSalesTo || '').trim();
+
+    return rows.filter((row) => {
+      const rowStatus = String(row.orderStatus || row.paymentStatus || '').trim().toLowerCase();
+      if (status && status !== 'all' && rowStatus !== status) return false;
+      if (from && String(row.orderDate || '').slice(0, 10) < from) return false;
+      if (to && String(row.orderDate || '').slice(0, 10) > to) return false;
+      if (state.influencerSalesMonth !== 'all' && String(row.orderDate || '').slice(0, 7) !== state.influencerSalesMonth) return false;
+      if (!search) return true;
+      return [row.orderNumber, row.productSummary, row.customerName, row.couponUsed, row.orderStatus, row.paymentStatus]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(search));
+    });
+  }
+
+  function renderSparklineBars(rows = [], valueKey = 'value', labelKey = 'label', formatter = null) {
+    const items = Array.isArray(rows) ? rows : [];
+    const maxValue = items.reduce((max, item) => Math.max(max, Number(item?.[valueKey] || 0)), 0) || 1;
+    return items.map((item) => {
+      const value = Number(item?.[valueKey] || 0);
+      const width = Math.max(8, Math.round((value / maxValue) * 100));
+      const formattedValue = typeof formatter === 'function' ? formatter(value, item) : formatPrice(value || 0);
+      return `
+        <div class="influencer-chart__row">
+          <span class="influencer-chart__label">${escapeHtml(item?.[labelKey] || '')}</span>
+          <span class="influencer-chart__bar"><span style="width:${width}%"></span></span>
+          <strong class="influencer-chart__value">${escapeHtml(formattedValue)}</strong>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderInfluencerDashboardSection() {
+    const dashboard = getInfluencerDashboardData();
+    if (!state.currentUser) return '';
+
+    if (!dashboard || !dashboard.influencer) {
+      return `
+        <section class="account-section account-section--influencer">
+          <div class="account-section__head">
+            <div>
+              <p class="account-section__eyebrow">Influencer Dashboard</p>
+              <h4>Creator access</h4>
+            </div>
+            <span class="account-badge account-badge--muted">Not available</span>
+          </div>
+          <div class="account-empty-state">
+            <p>No influencer dashboard for this account.</p>
+            <span>Your logged-in email must match an active influencer record in Merch Admin → Influencers.</span>
+          </div>
+        </section>
+      `;
+    }
+
+    const influencer = dashboard.influencer || {};
+    const summary = dashboard.summary || {};
+    const analytics = dashboard.analytics || {};
+    const coupons = Array.isArray(dashboard.couponPerformance) ? dashboard.couponPerformance : [];
+    const commissions = Array.isArray(dashboard.commissionHistory) ? dashboard.commissionHistory : [];
+    const notifications = Array.isArray(dashboard.notifications) ? dashboard.notifications : [];
+    const filteredSales = getInfluencerSalesRows();
+    const pageSize = 5;
+    const pageCount = Math.max(1, Math.ceil(filteredSales.length / pageSize));
+    const currentPage = Math.min(Math.max(1, Number(state.influencerSalesPage || 1)), pageCount);
+    const pageSlice = filteredSales.slice((currentPage - 1) * pageSize, (currentPage - 1) * pageSize + pageSize);
+
+    const socialLinksText = Array.isArray(influencer.socialLinks) ? influencer.socialLinks.join('\n') : '';
+    // Kept available for legacy markup while the insights panel remains hidden.
+    const bestCoupon = analytics.bestCoupon || dashboard.performance?.bestCoupon || null;
+    const highestSalesMonth = analytics.highestSalesMonth || dashboard.performance?.highestSalesMonth || null;
+    const topProducts = Array.isArray(analytics.topProducts) ? analytics.topProducts : Array.isArray(dashboard.performance?.topSellingProducts) ? dashboard.performance.topSellingProducts : [];
+    const averageOrderValue = dashboard.performance?.averageOrderValue ?? summary.averageOrderValue ?? 0;
+    const repeatCustomerPercentage = dashboard.performance?.repeatCustomerPercentage ?? analytics.repeatCustomerPercentage ?? 0;
+    const conversionRate = dashboard.performance?.conversionRate ?? summary.conversionRate ?? 0;
+    const upcomingPayment = dashboard.commission?.upcomingPayment ? formatDateLabel(dashboard.commission.upcomingPayment) : 'No payout scheduled';
+    const lastPayment = dashboard.commission?.lastPaymentDate ? formatDateLabel(dashboard.commission.lastPaymentDate) : 'No payments yet';
+    const monthlyTrend = Array.isArray(analytics.monthlyTrend) ? analytics.monthlyTrend : [];
+    const isCouponExpired = (coupon) => {
+      if (!coupon?.expiresAt) return false;
+      const expiry = new Date(String(coupon.expiresAt).length <= 10 ? `${coupon.expiresAt}T23:59:59` : coupon.expiresAt);
+      return !Number.isNaN(expiry.getTime()) && expiry.getTime() < Date.now();
+    };
+    const isCouponDisabled = (coupon) => coupon && (coupon.active === false || coupon.active === 0 || ['false', 'disabled', 'inactive'].includes(String(coupon.active).toLowerCase()));
+    const isCouponUnavailable = (coupon) => isCouponDisabled(coupon) || isCouponExpired(coupon);
+    const getCouponStatus = (coupon) => isCouponExpired(coupon) ? 'Expired' : isCouponDisabled(coupon) ? 'Disabled' : 'Active';
+    const primaryCoupon = coupons.find((coupon) => coupon && !isCouponUnavailable(coupon)) || coupons[0] || null;
+    const monthOptions = monthlyTrend.map((item) => ({
+      value: String(item.month || item.key || '').slice(0, 7),
+      label: String(item.label || item.month || item.key || ''),
+    })).filter((item, index, items) => item.value && items.findIndex((entry) => entry.value === item.value) === index);
+    const selectedMonth = monthOptions.find((item) => item.value === state.influencerSalesMonth) || null;
+    const monthlyRows = getInfluencerSalesRows();
+    const activeMonthlyRows = monthlyRows.filter((row) => !['cancelled', 'refunded', 'failed'].includes(String(row.orderStatus || row.paymentStatus || '').toLowerCase()));
+    const activeMonthlySales = activeMonthlyRows.reduce((total, row) => total + Number(row.orderAmount || 0), 0);
+    const monthlyCommission = activeMonthlyRows.reduce((total, row) => total + Number(row.commissionEarned || 0), 0);
+    const monthlyPaidRows = activeMonthlyRows.filter((row) => ['paid', 'cod_pending'].includes(String(row.paymentStatus || '').toLowerCase()));
+    const monthlyCouponUsage = activeMonthlyRows.filter((row) => row.couponUsed).length;
+    const monthlyConversion = activeMonthlyRows.length ? (monthlyPaidRows.length / activeMonthlyRows.length) * 100 : 0;
+    const isMonthlyView = Boolean(selectedMonth);
+    const primaryCouponUnavailable = isCouponUnavailable(primaryCoupon);
+    const kpis = [
+      { label: 'Total Sales Generated', value: formatMoneyFromPaise(isMonthlyView ? activeMonthlySales : summary.totalSalesGenerated || 0), note: isMonthlyView ? `${selectedMonth.label} active sales.` : 'Live merch sales linked to your coupons.' },
+      { label: 'Total Orders Referred', value: (isMonthlyView ? activeMonthlyRows.length : Number(summary.totalOrdersReferred || 0)).toLocaleString('en-IN'), note: isMonthlyView ? `${selectedMonth.label} active orders.` : 'Attributed orders across merch checkout.' },
+      { label: 'Total Commission Earned', value: formatMoneyFromPaise(isMonthlyView ? monthlyCommission : summary.totalCommissionEarned || 0), note: isMonthlyView ? `${selectedMonth.label} calculated commission.` : 'Calculated from active influencer commission.' },
+      { label: 'Commission Pending', value: formatMoneyFromPaise(isMonthlyView ? monthlyCommission : summary.commissionPending || 0), note: isMonthlyView ? `${selectedMonth.label} commission awaiting payout.` : 'Awaiting payout from the admin team.' },
+      { label: 'Commission Paid', value: formatMoneyFromPaise(isMonthlyView ? 0 : summary.commissionPaid || 0), note: isMonthlyView ? 'Monthly payout details are recorded separately.' : 'Already processed and recorded.' },
+      { label: 'Active Coupons', value: Number(summary.activeCoupons || coupons.filter((coupon) => coupon.active).length || 0).toLocaleString('en-IN'), note: 'Assignable and currently live.' },
+      { label: 'Coupon Usage', value: (isMonthlyView ? monthlyCouponUsage : Number(summary.couponUsage || 0)).toLocaleString('en-IN'), note: isMonthlyView ? `${selectedMonth.label} orders captured through your codes.` : 'Orders captured through your codes.' },
+      { label: 'Conversion Rate', value: `${(isMonthlyView ? monthlyConversion : Number(summary.conversionRate || 0)).toFixed(1)}%`, note: 'Paid orders from referred traffic.' },
+    ];
+
+    return `
+      <section class="account-section account-section--influencer">
+        <div class="account-section__head">
+          <div>
+            <p class="account-section__eyebrow">Influencer Dashboard</p>
+            <h4>Premium creator analytics</h4>
+          </div>
+          <label class="influencer-month-select">
+            <span>Month</span>
+            <select data-influencer-filter="month">
+              <option value="all" ${state.influencerSalesMonth === 'all' ? 'selected' : ''}>All months</option>
+              ${monthOptions.map((item) => `<option value="${escapeHtml(item.value)}" ${state.influencerSalesMonth === item.value ? 'selected' : ''}>${escapeHtml(item.label)}</option>`).join('')}
+            </select>
+          </label>
+        </div>
+        <p class="account-card__note">Your dashboard updates from live merch sales, assigned coupons, and commission payments.</p>
+
+        <article class="influencer-coupon-hero${primaryCouponUnavailable ? ' influencer-coupon-hero--unavailable' : ''}">
+          <div class="influencer-coupon-hero__top">
+            <div class="influencer-coupon-hero__copy">
+              <p class="account-section__eyebrow">Assigned Coupon</p>
+              <h4>${escapeHtml(primaryCoupon?.code || 'Not assigned yet')}</h4>
+              <p>${escapeHtml(primaryCoupon ? (primaryCoupon.description || 'This coupon is linked to your influencer account.') : 'No coupon has been assigned yet. Once the admin assigns one, it will appear here automatically.')}</p>
+            </div>
+            <div class="influencer-coupon-hero__actions">
+              <span class="account-badge ${primaryCoupon && !primaryCouponUnavailable ? 'account-badge--live' : 'account-badge--muted'}">${escapeHtml(primaryCoupon ? getCouponStatus(primaryCoupon) : 'No coupon')}</span>
+              <button type="button" class="btn btn-outline account-action-btn" data-account-action="copy-influencer-coupon" data-coupon-code="${escapeHtml(primaryCoupon?.code || '')}" ${primaryCoupon?.code && !primaryCouponUnavailable ? '' : 'disabled'}>Copy code</button>
+            </div>
+          </div>
+          <div class="influencer-coupon-hero__stats">
+            <div class="influencer-coupon-hero__stat">
+              <small>Type</small>
+              <strong>${escapeHtml(primaryCoupon ? (primaryCoupon.discountType || 'flat') : 'Discount')}</strong>
+            </div>
+            <div class="influencer-coupon-hero__stat">
+              <small>Value</small>
+              <strong>${escapeHtml(primaryCoupon ? formatPrice(primaryCoupon.discountValue || 0) : formatPrice(0))}</strong>
+            </div>
+            <div class="influencer-coupon-hero__stat">
+              <small>Expires</small>
+              <strong>${escapeHtml(primaryCoupon ? formatDateLabel(primaryCoupon.expiresAt) : 'No expiry')}</strong>
+            </div>
+            <div class="influencer-coupon-hero__stat">
+              <small>Usage</small>
+              <strong>${escapeHtml(primaryCoupon ? Number(primaryCoupon.usageCount || 0).toLocaleString('en-IN') : '0')}</strong>
+            </div>
+          </div>
+        </article>
+
+        <div class="influencer-kpi-grid">
+          ${kpis.map((item) => `
+            <article class="influencer-kpi">
+              <p>${escapeHtml(item.label)}</p>
+              <strong>${escapeHtml(item.value)}</strong>
+              <span>${escapeHtml(item.note)}</span>
+            </article>
+          `).join('')}
+        </div>
+
+        <div class="influencer-grid influencer-grid--charts">
+          <article class="influencer-panel">
+            <div class="account-section__head">
+              <div>
+                <p class="account-section__eyebrow">Monthly Sales Trend</p>
+                <h4>Sales generated</h4>
+              </div>
+            </div>
+            <div class="influencer-chart">
+              ${monthlyTrend.length ? renderSparklineBars(monthlyTrend, 'sales', 'label', (value) => formatMoneyFromPaise(value)) : '<p class="account-empty-state">No sales trend data yet.</p>'}
+            </div>
+          </article>
+          <article class="influencer-panel">
+            <div class="account-section__head">
+              <div>
+                <p class="account-section__eyebrow">Monthly Commission Trend</p>
+                <h4>Commission earned</h4>
+              </div>
+            </div>
+            <div class="influencer-chart">
+              ${monthlyTrend.length ? renderSparklineBars(monthlyTrend, 'commission', 'label', (value) => formatMoneyFromPaise(value)) : '<p class="account-empty-state">No commission trend data yet.</p>'}
+            </div>
+          </article>
+        </div>
+
+        <div class="influencer-grid influencer-grid--analytics">
+          <article class="influencer-panel">
+            <div class="account-section__head">
+              <div>
+                <p class="account-section__eyebrow">Orders Per Month</p>
+                <h4>Fulfillment activity</h4>
+              </div>
+            </div>
+            <div class="influencer-chart">
+              ${monthlyTrend.length ? renderSparklineBars(monthlyTrend, 'orders', 'label', (value) => Number(value || 0).toLocaleString('en-IN')) : '<p class="account-empty-state">No order activity yet.</p>'}
+            </div>
+          </article>
+          <article class="influencer-panel influencer-panel--removed-insights">
+            <div class="account-section__head">
+              <div>
+                <p class="account-section__eyebrow">Performance Insights</p>
+                <h4>Quick wins</h4>
+              </div>
+            </div>
+            <div class="account-chip-list influencer-insight-list">
+              <span class="account-chip">Best coupon: ${escapeHtml(bestCoupon?.code || 'N/A')}</span>
+              <span class="account-chip">Highest sales month: ${escapeHtml(highestSalesMonth?.label || 'N/A')}</span>
+              <span class="account-chip">Average order value: ${escapeHtml(formatMoneyFromPaise(averageOrderValue || 0))}</span>
+              <span class="account-chip">Repeat customers: ${escapeHtml(`${repeatCustomerPercentage.toFixed ? repeatCustomerPercentage.toFixed(1) : repeatCustomerPercentage}%`)}</span>
+              <span class="account-chip">Conversion rate: ${escapeHtml(`${Number(conversionRate || 0).toFixed(1)}%`)}</span>
+            </div>
+            <div class="influencer-mini-list">
+              ${topProducts.length ? topProducts.map((product) => `
+                <div class="influencer-mini-list__item">
+                  <strong>${escapeHtml(product.name || 'Product')}</strong>
+                  <span>${escapeHtml(`${Number(product.quantity || 0).toLocaleString('en-IN')} sold`)}</span>
+                </div>
+              `).join('') : '<p class="account-empty-state">Top products will appear once customers start buying through your codes.</p>'}
+            </div>
+          </article>
+        </div>
+
+        <article class="influencer-panel">
+          <div class="account-section__head">
+            <div>
+              <p class="account-section__eyebrow">Coupon Performance</p>
+              <h4>Assigned coupon details</h4>
+            </div>
+            <span class="account-section__count">${coupons.length}</span>
+          </div>
+          <div class="influencer-coupon-grid">
+            ${coupons.length ? coupons.map((coupon) => `
+              <article class="influencer-coupon-card${isCouponUnavailable(coupon) ? ' influencer-coupon-card--unavailable' : ''}">
+                <div class="influencer-coupon-card__head">
+                  <div>
+                    <strong>${escapeHtml(coupon.code || '')}</strong>
+                    <span>${escapeHtml(getCouponStatus(coupon))}</span>
+                  </div>
+                  <button type="button" class="btn btn-outline account-action-btn" data-account-action="copy-influencer-coupon" data-coupon-code="${escapeHtml(coupon.code || '')}" ${isCouponUnavailable(coupon) ? 'disabled' : ''}>Copy</button>
+                </div>
+                <p>${escapeHtml(coupon.description || 'No description')}</p>
+                <div class="influencer-coupon-card__meta">
+                  <span>${escapeHtml(coupon.discountType || 'flat')} ${escapeHtml(formatPrice(coupon.discountValue || 0))}</span>
+                  <span>Expires ${escapeHtml(coupon.expiresAt ? formatDateLabel(coupon.expiresAt) : 'No expiry')}</span>
+                  <span>Usage ${escapeHtml(`${Number(coupon.usageCount || 0)} / ${coupon.remainingUsage == null ? '∞' : coupon.maxRedemptions}`)}</span>
+                  <span>Revenue ${escapeHtml(formatMoneyFromPaise(coupon.revenueGenerated || 0))}</span>
+                  <span>Orders ${escapeHtml(Number(coupon.ordersGenerated || 0).toLocaleString('en-IN'))}</span>
+                </div>
+              </article>
+            `).join('') : '<div class="account-empty-state"><p>No coupons assigned yet.</p><span>Assigned coupon performance will appear here automatically.</span></div>'}
+          </div>
+        </article>
+
+        <details class="influencer-details influencer-details--sales-history" open>
+          <summary>
+            <span>Sales History</span>
+            <small>${filteredSales.length} records</small>
+          </summary>
+          <div class="influencer-toolbar">
+            <label class="account-field">
+              <span>Search</span>
+              <input type="search" data-influencer-filter="search" value="${escapeHtml(state.influencerSalesSearch)}" placeholder="Order number, coupon, customer, product" />
+            </label>
+            <label class="account-field">
+              <span>Status</span>
+              <select data-influencer-filter="status">
+                <option value="all" ${state.influencerSalesStatus === 'all' ? 'selected' : ''}>All</option>
+                <option value="paid" ${state.influencerSalesStatus === 'paid' ? 'selected' : ''}>Paid</option>
+                <option value="cod_pending" ${state.influencerSalesStatus === 'cod_pending' ? 'selected' : ''}>COD Pending</option>
+                <option value="processing" ${state.influencerSalesStatus === 'processing' ? 'selected' : ''}>Processing</option>
+                <option value="shipped" ${state.influencerSalesStatus === 'shipped' ? 'selected' : ''}>Shipped</option>
+                <option value="delivered" ${state.influencerSalesStatus === 'delivered' ? 'selected' : ''}>Delivered</option>
+                <option value="cancelled" ${state.influencerSalesStatus === 'cancelled' ? 'selected' : ''}>Cancelled</option>
+              </select>
+            </label>
+            <label class="account-field">
+              <span>From</span>
+              <input type="date" data-influencer-filter="from" value="${escapeHtml(state.influencerSalesFrom)}" />
+            </label>
+            <label class="account-field">
+              <span>To</span>
+              <input type="date" data-influencer-filter="to" value="${escapeHtml(state.influencerSalesTo)}" />
+            </label>
+          </div>
+          <div class="influencer-table-wrap">
+            ${pageSlice.length ? `
+              <table class="influencer-table">
+                <thead>
+                  <tr>
+                    <th>Order</th>
+                    <th>Date</th>
+                    <th>Product Summary</th>
+                    <th>Customer</th>
+                    <th>Coupon</th>
+                    <th>Amount</th>
+                    <th>Commission</th>
+                    <th>Status</th>
+                    <th>Payment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${pageSlice.map((order) => `
+                    <tr>
+                      <td><strong>${escapeHtml(order.orderNumber || '')}</strong></td>
+                      <td>${escapeHtml(formatDateLabel(order.orderDate))}</td>
+                      <td>${escapeHtml(order.productSummary || 'Merch order')}</td>
+                      <td>${escapeHtml(order.customerName || 'Customer')}</td>
+                      <td>${escapeHtml(order.couponUsed || '—')}</td>
+                      <td>${escapeHtml(formatMoneyFromPaise(order.orderAmount || 0))}</td>
+                      <td>${escapeHtml(formatMoneyFromPaise(order.commissionEarned || 0))}</td>
+                      <td>${escapeHtml(order.orderStatus || 'pending')}</td>
+                      <td>${escapeHtml(order.paymentStatus || 'pending')}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+              <div class="influencer-pagination">
+                <span>Page ${currentPage} of ${pageCount}</span>
+                <div>
+                  <button type="button" class="btn btn-outline account-action-btn" data-account-action="influencer-history-page" data-direction="prev" ${currentPage <= 1 ? 'disabled' : ''}>Previous</button>
+                  <button type="button" class="btn btn-outline account-action-btn" data-account-action="influencer-history-page" data-direction="next" ${currentPage >= pageCount ? 'disabled' : ''}>Next</button>
+                </div>
+              </div>
+            ` : '<div class="account-empty-state"><p>No sales match your filters.</p><span>Try a wider date range or clear the search.</span></div>'}
+          </div>
+        </details>
+
+        <div class="influencer-grid influencer-grid--two">
+          <details class="influencer-details" open>
+            <summary>
+              <span>Commission</span>
+              <small>${formatMoneyFromPaise(dashboard.commission?.pending || 0)} pending</small>
+            </summary>
+            <div class="influencer-commission-grid">
+              <article class="influencer-commission-card"><span>Total Earned</span><strong>${escapeHtml(formatMoneyFromPaise(dashboard.commission?.totalEarned || 0))}</strong></article>
+              <article class="influencer-commission-card"><span>Total Paid</span><strong>${escapeHtml(formatMoneyFromPaise(dashboard.commission?.totalPaid || 0))}</strong></article>
+              <article class="influencer-commission-card"><span>Pending</span><strong>${escapeHtml(formatMoneyFromPaise(dashboard.commission?.pending || 0))}</strong></article>
+              <article class="influencer-commission-card"><span>Last Payment</span><strong>${escapeHtml(lastPayment)}</strong></article>
+              <article class="influencer-commission-card"><span>Upcoming Payment</span><strong>${escapeHtml(upcomingPayment)}</strong></article>
+            </div>
+            <div class="influencer-table-wrap">
+              ${commissions.length ? `
+                <table class="influencer-table influencer-table--compact">
+                  <thead>
+                    <tr>
+                      <th>Payment Date</th>
+                      <th>Amount</th>
+                      <th>Method</th>
+                      <th>Reference Number</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${commissions.map((payment) => `
+                      <tr>
+                        <td>${escapeHtml(formatDateLabel(payment.paymentDate))}</td>
+                        <td>${escapeHtml(formatMoneyFromPaise(payment.amount || 0))}</td>
+                        <td>${escapeHtml(payment.paymentMethod || 'Manual')}</td>
+                        <td>${escapeHtml(payment.referenceNumber || '—')}</td>
+                        <td>${escapeHtml(payment.status || 'pending')}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              ` : '<div class="account-empty-state"><p>No commission history yet.</p><span>Processed payouts will show up here automatically.</span></div>'}
+            </div>
+          </details>
+
+          <details class="influencer-details" open>
+            <summary>
+              <span>Notifications</span>
+              <small>${notifications.length} items</small>
+            </summary>
+            <div class="influencer-notifications">
+              ${notifications.length ? notifications.map((note) => `
+                <article class="influencer-notification">
+                  <strong>${escapeHtml(note.title || '')}</strong>
+                  <p>${escapeHtml(note.message || '')}</p>
+                  <span>${escapeHtml(formatDateLabel(note.time))}</span>
+                </article>
+              `).join('') : '<div class="account-empty-state"><p>No notifications yet.</p><span>Sale, coupon, and payment alerts will appear here.</span></div>'}
+            </div>
+          </details>
+        </div>
+
+        <details class="influencer-details">
+          <summary>
+            <span>Profile</span>
+            <small>Manage creator details</small>
+          </summary>
+          <form class="influencer-profile-form" id="influencerProfileForm">
+            <div class="account-form__grid">
+              <label class="account-field account-field--wide">
+                <span>Profile Picture</span>
+                <input name="avatarUrl" type="url" value="${escapeHtml(influencer.avatarUrl || '')}" placeholder="https://..." />
+              </label>
+              <label class="account-field">
+                <span>Name</span>
+                <input name="name" type="text" value="${escapeHtml(influencer.name || '')}" required />
+              </label>
+              <label class="account-field">
+                <span>Email</span>
+                <input type="email" value="${escapeHtml(influencer.email || '')}" readonly aria-readonly="true" />
+              </label>
+              <label class="account-field">
+                <span>Phone Number</span>
+                <input name="phone" type="tel" value="${escapeHtml(influencer.phone || '')}" />
+              </label>
+              <label class="account-field account-field--wide">
+                <span>Social Media Links</span>
+                <textarea name="socialLinks" rows="3" placeholder="One URL per line">${escapeHtml(socialLinksText)}</textarea>
+              </label>
+              <label class="account-field account-field--wide">
+                <span>Bio</span>
+                <textarea name="bio" rows="3" placeholder="Short creator bio">${escapeHtml(influencer.bio || '')}</textarea>
+              </label>
+              <label class="account-field account-field--wide">
+                <span>Preferred Payment Details</span>
+                <textarea name="preferredPaymentDetails" rows="3" placeholder="UPI ID, bank details, or payout instructions">${escapeHtml(influencer.preferredPaymentDetails || '')}</textarea>
+              </label>
+            </div>
+            <div class="account-form__actions">
+              <button class="btn btn-primary account-action-btn" type="submit">Save Profile</button>
+            </div>
+          </form>
+        </details>
+      </section>
+    `;
   }
 
   function renderAccountDrawer() {
@@ -791,9 +1957,12 @@
 
     const profile = getMerchantProfile();
     const orders = Array.isArray(state.merchOrders) ? state.merchOrders : [];
+    const filteredOrders = getFilteredMerchOrders(orders);
     const addresses = Array.isArray(state.merchAddresses) ? state.merchAddresses : [];
     const wishlistItems = Array.isArray(state.merchWishlistItems) ? state.merchWishlistItems : [];
-    const visibleOrders = state.accountOrdersExpanded ? orders : orders.slice(0, 4);
+    const couponHistory = Array.isArray(state.merchCouponHistory) ? state.merchCouponHistory : [];
+    const visibleOrders = state.accountOrdersExpanded ? filteredOrders : filteredOrders.slice(0, 4);
+    const hasActiveOrderFilter = Boolean(state.accountOrderFilterAppliedFrom && state.accountOrderFilterAppliedTo);
     const editingAddress = addresses.find((address) => getAddressId(address) === String(state.accountEditingAddressId || ''));
     const accountInitials = escapeHtml(getInitials(profile.fullName));
     const avatarStyle = profile.avatarUrl
@@ -801,7 +1970,14 @@
       : '';
 
     els.accountDrawerContent.innerHTML = `
-      <section class="account-card account-card--profile">
+      <nav class="account-panel-nav" aria-label="Account sections">
+        <button type="button" data-account-nav="account-profile" aria-current="${state.accountActiveSection === 'account-profile' ? 'page' : 'false'}">My Profile</button>
+        <button type="button" data-account-nav="account-orders" aria-current="${state.accountActiveSection === 'account-orders' ? 'page' : 'false'}">My Orders</button>
+        <button type="button" data-account-nav="account-addresses" aria-current="${state.accountActiveSection === 'account-addresses' ? 'page' : 'false'}">My Addresses</button>
+        <button type="button" data-account-nav="account-wishlist" aria-current="${state.accountActiveSection === 'account-wishlist' ? 'page' : 'false'}">Wishlist</button>
+        ${state.influencerDashboard?.influencer ? `<button type="button" data-account-nav="account-influencer" aria-current="${state.accountActiveSection === 'account-influencer' ? 'page' : 'false'}">Influencer Dashboard</button>` : ''}
+      </nav>
+      <section id="account-profile" data-account-section="account-profile" class="account-card account-card--profile">
         <div class="account-card__avatar profile-avatar${profile.avatarUrl ? ' has-image' : ''}"${avatarStyle}>${accountInitials}</div>
         <div class="account-card__summary">
           <div class="account-card__title-row">
@@ -841,7 +2017,7 @@
         </div>
       </section>
 
-      <section class="account-section">
+      <section id="account-addresses" data-account-section="account-addresses" class="account-section">
         <div class="account-section__head">
           <div>
             <p class="account-section__eyebrow">My Addresses</p>
@@ -881,18 +2057,35 @@
         `}
       </section>
 
-      <section class="account-section">
+      <section id="account-orders" data-account-section="account-orders" class="account-section">
         <div class="account-section__head">
           <div>
             <p class="account-section__eyebrow">My Orders</p>
             <h4>Merchandise orders</h4>
           </div>
           <div class="account-section__actions">
-            ${orders.length > 4 ? `<button class="btn btn-outline account-action-btn" type="button" data-account-action="view-all-orders">${state.accountOrdersExpanded ? 'Show Less' : 'View All'}</button>` : ''}
+            ${filteredOrders.length > 4 ? `<button class="btn btn-outline account-action-btn" type="button" data-account-action="view-all-orders">${state.accountOrdersExpanded ? 'Show Less' : 'View All'}</button>` : ''}
             <span class="account-section__count">${orders.length}</span>
           </div>
         </div>
         ${orders.length ? `
+          <form class="account-order-filter" id="accountOrderFilterForm">
+            <label class="account-field">
+              <span>From</span>
+              <input name="fromDate" type="date" value="${escapeHtml(state.accountOrderFilterFrom)}" />
+            </label>
+            <label class="account-field">
+              <span>To</span>
+              <input name="toDate" type="date" value="${escapeHtml(state.accountOrderFilterTo)}" />
+            </label>
+            <div class="account-order-filter__actions">
+              <button class="btn btn-primary account-action-btn" type="submit">Apply</button>
+              <button class="account-order-filter__clear" type="button" data-account-action="clear-order-filter">Clear</button>
+            </div>
+            ${state.accountOrderFilterMessage ? `<p class="account-order-filter__message" role="alert">${escapeHtml(state.accountOrderFilterMessage)}</p>` : ''}
+          </form>
+        ` : ''}
+        ${filteredOrders.length ? `
           <div class="account-list">
             ${visibleOrders.map((order) => `
               <article class="account-list__item account-list__item--stacked">
@@ -908,15 +2101,23 @@
                   </div>
                   
                 </div>
-                <p>${escapeHtml(formatDateLabel(order.createdAt))} · ${escapeHtml(order.totalAmount ? formatPrice(order.totalAmount) : 'Total unavailable')}</p>
+                <p>${escapeHtml(formatDateLabel(order.createdAt))} - ${escapeHtml(order.totalAmount ? formatMoneyFromPaise(order.totalAmount) : 'Total unavailable')}</p>
+                ${(order.influencerCoupon || order.couponCode || order.coupon_code) ? `<p class="account-order-coupon"><span>Coupon applied</span><strong>${escapeHtml(order.influencerCoupon || order.couponCode || order.coupon_code)}</strong></p>` : ''}
                 <div class="account-item-actions account-item-actions--inline">
                   <button type="button" data-account-action="view-order" data-order-id="${escapeHtml(String(order.id || ''))}">View Details</button>
                   <button type="button" data-account-action="track-order" data-order-id="${escapeHtml(String(order.id || ''))}">Track Order</button>
                   <button type="button" data-account-action="invoice-order" data-order-id="${escapeHtml(String(order.id || ''))}">Invoice</button>
+                  <button type="button" data-account-action="email-invoice" data-order-id="${escapeHtml(String(order.id || ''))}">Email</button>
                   <button type="button" data-account-action="download-invoice" data-order-id="${escapeHtml(String(order.id || ''))}">Download PDF</button>
                 </div>
               </article>
             `).join('')}
+          </div>
+          ${hasActiveOrderFilter && filteredOrders.length > visibleOrders.length ? `<p class="account-order-filter__summary">Showing ${visibleOrders.length} of ${filteredOrders.length} matching orders.</p>` : ''}
+        ` : orders.length ? `
+          <div class="account-empty-state">
+            <p>No orders found.</p>
+            <span>No merchandise orders match the selected date range.</span>
           </div>
         ` : `
           <div class="account-empty-state">
@@ -926,7 +2127,40 @@
         `}
       </section>
 
-      <section class="account-section">
+      <section data-account-section="account-coupons" class="account-section account-section--coupon-history">
+        <div class="account-section__head">
+          <div>
+            <p class="account-section__eyebrow">Coupon History</p>
+            <h4>Applied discounts</h4>
+          </div>
+          <span class="account-section__count">${couponHistory.length}</span>
+        </div>
+        ${couponHistory.length ? `
+          <div class="account-list">
+            ${couponHistory.map((entry) => `
+              <article class="account-list__item account-list__item--stacked">
+                <div class="account-list__row">
+                  <strong>${escapeHtml(entry.couponCode || entry.influencerCoupon || `Order #${entry.orderId}`)}</strong>
+                  <span>${escapeHtml(formatDateLabel(entry.createdAt))}</span>
+                </div>
+                <p>${escapeHtml(entry.influencerCoupon || entry.couponCode || 'Discount applied')}</p>
+                <div class="account-item-actions account-item-actions--inline">
+                  <button type="button" data-account-action="view-order" data-order-id="${escapeHtml(String(entry.orderId || ''))}">View Order</button>
+                </div>
+              </article>
+            `).join('')}
+          </div>
+        ` : `
+          <div class="account-empty-state">
+            <p>No coupon history yet.</p>
+            <span>Any merch coupon you used will appear here automatically.</span>
+          </div>
+        `}
+      </section>
+
+      <div id="account-influencer" data-account-section="account-influencer">${renderInfluencerDashboardSection()}</div>
+
+      <section id="account-wishlist" data-account-section="account-wishlist" class="account-section">
         <div class="account-section__head">
           <div>
             <p class="account-section__eyebrow">Wishlist</p>
@@ -961,7 +2195,7 @@
         `}
       </section>
 
-      <section class="account-section">
+      <section class="account-section account-section--extra">
         <div class="account-section__head">
           <div>
             <p class="account-section__eyebrow">Saved Payments</p>
@@ -975,7 +2209,7 @@
         </div>
       </section>
 
-      <section class="account-section">
+      <section class="account-section account-section--extra">
         <div class="account-section__head">
           <div>
             <p class="account-section__eyebrow">Account Settings</p>
@@ -991,6 +2225,11 @@
 
       <button id="merchLogoutBtn" class="btn btn-secondary btn-full account-logout-btn" type="button">Logout</button>
     `;
+
+    const activeSection = state.accountActiveSection || '';
+    els.accountDrawerContent.querySelectorAll('[data-account-section]').forEach((section) => {
+      section.hidden = !activeSection || section.dataset.accountSection !== activeSection;
+    });
 
     document.getElementById('merchLogoutBtn')?.addEventListener('click', handleLogout);
     bindAccountDrawerActions();
@@ -1054,14 +2293,63 @@
   function bindAccountDrawerActions() {
     document.getElementById('accountProfileForm')?.addEventListener('submit', handleProfileSubmit);
     document.getElementById('accountAddressForm')?.addEventListener('submit', handleAddressSubmit);
+    document.getElementById('influencerProfileForm')?.addEventListener('submit', handleInfluencerProfileSubmit);
+    document.getElementById('accountOrderFilterForm')?.addEventListener('submit', handleAccountOrderFilterSubmit);
 
     els.accountDrawerContent?.querySelectorAll('[data-account-action]').forEach((button) => {
       button.addEventListener('click', () => handleAccountAction(button));
+    });
+
+    els.accountDrawerContent?.querySelectorAll('[data-account-nav]').forEach((button) => {
+      button.addEventListener('click', () => {
+        state.accountActiveSection = button.dataset.accountNav || 'account-profile';
+        renderAccountDrawer();
+      });
+    });
+
+    els.accountDrawerContent?.querySelectorAll('[data-influencer-filter]').forEach((input) => {
+      const eventName = input.tagName === 'SELECT' ? 'change' : 'input';
+      input.addEventListener(eventName, () => {
+        const key = input.dataset.influencerFilter;
+        if (key === 'search') state.influencerSalesSearch = String(input.value || '');
+        if (key === 'status') state.influencerSalesStatus = String(input.value || 'all');
+        if (key === 'from') state.influencerSalesFrom = String(input.value || '');
+        if (key === 'to') state.influencerSalesTo = String(input.value || '');
+        if (key === 'month') state.influencerSalesMonth = String(input.value || 'all');
+        state.influencerSalesPage = 1;
+        renderAccountDrawer();
+      });
     });
   }
 
   function getOrderById(orderId) {
     return (Array.isArray(state.merchOrders) ? state.merchOrders : []).find((order) => String(order.id || '') === String(orderId || ''));
+  }
+
+  function handleAccountOrderFilterSubmit(event) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const from = String(formData.get('fromDate') || '').trim();
+    const to = String(formData.get('toDate') || '').trim();
+    state.accountOrderFilterFrom = from;
+    state.accountOrderFilterTo = to;
+
+    if (!from || !to) {
+      state.accountOrderFilterMessage = 'Select both From and To dates.';
+      renderAccountDrawer();
+      return;
+    }
+
+    if (from > to) {
+      state.accountOrderFilterMessage = 'From date must be before or equal to To date.';
+      renderAccountDrawer();
+      return;
+    }
+
+    state.accountOrderFilterAppliedFrom = from;
+    state.accountOrderFilterAppliedTo = to;
+    state.accountOrderFilterMessage = '';
+    renderAccountDrawer();
   }
 
   async function handleAccountAction(button) {
@@ -1120,6 +2408,16 @@
       return;
     }
 
+    if (action === 'clear-order-filter') {
+      state.accountOrderFilterFrom = '';
+      state.accountOrderFilterTo = '';
+      state.accountOrderFilterAppliedFrom = '';
+      state.accountOrderFilterAppliedTo = '';
+      state.accountOrderFilterMessage = '';
+      renderAccountDrawer();
+      return;
+    }
+
     if (action === 'view-order') {
       const order = getOrderById(button.dataset.orderId);
       console.log('View order:', JSON.stringify(order, null, 2));
@@ -1133,6 +2431,10 @@
                <strong>${formatDateLabel(order.createdAt)}</strong>
              </div>
              <div class="order-detail-row">
+               <span>Customer Type</span>
+               <strong>${order.isGuest ? 'Guest linked to account' : 'Registered customer'}</strong>
+             </div>
+             <div class="order-detail-row">
                <span>Order Status</span>
                <strong>${formatOrderStatus(order.status)}</strong>
              </div>
@@ -1144,9 +2446,18 @@
                <span>Payment Method</span>
                <strong>${order.paymentMethod || 'Online'}</strong>
              </div>
+             ${(order.influencerCoupon || order.couponCode || order.coupon_code) ? `<div class="order-detail-row"><span>Coupon Applied</span><strong>${escapeHtml(order.influencerCoupon || order.couponCode || order.coupon_code)}</strong></div>` : ''}
+             <div class="order-detail-row">
+               <span>Shipping</span>
+               <strong>${escapeHtml(order.shippingAddress || 'Unavailable')}</strong>
+             </div>
+             <div class="order-detail-row">
+               <span>Billing</span>
+               <strong>${escapeHtml(order.billingAddress || order.shippingAddress || 'Unavailable')}</strong>
+             </div>
              <div class="order-detail-row">
                <span>Total</span>
-               <strong>${order.totalAmount ? formatPrice(order.totalAmount) : 'Unavailable'}</strong>
+               <strong>${order.totalAmount ? formatMoneyFromPaise(order.totalAmount) : 'Unavailable'}</strong>
              </div>
            </div>
          `
@@ -1157,9 +2468,9 @@
     }
 
     if (action === 'track-order') {
-      const order = getOrderById(button.dataset.orderId);
-      const tracking = [order?.carrierName, order?.trackingNumber].filter(Boolean).join(' · ');
-      showCheckoutNotice('Track order', tracking || 'Tracking details will appear once this order ships.');
+      if (button.dataset.orderId) {
+        window.location.hash = `track-order/${encodeURIComponent(button.dataset.orderId)}`;
+      }
       return;
     }
 
@@ -1170,6 +2481,11 @@
 
     if (action === 'download-invoice') {
       await downloadMerchInvoice(button.dataset.orderId);
+      return;
+    }
+
+    if (action === 'email-invoice') {
+      await emailMerchInvoice(button.dataset.orderId);
       return;
     }
 
@@ -1187,6 +2503,40 @@
 
     if (action === 'wishlist-move') {
       showCheckoutNotice('Wishlist', 'Move to Cart is ready for the wishlist service connection.');
+      return;
+    }
+
+    if (action === 'copy-influencer-coupon') {
+      const code = String(button.dataset.couponCode || '').trim();
+      if (!code) return;
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(code);
+        }
+        showCheckoutNotice('Copied', `${code} copied to clipboard.`);
+      } catch {
+        showCheckoutNotice('Copy failed', 'Unable to copy the coupon code right now.', { variant: 'error' });
+      }
+      return;
+    }
+
+    if (action === 'influencer-history-page') {
+      const direction = String(button.dataset.direction || '').trim();
+      const totalRows = getInfluencerSalesRows();
+      const pageCount = Math.max(1, Math.ceil(totalRows.length / 5));
+      if (direction === 'prev') {
+        state.influencerSalesPage = Math.max(1, Number(state.influencerSalesPage || 1) - 1);
+      } else if (direction === 'next') {
+        state.influencerSalesPage = Math.min(pageCount, Number(state.influencerSalesPage || 1) + 1);
+      }
+      renderAccountDrawer();
+      return;
+    }
+
+    if (action === 'save-influencer-profile') {
+      const form = document.getElementById('influencerProfileForm');
+      if (form) form.requestSubmit();
+      return;
     }
   }
 
@@ -1252,6 +2602,25 @@
     }
   }
 
+  async function emailMerchInvoice(orderId) {
+    try {
+      const id = Number(orderId);
+      if (!Number.isInteger(id) || id <= 0) throw new Error('Order details are unavailable.');
+      const result = await api(`/api/merch/orders/${encodeURIComponent(id)}/invoice-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const recipient = String(result.recipientEmail || state.merchProfile?.email || '').trim();
+      showCheckoutNotice(
+        'Invoice email sent',
+        recipient ? `We sent the invoice to ${recipient}.` : 'We sent the invoice email successfully.'
+      );
+    } catch (error) {
+      showCheckoutNotice('Email unavailable', error.message || 'Unable to email the invoice. Please try again.', { variant: 'error' });
+    }
+  }
+
   async function handleProfileSubmit(event) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
@@ -1277,6 +2646,60 @@
     state.accountProfileEditing = false;
     state.accountProfileMessage = 'Profile saved.';
     renderAccountTrigger();
+    renderAccountDrawer();
+  }
+
+  async function handleInfluencerProfileSubmit(event) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const socialLinks = String(formData.get('socialLinks') || '')
+      .split(/\n+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const payload = {
+      name: String(formData.get('name') || '').trim(),
+      phone: String(formData.get('phone') || '').trim(),
+      avatarUrl: String(formData.get('avatarUrl') || '').trim(),
+      socialLinks,
+      bio: String(formData.get('bio') || '').trim(),
+      preferredPaymentDetails: String(formData.get('preferredPaymentDetails') || '').trim(),
+    };
+
+    try {
+      const result = await api('/api/merch/influencer-profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      state.influencerDashboard = result.dashboard || state.influencerDashboard;
+      if (result.influencer) {
+        state.influencerDashboard = {
+          ...(state.influencerDashboard || {}),
+          influencer: result.influencer,
+        };
+      }
+      if (state.merchProfile) {
+        state.merchProfile = {
+          ...state.merchProfile,
+          ...(payload.name ? { fullName: payload.name } : {}),
+          ...(payload.phone ? { mobile: payload.phone } : {}),
+          ...(payload.avatarUrl ? { avatarUrl: payload.avatarUrl } : {}),
+        };
+      }
+      if (state.currentUser) {
+        state.currentUser = {
+          ...state.currentUser,
+          ...(payload.name ? { name: payload.name } : {}),
+          ...(payload.phone ? { mobile: payload.phone } : {}),
+          ...(payload.avatarUrl ? { avatarUrl: payload.avatarUrl } : {}),
+        };
+      }
+      showCheckoutNotice('Profile saved', 'Your influencer profile was updated.');
+    } catch (error) {
+      showCheckoutNotice('Profile not saved', error.message || 'Unable to update influencer profile.', { variant: 'error' });
+      return;
+    }
+
     renderAccountDrawer();
   }
 
@@ -1351,12 +2774,12 @@
     renderAccountDrawer();
   }
 
-  function openAccountDrawer() {
+  async function openAccountDrawer() {
     if (!els.accountDrawer) return;
 
     state.accountDrawerOpen = true;
     state.accountDrawerTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    renderAccountDrawer();
+    state.accountActiveSection = null;
     els.accountDrawer.hidden = false;
     els.accountDrawerOverlay.hidden = false;
     requestAnimationFrame(() => {
@@ -1364,8 +2787,12 @@
       els.accountDrawerOverlay.classList.add('is-visible');
     });
     document.body.classList.add('is-account-drawer-open');
+    renderAccountDrawer();
     els.accountDrawerCloseBtn?.focus();
     els.merchAuthCta?.querySelector('#merchAccountBtn')?.setAttribute('aria-expanded', 'true');
+
+    await loadInfluencerDashboard();
+    if (state.accountDrawerOpen) renderAccountDrawer();
   }
 
   function closeAccountDrawer() {
@@ -1396,6 +2823,14 @@
     state.merchAddresses = [];
     state.merchWishlistItems = [];
     state.merchCartItems = [];
+    state.merchCouponHistory = [];
+    state.influencerDashboard = null;
+    state.influencerSalesSearch = '';
+    state.influencerSalesStatus = 'all';
+    state.influencerSalesFrom = '';
+    state.influencerSalesTo = '';
+    state.influencerSalesPage = 1;
+    state.influencerSalesMonth = 'all';
     state.accountDrawerTrigger = null;
     closeAccountDrawer();
     renderAccountTrigger();
@@ -1404,7 +2839,7 @@
     });
   }
 
-  // ─── Render: Product Grid ───
+  // â”€â”€â”€ Render: Product Grid â”€â”€â”€
   function getFilteredProducts() {
     let products = [...state.products];
 
@@ -1453,10 +2888,13 @@
     els.productGrid.innerHTML = products.map(product => {
       const defaultVariant = getDefaultPurchasableVariant(product);
       const isSoldOut = !defaultVariant || Number(defaultVariant.stock || 0) <= 0;
+      const lowStockVariants = getLowStockVariants(product);
+      const stockState = getVariantStockState(defaultVariant);
       return `
       <article class="product-card" data-product-id="${product.id}" tabindex="0" role="button" aria-label="View ${escapeHtml(product.name)}">
         <div class="product-card__image">
-          <img src="${escapeHtml(product.images?.[0] || product.imageUrl || FALLBACK_PRODUCT_IMAGE)}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
+          ${isSoldOut ? '<span class="product-card__badge product-card__badge--sold-out">Sold out</span>' : lowStockVariants.length ? '<span class="product-card__badge product-card__badge--low-stock">Low stock</span>' : ''}
+          <img src="${escapeHtml(product.images?.[0] || product.imageUrl || getProductFallbackImage(product))}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
         </div>
         <div class="product-card__body">
           <p class="product-card__category">${escapeHtml(getCategoryLabel(product.category))}</p>
@@ -1464,6 +2902,15 @@
           <p class="product-card__price">
             ${product.variants.length > 1 ? '<span class="price-from">From </span>' : ''}${getPriceRange(product)}
           </p>
+          <p class="product-card__stock ${stockState.className}">
+            ${escapeHtml(stockState.label)}
+          </p>
+          ${lowStockVariants.length ? `
+            <p class="product-card__stock-details">
+              ${escapeHtml(lowStockVariants.slice(0, 2).map((variant) => `${getVariantLabel(variant)}: ${Number(variant.stock || 0)} left`).join(' · '))}
+              ${lowStockVariants.length > 2 ? ` · +${lowStockVariants.length - 2} more` : ''}
+            </p>
+          ` : ''}
           <div class="product-card__actions">
             <button class="btn btn-secondary product-card__action" type="button" data-product-action="add-to-cart" data-product-id="${product.id}" ${isSoldOut ? 'disabled' : ''}>
               ${isSoldOut ? 'Out of Stock' : 'Add to Cart'}
@@ -1509,10 +2956,13 @@
       bottles: 'Hydrogen Water Bottles',
       sprays: 'Hydrogen Mists',
     };
-    return labels[category] || category;
+    if (labels[category]) return labels[category];
+    return String(category || 'Products')
+      .replace(/[-_]+/g, ' ')
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
   }
 
-  // ─── Render: Product Detail ───
+  // â”€â”€â”€ Render: Product Detail â”€â”€â”€
   function showProductDetail(productId) {
     const product = state.products.find(p => Number(p.id) === Number(productId));
     if (!product) return;
@@ -1526,6 +2976,8 @@
     els.shopSection.hidden = true;
     document.querySelector('.merch-hero').hidden = true;
     document.querySelector('.merch-categories').hidden = true;
+    if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
+    if (els.orderTracking) els.orderTracking.hidden = true;
     els.productDetail.hidden = false;
 
     renderProductGallery(product);
@@ -1540,16 +2992,21 @@
     state.selectedVariant = null;
 
     els.productDetail.hidden = true;
+    if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
+    if (els.orderTracking) els.orderTracking.hidden = true;
     els.shopSection.hidden = false;
     document.querySelector('.merch-hero').hidden = false;
     document.querySelector('.merch-categories').hidden = false;
+    if (window.location.hash === '#booking-confirmation' || getTrackingOrderIdFromHash()) {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
   }
 
   function renderProductGallery(product) {
-    const mainImage = product.images?.[0] || product.imageUrl || FALLBACK_PRODUCT_IMAGE;
+    const mainImage = product.images?.[0] || product.imageUrl || getProductFallbackImage(product);
     els.productGallery.innerHTML = `
       <div class="gallery-main">
-        <img id="galleryMainImg" src="${escapeHtml(mainImage)}" alt="${escapeHtml(product.name)}" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
+        <img id="galleryMainImg" src="${escapeHtml(mainImage)}" alt="${escapeHtml(product.name)}" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
       </div>
       ${(product.images || []).length > 1 ? `
         <div class="gallery-thumbs">
@@ -1582,6 +3039,8 @@
 
   function renderProductInfo(product) {
     const variant = state.selectedVariant;
+    const stockState = getVariantStockState(variant);
+    const lowStockVariants = getLowStockVariants(product);
 
     // Get unique sizes and colors
     const sizes = [...new Set(product.variants.map(v => v.size).filter(Boolean))];
@@ -1592,6 +3051,16 @@
       <h1 class="detail-title">${escapeHtml(product.name)}</h1>
       <p class="detail-price">${formatPrice(variant.price)}</p>
       <p class="detail-description">${escapeHtml(product.description)}</p>
+      ${product.isCombo && Array.isArray(product.comboItems) && product.comboItems.length ? `
+        <div class="combo-product-details">
+          <strong>Included in this combo</strong>
+          <div class="combo-product-details__items">
+            ${product.comboItems.map((item) => { const fallback = getProductFallbackImage({ name: item.productName, category: '' }); const image = normalizeProductImageUrl(item.imageUrl || fallback); return `<div class="combo-product-details__item"><img src="${escapeHtml(image)}" alt="" onerror="this.onerror=null;this.src='${escapeHtml(fallback)}';" /><span>${escapeHtml(item.productName)}<small>${escapeHtml([item.size, item.color].filter(Boolean).join(' / ') || item.sku || 'Default variant')}</small></span></div>`; }).join('')}
+          </div>
+        </div>
+      ` : ''}
+      ${Object.keys(getProductSpecifications(product, variant)).length ? '<button class="more-details-button" id="moreDetailsButton" type="button" aria-expanded="false" aria-controls="productSpecifications">More details <span aria-hidden="true">＋</span></button>' : ''}
+      ${renderProductSpecifications(product, variant)}
 
       ${sizes.length > 0 ? `
         <div class="variant-group">
@@ -1625,7 +3094,7 @@
 
       <div class="quantity-control">
         <label>Quantity</label>
-        <button class="qty-btn" id="qtyDec" type="button">−</button>
+        <button class="qty-btn" id="qtyDec" type="button">-</button>
         <span class="qty-value" id="qtyValue">${state.quantity}</span>
         <button class="qty-btn" id="qtyInc" type="button">+</button>
       </div>
@@ -1640,10 +3109,28 @@
         <button id="addToWishlistBtn" class="btn btn-outline btn-lg" type="button">♡ Wishlist</button>
       </div>
 
-      <p class="stock-status ${variant.stock > 0 ? 'in-stock' : 'out-of-stock'}">
-        ${variant.stock > 0 ? `✓ In stock (${variant.stock} available)` : '✕ Out of stock'}
+      <p class="stock-status ${stockState.className}">
+        ${escapeHtml(stockState.label)}
       </p>
+      <p class="stock-status__detail">
+        ${escapeHtml(stockState.detail)}
+      </p>
+      ${lowStockVariants.length ? `
+        <div class="stock-alert stock-alert--low">
+          <strong>Low stock details</strong>
+          <span>${escapeHtml(lowStockVariants.map((item) => `${getVariantLabel(item)} (${Number(item.stock || 0)})`).join(', '))}</span>
+        </div>
+      ` : ''}
     `;
+
+    const moreDetailsButton = document.getElementById('moreDetailsButton');
+    const specificationsPanel = document.getElementById('productSpecifications');
+    moreDetailsButton?.addEventListener('click', () => {
+      const isOpen = !specificationsPanel.hidden;
+      specificationsPanel.hidden = isOpen;
+      moreDetailsButton.setAttribute('aria-expanded', String(!isOpen));
+      moreDetailsButton.querySelector('span').textContent = isOpen ? '＋' : '−';
+    });
 
     // Bind variant selectors
     els.productInfo.querySelectorAll('[data-size]').forEach(btn => {
@@ -1703,7 +3190,7 @@
     });
   }
 
-  // ─── Search ───
+  // â”€â”€â”€ Search â”€â”€â”€
   function openSearch() {
     els.searchOverlay.hidden = false;
     els.searchInput.focus();
@@ -1863,7 +3350,7 @@
           <span>
             <strong>${escapeHtml(getAddressLabel(address))}</strong>
             <small>${escapeHtml(getAddressSummary(address))}</small>
-            <small>${escapeHtml([address.recipientName, address.phone].filter(Boolean).join(' · '))}</small>
+                    <small>${escapeHtml([address.recipientName, address.phone].filter(Boolean).join(' · '))}</small>
           </span>
           ${address.isDefault ? '<em>Default</em>' : ''}
         </label>
@@ -2077,7 +3564,7 @@
     startRazorpayCheckout(customer, address);
   }
 
-  // ─── Event Bindings ───
+  // â”€â”€â”€ Event Bindings â”€â”€â”€
   function bindEvents() {
     // Hero shop button
     els.heroShopBtn.addEventListener('click', () => {
@@ -2153,9 +3640,15 @@
         closeAccountDrawer();
       }
     });
+
+    window.addEventListener('hashchange', () => {
+      if (!routeFromLocation()) {
+        showShop();
+      }
+    });
   }
 
-  // ─── Razorpay Checkout Flow ───
+  // â”€â”€â”€ Razorpay Checkout Flow â”€â”€â”€
   async function initiateCheckout() {
     if (!state.authResolved) {
       await loadCustomerContext();
@@ -2202,6 +3695,7 @@
       }
 
       const data = await res.json();
+      const confirmationCartItems = state.cart.map((item) => ({ ...item }));
 
       // Load Razorpay script if not loaded
       if (!window.Razorpay) {
@@ -2232,6 +3726,15 @@
             }),
           });
           if (verifyRes.ok) {
+            const verifyData = await verifyRes.json().catch(() => ({}));
+            const confirmation = buildConfirmationData({
+              order: data,
+              verifyResult: { ...verifyData, orderNumber: data.orderNumber },
+              customer,
+              address,
+              cartItems: confirmationCartItems,
+            });
+            saveConfirmation(confirmation);
             state.cart = [];
             state.merchCouponCode = '';
             state.merchCouponPreview = null;
@@ -2240,7 +3743,8 @@
             renderCart();
             closeCart();
             await loadCustomerContext();
-            showCheckoutNotice('Payment successful', `Order ${data.orderNumber} confirmed.`);
+            window.location.hash = 'booking-confirmation';
+            showBookingConfirmation(confirmation);
           } else {
             showCheckoutNotice('Payment verification failed', 'Please contact support with your payment details.', { variant: 'error' });
           }
@@ -2265,6 +3769,26 @@
     });
   }
 
+  async function loadInfluencerDashboard() {
+    if (!state.currentUser) {
+      state.influencerDashboard = null;
+      return;
+    }
+
+    try {
+      state.influencerDashboardLoading = true;
+      const result = await api('/api/merch/influencer-dashboard?page=1&pageSize=500');
+      state.influencerDashboard = result || null;
+    } catch (error) {
+      state.influencerDashboard = null;
+      if (Number(error?.status || 0) !== 403) {
+        console.warn('Unable to load influencer dashboard:', error?.message || error);
+      }
+    } finally {
+      state.influencerDashboardLoading = false;
+    }
+  }
+
   async function loadCustomerContext() {
     try {
       const authResult = await api('/api/auth/me');
@@ -2285,32 +3809,43 @@
         state.merchAddresses = Array.isArray(profileResult.addresses) ? profileResult.addresses : [];
         state.merchWishlistItems = Array.isArray(profileResult.wishlistItems) ? profileResult.wishlistItems : [];
         state.merchCartItems = Array.isArray(profileResult.cartItems) ? profileResult.cartItems : [];
+        state.merchCouponHistory = Array.isArray(profileResult.couponHistory) ? profileResult.couponHistory : [];
       } catch {
         state.merchProfile = null;
         state.merchOrders = [];
         state.merchAddresses = [];
         state.merchWishlistItems = [];
         state.merchCartItems = [];
+        state.merchCouponHistory = [];
       }
+      await loadInfluencerDashboard();
     } else {
       state.merchProfile = null;
       state.merchOrders = [];
       state.merchAddresses = [];
       state.merchWishlistItems = [];
       state.merchCartItems = [];
+      state.merchCouponHistory = [];
+      state.influencerDashboard = null;
     }
 
     state.authResolved = true;
     setBodyAuthLoading(false);
     renderAccountTrigger();
+
+    if (state.currentView === 'tracking') {
+      const trackingOrderId = getTrackingOrderIdFromHash();
+      if (trackingOrderId) showOrderTracking(trackingOrderId);
+    }
   }
 
-  // ─── Initialize ───
+  // â”€â”€â”€ Initialize â”€â”€â”€
   function init() {
     loadCart();
     renderCartBadge();
     renderProductGrid();
     bindEvents();
+    routeFromLocation();
     setBodyAuthLoading(true);
     renderAccountTrigger();
     loadMerchProducts();

@@ -58,10 +58,11 @@
           </div>
 
           <div class="admin-topbar__right">
-            <button class="admin-pill" type="button" data-action="open-notifications">
+            <div class="admin-pill" aria-label="Unread notifications">
               <span class="admin-pill__dot"></span>
-              <span>Notifications</span>
-            </button>
+              <span aria-hidden="true">&#128276;</span>
+              <span id="notificationBadgeCount">0</span>
+            </div>
             <button class="admin-profile" type="button" data-action="open-profile" aria-label="Open admin profile">
               <span class="admin-profile__avatar" id="profileAvatar">AH</span>
               <span class="admin-profile__meta">
@@ -86,19 +87,6 @@
       </div>
     </div>
 
-    <div class="admin-drawer" id="notificationsDrawer" hidden>
-      <div class="admin-drawer__panel">
-        <div class="admin-drawer__header">
-          <div>
-            <p class="admin-kicker">Activity</p>
-            <h2>Notifications</h2>
-          </div>
-          <button class="admin-icon-btn" type="button" data-action="close-notifications" aria-label="Close notifications">&times;</button>
-        </div>
-        <div class="admin-drawer__body" id="notificationsList"></div>
-      </div>
-    </div>
-
     <div class="admin-modal" id="adminModal" hidden aria-hidden="true">
       <div class="admin-modal__backdrop" data-action="close-modal"></div>
       <div class="admin-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="adminModalTitle" id="adminModalDialog"></div>
@@ -106,6 +94,6 @@
 
     <div class="admin-toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
 
-    <script src="admin.js"></script>
+    <script src="admin.js?v=20260728-2"></script>
   </body>
 </html>

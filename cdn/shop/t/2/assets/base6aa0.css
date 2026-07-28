@@ -115,17 +115,18 @@
   }
 
   .header__inline-menu .list-menu--inline{
-    display:flex!important;
-    align-items:center!important;
+    display:flex !important;
+    align-items:center !important;
     justify-content:space-between;
-    flex-wrap:nowrap!important;
-    gap:clamp(10px,1.4vw,28px);
+    flex-wrap:nowrap !important;
+    gap:0;
     width:100%;
   }
 
   .header__inline-menu .list-menu--inline .list-menu-item{
     flex:0 0 auto;
-    padding-inline:0!important;
+    margin:0!important;
+    padding:0!important;
   }
 
   .header__inline-menu .list-menu--inline .header__menu-item{
@@ -140,6 +141,11 @@
     margin-right:0;
     min-width:0;
     width:auto;
+  }
+
+  .header__icons.storefront-header__cta{
+    flex:0 0 auto;
+    margin-left:auto;
   }
 
   .header__icons-wrapper{
@@ -157,16 +163,11 @@
 @media screen and (min-width:1100px) and (max-width:1280px){
   .header-wrapper--top-menu .header{
     grid-template-columns:minmax(0,1fr) auto;
-    column-gap:24px;
   }
 
   .header__left{
     grid-template-columns:120px minmax(0,1fr);
     column-gap:18px;
-  }
-
-  .header__inline-menu .list-menu--inline{
-    gap:10px;
   }
 
   .header__inline-menu .header__menu-item{
@@ -179,4 +180,22 @@
     padding:0 18px;
     font-size:14px;
   }
+}
+
+/* Keep the desktop menu and CTA separated while the header is tightening. */
+@media screen and (min-width:1100px) and (max-width:1439px){
+  .header-wrapper--top-menu .header{
+    column-gap:clamp(18px,2.2vw,32px);
+  }
+
+  .header__left,
+  .header__inline-menu{
+    min-width:0;
+  }
+
+  .header__inline-menu .list-menu--inline .header__menu-item{
+    font-size:clamp(.82rem,.65rem + .35vw,1rem);
+    min-width:0;
+  }
+
 }
