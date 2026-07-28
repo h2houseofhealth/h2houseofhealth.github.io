@@ -4920,7 +4920,10 @@
 					<div class="footer-links">
 						 <a href="privacy/">Privacy Policy</a>
 						 <a href="cookies/">Cookie Policy</a>
-						 <a href="terms/">Terms &amp; Conditions</a>
+						 <a href="terms/">Terms of service</a>
+						 <a href="security/">Security</a>
+						 <a href="help/">Help &amp; Support</a>
+                         <a href="report-fraud/">Report Fraud</a>
 						 <a href="data-deletion/">Data Deletion</a>
                     </div>
 			</div>
@@ -5108,6 +5111,49 @@ account-icon {
 
 .btn-secondary:hover {
     background: #f3ebe6;
+}
+/* ===========================
+   Mobile Footer Fix
+=========================== */
+@media screen and (max-width: 768px) {
+
+.footer__content-bottom-container{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:18px;
+}
+
+.footer__content-bottom-main{
+    width:100%;
+    display:flex;
+    justify-content:center;
+}
+
+.footer__copyright{
+    width:100%;
+    text-align:center;
+}
+
+.footer__copyright .copyright__content{
+    display:block;
+    white-space:normal;
+}
+
+.footer-links{
+    width:100%;
+    display:flex;
+    flex-wrap:wrap;
+    justify-content:center;
+    gap:12px 20px;
+    text-align:center;
+}
+
+.footer-links a{
+    white-space:nowrap;
+}
+
 }</style>
 
 <!-- Fix: Mobile menu not reopening after close -->
