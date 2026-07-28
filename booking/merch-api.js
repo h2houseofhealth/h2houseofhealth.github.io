@@ -1955,6 +1955,19 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       revenueSeries: dailyRevenue,
       monthlyRevenueSeries,
       topProducts,
+      productSales: [...orderItemStats.entries()]
+        .map(([productId, stats]) => {
+          const product = products.find((item) => Number(item.id) === Number(productId));
+          return {
+            id: productId,
+            name: product?.name || `Product ${productId}`,
+            category: product?.category || 'Uncategorized',
+            quantity: stats.quantity,
+            revenue: stats.revenue,
+            orders: stats.orders.size,
+          };
+        })
+        .sort((left, right) => right.revenue - left.revenue || right.quantity - left.quantity),
       topCategories: [...categoryStats.values()]
         .sort((left, right) => right.revenue - left.revenue || right.quantity - left.quantity)
         .slice(0, 5),
@@ -2453,6 +2466,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       registrationDate: seed.registrationDate || null,
       merchandiseOrders: 0,
       lifetimeMerchSpend: 0,
+      couponDiscountTotal: 0,
+      couponRedemptions: [],
       lastOrder: null,
       lastOrderAt: 0,
       addresses: [],
@@ -2472,6 +2487,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     customer.registrationDate = customer.registrationDate || customer.lastOrder?.createdAt || null;
     customer.merchandiseOrders = Number(customer.merchandiseOrders || 0);
     customer.lifetimeMerchSpend = Number(customer.lifetimeMerchSpend || 0);
+    customer.couponDiscountTotal = Number(customer.couponDiscountTotal || 0);
+    customer.couponRedemptions = Array.isArray(customer.couponRedemptions) ? customer.couponRedemptions : [];
     return customer;
   }
 
@@ -3726,7 +3743,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       .prepare(
         `SELECT id, order_number AS orderNumber, customer_name AS customerName, customer_email AS customerEmail,
                 customer_phone AS customerPhone, customer_user_id AS customerUserId, customer_id AS customerId,
-                total_amount AS totalAmount, status, created_at AS createdAt, shipping_address AS shippingAddress,
+                total_amount AS totalAmount, discount_amount AS discountAmount, coupon_code AS couponCode,
+                payment_status AS paymentStatus, status, created_at AS createdAt, shipping_address AS shippingAddress,
                 billing_address AS billingAddress
          FROM merch_orders
          ORDER BY datetime(created_at) ASC, id ASC`
@@ -3845,6 +3863,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       customer.email = String(customer.email || order.customerEmail || '').trim().toLowerCase();
       customer.phone = String(customer.phone || order.customerPhone || '').trim();
       customer.merchandiseOrders += 1;
+      const couponCode = String(order.couponCode || '').trim();
+      const discountAmount = Number(order.discountAmount || 0);
+      if (couponCode) {
+        customer.couponRedemptions.push({
+          orderNumber: String(order.orderNumber || ''),
+          couponCode,
+          discountAmount,
+          createdAt: order.createdAt || null,
+        });
+        customer.couponDiscountTotal += discountAmount;
+      }
       if (paymentStatus === 'paid') {
         customer.lifetimeMerchSpend += orderTotal;
       }
@@ -3859,6 +3888,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           orderNumber: order.orderNumber,
           createdAt: order.createdAt || null,
           status: order.status || 'pending',
+          couponCode,
+          discountAmount,
         };
       }
 
@@ -3890,7 +3921,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
              substr(mo.created_at, 1, 7) AS month,
              COUNT(*) AS orders,
              COALESCE(SUM(mo.total_amount), 0) AS revenue,
-             COUNT(*) * COALESCE(i.commission_per_order_paise, 0) AS commission
+             COUNT(*) * COALESCE(i.commission_per_order_paise, 0) AS commission,
+             SUM(CASE WHEN mo.coupon_id IS NOT NULL THEN 1 ELSE 0 END) AS couponUsage
       FROM merch_orders mo
       JOIN merch_influencers i ON i.id = mo.influencer_id
       WHERE mo.influencer_id IS NOT NULL
@@ -3908,10 +3940,40 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         orders: Number(row.orders || 0),
         revenue: Number(row.revenue || 0),
         commission: Number(row.commission || 0),
+        couponUsage: Number(row.couponUsage || 0),
       });
     });
     influencers.forEach((influencer) => {
       influencer.monthlySales = monthlyByInfluencer.get(Number(influencer.id)) || [];
+    });
+    const dailyRows = db.prepare(`
+      SELECT mo.influencer_id AS influencerId,
+             substr(mo.created_at, 1, 10) AS day,
+             COUNT(*) AS orders,
+             COALESCE(SUM(mo.total_amount), 0) AS revenue,
+             COUNT(*) * COALESCE(i.commission_per_order_paise, 0) AS commission,
+             SUM(CASE WHEN mo.coupon_id IS NOT NULL THEN 1 ELSE 0 END) AS couponUsage
+      FROM merch_orders mo
+      JOIN merch_influencers i ON i.id = mo.influencer_id
+      WHERE mo.influencer_id IS NOT NULL
+        AND mo.payment_status IN ('paid', 'cod_pending')
+      GROUP BY mo.influencer_id, substr(mo.created_at, 1, 10)
+      ORDER BY day DESC
+    `).all();
+    const dailyByInfluencer = new Map();
+    dailyRows.forEach((row) => {
+      const id = Number(row.influencerId);
+      if (!dailyByInfluencer.has(id)) dailyByInfluencer.set(id, []);
+      dailyByInfluencer.get(id).push({
+        day: row.day,
+        orders: Number(row.orders || 0),
+        revenue: Number(row.revenue || 0),
+        commission: Number(row.commission || 0),
+        couponUsage: Number(row.couponUsage || 0),
+      });
+    });
+    influencers.forEach((influencer) => {
+      influencer.dailySales = dailyByInfluencer.get(Number(influencer.id)) || [];
     });
     res.json({ influencers, total: influencers.length });
   });
@@ -4360,6 +4422,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       productParams.push(comboId);
     }
     const componentIds = body.componentVariantIds === undefined ? null : [...new Set((Array.isArray(body.componentVariantIds) ? body.componentVariantIds : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+    const componentStocks = Array.isArray(body.componentStocks)
+      ? new Map(body.componentStocks.map((item) => [Number(item?.variantId), Math.max(0, Math.floor(Number(item?.stock || 0)))]))
+      : null;
     try {
       db.transaction(() => {
         if (productUpdates.length) db.prepare(`UPDATE merch_products SET ${productUpdates.join(', ')} WHERE id = ?`).run(...productParams);
@@ -4372,6 +4437,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           db.prepare('DELETE FROM merch_combo_items WHERE combo_product_id = ?').run(comboId);
           const insertItem = db.prepare('INSERT INTO merch_combo_items (combo_product_id, component_product_id, component_variant_id, quantity) VALUES (?, ?, ?, 1)');
           valid.forEach((item) => insertItem.run(comboId, item.productId, item.variantId));
+        }
+        if (componentStocks) {
+          const stockVariantIds = componentIds || db.prepare('SELECT component_variant_id AS variantId FROM merch_combo_items WHERE combo_product_id = ?').all(comboId).map((item) => Number(item.variantId));
+          const updateStock = db.prepare('UPDATE merch_variants SET stock = ? WHERE id = ?');
+          stockVariantIds.forEach((variantId) => {
+            if (componentStocks.has(variantId)) updateStock.run(componentStocks.get(variantId), variantId);
+          });
         }
       })();
       return res.json(loadMerchProductCatalog({ includeInactive: true }).find((item) => Number(item.id) === comboId) || { id: comboId });
