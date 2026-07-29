@@ -2371,8 +2371,31 @@ app.get('/api/membership-orders/:orderId/invoice-link', requireAuth, (req, res) 
   });
 });
 
-app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
-  app.locals.merchGuestOrderSync?.(req.user);
+app.get('/api/merch/orders/:id/invoice-link', (req, res) => {
+  let authUser = null;
+  const authorizationHeader = String(req.headers.authorization || '').trim();
+  const bearerToken = authorizationHeader.toLowerCase().startsWith('bearer ')
+    ? authorizationHeader.slice(7).trim()
+    : '';
+  const tokens = [req.cookies[TOKEN_COOKIE], bearerToken]
+    .map((token) => String(token || '').trim())
+    .filter(Boolean);
+  for (const tokenValue of tokens) {
+    try {
+      const payload = jwt.verify(tokenValue, JWT_SECRET);
+      const user = getUserProfileById(Number(payload.sub));
+      if (user) {
+        authUser = user;
+        break;
+      }
+    } catch {
+      // Guest invoice access is checked against the order below.
+    }
+  }
+
+  if (authUser) {
+    app.locals.merchGuestOrderSync?.(authUser);
+  }
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId) || orderId <= 0) {
     return res.status(400).json({ message: 'order id is required' });
@@ -2382,6 +2405,9 @@ app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
     .prepare(
       `SELECT id,
               order_number AS orderNumber,
+              customer_email AS customerEmail,
+              guest_email AS guestEmail,
+              is_guest AS isGuest,
               customer_user_id AS customerUserId,
               customer_id AS customerId,
               payment_status AS paymentStatus
@@ -2393,16 +2419,36 @@ app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
     return res.status(404).json({ message: 'merch order not found' });
   }
 
-  const isAdmin = String(req.user?.role || '').trim().toLowerCase() === 'admin';
+  if (!authUser) {
+    const guestEmail = String(req.query?.guestEmail || req.query?.email || '').trim().toLowerCase();
+    const orderEmail = String(order.guestEmail || order.customerEmail || '').trim().toLowerCase();
+    const isGuestOrder = Number(order.isGuest || 0) === 1 && !Number(order.customerUserId || 0);
+    if (!isGuestOrder || !guestEmail || guestEmail !== orderEmail) {
+      return res.status(401).json({ message: 'unauthorized' });
+    }
+
+    const token = createInvoiceAccessToken({
+      scope: 'merch_invoice',
+      orderId: order.id,
+      isGuest: true,
+    });
+    const invoiceUrl = `${getRequestOrigin(req)}/invoice/merch?token=${encodeURIComponent(token)}`;
+    return res.json({
+      invoiceUrl,
+      invoiceDownloadUrl: `${invoiceUrl}&format=pdf&download=1`,
+    });
+  }
+
+  const isAdmin = String(authUser?.role || '').trim().toLowerCase() === 'admin';
   let invoiceUserId = Number(order.customerUserId || 0) || 0;
-  let ownsOrder = invoiceUserId === Number(req.user.id);
+  let ownsOrder = invoiceUserId === Number(authUser.id);
   if (!ownsOrder && Number(order.customerId || 0) > 0) {
     const profile = db
       .prepare('SELECT id, user_id AS userId FROM merch_customer_profiles WHERE id = ?')
       .get(Number(order.customerId));
     if (profile) {
       invoiceUserId = Number(profile.userId || invoiceUserId || 0);
-      ownsOrder = Number(profile.userId || 0) === Number(req.user.id);
+      ownsOrder = Number(profile.userId || 0) === Number(authUser.id);
     }
   }
 
@@ -2411,7 +2457,7 @@ app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
   }
   if (!Number.isInteger(invoiceUserId) || invoiceUserId <= 0) {
     if (isAdmin) {
-      invoiceUserId = Number(req.user.id);
+      invoiceUserId = Number(authUser.id);
     } else {
       return res.status(409).json({ message: 'invoice is available only for linked customer accounts' });
     }
@@ -8013,7 +8059,7 @@ function buildMerchOrderInfoHtml(order) {
 app.get('/invoice/merch', async (req, res) => {
   const access = verifyInvoiceAccessToken(req.query?.token);
   const orderId = Number(access?.orderId);
-  if (!access || access.scope !== 'merch_invoice' || !Number.isInteger(orderId) || !Number.isInteger(access.userId)) {
+  if (!access || access.scope !== 'merch_invoice' || !Number.isInteger(orderId) || (!access.isGuest && !Number.isInteger(access.userId))) {
     return res.status(400).send('Invalid or expired invoice link');
   }
 
@@ -8024,6 +8070,7 @@ app.get('/invoice/merch', async (req, res) => {
               customer_name AS customerName,
               customer_email AS customerEmail,
               customer_phone AS customerPhone,
+              is_guest AS isGuest,
               customer_user_id AS customerUserId,
               customer_id AS customerId,
               status,
@@ -8045,7 +8092,9 @@ app.get('/invoice/merch', async (req, res) => {
     return res.status(404).send('Invoice not found');
   }
 
-  let ownsOrder = Number(order.customerUserId || 0) === Number(access.userId);
+  let ownsOrder = access.isGuest
+    ? Number(order.isGuest || 0) === 1 && !Number(order.customerUserId || 0)
+    : Number(order.customerUserId || 0) === Number(access.userId);
   if (!ownsOrder && Number(order.customerId || 0) > 0) {
     const profile = db
       .prepare('SELECT id FROM merch_customer_profiles WHERE id = ? AND user_id = ?')
@@ -10814,6 +10863,7 @@ function createInvoiceAccessToken(payload) {
       userId: payload?.userId != null ? Number(payload.userId) : undefined,
       orderId: payload?.orderId != null ? String(payload.orderId) : undefined,
       isAdmin: payload?.isAdmin === true,
+      isGuest: payload?.isGuest === true,
     },
     JWT_SECRET,
     { expiresIn: '30d' }
@@ -10831,6 +10881,7 @@ function verifyInvoiceAccessToken(token) {
       userId: payload?.userId != null ? Number(payload.userId) : null,
       orderId: payload?.orderId != null ? String(payload.orderId) : '',
       isAdmin: payload?.isAdmin === true,
+      isGuest: payload?.isGuest === true,
     };
   } catch {
     return null;

@@ -8,7 +8,15 @@
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const express = require('express');
+const FormData = require('form-data');
 const router = express.Router();
+
+let puppeteer;
+try {
+  puppeteer = require('puppeteer');
+} catch {
+  puppeteer = null;
+}
 
 module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, JWT_SECRET, jwt, sendMerchEmail = null, couponHelpers = {} }) {
   const {
@@ -2986,6 +2994,292 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return { html, text };
   }
 
+  function getMerchWhatsAppConfig() {
+    const enabledValue = String(process.env.WHATSAPP_ORDER_CONFIRMATION_ENABLED || '').trim().toLowerCase();
+    const token = String(process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_WHATSAPP_ACCESS_TOKEN || '').trim();
+    const phoneNumberId = String(process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.META_WHATSAPP_PHONE_NUMBER_ID || '').trim();
+    return {
+      enabled: enabledValue === 'true' || (!['false', '0', 'no', 'off'].includes(enabledValue) && Boolean(token && phoneNumberId)),
+      token,
+      phoneNumberId,
+      apiVersion: String(process.env.WHATSAPP_API_VERSION || 'v20.0').trim(),
+      actionTemplateName: String(process.env.WHATSAPP_ORDER_ACTION_TEMPLATE || '').trim(),
+      templateLanguage: String(process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'en').trim(),
+    };
+  }
+
+  function normalizeMerchWhatsAppPhone(phone) {
+    const digits = String(phone || '').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.length === 10) return `91${digits}`;
+    return digits;
+  }
+
+  function formatMerchWhatsAppCurrency(paise) {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(Number(paise || 0) / 100);
+  }
+
+  function buildMerchWhatsAppCardHtml({ order, items, req }) {
+    const links = buildMerchEmailLinks(req, order.id);
+    const expectedStart = addMerchEmailDays(order.createdAt, 5);
+    const expectedEnd = addMerchEmailDays(order.createdAt, 9);
+    const expectedDelivery = `${formatMerchEmailDate(expectedStart)} - ${formatMerchEmailDate(expectedEnd)}`;
+    const firstItem = items[0] || {};
+    const heroImage = links.hero;
+    const logo = links.logo;
+    const itemRows = (items.length ? items : [firstItem]).map((item) => `
+      <div class="product-row">
+        <img src="${escapeHtml(getMerchEmailAssetUrl(req, item.imageUrl || firstItem.imageUrl || links.placeholder))}" alt="">
+        <div class="product-copy">
+          <h3>${escapeHtml(item.productName || 'H2 House Merch')}</h3>
+          <p>${escapeHtml(item.variantLabel || item.sku || 'Standard')} <span>|</span> Quantity: ${escapeHtml(String(item.quantity || 1))}</p>
+        </div>
+        <strong>${formatMerchWhatsAppCurrency(item.lineTotal || order.totalAmount || 0)}</strong>
+      </div>
+    `).join('');
+
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; background: #FAF7F4; color: #2F2F2F; font-family: Arial, Helvetica, sans-serif; }
+      .card { width: 760px; min-height: 1060px; margin: 0; background: #FAF7F4; border: 6px solid #fff; border-radius: 24px; overflow: hidden; box-shadow: 0 18px 44px rgba(87, 48, 26, .16); }
+      .hero { position: relative; min-height: 278px; padding: 34px 36px 28px; background: linear-gradient(90deg, rgba(250,247,244,.98) 0%, rgba(250,247,244,.9) 48%, rgba(250,247,244,.35) 100%); }
+      .hero::after { content: ""; position: absolute; inset: 0; background: url("${escapeHtml(heroImage)}") right center / 43% auto no-repeat; opacity: .98; }
+      .hero-content { position: relative; z-index: 1; width: 58%; }
+      .logo { width: 148px; height: auto; display: block; margin-bottom: 24px; }
+      h1 { margin: 0; font-family: Georgia, 'Times New Roman', serif; color: #A0522D; font-size: 70px; line-height: .98; letter-spacing: 0; }
+      .tagline { margin: 22px 0 0; color: #6e3826; font-family: Georgia, 'Times New Roman', serif; font-size: 22px; line-height: 1.28; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+      .rule { width: 62px; height: 1px; margin-top: 24px; background: #A0522D; }
+      .confirmed { padding: 4px 44px 20px; text-align: center; }
+      .success { display: inline-flex; align-items: center; justify-content: center; width: 54px; height: 54px; border-radius: 999px; margin-bottom: 14px; background: #2E7D32; color: #fff; font-size: 38px; font-weight: 700; }
+      .confirmed h2 { margin: 0 0 8px; font-family: Georgia, 'Times New Roman', serif; font-size: 30px; line-height: 1.18; color: #141414; }
+      .confirmed p { margin: 0 auto; max-width: 510px; font-size: 18px; line-height: 1.35; color: #111; }
+      .info-grid { display: grid; grid-template-columns: repeat(4, 1fr); margin: 0 28px 8px; border: 1px solid #ead3c6; border-radius: 12px; overflow: hidden; background: rgba(255, 250, 247, .7); }
+      .info { min-height: 130px; padding: 20px 12px 16px; text-align: center; border-right: 1px solid #ead3c6; }
+      .info:last-child { border-right: 0; }
+      .info .icon { margin-bottom: 12px; color: #A0522D; font-size: 28px; line-height: 1; }
+      .info span { display: block; margin-bottom: 8px; font-size: 15px; color: #4d3328; }
+      .info strong { display: block; color: #982d18; font-size: 15px; line-height: 1.28; word-break: break-word; }
+      .products { margin: 8px 28px; display: grid; gap: 8px; }
+      .product-row { min-height: 108px; display: grid; grid-template-columns: 122px 1fr 144px; align-items: center; gap: 12px; padding: 12px 22px; border: 1px solid #ead3c6; border-radius: 12px; background: rgba(255, 250, 247, .72); }
+      .product-row img { width: 100px; height: 84px; object-fit: contain; }
+      .product-row h3 { margin: 0 0 8px; font-family: Georgia, 'Times New Roman', serif; color: #171717; font-size: 24px; line-height: 1.15; }
+      .product-row p { margin: 0; color: #111; font-size: 16px; line-height: 1.3; }
+      .product-row p span { margin: 0 10px; color: #A0522D; }
+      .product-row strong { justify-self: end; color: #111; font-size: 20px; white-space: nowrap; }
+      .summary { margin: 8px 28px 12px; padding: 10px 14px 4px; border: 1px solid #ead3c6; border-radius: 12px; background: rgba(255, 250, 247, .72); }
+      .summary-row { display: flex; justify-content: space-between; align-items: baseline; padding: 5px 0; font-size: 17px; line-height: 1.25; }
+      .summary-row strong { font-weight: 500; }
+      .summary-total { margin-top: 6px; padding-top: 12px; border-top: 1px dashed #ddbea9; color: #A0522D; font-family: Georgia, 'Times New Roman', serif; font-size: 22px; font-weight: 700; }
+      .footer-note { margin: 0 28px; padding: 12px 6px 14px; border-top: 1px solid #dfc2b3; font-size: 16px; line-height: 1.35; }
+      .footer-note p { margin: 0; }
+      .footer { display: flex; align-items: center; min-height: 58px; padding: 0 30px; border-top: 1px solid #ead3c6; background: rgba(255, 250, 247, .75); }
+      .footer img { width: 118px; height: auto; }
+      .footer .divider { width: 1px; height: 32px; background: #dfc2b3; margin: 0 32px; }
+      .follow { color: #5c3a2e; font-size: 15px; margin-right: 20px; }
+      .social { display: flex; gap: 34px; color: #A0522D; font-size: 26px; font-weight: 700; align-items: center; }
+      .time { margin-left: auto; color: #777; font-size: 15px; }
+    </style>
+  </head>
+  <body>
+    <article class="card">
+      <section class="hero">
+        <div class="hero-content">
+          <img class="logo" src="${escapeHtml(logo)}" alt="H2 House of Health">
+          <h1>Thank You!</h1>
+          <p class="tagline">Preventive Today,<br>Healthier Tomorrow.</p>
+          <div class="rule"></div>
+        </div>
+      </section>
+      <section class="confirmed">
+        <div class="success">✓</div>
+        <h2>Your order is confirmed.</h2>
+        <p>We're preparing your order with care and will notify you once it's on the way.</p>
+      </section>
+      <section class="info-grid">
+        <div class="info"><div class="icon">□</div><span>Order ID</span><strong>${escapeHtml(order.orderNumber || `Order #${order.id}`)}</strong></div>
+        <div class="info"><div class="icon">▦</div><span>Order Date</span><strong>${escapeHtml(formatMerchEmailDateTime(order.createdAt) || order.createdAt || '')}</strong></div>
+        <div class="info"><div class="icon">₹</div><span>Total Paid</span><strong>${formatMerchWhatsAppCurrency(order.totalAmount || 0)}</strong></div>
+        <div class="info"><div class="icon">▭</div><span>Estimated Delivery</span><strong>${escapeHtml(expectedDelivery)}<br>We'll keep you updated.</strong></div>
+      </section>
+      <section class="products">${itemRows}</section>
+      <section class="summary">
+        <div class="summary-row"><span>Subtotal</span><strong>${formatMerchWhatsAppCurrency(order.subtotal || 0)}</strong></div>
+        <div class="summary-row"><span>Shipping</span><strong>${formatMerchWhatsAppCurrency(order.shippingCharge || 0)}</strong></div>
+        <div class="summary-row"><span>GST (Inclusive)</span><strong>${formatMerchWhatsAppCurrency(order.gstAmount || 0)}</strong></div>
+        <div class="summary-row summary-total"><span>Total Paid</span><strong>${formatMerchWhatsAppCurrency(order.totalAmount || 0)}</strong></div>
+      </section>
+      <section class="footer-note">
+        <p>Thank you for choosing H2 House of Health.</p>
+        <p>We truly appreciate your trust in us.</p>
+      </section>
+      <footer class="footer">
+        <img src="${escapeHtml(logo)}" alt="H2 House of Health">
+        <div class="divider"></div>
+        <span class="follow">Follow us</span>
+        <div class="social"><span>◎</span><span>f</span><span>▶</span></div>
+        <span class="time">${escapeHtml(new Intl.DateTimeFormat('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date()))}</span>
+      </footer>
+    </article>
+  </body>
+</html>`;
+  }
+
+  async function renderMerchWhatsAppCardImage({ order, items, req }) {
+    if (!puppeteer) {
+      throw new Error('Puppeteer is not available for WhatsApp card rendering');
+    }
+    let browser;
+    try {
+      browser = await puppeteer.launch({
+        headless: 'new',
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      });
+      const page = await browser.newPage();
+      await page.setViewport({ width: 760, height: 1100, deviceScaleFactor: 2 });
+      await page.setContent(buildMerchWhatsAppCardHtml({ order, items, req }), { waitUntil: 'networkidle0', timeout: 30000 });
+      const card = await page.$('.card');
+      if (!card) throw new Error('WhatsApp card root was not rendered');
+      return card.screenshot({ type: 'png' });
+    } finally {
+      if (browser) await browser.close();
+    }
+  }
+
+  function submitWhatsAppMediaUpload({ config, toUploadBuffer, filename }) {
+    return new Promise((resolve, reject) => {
+      const form = new FormData();
+      form.append('messaging_product', 'whatsapp');
+      form.append('type', 'image/png');
+      form.append('file', toUploadBuffer, { filename, contentType: 'image/png' });
+      const request = form.submit({
+        protocol: 'https:',
+        host: 'graph.facebook.com',
+        path: `/${config.apiVersion}/${config.phoneNumberId}/media`,
+        headers: { Authorization: `Bearer ${config.token}` },
+      }, (error, response) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => { body += chunk; });
+        response.on('end', () => {
+          let parsed = {};
+          try {
+            parsed = body ? JSON.parse(body) : {};
+          } catch {
+            parsed = { raw: body };
+          }
+          if (response.statusCode < 200 || response.statusCode >= 300 || !parsed.id) {
+            reject(new Error(parsed?.error?.message || `WhatsApp media upload failed with HTTP ${response.statusCode}`));
+            return;
+          }
+          resolve(parsed.id);
+        });
+      });
+      request.on('error', reject);
+    });
+  }
+
+  async function sendWhatsAppGraphMessage(config, payload) {
+    const response = await fetch(`https://graph.facebook.com/${config.apiVersion}/${config.phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ messaging_product: 'whatsapp', ...payload }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.error?.message || `WhatsApp message failed with HTTP ${response.status}`);
+    }
+    return data;
+  }
+
+  async function sendMerchWhatsAppActionMessage({ config, to, order, links }) {
+    const actionText = "Choose an action below 👇\n\nWe're here to help!";
+    if (config.actionTemplateName) {
+      await sendWhatsAppGraphMessage(config, {
+        to,
+        type: 'template',
+        template: {
+          name: config.actionTemplateName,
+          language: { code: config.templateLanguage },
+          components: [
+            {
+              type: 'body',
+              parameters: [
+                { type: 'text', text: order.orderNumber || `Order #${order.id}` },
+              ],
+            },
+            { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: links.track }] },
+            { type: 'button', sub_type: 'url', index: '1', parameters: [{ type: 'text', text: links.home }] },
+            { type: 'button', sub_type: 'url', index: '2', parameters: [{ type: 'text', text: links.shop }] },
+          ],
+        },
+      });
+      return;
+    }
+
+    await sendWhatsAppGraphMessage(config, {
+      to,
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: actionText },
+        action: {
+          buttons: [
+            { type: 'reply', reply: { id: `track:${links.track}`, title: '📦 Track My Order' } },
+            { type: 'reply', reply: { id: `home:${links.home}`, title: '🏠 Back to Home' } },
+            { type: 'reply', reply: { id: `shop:${links.shop}`, title: '🛍 Continue Shopping' } },
+          ],
+        },
+      },
+    });
+  }
+
+  async function sendMerchWhatsAppOrderConfirmation(orderId, req) {
+    const config = getMerchWhatsAppConfig();
+    if (!config.enabled) return;
+    if (!config.token || !config.phoneNumberId) {
+      console.warn('[Merch] WhatsApp confirmation skipped: WhatsApp credentials are not configured.');
+      return;
+    }
+
+    const data = getMerchOrderEmailData(orderId);
+    const to = normalizeMerchWhatsAppPhone(data?.order?.customerPhone);
+    if (!data || !to) {
+      console.warn('[Merch] WhatsApp confirmation skipped: customer phone is missing.');
+      return;
+    }
+
+    const links = buildMerchEmailLinks(req, data.order.id);
+    const cardBuffer = await renderMerchWhatsAppCardImage({ order: data.order, items: data.items, req });
+    const mediaId = await submitWhatsAppMediaUpload({
+      config,
+      toUploadBuffer: cardBuffer,
+      filename: `h2-order-${String(data.order.orderNumber || data.order.id).replace(/[^a-z0-9_-]+/gi, '-')}.png`,
+    });
+    await sendWhatsAppGraphMessage(config, {
+      to,
+      type: 'image',
+      image: { id: mediaId },
+    });
+    await sendMerchWhatsAppActionMessage({ config, to, order: data.order, links });
+  }
+
   async function sendMerchOrderConfirmationEmail(orderId, req) {
     const data = getMerchOrderEmailData(orderId);
     if (!data || !isValidMerchEmail(data.order.customerEmail)) return;
@@ -2999,6 +3293,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       subject: `Your H2 order is confirmed - ${data.order.orderNumber || `Order #${data.order.id}`}`,
       text,
       html,
+    });
+    sendMerchWhatsAppOrderConfirmation(orderId, req).catch((error) => {
+      console.error('[Merch] Failed to send WhatsApp order confirmation:', error?.message || error);
     });
   }
 

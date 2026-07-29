@@ -70,7 +70,7 @@
     selectedCategory: 'all',
     sortBy: 'newest',
     searchQuery: '',
-    currentView: 'shop', // 'shop' | 'detail' | 'confirmation' | 'tracking'
+    currentView: 'shop', // 'shop' | 'detail' | 'checkout' | 'confirmation' | 'tracking'
     selectedProduct: null,
     selectedVariant: null,
     quantity: 1,
@@ -106,6 +106,9 @@
     accountOrderFilterMessage: '',
     checkoutModalOpen: false,
     checkoutSelectedAddressId: '',
+    checkoutDraft: null,
+    checkoutErrors: {},
+    checkoutSubmitting: false,
     checkoutMessage: '',
     merchCouponCode: '',
     merchCouponPreview: null,
@@ -703,6 +706,8 @@
     return {
       id: confirmation.orderId,
       orderNumber: confirmation.bookingId,
+      customerEmail: confirmation.email,
+      email: confirmation.email,
       status: 'processing',
       createdAt: confirmation.createdAt,
       updatedAt: confirmation.createdAt,
@@ -1066,6 +1071,7 @@
     cartBadge: document.getElementById('cartBadge'),
     cartShopBtn: document.getElementById('cartShopBtn'),
     checkoutBtn: document.getElementById('checkoutBtn'),
+    checkoutPage: document.getElementById('checkoutPage'),
     bookingConfirmation: document.getElementById('bookingConfirmation'),
     orderTracking: document.getElementById('orderTracking'),
     merchAuthCta: document.getElementById('merchAuthCta'),
@@ -1156,6 +1162,40 @@
 
   function getCartTotal() {
     return state.cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  }
+
+  function getMerchShippingCharge(subtotalInr = getCartTotal()) {
+    return Number(subtotalInr || 0) >= 999 ? 0 : 99;
+  }
+
+  function getIncludedGstAmount(subtotalInr = getCartTotal()) {
+    const subtotalPaise = Math.round(Number(subtotalInr || 0) * 100);
+    return Math.max(0, (subtotalPaise - Math.round(subtotalPaise / 1.18)) / 100);
+  }
+
+  function formatCheckoutMoney(amountInr) {
+    return '₹' + Number(amountInr || 0).toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+
+  function getCheckoutDiscountAmount() {
+    return Math.max(0, Number(state.merchCouponPreview?.discountAmountInr || 0));
+  }
+
+  function getCheckoutTotals() {
+    const subtotal = getCartTotal();
+    const shipping = getMerchShippingCharge(subtotal);
+    const discount = getCheckoutDiscountAmount();
+    const total = Math.max(1, subtotal + shipping - discount);
+    return {
+      subtotal,
+      shipping,
+      discount,
+      total,
+      gstIncluded: getIncludedGstAmount(subtotal),
+    };
   }
 
   function getCartCount() {
@@ -1436,7 +1476,7 @@
     const details = [
       { icon: 'calendar', label: 'Date & Time', lines: [data.dateLabel, data.timeLabel] },
       { icon: 'user', label: 'Service', lines: [data.service] },
-      { icon: 'map', label: data.locationTitle || 'Location', lines: ['H2 House of Health', data.location] },
+      { icon: 'map', label: data.locationTitle || 'Location', lines: [data.location] },
       {
         icon: 'truck',
         label: 'Estimated Delivery Date',
@@ -1556,6 +1596,7 @@
 
     els.productDetail.hidden = true;
     els.shopSection.hidden = true;
+    if (els.checkoutPage) els.checkoutPage.hidden = true;
     if (els.orderTracking) els.orderTracking.hidden = true;
     document.querySelector('.merch-hero').hidden = true;
     document.querySelector('.merch-categories').hidden = true;
@@ -1584,7 +1625,7 @@
           return;
         }
         if (action === 'invoice' && order?.id) {
-          await openMerchInvoice(order.id);
+          await openTrackingMerchInvoice(order);
         }
       });
     });
@@ -1596,6 +1637,7 @@
 
     els.productDetail.hidden = true;
     els.shopSection.hidden = true;
+    if (els.checkoutPage) els.checkoutPage.hidden = true;
     if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
     document.querySelector('.merch-hero').hidden = true;
     document.querySelector('.merch-categories').hidden = true;
@@ -1617,6 +1659,10 @@
     }
     if (window.location.hash === '#booking-confirmation') {
       showBookingConfirmation();
+      return true;
+    }
+    if (window.location.hash === '#checkout') {
+      showCheckoutPage();
       return true;
     }
     return false;
@@ -2146,6 +2192,28 @@
     `;
   }
 
+  function renderOrderActionIcon(name) {
+    const icons = {
+      eye: '<svg class="account-order-action__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.8"/></svg>',
+      truck: '<svg class="account-order-action__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 7h11v9H3V7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 10h4l3 3v3h-7v-6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM18 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" stroke="currentColor" stroke-width="1.8"/></svg>',
+      document: '<svg class="account-order-action__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3h7l4 4v14H7V3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3v5h4M10 12h5M10 16h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+      download: '<svg class="account-order-action__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12M7.5 10.5 12 15l4.5-4.5M5 21h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    };
+    return icons[name] || '';
+  }
+
+  function renderAccountNavIcon(name) {
+    const icons = {
+      profile: '<svg class="account-panel-nav__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="1.8"/><path d="M4 21a8 8 0 0 1 16 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+      orders: '<svg class="account-panel-nav__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 8h12l-1 12H7L6 8Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 8a3 3 0 0 1 6 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+      addresses: '<svg class="account-panel-nav__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s7-5.3 7-11a7 7 0 1 0-14 0c0 5.7 7 11 7 11Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 12.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4Z" stroke="currentColor" stroke-width="1.8"/></svg>',
+      wishlist: '<svg class="account-panel-nav__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20.5 5.8c-1.7-1.8-4.4-1.8-6.1 0L12 8.2 9.6 5.8c-1.7-1.8-4.4-1.8-6.1 0-1.8 1.9-1.8 4.9 0 6.7L12 21l8.5-8.5c1.8-1.8 1.8-4.8 0-6.7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+      logout: '<svg class="account-panel-nav__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M10 7V5a2 2 0 0 1 2-2h7v18h-7a2 2 0 0 1-2-2v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 12h9M10 9l3 3-3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      influencer: '<svg class="account-panel-nav__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 13v5a2 2 0 0 0 2 2h3l7-16h2a2 2 0 0 1 2 2v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 13h5M15 13h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'
+    };
+    return icons[name] || '';
+  }
+
   function renderAccountDrawer() {
     if (!els.accountDrawerContent) return;
 
@@ -2165,11 +2233,12 @@
 
     els.accountDrawerContent.innerHTML = `
       <nav class="account-panel-nav" aria-label="Account sections">
-        <button type="button" data-account-nav="account-profile" aria-current="${state.accountActiveSection === 'account-profile' ? 'page' : 'false'}">My Profile</button>
-        <button type="button" data-account-nav="account-orders" aria-current="${state.accountActiveSection === 'account-orders' ? 'page' : 'false'}">My Orders</button>
-        <button type="button" data-account-nav="account-addresses" aria-current="${state.accountActiveSection === 'account-addresses' ? 'page' : 'false'}">My Addresses</button>
-        <button type="button" data-account-nav="account-wishlist" aria-current="${state.accountActiveSection === 'account-wishlist' ? 'page' : 'false'}">Wishlist</button>
-        ${state.influencerDashboard?.influencer ? `<button type="button" data-account-nav="account-influencer" aria-current="${state.accountActiveSection === 'account-influencer' ? 'page' : 'false'}">Influencer Dashboard</button>` : ''}
+        <button type="button" data-account-nav="account-profile" aria-current="${state.accountActiveSection === 'account-profile' ? 'page' : 'false'}">${renderAccountNavIcon('profile')}<span>My Profile</span></button>
+        <button type="button" data-account-nav="account-orders" aria-current="${state.accountActiveSection === 'account-orders' ? 'page' : 'false'}">${renderAccountNavIcon('orders')}<span>My Orders</span></button>
+        <button type="button" data-account-nav="account-addresses" aria-current="${state.accountActiveSection === 'account-addresses' ? 'page' : 'false'}">${renderAccountNavIcon('addresses')}<span>My Addresses</span></button>
+        <button type="button" data-account-nav="account-wishlist" aria-current="${state.accountActiveSection === 'account-wishlist' ? 'page' : 'false'}">${renderAccountNavIcon('wishlist')}<span>Wishlist</span></button>
+        <button id="merchLogoutNavBtn" class="account-panel-nav__logout" type="button">${renderAccountNavIcon('logout')}<span>Logout</span></button>
+        ${state.influencerDashboard?.influencer ? `<button type="button" data-account-nav="account-influencer" aria-current="${state.accountActiveSection === 'account-influencer' ? 'page' : 'false'}">${renderAccountNavIcon('influencer')}<span>Influencer Dashboard</span></button>` : ''}
       </nav>
       <section id="account-profile" data-account-section="account-profile" class="account-card account-card--profile">
         <div class="account-card__avatar profile-avatar${profile.avatarUrl ? ' has-image' : ''}"${avatarStyle}>${accountInitials}</div>
@@ -2251,16 +2320,13 @@
         `}
       </section>
 
-      <section id="account-orders" data-account-section="account-orders" class="account-section">
+      <section id="account-orders" data-account-section="account-orders" class="account-section account-section--orders">
         <div class="account-section__head">
           <div>
             <p class="account-section__eyebrow">My Orders</p>
             <h4>Merchandise orders</h4>
           </div>
-          <div class="account-section__actions">
-            ${filteredOrders.length > 4 ? `<button class="btn btn-outline account-action-btn" type="button" data-account-action="view-all-orders">${state.accountOrdersExpanded ? 'Show Less' : 'View All'}</button>` : ''}
-            <span class="account-section__count">${orders.length}</span>
-          </div>
+          <span class="account-section__count">${orders.length}</span>
         </div>
         ${orders.length ? `
           <form class="account-order-filter" id="accountOrderFilterForm">
@@ -2280,13 +2346,13 @@
           </form>
         ` : ''}
         ${filteredOrders.length ? `
-          <div class="account-list">
+          <div class="account-list account-order-list">
             ${visibleOrders.map((order) => `
-              <article class="account-list__item account-list__item--stacked">
+              <article class="account-list__item account-list__item--stacked account-order-card">
                 <div class="account-list__row">
                   <strong>${escapeHtml(order.orderNumber || `Order #${order.id}`)}</strong>
                   <div class="order-status-group">
-                    <span class="payment-status payment-status--paid">
+                    <span class="payment-status payment-status--${order.paymentStatus === 'paid' ? 'paid' : 'pending'}">
                       ${order.paymentStatus === 'paid' ? 'Paid' : 'Pending Payment'}
                     </span>
                     <span class="order-status">
@@ -2295,14 +2361,13 @@
                   </div>
                   
                 </div>
-                <p>${escapeHtml(formatDateLabel(order.createdAt))} - ${escapeHtml(order.totalAmount ? formatMoneyFromPaise(order.totalAmount) : 'Total unavailable')}</p>
+                <p>${escapeHtml(formatDateLabel(order.createdAt))} <span class="account-order-meta-dot" aria-hidden="true">•</span> ${escapeHtml(order.totalAmount ? formatMoneyFromPaise(order.totalAmount) : 'Total unavailable')}</p>
                 ${(order.influencerCoupon || order.couponCode || order.coupon_code) ? `<p class="account-order-coupon"><span>Coupon applied</span><strong>${escapeHtml(order.influencerCoupon || order.couponCode || order.coupon_code)}</strong></p>` : ''}
-                <div class="account-item-actions account-item-actions--inline">
-                  <button type="button" data-account-action="view-order" data-order-id="${escapeHtml(String(order.id || ''))}">View Details</button>
-                  <button type="button" data-account-action="track-order" data-order-id="${escapeHtml(String(order.id || ''))}">Track Order</button>
-                  <button type="button" data-account-action="invoice-order" data-order-id="${escapeHtml(String(order.id || ''))}">Invoice</button>
-                  <button type="button" data-account-action="email-invoice" data-order-id="${escapeHtml(String(order.id || ''))}">Email</button>
-                  <button type="button" data-account-action="download-invoice" data-order-id="${escapeHtml(String(order.id || ''))}">Download PDF</button>
+                <div class="account-item-actions account-item-actions--inline account-order-actions">
+                  <button type="button" data-account-action="view-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="View details for ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('eye')}<span>View Details</span></button>
+                  <button type="button" data-account-action="track-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Track ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('truck')}<span>Track Order</span></button>
+                  <button type="button" data-account-action="invoice-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Open invoice for ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('document')}<span>Invoice</span></button>
+                  <button type="button" data-account-action="download-invoice" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Download invoice for ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('download')}<span>Download Invoice</span></button>
                 </div>
               </article>
             `).join('')}
@@ -2426,6 +2491,7 @@
     });
 
     document.getElementById('merchLogoutBtn')?.addEventListener('click', handleLogout);
+    document.getElementById('merchLogoutNavBtn')?.addEventListener('click', handleLogout);
     bindAccountDrawerActions();
   }
 
@@ -2742,6 +2808,16 @@
     return api(`/api/merch/orders/${encodeURIComponent(id)}/invoice-link`);
   }
 
+  async function fetchTrackingMerchInvoiceLink(order) {
+    const id = Number(order?.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error('Order details are unavailable.');
+    }
+    const guestEmail = !state.currentUser ? String(order?.customerEmail || order?.email || '').trim() : '';
+    const query = guestEmail ? `?guestEmail=${encodeURIComponent(guestEmail)}` : '';
+    return api(`/api/merch/orders/${encodeURIComponent(id)}/invoice-link${query}`);
+  }
+
   function openMerchDocument(url) {
     const targetUrl = buildApiUrl(url);
     const opened = window.open(targetUrl, '_blank', 'noopener,noreferrer');
@@ -2766,6 +2842,16 @@
   async function openMerchInvoice(orderId) {
     try {
       const data = await fetchMerchInvoiceLink(orderId);
+      if (!data.invoiceUrl) throw new Error('Invoice link missing.');
+      openMerchDocument(data.invoiceUrl);
+    } catch (error) {
+      showCheckoutNotice('Invoice unavailable', error.message || 'Unable to open the invoice. Please try again.', { variant: 'error' });
+    }
+  }
+
+  async function openTrackingMerchInvoice(order) {
+    try {
+      const data = await fetchTrackingMerchInvoiceLink(order);
       if (!data.invoiceUrl) throw new Error('Invoice link missing.');
       openMerchDocument(data.invoiceUrl);
     } catch (error) {
@@ -2973,7 +3059,7 @@
 
     state.accountDrawerOpen = true;
     state.accountDrawerTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    state.accountActiveSection = null;
+    state.accountActiveSection = 'account-orders';
     els.accountDrawer.hidden = false;
     els.accountDrawerOverlay.hidden = false;
     requestAnimationFrame(() => {
@@ -3097,14 +3183,8 @@
             ${product.variants.length > 1 ? '<span class="price-from">From </span>' : ''}${getPriceRange(product)}
           </p>
           <p class="product-card__stock ${stockState.className}">
-            ${escapeHtml(stockState.label)}
+            ${isSoldOut ? 'UNAVAILABLE' : 'IN STOCK'}
           </p>
-          ${lowStockVariants.length ? `
-            <p class="product-card__stock-details">
-              ${escapeHtml(lowStockVariants.slice(0, 2).map((variant) => `${getVariantLabel(variant)}: ${Number(variant.stock || 0)} left`).join(' · '))}
-              ${lowStockVariants.length > 2 ? ` · +${lowStockVariants.length - 2} more` : ''}
-            </p>
-          ` : ''}
           <div class="product-card__actions">
             <button class="btn btn-secondary product-card__action" type="button" data-product-action="add-to-cart" data-product-id="${product.id}" ${isSoldOut ? 'disabled' : ''}>
               ${isSoldOut ? 'Out of Stock' : 'Add to Cart'}
@@ -3170,6 +3250,7 @@
     els.shopSection.hidden = true;
     document.querySelector('.merch-hero').hidden = true;
     document.querySelector('.merch-categories').hidden = true;
+    if (els.checkoutPage) els.checkoutPage.hidden = true;
     if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
     if (els.orderTracking) els.orderTracking.hidden = true;
     els.productDetail.hidden = false;
@@ -3186,12 +3267,13 @@
     state.selectedVariant = null;
 
     els.productDetail.hidden = true;
+    if (els.checkoutPage) els.checkoutPage.hidden = true;
     if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
     if (els.orderTracking) els.orderTracking.hidden = true;
     els.shopSection.hidden = false;
     document.querySelector('.merch-hero').hidden = false;
     document.querySelector('.merch-categories').hidden = false;
-    if (window.location.hash === '#booking-confirmation' || getTrackingOrderIdFromHash()) {
+    if (window.location.hash === '#booking-confirmation' || window.location.hash === '#checkout' || getTrackingOrderIdFromHash()) {
       history.replaceState(null, '', window.location.pathname + window.location.search);
     }
   }
@@ -3536,6 +3618,320 @@
     });
   }
 
+  function buildCheckoutDraft(customer = {}, address = {}) {
+    const nameParts = String(customer?.name || address?.recipientName || '').trim().split(/\s+/).filter(Boolean);
+    const firstName = nameParts.shift() || '';
+    const lastName = nameParts.join(' ');
+    return {
+      email: String(customer?.email || '').trim(),
+      phone: String(customer?.phone || address?.phone || '').trim(),
+      firstName,
+      lastName,
+      country: String(address?.country || 'India').trim() || 'India',
+      line1: String(address?.line1 || address?.full || '').trim(),
+      line2: String(address?.line2 || '').trim(),
+      city: String(address?.city || '').trim(),
+      state: String(address?.state || '').trim(),
+      postalCode: String(address?.postalCode || '').trim(),
+      emailOffers: true,
+      saveInformation: Boolean(address?.isDefault),
+    };
+  }
+
+  function getCheckoutDraftFromForm(form) {
+    const formData = new FormData(form);
+    return {
+      email: String(formData.get('email') || '').trim(),
+      phone: String(formData.get('phone') || '').trim(),
+      firstName: String(formData.get('firstName') || '').trim(),
+      lastName: String(formData.get('lastName') || '').trim(),
+      country: String(formData.get('country') || '').trim(),
+      line1: String(formData.get('line1') || '').trim(),
+      line2: String(formData.get('line2') || '').trim(),
+      city: String(formData.get('city') || '').trim(),
+      state: String(formData.get('state') || '').trim(),
+      postalCode: String(formData.get('postalCode') || '').trim(),
+      emailOffers: formData.get('emailOffers') === 'on',
+      saveInformation: formData.get('saveInformation') === 'on',
+    };
+  }
+
+  function getCheckoutPayloadFromDraft(draft = state.checkoutDraft || {}) {
+    const fullName = [draft.firstName, draft.lastName].filter(Boolean).join(' ').trim();
+    return {
+      customer: {
+        name: fullName,
+        email: String(draft.email || '').trim(),
+        phone: String(draft.phone || '').trim(),
+      },
+      address: {
+        recipientName: fullName,
+        phone: String(draft.phone || '').trim(),
+        line1: String(draft.line1 || '').trim(),
+        line2: String(draft.line2 || '').trim(),
+        city: String(draft.city || '').trim(),
+        state: String(draft.state || '').trim(),
+        postalCode: String(draft.postalCode || '').trim(),
+        country: String(draft.country || 'India').trim() || 'India',
+        isDefault: Boolean(draft.saveInformation),
+        full: [draft.line1, draft.line2, draft.city, draft.state, draft.postalCode, draft.country].filter(Boolean).join(', '),
+      },
+    };
+  }
+
+  function validateCheckoutDraft(draft = {}) {
+    const errors = {};
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const digitsOnly = (value) => String(value || '').replace(/\D+/g, '');
+
+    if (!draft.email) errors.email = 'Email is required.';
+    else if (!emailPattern.test(draft.email)) errors.email = 'Enter a valid email address.';
+    if (!draft.firstName) errors.firstName = 'First name is required.';
+    if (!draft.lastName) errors.lastName = 'Last name is required.';
+    if (!draft.country) errors.country = 'Country is required.';
+    if (!draft.line1) errors.line1 = 'Address is required.';
+    if (!draft.city) errors.city = 'City is required.';
+    if (!draft.state) errors.state = 'State is required.';
+    if (!draft.postalCode) errors.postalCode = 'PIN code is required.';
+    else if (digitsOnly(draft.postalCode).length !== 6) errors.postalCode = 'Enter a 6-digit PIN code.';
+    if (!draft.phone) errors.phone = 'Phone is required.';
+    else if (digitsOnly(draft.phone).length !== 10) errors.phone = 'Enter a 10-digit phone number.';
+
+    return errors;
+  }
+
+  function fieldError(name) {
+    const message = state.checkoutErrors?.[name];
+    return message ? `<span class="checkout-field-error" id="checkout-${name}-error">${escapeHtml(message)}</span>` : '';
+  }
+
+  function renderCheckoutField({ name, label, value = '', type = 'text', placeholder = '', autocomplete = '', wide = false, icon = '', required = true }) {
+    const error = state.checkoutErrors?.[name];
+    return `
+      <label class="shopify-field${wide ? ' shopify-field--wide' : ''}${error ? ' has-error' : ''}">
+        <span>${escapeHtml(label)}</span>
+        <input name="${escapeHtml(name)}" type="${escapeHtml(type)}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" autocomplete="${escapeHtml(autocomplete)}" ${required ? 'required' : ''} ${error ? `aria-describedby="checkout-${escapeHtml(name)}-error"` : ''} />
+        ${icon ? `<span class="shopify-field__icon" aria-hidden="true">${icon}</span>` : ''}
+        ${fieldError(name)}
+      </label>
+    `;
+  }
+
+  function renderCheckoutSelect({ name, label, value = '', options = [], wide = false }) {
+    const error = state.checkoutErrors?.[name];
+    return `
+      <label class="shopify-field shopify-field--select${wide ? ' shopify-field--wide' : ''}${error ? ' has-error' : ''}">
+        <span>${escapeHtml(label)}</span>
+        <select name="${escapeHtml(name)}" required ${error ? `aria-describedby="checkout-${escapeHtml(name)}-error"` : ''}>
+          ${options.map((option) => `<option value="${escapeHtml(option)}" ${String(option) === String(value) ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}
+        </select>
+        ${fieldError(name)}
+      </label>
+    `;
+  }
+
+  function renderCheckoutSummary() {
+    const totals = getCheckoutTotals();
+    const hasShippingAddress = Boolean(state.checkoutDraft?.line1 && state.checkoutDraft?.city && state.checkoutDraft?.state && state.checkoutDraft?.postalCode);
+    const discount = totals.discount > 0 ? `
+      <div class="shopify-price-row shopify-price-row--discount">
+        <span>Discount${state.merchCouponCode ? ` (${escapeHtml(state.merchCouponCode)})` : ''}</span>
+        <strong>- ${formatCheckoutMoney(totals.discount)}</strong>
+      </div>
+    ` : '';
+    return `
+      <aside class="shopify-summary" aria-label="Order summary">
+        <h2>Order Summary</h2>
+        <div class="shopify-summary-products">
+          ${state.cart.map((item) => `
+            <div class="shopify-summary-product">
+              <div class="shopify-summary-product__image">
+                <img src="${escapeHtml(item.image || FALLBACK_PRODUCT_IMAGE)}" alt="${escapeHtml(item.productName)}" />
+                <span>${escapeHtml(String(item.quantity))}</span>
+              </div>
+              <div class="shopify-summary-product__copy">
+                <strong>${escapeHtml(item.productName)}</strong>
+                <small>${escapeHtml(item.variantLabel || 'Default')}</small>
+                <small>${escapeHtml(`${item.quantity} Piece${Number(item.quantity) === 1 ? '' : 's'}`)}</small>
+              </div>
+              <strong class="shopify-summary-product__price">${formatCheckoutMoney(item.price * item.quantity)}</strong>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="shopify-coupon">
+          <label class="shopify-coupon__field">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="m20 12-8 8-9-9V3h8l9 9Z"/><circle cx="7.5" cy="7.5" r="1.2"/></svg>
+            </span>
+            <input id="checkoutCouponCode" type="text" value="${escapeHtml(state.merchCouponCode || '')}" placeholder="Discount code or gift card" autocomplete="off" aria-label="Discount code or gift card" />
+          </label>
+          <button id="checkoutCouponApplyBtn" class="shopify-coupon__apply" type="button" ${state.merchCouponLoading ? 'disabled' : ''}>${state.merchCouponLoading ? 'APPLYING' : 'APPLY'}</button>
+          <div class="shopify-coupon__message${state.merchCouponError ? ' is-error' : ''}" ${state.merchCouponPreview || state.merchCouponError ? '' : 'hidden'}>
+            ${state.merchCouponPreview ? `${escapeHtml(state.merchCouponPreview.code || state.merchCouponCode)} applied` : escapeHtml(state.merchCouponError || '')}
+          </div>
+        </div>
+
+        <div class="shopify-pricing">
+          <div class="shopify-price-row"><span>Subtotal</span><strong>${formatCheckoutMoney(totals.subtotal)}</strong></div>
+          ${discount}
+          <div class="shopify-price-row"><span>Shipping <em aria-label="Shipping help">?</em></span><strong>${hasShippingAddress ? (totals.shipping ? formatCheckoutMoney(totals.shipping) : 'Free') : 'Enter shipping address'}</strong></div>
+          <div class="shopify-price-row"><span>GST (Included)</span><strong>${formatCheckoutMoney(totals.gstIncluded)}</strong></div>
+        </div>
+
+        <div class="shopify-total">
+          <span>Total</span>
+          <strong><small>INR</small> ${formatCheckoutMoney(totals.total)}</strong>
+          <p>Including ${formatCheckoutMoney(totals.gstIncluded)} in taxes</p>
+        </div>
+
+        <div class="shopify-trust">
+          <div><span><svg viewBox="0 0 24 24"><path d="M20 4c-8 1-13 6-14 14 6-1 12-6 14-14Z"/><path d="M9 15c2-3 4-5 7-7"/></svg></span><strong>100% Authentic<br>Products</strong></div>
+          <div><span><svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="1"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span><strong>Secure<br>Payments</strong></div>
+          <div><span><svg viewBox="0 0 24 24"><path d="M3 7h11v10H3z"/><path d="M14 11h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.5"/><circle cx="18" cy="18" r="1.5"/></svg></span><strong>Fast &amp; Reliable<br>Delivery</strong></div>
+          <div><span><svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 5 3 8 7 10 4-2 7-5 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></svg></span><strong>H2 Quality<br>Promise</strong></div>
+        </div>
+      </aside>
+    `;
+  }
+
+  function renderCheckoutPage() {
+    if (!els.checkoutPage) return;
+    const draft = state.checkoutDraft || buildCheckoutDraft(getAuthenticatedCheckoutCustomer(), serializeAddress(getDefaultAddress()));
+    state.checkoutDraft = draft;
+    const shippingReady = Boolean(draft.line1 && draft.city && draft.state && draft.postalCode);
+    const mailIcon = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.6 2.6 0 1 1 4.2 2c-.9.6-1.7 1.2-1.7 2.5"/><path d="M12 17h.01"/></svg>';
+    const searchIcon = '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>';
+
+    els.checkoutPage.innerHTML = `
+      <div class="shopify-checkout__inner">
+        <form id="shopifyCheckoutForm" class="shopify-checkout-form" novalidate>
+          <section class="shopify-section shopify-section--contact">
+            <div class="shopify-section__head">
+              <h1 id="checkoutPageTitle">Contact</h1>
+              <p>Already have an account? <a href="/merch/auth.html">Sign in</a></p>
+            </div>
+            ${renderCheckoutField({ name: 'email', label: 'Email', value: draft.email, type: 'email', placeholder: 'Enter your email', autocomplete: 'email', wide: true, icon: mailIcon })}
+            <label class="shopify-check"><input name="emailOffers" type="checkbox" ${draft.emailOffers ? 'checked' : ''} /><span>Email me with news and offers</span></label>
+          </section>
+
+          <section class="shopify-section">
+            <h2>Delivery</h2>
+            <div class="shopify-field-grid">
+              ${renderCheckoutSelect({ name: 'country', label: 'Country/Region', value: draft.country || 'India', options: ['India'], wide: true })}
+              ${renderCheckoutField({ name: 'firstName', label: 'First name', value: draft.firstName, placeholder: 'First name', autocomplete: 'given-name' })}
+              ${renderCheckoutField({ name: 'lastName', label: 'Last name', value: draft.lastName, placeholder: 'Last name', autocomplete: 'family-name' })}
+              ${renderCheckoutField({ name: 'line1', label: 'Address', value: draft.line1, placeholder: 'House number and street name', autocomplete: 'address-line1', wide: true, icon: searchIcon })}
+              ${renderCheckoutField({ name: 'line2', label: 'Apartment, suite, etc. (optional)', value: draft.line2, placeholder: 'Apartment, suite, building, floor, etc.', autocomplete: 'address-line2', wide: true, required: false })}
+              ${renderCheckoutField({ name: 'city', label: 'City', value: draft.city, placeholder: 'City', autocomplete: 'address-level2' })}
+              ${renderCheckoutSelect({ name: 'state', label: 'State', value: draft.state || 'Telangana', options: ['Telangana', 'Andhra Pradesh', 'Karnataka', 'Maharashtra', 'Tamil Nadu', 'Delhi', 'Kerala', 'Gujarat', 'Rajasthan', 'Uttar Pradesh', 'West Bengal'] })}
+              ${renderCheckoutField({ name: 'postalCode', label: 'PIN code', value: draft.postalCode, placeholder: 'PIN code', autocomplete: 'postal-code', inputmode: 'numeric' })}
+              ${renderCheckoutField({ name: 'phone', label: 'Phone', value: draft.phone, type: 'tel', placeholder: '10-digit mobile number', autocomplete: 'tel', wide: true, icon: mailIcon })}
+            </div>
+            <label class="shopify-check"><input name="saveInformation" type="checkbox" ${draft.saveInformation ? 'checked' : ''} /><span>Save this information for next time</span></label>
+          </section>
+
+          <section class="shopify-section">
+            <h2>Shipping method</h2>
+            <div class="shopify-shipping-box${shippingReady ? ' is-ready' : ''}">
+              <span><svg viewBox="0 0 24 24"><path d="M3 7h11v10H3z"/><path d="M14 11h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.5"/><circle cx="18" cy="18" r="1.5"/></svg></span>
+              <p>${shippingReady ? `${getMerchShippingCharge() ? `${formatCheckoutMoney(getMerchShippingCharge())} standard shipping` : 'Free shipping available'}` : 'Enter your shipping address to view available shipping methods.'}</p>
+            </div>
+          </section>
+
+          <section class="shopify-section">
+            <h2>Payment</h2>
+            <label class="shopify-payment-option">
+              <input type="radio" name="paymentMethod" value="razorpay" checked />
+              <span>Razorpay</span>
+              <strong>Razorpay</strong>
+            </label>
+          </section>
+
+          <button class="shopify-pay-button" type="submit" ${state.checkoutSubmitting ? 'disabled' : ''}>
+            <span>${state.checkoutSubmitting ? 'PROCESSING...' : 'CONTINUE TO PAYMENT'}</span>
+            <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+          </button>
+        </form>
+        ${renderCheckoutSummary()}
+      </div>
+    `;
+    bindCheckoutPageEvents();
+  }
+
+  function showCheckoutPage(customer = null, address = null) {
+    if (!state.cart.length) {
+      showShop();
+      return;
+    }
+    if (customer || address || !state.checkoutDraft) {
+      state.checkoutDraft = buildCheckoutDraft(customer || getAuthenticatedCheckoutCustomer(), address || serializeAddress(getDefaultAddress()));
+    }
+    state.currentView = 'checkout';
+    state.checkoutErrors = {};
+    els.productDetail.hidden = true;
+    els.shopSection.hidden = true;
+    if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
+    if (els.orderTracking) els.orderTracking.hidden = true;
+    if (els.checkoutPage) els.checkoutPage.hidden = false;
+    document.querySelector('.merch-hero').hidden = true;
+    document.querySelector('.merch-categories').hidden = true;
+    closeCart();
+    renderCheckoutPage();
+    if (window.location.hash !== '#checkout') window.location.hash = 'checkout';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function bindCheckoutPageEvents() {
+    const form = els.checkoutPage?.querySelector('#shopifyCheckoutForm');
+    if (!form) return;
+    form.addEventListener('input', () => {
+      state.checkoutDraft = getCheckoutDraftFromForm(form);
+      if (Object.keys(state.checkoutErrors || {}).length) {
+        state.checkoutErrors = validateCheckoutDraft(state.checkoutDraft);
+        renderCheckoutPage();
+      }
+    });
+    form.addEventListener('change', () => {
+      state.checkoutDraft = getCheckoutDraftFromForm(form);
+      renderCheckoutPage();
+    });
+    form.addEventListener('submit', handleCheckoutPageSubmit);
+    els.checkoutPage?.querySelector('#checkoutCouponApplyBtn')?.addEventListener('click', applyMerchCouponFromCheckout);
+    els.checkoutPage?.querySelector('#checkoutCouponCode')?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        applyMerchCouponFromCheckout();
+      }
+    });
+  }
+
+  async function applyMerchCouponFromCheckout() {
+    const input = els.checkoutPage?.querySelector('#checkoutCouponCode');
+    if (input) state.merchCouponCode = normalizeCouponCode(input.value);
+    await applyMerchCouponFromCart();
+    renderCheckoutPage();
+  }
+
+  async function handleCheckoutPageSubmit(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    state.checkoutDraft = getCheckoutDraftFromForm(form);
+    state.checkoutErrors = validateCheckoutDraft(state.checkoutDraft);
+    if (Object.keys(state.checkoutErrors).length) {
+      renderCheckoutPage();
+      els.checkoutPage?.querySelector('.has-error input, .has-error select')?.focus();
+      return;
+    }
+
+    const { customer, address } = getCheckoutPayloadFromDraft(state.checkoutDraft);
+    state.checkoutSubmitting = true;
+    renderCheckoutPage();
+    await startRazorpayCheckout(customer, address);
+    state.checkoutSubmitting = false;
+    renderCheckoutPage();
+  }
+
   function renderCheckoutAddressCards() {
     const addresses = Array.isArray(state.merchAddresses) ? state.merchAddresses : [];
     const selectedId = state.checkoutSelectedAddressId || getAddressId(getDefaultAddress());
@@ -3600,7 +3996,7 @@
         return;
       }
       closeMerchModal();
-      startRazorpayCheckout(customer, serializeAddress(selected));
+      showCheckoutPage(customer, serializeAddress(selected));
     });
   }
 
@@ -3708,7 +4104,7 @@
     }
 
     closeMerchModal();
-    startRazorpayCheckout(getAuthenticatedCheckoutCustomer(), serializeAddress(selected));
+    showCheckoutPage(getAuthenticatedCheckoutCustomer(), serializeAddress(selected));
   }
 
   function openGuestCheckoutModal() {
@@ -3759,7 +4155,7 @@
     }
 
     closeMerchModal();
-    startRazorpayCheckout(customer, address);
+    showCheckoutPage(customer, address);
   }
 
   // â”€â”€â”€ Event Bindings â”€â”€â”€
