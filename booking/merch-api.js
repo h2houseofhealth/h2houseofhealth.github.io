@@ -366,6 +366,26 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return '₹' + Number(paise || 0).toLocaleString('en-IN');
   }
 
+  const MERCH_TIME_ZONE = 'Asia/Kolkata';
+
+  function getMerchDateKey(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const normalized = raw.replace(' ', 'T');
+    const parsed = new Date(/(?:Z|[+\-]\d{2}:?\d{2})$/i.test(normalized) ? normalized : `${normalized}Z`);
+    if (Number.isNaN(parsed.getTime())) return '';
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: MERCH_TIME_ZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(parsed).reduce((result, part) => {
+      if (part.type !== 'literal') result[part.type] = part.value;
+      return result;
+    }, {});
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  }
+
   function formatMerchEmailCurrency(paise) {
     return `&#8377;${(Number(paise || 0) / 100).toLocaleString('en-IN', {
       minimumFractionDigits: 2,
@@ -1434,8 +1454,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       primarySku: String(primaryVariant?.sku || ''),
       sku: String(primaryVariant?.sku || ''),
       stock,
-      status: Number(product.is_active || 1) === 1 ? 'published' : 'archived',
-      archived: Number(product.is_active || 1) !== 1,
+      // `is_active` is intentionally checked with nullish semantics here:
+      // zero means archived and must not be replaced by the fallback value.
+      status: Number(product.is_active ?? 1) === 1 ? 'published' : 'archived',
+      archived: Number(product.is_active ?? 1) !== 1,
       featured: false,
       comboPurchase: Number(product.combo_purchase || 0) === 1,
       isCombo: Number(product.is_combo || 0) === 1,
@@ -1696,6 +1718,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function buildMerchReports({ startDate = null, endDate = null } = {}) {
     const allOrders = loadMerchOrders({ startDate, endDate });
+    // Reports keep the normal confirmed-order visibility rules, while the live
+    // feed must also see orders immediately after checkout creates them.
+    const notificationOrders = loadMerchOrders({ startDate, endDate, includeUnconfirmed: true });
     const products = loadMerchProductCatalog({ includeInactive: true });
     const profiles = db
       .prepare(
@@ -1709,6 +1734,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const coupons = db
       .prepare(
         `SELECT c.id, c.code, c.coupon_type AS couponType, c.active, c.influencer_id AS influencerId,
+                c.expires_at AS expiresAt, c.valid_till AS validTill,
+                c.created_at AS createdAt,
                 COUNT(cr.id) AS totalRedemptions
          FROM coupons c
          LEFT JOIN coupon_redemptions cr ON cr.coupon_id = c.id
@@ -1754,13 +1781,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const revenueByDate = new Map();
     const monthlyInfluencerMap = new Map();
     for (const order of paidOrders) {
-      const dateKey = String(order.createdAt || '').slice(0, 10);
+      const dateKey = getMerchDateKey(order.createdAt);
       if (!dateKey) continue;
       revenueByDate.set(dateKey, (revenueByDate.get(dateKey) || 0) + Number(order.totalAmount || 0));
     }
     for (const order of allOrders) {
       const influencerId = Number(order.influencerId || 0);
-      const monthKey = String(order.createdAt || '').slice(0, 7);
+      const monthKey = getMerchDateKey(order.createdAt).slice(0, 7);
       if (!influencerId || !monthKey) continue;
 
       const influencer = influencerById.get(influencerId) || null;
@@ -1789,7 +1816,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     const monthlyRevenueMap = new Map();
     for (const order of paidOrders) {
-      const monthKey = String(order.createdAt || '').slice(0, 7);
+      const monthKey = getMerchDateKey(order.createdAt).slice(0, 7);
       if (!monthKey) continue;
       const entry = monthlyRevenueMap.get(monthKey) || { month: monthKey, revenue: 0, orders: 0 };
       entry.revenue += Number(order.totalAmount || 0);
@@ -1855,6 +1882,105 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       })
       .sort((left, right) => String(right.registrationDate || right.lastOrder?.createdAt || '').localeCompare(String(left.registrationDate || left.lastOrder?.createdAt || '')))
       .slice(0, 5);
+
+    const notifications = [];
+    const pushNotification = ({ id, type, title, message, time, read = false }) => {
+      if (!time) return;
+      notifications.push({ id: String(id), type, title, message, time, read });
+    };
+
+    for (const product of products
+      .filter((item) => !item.archived && Number(item.stock || 0) <= LOW_STOCK_THRESHOLD)
+      .sort((left, right) => Number(left.stock || 0) - Number(right.stock || 0))) {
+      pushNotification({
+        id: `stock-${product.id}`,
+        type: Number(product.stock || 0) === 0 ? 'Out of Stock' : 'Low Stock',
+        title: Number(product.stock || 0) === 0 ? 'Out of Stock' : 'Low Stock',
+        message: Number(product.stock || 0) === 0
+          ? `${product.name} is out of stock.`
+          : `${product.name} has only ${Number(product.stock || 0)} units remaining.`,
+        time: product.updatedAt || product.createdAt || new Date().toISOString(),
+      });
+    }
+
+    for (const order of notificationOrders.slice(0, 10)) {
+      pushNotification({
+        id: `order-${order.id}`,
+        type: 'New Order',
+        title: 'New Order',
+        message: `${order.orderNumber} placed by ${order.customerName || 'a customer'}.`,
+        time: order.createdAt,
+      });
+      if (order.influencerName || order.couponCode) {
+        pushNotification({
+          id: `referral-${order.id}`,
+          type: 'Influencer Referral',
+          title: 'Influencer Referral',
+          message: `${order.orderNumber} used ${order.couponCode || 'an assigned influencer coupon'}.`,
+          time: order.createdAt,
+          read: true,
+        });
+      }
+      const paymentStatus = String(order.paymentStatus || '').toLowerCase();
+      if (['failed', 'failure'].includes(paymentStatus)) {
+        pushNotification({
+          id: `payment-failed-${order.id}`,
+          type: 'Payment Failed',
+          title: 'Payment Failed',
+          message: `${order.orderNumber} payment failed.`,
+          time: order.updatedAt || order.createdAt,
+        });
+      } else if (['paid', 'cod_pending'].includes(paymentStatus)) {
+        pushNotification({
+          id: `payment-${order.id}`,
+          type: 'Payment Received',
+          title: 'Payment Received',
+          message: `Payment received for ${order.orderNumber}.`,
+          time: order.updatedAt || order.createdAt,
+          read: true,
+        });
+      }
+      const orderStatus = String(order.status || '').toLowerCase();
+      if (['cancelled', 'returned'].includes(orderStatus)) {
+        pushNotification({
+          id: `order-status-${order.id}`,
+          type: 'Order Cancelled',
+          title: orderStatus === 'returned' ? 'Order Returned' : 'Order Cancelled',
+          message: `${order.orderNumber} was ${orderStatus}.`,
+          time: order.updatedAt || order.createdAt,
+          read: true,
+        });
+      }
+    }
+
+    for (const customer of recentCustomers) {
+      pushNotification({
+        id: `customer-${customer.id}`,
+        type: 'New Customer',
+        title: 'New Customer',
+        message: `${customer.name} created a new merch account.`,
+        time: customer.registrationDate,
+        read: true,
+      });
+    }
+
+    const now = Date.now();
+    for (const coupon of coupons) {
+      const expiry = String(coupon.expiresAt || coupon.validTill || '').trim();
+      const expiryTime = expiry ? new Date(expiry.replace(' ', 'T')).getTime() : NaN;
+      if (Number.isFinite(expiryTime) && expiryTime > now && expiryTime - now <= 14 * 24 * 60 * 60 * 1000) {
+        pushNotification({
+          id: `coupon-${coupon.id}`,
+          type: 'Coupon Expiring',
+          title: 'Coupon Expiring',
+          message: `${coupon.code} expires on ${expiry}.`,
+          time: coupon.updatedAt || coupon.createdAt || expiry,
+          read: true,
+        });
+      }
+    }
+
+    notifications.sort((left, right) => new Date(right.time).getTime() - new Date(left.time).getTime());
 
     const orderItemStats = new Map();
     for (const order of allOrders) {
@@ -2001,6 +2127,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       recentCouponUsage,
       recentCustomers,
       recentOrders: allOrders.slice(0, 5),
+      notifications: notifications.slice(0, 25),
     };
   }
 
@@ -4328,7 +4455,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       shippedOrders: Number(report.statusBreakdown?.shipped || 0),
       deliveredOrders: Number(report.statusBreakdown?.delivered || 0),
       todayOrders: Array.isArray(report.recentOrders)
-        ? report.recentOrders.filter((order) => String(order.createdAt || '').slice(0, 10) === new Date().toISOString().slice(0, 10)).length
+        ? report.recentOrders.filter((order) => getMerchDateKey(order.createdAt) === getMerchDateKey(new Date())).length
         : 0,
       summary,
       statusBreakdown: report.statusBreakdown || {},
@@ -4337,6 +4464,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       recentPayments: report.recentPayments || [],
       recentCouponUsage: report.recentCouponUsage || [],
       recentCustomers: report.recentCustomers || [],
+      notifications: report.notifications || [],
       topProducts: report.topProducts || [],
       topCategories: report.topCategories || [],
       revenueSeries: report.revenueSeries || [],
@@ -4400,6 +4528,29 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     } catch (error) {
       console.error('Failed to create merch combo:', error);
       return res.status(500).json({ message: error.message || 'Unable to create combo.' });
+    }
+  });
+
+  // ADMIN: Remove selected product variants from every combo that contains them.
+  app.post('/api/merch/admin/combos/remove-components', requireAdmin, (req, res) => {
+    const variantIds = [...new Set((Array.isArray(req.body?.variantIds) ? req.body.variantIds : [])
+      .map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0))];
+    if (!variantIds.length) return res.status(400).json({ message: 'At least one product variant is required.' });
+    const placeholders = variantIds.map(() => '?').join(', ');
+    try {
+      const result = db.transaction(() => {
+        const affected = db.prepare(`SELECT DISTINCT combo_product_id AS comboId FROM merch_combo_items WHERE component_variant_id IN (${placeholders})`).all(...variantIds);
+        const removed = db.prepare(`DELETE FROM merch_combo_items WHERE component_variant_id IN (${placeholders})`).run(...variantIds);
+        const deactivate = db.prepare(`UPDATE merch_products SET is_active = 0, updated_at = datetime('now') WHERE id = ? AND is_combo = 1`);
+        const countItems = db.prepare('SELECT COUNT(*) AS count FROM merch_combo_items WHERE combo_product_id = ?');
+        affected.forEach(({ comboId }) => {
+          if (Number(countItems.get(comboId).count || 0) < 2) deactivate.run(comboId);
+        });
+        return { removed: Number(removed.changes || 0), combosUpdated: affected.length };
+      })();
+      return res.json(result);
+    } catch (error) {
+      return res.status(400).json({ message: error.message || 'Unable to remove products from combos.' });
     }
   });
 
