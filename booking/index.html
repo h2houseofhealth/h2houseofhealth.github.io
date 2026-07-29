@@ -149,6 +149,31 @@
               <span id="authResendOtpHint" class="auth-otp-hint" hidden></span>
             </div>
             <button id="authSubmitBtn" class="btn btn-primary" type="submit">Sign in</button>
+            <div id="mobileAuthSection" class="mobile-auth-section" hidden>
+              <div class="auth-divider"><span>OR</span></div>
+              <p class="mobile-auth-title">
+                <span class="mobile-auth-phone-icon" aria-hidden="true">&#9742;</span>
+                <span>Login with Mobile Number</span>
+              </p>
+              <div class="mobile-auth-field">
+                <span class="mobile-auth-field-label">Mobile Number</span>
+                <div class="mobile-auth-number-row">
+                  <select id="mobileAuthCountry" aria-label="Country code">
+                    <option value="+91">+91</option>
+                  </select>
+                  <input id="mobileAuthNumber" type="tel" inputmode="numeric" autocomplete="tel" maxlength="10" placeholder="98765 43210" aria-label="Mobile number" />
+                </div>
+              </div>
+              <button id="sendWhatsappOtpBtn" class="btn mobile-auth-send" type="button">
+                <span class="mobile-auth-whatsapp-icon" aria-hidden="true">&#9673;</span>
+                <span>Send WhatsApp OTP</span>
+              </button>
+              <label id="mobileAuthOtpWrap" hidden>
+                OTP
+                <input id="mobileAuthOtp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="_ _ _ _ _ _" />
+              </label>
+              <button id="verifyWhatsappOtpBtn" class="btn btn-primary" type="button" hidden>Verify &amp; Sign In</button>
+            </div>
           </form>
           <!-- Google OAuth hidden until configured -->
           <div id="authDivider" class="auth-divider" hidden><span>or</span></div>
