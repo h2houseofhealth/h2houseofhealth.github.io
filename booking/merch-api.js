@@ -167,6 +167,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       coupon_id INTEGER REFERENCES coupons(id),
       coupon_code TEXT,
       influencer_id INTEGER REFERENCES merch_influencers(id),
+      commission_amount_paise INTEGER NOT NULL DEFAULT 0,
+      commission_snapshot_at TEXT,
       total_amount INTEGER NOT NULL,
       payment_method TEXT NOT NULL DEFAULT 'online',
       payment_status TEXT NOT NULL DEFAULT 'pending',
@@ -193,6 +195,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       unit_price INTEGER NOT NULL,
       quantity INTEGER NOT NULL,
       line_total INTEGER NOT NULL
+      ,commission_amount_paise INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS merch_influencer_commission_payments (
@@ -208,6 +211,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  if (!hasColumn('merch_orders', 'commission_amount_paise')) db.exec('ALTER TABLE merch_orders ADD COLUMN commission_amount_paise INTEGER NOT NULL DEFAULT 0');
+  if (!hasColumn('merch_orders', 'commission_snapshot_at')) db.exec('ALTER TABLE merch_orders ADD COLUMN commission_snapshot_at TEXT');
+  if (!hasColumn('merch_order_items', 'commission_amount_paise')) db.exec('ALTER TABLE merch_order_items ADD COLUMN commission_amount_paise INTEGER NOT NULL DEFAULT 0');
+  db.exec("UPDATE merch_orders SET commission_amount_paise = COALESCE((SELECT commission_per_order_paise FROM merch_influencers WHERE merch_influencers.id = merch_orders.influencer_id), 0), commission_snapshot_at = datetime('now') WHERE commission_snapshot_at IS NULL");
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS merch_customer_profiles (
@@ -631,6 +639,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       SELECT influencer_id AS influencerId,
              COUNT(*) AS totalOrders,
              COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'cod_pending') THEN total_amount ELSE 0 END), 0) AS revenue,
+             COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'cod_pending') THEN commission_amount_paise ELSE 0 END), 0) AS totalCommissionEarned,
              COALESCE(SUM(CASE WHEN coupon_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS couponUsage
       FROM merch_orders
       WHERE influencer_id IN (${ids.map(() => '?').join(', ')})
@@ -703,7 +712,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       revenue,
       couponUsage: Number(stats.couponUsage || 0),
       activeCampaigns: coupons.filter((coupon) => Number(coupon.isActive ?? coupon.active ?? 0) === 1).length,
-      commission: Math.round(Number(stats.totalOrders || 0) * commissionPerOrderPaise),
+      commission: Math.max(0, Math.round(Number(stats.totalCommissionEarned || 0))),
       createdAt: row.createdAt || row.created_at || null,
       updatedAt: row.updatedAt || row.updated_at || null,
     };
@@ -894,7 +903,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       SELECT mo.id, mo.order_number AS orderNumber, mo.customer_name AS customerName, mo.customer_email AS customerEmail,
              mo.is_guest AS isGuest, mo.status, mo.payment_status AS paymentStatus,
              mo.payment_method AS paymentMethod, mo.razorpay_payment_id AS paymentReference,
-             mo.total_amount AS totalAmount, mo.discount_amount AS discountAmount,
+             mo.total_amount AS totalAmount, mo.discount_amount AS discountAmount, mo.commission_amount_paise AS commissionAmountPaise,
              mo.coupon_id AS couponId, mo.coupon_code AS couponCode, mo.created_at AS createdAt
       FROM merch_orders mo
       WHERE mo.influencer_id = ?
@@ -920,7 +929,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const customerEmailCounts = new Map();
     const allOrders = orderRows.map((order) => {
       const items = itemsByOrderId.get(Number(order.id)) || [];
-      const commissionEarned = commissionPerOrderPaise;
+      const commissionEarned = Math.max(0, Number(order.commissionAmountPaise || 0));
       const productSummary = items.length
         ? items.map((item) => `${String(item.productName || 'Item')} x${Number(item.quantity || 0)}`).join(', ')
         : 'Merch order';
@@ -985,7 +994,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const activeOrders = allOrders.filter((order) => !['cancelled', 'refunded'].includes(String(order.orderStatus || '').toLowerCase()));
     const salesGenerated = paidOrders.reduce((sum, order) => sum + Number(order.orderAmount || 0), 0);
     const totalOrdersReferred = activeOrders.length;
-    const commissionEarned = Math.round(paidOrders.length * commissionPerOrderPaise);
+    const commissionEarned = paidOrders.reduce((sum, order) => sum + Math.max(0, Number(order.commissionEarned || 0)), 0);
     const commissionPayments = getInfluencerCommissionPayments(influencerId);
     const commissionPaidFromPayments = commissionPayments
       .filter((payment) => ['paid', 'processed', 'completed', 'settled'].includes(String(payment.status || '').toLowerCase()))
@@ -1597,6 +1606,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       gstAmount: Number(order.gstAmount || order.gst_amount || 0),
       shippingCharge: Number(order.shippingCharge || order.shipping_charge || 0),
       discountAmount: Number(order.discountAmount || order.discount_amount || 0),
+      commissionAmountPaise: Number(order.commissionAmountPaise || order.commission_amount_paise || 0),
       couponId: order.couponId || order.coupon_id || null,
       couponCode: String(order.couponCode || order.coupon_code || ''),
       influencerId: order.influencerId || order.influencer_id || null,
@@ -1682,7 +1692,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       SELECT mo.id, mo.order_number AS orderNumber, mo.customer_name AS customerName, mo.customer_email AS customerEmail,
              mo.customer_phone AS customerPhone, mo.guest_name AS guestName, mo.guest_email AS guestEmail,
              mo.guest_phone AS guestPhone, mo.is_guest AS isGuest, mo.status, mo.subtotal, mo.gst_amount AS gstAmount,
-             mo.shipping_charge AS shippingCharge, mo.discount_amount AS discountAmount, mo.coupon_id AS couponId,
+             mo.shipping_charge AS shippingCharge, mo.discount_amount AS discountAmount, mo.commission_amount_paise AS commissionAmountPaise, mo.coupon_id AS couponId,
              mo.coupon_code AS couponCode, mo.influencer_id AS influencerId, mi.name AS influencerName,
              mi.handle AS influencerHandle, mo.total_amount AS totalAmount, mo.payment_method AS paymentMethod,
              mo.payment_status AS paymentStatus, mo.razorpay_order_id AS razorpayOrderId,
@@ -1799,7 +1809,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       if (!influencerId || !monthKey) continue;
 
       const influencer = influencerById.get(influencerId) || null;
-      const commissionPerOrderPaise = Math.max(0, Math.round(Number(influencer?.commissionPerOrderPaise || 0)));
       const entryKey = `${monthKey}:${influencerId}`;
       const existing = monthlyInfluencerMap.get(entryKey) || {
         month: monthKey,
@@ -1815,7 +1824,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const orderRevenue = Number(order.totalAmount || 0);
       existing.orders += 1;
       existing.revenue += orderRevenue;
-      existing.commission += commissionPerOrderPaise;
+      existing.commission += Math.max(0, Number(order.commissionAmountPaise || 0));
       if (String(order.couponCode || '').trim()) {
         existing.couponUsage += 1;
       }
@@ -3334,6 +3343,18 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return result;
   }
 
+  function getMerchCommissionSnapshot(coupon, items = []) {
+    if (!coupon?.influencerId) return { total: 0, byProduct: new Map() };
+    const fallback = Math.max(0, Math.round(Number(coupon.commissionPerOrderPaise || 0)));
+    const lineCommissions = new Map();
+    let total = items.length ? fallback : 0;
+    for (const item of items) {
+      const productCommission = fallback;
+      lineCommissions.set(Number(item.variantId), productCommission);
+    }
+    return { total, byProduct: lineCommissions };
+  }
+
   function recordMerchCouponRedemption(payload) {
     if (typeof recordCouponRedemption !== 'function') return;
     recordCouponRedemption(payload);
@@ -3506,6 +3527,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const shippingCharge = subtotal >= 99900 ? 0 : 9900; // Free above ₹999
     const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
     const influencerId = Number(couponResult.coupon?.influencerId || 0) > 0 ? Number(couponResult.coupon.influencerId) : null;
+    const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems);
     const totalAmount = Math.max(100, subtotal + shippingCharge - discountAmount);
     const orderNumber = generateOrderNumber();
     const shippingAddressPayload = address || {};
@@ -3524,24 +3546,24 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }).then(rpOrder => {
       // Save order to DB
       const insertOrder = db.prepare(`
-        INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, total_amount, payment_method, payment_status, razorpay_order_id, shipping_address, billing_address)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, 'online', 'pending', ?, ?, ?)
+        INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, commission_amount_paise, commission_snapshot_at, total_amount, payment_method, payment_status, razorpay_order_id, shipping_address, billing_address)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'online', 'pending', ?, ?, ?)
       `);
       const result = insertOrder.run(
         orderNumber, resolvedCustomer.name, resolvedCustomer.email, resolvedCustomer.phone,
         guestName, guestEmail, guestPhone, isGuestCheckout ? 1 : 0, authUser?.id || null, merchProfile?.id || null,
-        subtotal, gstAmount, shippingCharge, discountAmount, couponResult.coupon?.id || null, couponResult.couponCode || null, influencerId, totalAmount,
+        subtotal, gstAmount, shippingCharge, discountAmount, couponResult.coupon?.id || null, couponResult.couponCode || null, influencerId, commissionSnapshot.total, totalAmount,
         rpOrder.id, JSON.stringify(shippingAddressPayload || {}), JSON.stringify(billingAddressPayload || shippingAddressPayload || {})
       );
       const orderId = result.lastInsertRowid;
 
       // Save order items
       const insertItem = db.prepare(`
-        INSERT INTO merch_order_items (order_id, variant_id, product_name, variant_label, sku, unit_price, quantity, line_total)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO merch_order_items (order_id, variant_id, product_name, variant_label, sku, unit_price, quantity, line_total, commission_amount_paise)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       for (const item of validatedItems) {
-        insertItem.run(orderId, item.variantId, item.productName, item.variantLabel, item.sku, item.unitPrice, item.quantity, item.lineTotal);
+        insertItem.run(orderId, item.variantId, item.productName, item.variantLabel, item.sku, item.unitPrice, item.quantity, item.lineTotal, commissionSnapshot.byProduct.get(Number(item.variantId)) || 0);
       }
 
       res.json({
@@ -3669,6 +3691,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const codSurcharge = 5000; // ₹50
     const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
     const influencerId = Number(couponResult.coupon?.influencerId || 0) > 0 ? Number(couponResult.coupon.influencerId) : null;
+    const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems);
     const totalAmount = Math.max(100, subtotal + shippingCharge + codSurcharge - discountAmount);
     const orderNumber = generateOrderNumber();
     const shippingAddressPayload = address || {};
@@ -3679,8 +3702,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const guestPhone = isGuestCheckout ? resolvedCustomer.phone : null;
 
     const result = db.prepare(`
-      INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, total_amount, payment_method, payment_status, shipping_address, billing_address)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?, ?, ?, 'cod', 'cod_pending', ?, ?)
+      INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, commission_amount_paise, commission_snapshot_at, total_amount, payment_method, payment_status, shipping_address, billing_address)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'cod', 'cod_pending', ?, ?)
     `).run(
       orderNumber,
       resolvedCustomer.name,
@@ -3699,15 +3722,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       couponResult.coupon?.id || null,
       couponResult.couponCode || null,
       influencerId,
+      commissionSnapshot.total,
       totalAmount,
       JSON.stringify(shippingAddressPayload || {}),
       JSON.stringify(billingAddressPayload || shippingAddressPayload || {})
     );
 
     const orderId = result.lastInsertRowid;
-    const insertItem = db.prepare('INSERT INTO merch_order_items (order_id, variant_id, product_name, variant_label, sku, unit_price, quantity, line_total) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    const insertItem = db.prepare('INSERT INTO merch_order_items (order_id, variant_id, product_name, variant_label, sku, unit_price, quantity, line_total, commission_amount_paise) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
     for (const item of validatedItems) {
-      insertItem.run(orderId, item.variantId, item.productName, item.variantLabel, item.sku, item.unitPrice, item.quantity, item.lineTotal);
+      insertItem.run(orderId, item.variantId, item.productName, item.variantLabel, item.sku, item.unitPrice, item.quantity, item.lineTotal, commissionSnapshot.byProduct.get(Number(item.variantId)) || 0);
       decrementMerchPurchaseVariant(item.variantId, item.quantity);
     }
 
@@ -4363,7 +4387,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
              substr(mo.created_at, 1, 7) AS month,
              COUNT(*) AS orders,
              COALESCE(SUM(mo.total_amount), 0) AS revenue,
-             COUNT(*) * COALESCE(i.commission_per_order_paise, 0) AS commission,
+             COALESCE(SUM(mo.commission_amount_paise), 0) AS commission,
              SUM(CASE WHEN mo.coupon_id IS NOT NULL THEN 1 ELSE 0 END) AS couponUsage
       FROM merch_orders mo
       JOIN merch_influencers i ON i.id = mo.influencer_id
@@ -4393,7 +4417,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
              substr(mo.created_at, 1, 10) AS day,
              COUNT(*) AS orders,
              COALESCE(SUM(mo.total_amount), 0) AS revenue,
-             COUNT(*) * COALESCE(i.commission_per_order_paise, 0) AS commission,
+             COALESCE(SUM(mo.commission_amount_paise), 0) AS commission,
              SUM(CASE WHEN mo.coupon_id IS NOT NULL THEN 1 ELSE 0 END) AS couponUsage
       FROM merch_orders mo
       JOIN merch_influencers i ON i.id = mo.influencer_id
