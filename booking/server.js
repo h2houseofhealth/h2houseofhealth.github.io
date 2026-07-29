@@ -13652,6 +13652,158 @@ function hashOtp(otp) {
   return crypto.createHash('sha256').update(String(otp)).digest('hex');
 }
 
+<<<<<<< Updated upstream
+=======
+function normalizeWhatsAppMobile(value) {
+  const raw = String(value || '').trim();
+  const digits = raw.replace(/\D/g, '');
+  if (/^\+91[6-9]\d{9}$/.test(raw)) return raw;
+  if (/^91[6-9]\d{9}$/.test(digits)) return `+${digits}`;
+  if (/^[6-9]\d{9}$/.test(digits)) return `+91${digits}`;
+  return '';
+}
+
+function sendWhatsAppMessage(to, templateName, parameters = []) {
+  const recipient = normalizeWhatsAppMobile(to);
+  const normalizedTemplateName = String(templateName || '').trim();
+  if (!recipient || !normalizedTemplateName) {
+    return Promise.resolve({ ok: false, statusCode: 400, message: 'Valid WhatsApp recipient and template are required.' });
+  }
+  if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_NUMBER_ID || !WHATSAPP_API_VERSION) {
+    return Promise.resolve({
+      ok: false,
+      statusCode: 503,
+      message: 'WhatsApp Cloud API is not configured. Set WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, and WHATSAPP_API_VERSION.',
+    });
+  }
+  console.log('==============================');
+  console.log('WhatsApp recipient:', recipient);
+  console.log('Template:', normalizedTemplateName);
+  console.log('==============================');
+
+  const bodyParameters = (Array.isArray(parameters) ? parameters : [parameters]).map((parameter) => ({
+    type: 'text',
+    text: String(parameter ?? ''),
+  }));
+  const payload = JSON.stringify({
+    messaging_product: 'whatsapp',
+    to: recipient,
+    type: 'template',
+    template: {
+      name: normalizedTemplateName,
+      language: { code: 'en_US' },
+      components: bodyParameters.length ? [{ type: 'body', parameters: bodyParameters }] : undefined,
+    },
+  });
+  const apiVersion = WHATSAPP_API_VERSION.startsWith('v') ? WHATSAPP_API_VERSION : `v${WHATSAPP_API_VERSION}`;
+
+  return new Promise((resolve) => {
+    const request = https.request(
+      {
+        hostname: 'graph.facebook.com',
+        path: `/${apiVersion}/${encodeURIComponent(WHATSAPP_PHONE_NUMBER_ID)}/messages`,
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      },
+      (response) => {
+        let responseBody = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => { responseBody += chunk; });
+        response.on('end', () => {
+          let parsed = null;
+          try { parsed = responseBody ? JSON.parse(responseBody) : null; } catch { parsed = null; }
+          const statusCode = Number(response.statusCode || 500);
+          if (statusCode >= 200 && statusCode < 300) {
+            return resolve({ ok: true, statusCode, messageId: parsed?.messages?.[0]?.id || '' });
+          }
+          resolve({ ok: false, statusCode, message: parsed?.error?.message || 'WhatsApp message could not be sent.' });
+        });
+      }
+    );
+    request.on('error', (error) => resolve({ ok: false, statusCode: 502, message: error.message }));
+    request.write(payload);
+    request.end();
+  });
+}
+
+function sendWhatsAppText(to, message) {
+  const recipient = normalizeWhatsAppMobile(to);
+  const text = String(message || '').trim();
+  if (!recipient || !text) {
+    return Promise.resolve({ ok: false, statusCode: 400, message: 'Valid WhatsApp recipient and message are required.' });
+  }
+  if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_NUMBER_ID || !WHATSAPP_API_VERSION) {
+    return Promise.resolve({
+      ok: false,
+      statusCode: 503,
+      message: 'WhatsApp Cloud API is not configured. Set WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, and WHATSAPP_API_VERSION.',
+    });
+  }
+  console.log('==============================');
+  console.log('WhatsApp recipient:', recipient);
+  console.log('Message:', text);
+  console.log('==============================');
+  const payload = JSON.stringify({
+    messaging_product: 'whatsapp',
+    to: recipient,
+    type: 'text',
+    text: {
+      preview_url: false,
+      body: text,
+    },
+  });
+  const apiVersion = WHATSAPP_API_VERSION.startsWith('v') ? WHATSAPP_API_VERSION : `v${WHATSAPP_API_VERSION}`;
+
+  return new Promise((resolve) => {
+    const request = https.request(
+      {
+        hostname: 'graph.facebook.com',
+        path: `/${apiVersion}/${encodeURIComponent(WHATSAPP_PHONE_NUMBER_ID)}/messages`,
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      },
+      (response) => {
+        let responseBody = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => { responseBody += chunk; });
+        response.on('end', () => {
+          let parsed = null;
+          try { parsed = responseBody ? JSON.parse(responseBody) : null; } catch { parsed = null; }
+          console.log('WhatsApp API Status:', response.statusCode);
+          console.log('WhatsApp API Response:', responseBody);
+          const statusCode = Number(response.statusCode || 500);
+          if (statusCode >= 200 && statusCode < 300) {
+            return resolve({ ok: true, statusCode, messageId: parsed?.messages?.[0]?.id || '' });
+          }
+          resolve({ ok: false, statusCode, message: parsed?.error?.message || 'WhatsApp message could not be sent.' });
+        });
+      }
+    );
+    request.on('error', (error) => resolve({ ok: false, statusCode: 502, message: error.message }));
+    request.write(payload);
+    request.end();
+  });
+}
+
+function sendWhatsAppBookingConfirmation(booking) {
+  return sendWhatsAppMessage(booking?.clientPhone || booking?.clientMobile, 'booking_confirmation', [
+    booking?.clientName || '',
+    booking?.bookingDate || '',
+    booking?.bookingTime || '',
+    booking?.serviceName || '',
+    'House of Health',
+  ]);
+}
+
+>>>>>>> Stashed changes
 function getTransporter() {
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT || 587);

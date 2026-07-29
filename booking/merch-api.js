@@ -3125,9 +3125,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!couponCode) {
       return res.status(400).json({ error: 'couponCode is required' });
     }
-    if (!authUser) {
-      return res.status(401).json({ error: 'Sign in to redeem an influencer coupon.' });
-    }
 
     const subtotalAmountPaise = Number(req.body?.subtotalAmountPaise || 0);
     const couponResult = validateMerchCouponForUser({
@@ -3154,9 +3151,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const authUser = getMerchAuthUser(req);
     const merchProfile = authUser ? ensureMerchCustomerProfileForUser(authUser) : null;
     const couponCode = normalizeMerchCouponCode(req.body?.couponCode);
-    if (couponCode && !authUser) {
-      return res.status(401).json({ error: 'Sign in to redeem an influencer coupon.' });
-    }
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Cart is empty' });
     }
@@ -3338,9 +3332,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Cart is empty' });
     }
-    if (couponCode && !authUser) {
-      return res.status(401).json({ error: 'Sign in to apply a coupon.' });
-    }
     const resolvedCustomer = {
       name: String(customer?.name || merchProfile?.fullName || authUser?.name || '').trim(),
       email: String(customer?.email || merchProfile?.email || authUser?.email || '').trim().toLowerCase(),
@@ -3446,6 +3437,33 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   });
 
   // ─── ADMIN: Get all orders ───
+  app.post('/api/merch/wishlist', requireMerchAuth, (req, res) => {
+    const profile = ensureMerchCustomerProfileForUser(req.user);
+    const productId = Number(req.body?.productId || 0) || null;
+    const variantId = Number(req.body?.variantId || 0) || null;
+
+    if (!profile || (!productId && !variantId)) {
+      return res.status(400).json({ error: 'A product or variant is required' });
+    }
+
+    db.prepare(`
+      INSERT OR IGNORE INTO merch_customer_wishlist_items (customer_id, product_id, variant_id)
+      VALUES (?, ?, ?)
+    `).run(profile.id, productId, variantId);
+
+    const item = db.prepare(`
+      SELECT id, customer_id AS customerId, product_id AS productId, variant_id AS variantId,
+             created_at AS createdAt, updated_at AS updatedAt
+      FROM merch_customer_wishlist_items
+      WHERE customer_id = ?
+        AND ((product_id = ?) OR (product_id IS NULL AND ? IS NULL))
+        AND ((variant_id = ?) OR (variant_id IS NULL AND ? IS NULL))
+      LIMIT 1
+    `).get(profile.id, productId, productId, variantId, variantId);
+
+    return res.json({ success: true, item });
+  });
+
   app.get('/api/merch/profile', requireMerchAuth, (req, res) => {
     const profile = syncMerchGuestOrdersForUser(req.user) || ensureMerchCustomerProfileForUser(req.user);
     if (!profile) {
