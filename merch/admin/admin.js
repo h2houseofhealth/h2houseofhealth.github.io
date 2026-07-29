@@ -3698,10 +3698,7 @@
           <label class="admin-field"><span>Social Handle</span><input class="admin-input" name="handle" value="${escapeHtml(entity?.handle || '')}" required /></label>
           <label class="admin-field"><span>Email</span><input class="admin-input" name="email" value="${escapeHtml(entity?.email || '')}" /></label>
           <label class="admin-field"><span>Phone</span><input class="admin-input" name="phone" value="${escapeHtml(entity?.phone || '')}" /></label>
-          <label class="admin-field"><span>Commission per Order (rupees)</span><input class="admin-input" name="commissionPerOrder" type="number" min="0" step="1" value="${escapeHtml(Number(entity?.commissionPerOrderPaise || 0) / 100)}" /></label>
-          <label class="admin-field"><span>Discount Applied (rupees)</span><input class="admin-input" value="${escapeHtml(Math.round(getInfluencerDiscountApplied(entity)))}" readonly /><small class="admin-field__hint">Total discount used by customers through assigned coupons.</small></label>
-          <label class="admin-field"><span>Assigned Coupon Worth (rupees)</span><input class="admin-input" value="${escapeHtml(Math.round(getInfluencerCouponWorth(entity)))}" readonly /><small class="admin-field__hint">Configured discount amount across assigned flat-value coupons.</small></label>
-          <div class="admin-field admin-field--wide"><span>Assigned Coupons</span>${renderAssignedCouponDetails(entity)}<div class="admin-chip-row" style="margin-top:10px;">${entity ? `<button class="admin-btn admin-btn--soft" type="button" data-action="assign-coupon" data-id="${escapeHtml(entity.id)}">Edit assignments</button>` : ''}</div><small class="admin-field__hint">Discount value is the offer attached to each coupon; Discount Applied updates after redemptions.</small></div>
+          <div class="admin-field admin-field--wide"><span>Assigned Coupons</span>${renderAssignedCouponDetails(entity)}<div class="admin-chip-row" style="margin-top:10px;">${entity ? `<button class="admin-btn admin-btn--soft" type="button" data-action="assign-coupon" data-id="${escapeHtml(entity.id)}">Edit assignments</button>` : ''}</div><small class="admin-field__hint">Manage discount and commission in the coupon settings.</small></div>
           <label class="admin-field admin-field--wide"><span>Notes</span><textarea class="admin-textarea" name="notes">${escapeHtml(entity?.notes || '')}</textarea></label>
           <label class="admin-check"><input type="checkbox" name="active" ${entity?.active !== false ? 'checked' : ''} /><span>Active influencer</span></label>
         `,
@@ -4095,7 +4092,7 @@
       email: String(fd.get('email') || '').trim(),
       phone: String(fd.get('phone') || '').trim(),
       notes: String(fd.get('notes') || '').trim(),
-      commissionPerOrderPaise: Math.max(0, Math.round(Number(fd.get('commissionPerOrder') || 0) * 100)),
+      commissionPerOrderPaise: Number(existing?.commissionPerOrderPaise || 0),
       paidCommission: Math.max(0, Math.round(Number(existing?.paidCommission || 0))),
       coupons: existing?.coupons || [],
       totalOrders: Number(existing?.totalOrders || 0),
@@ -5416,7 +5413,7 @@
         code: entity.code,
         description: entity.description,
         discountValue: Number(entity.discount) || 0,
-        commissionPerOrderPaise: Math.max(0, Math.round(Number(entity.commissionPerOrder || 0) * 100)),
+        commissionPerOrderPaise: Math.max(0, Math.round(Number(entity.commissionPerOrderPaise || 0))),
         couponType: entity.couponType,
         appliesTo: entity.appliesTo,
         festivalName: entity.festivalName,
