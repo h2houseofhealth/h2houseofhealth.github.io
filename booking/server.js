@@ -13703,8 +13703,6 @@ function hashOtp(otp) {
   return crypto.createHash('sha256').update(String(otp)).digest('hex');
 }
 
-<<<<<<< Updated upstream
-=======
 function normalizeWhatsAppMobile(value) {
   const raw = String(value || '').trim();
   const digits = raw.replace(/\D/g, '');
@@ -13853,8 +13851,6 @@ function sendWhatsAppBookingConfirmation(booking) {
     'House of Health',
   ]);
 }
-
->>>>>>> Stashed changes
 function getTransporter() {
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT || 587);
