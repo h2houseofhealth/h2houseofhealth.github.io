@@ -214,6 +214,35 @@
     },
   ];
 
+  // Sidebar content is deliberately data-first so it can later be replaced by
+  // GET /api/merch/sidebar without changing the rendering layer.
+  const MERCH_SIDEBAR_DEMO_DATA = {
+    trending: [
+      { key: 'bottle', rating: 5 },
+      { key: 'mist', rating: 5 },
+      { key: 'hoodie-sand', rating: 5 },
+      { key: 'hoodie-black', rating: 5 },
+    ],
+    bundles: [
+      { keys: ['bottle', 'mist'], label: 'Bottle + Mist', savings: 'Save 15%', discount: 0.85 },
+    ],
+    offers: [
+      { eyebrow: '🏷 Limited Time Offer', title: 'Up to 10% OFF', detail: 'Make space for a more intentional everyday ritual.', cta: 'Shop Now' },
+    ],
+    benefits: [
+      'Secure Payments',
+      'Easy Returns',
+      'Sustainably Made',
+      'Trusted by Wellness Enthusiasts',
+    ],
+    recommended: [
+      { key: 'bottle' },
+      { key: 'mist' },
+      { key: 'hoodie-black' },
+      { key: 'hoodie-sand' },
+    ],
+  };
+
   const PRODUCT_IMAGE_SOURCES = PRODUCTS.reduce((map, product) => {
     const source = {
       imageUrl: product.images?.[0] || '',
@@ -346,6 +375,134 @@
     const max = Math.max(...prices);
     if (min === max) return formatPrice(min);
     return `${formatPrice(min)} - ${formatPrice(max)}`;
+  }
+
+  function findSidebarProduct(key, fallbackIndex = 0) {
+    const normalizedKey = String(key || '').toLowerCase();
+    const productPool = state.products.length ? state.products : PRODUCTS;
+    const product = productPool.find((entry) => {
+      const name = String(entry.name || '').toLowerCase();
+      const category = String(entry.category || '').toLowerCase();
+      if (normalizedKey === 'bottle') return category === 'bottles' || name.includes('bottle');
+      if (normalizedKey === 'mist') return category === 'sprays' || name.includes('mist') || name.includes('spray');
+      if (normalizedKey === 'hoodie-sand') return name.includes('hoodie') && name.includes('sand');
+      if (normalizedKey === 'hoodie-black') return name.includes('hoodie') && name.includes('black');
+      return name.includes(normalizedKey);
+    });
+    return product || productPool[fallbackIndex % Math.max(1, productPool.length)] || null;
+  }
+
+  function getSmartSidebarData() {
+    const trending = MERCH_SIDEBAR_DEMO_DATA.trending
+      .map((entry, index) => ({ ...entry, product: findSidebarProduct(entry.key, index) }))
+      .filter((entry) => entry.product);
+    const recommended = MERCH_SIDEBAR_DEMO_DATA.recommended
+      .map((entry, index) => ({ ...entry, product: findSidebarProduct(entry.key, index) }))
+      .filter((entry) => entry.product);
+    const bundles = MERCH_SIDEBAR_DEMO_DATA.bundles.map((bundle) => {
+      const products = bundle.keys.map((key, index) => findSidebarProduct(key, index)).filter(Boolean);
+      const basePrice = products.reduce((total, product) => total + Number(product.variants?.[0]?.price || product.basePrice || 0), 0);
+      return {
+        ...bundle,
+        products,
+        price: basePrice * Number(bundle.discount || 1),
+      };
+    }).filter((bundle) => bundle.products.length);
+    return {
+      trending,
+      bundles,
+      offers: MERCH_SIDEBAR_DEMO_DATA.offers,
+      benefits: MERCH_SIDEBAR_DEMO_DATA.benefits,
+      recommended,
+    };
+  }
+
+  function renderSidebarProduct(item) {
+    const product = item.product;
+    const image = product.images?.[0] || product.imageUrl || getProductFallbackImage(product);
+    return `
+      <button class="smart-merch-product" type="button" data-sidebar-product-id="${escapeHtml(String(product.id))}" aria-label="View ${escapeHtml(product.name)}">
+        <img src="${escapeHtml(image)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
+        <span class="smart-merch-product__info">
+          <strong>${escapeHtml(product.name)}</strong>
+          <span class="smart-merch-product__rating" aria-label="${Number(item.rating || 5)} out of 5 stars">★★★★★</span>
+          <span class="smart-merch-product__price">${escapeHtml(getPriceRange(product))}</span>
+        </span>
+      </button>
+    `;
+  }
+
+  function renderSmartMerchSidebar() {
+    if (!els.smartMerchSidebar) return;
+    const data = getSmartSidebarData();
+    els.smartMerchSidebar.innerHTML = `
+      <section class="smart-merch-sidebar__section smart-merch-sidebar__section--trending" aria-labelledby="smartTrendingTitle">
+        <div class="smart-merch-sidebar__heading">
+          <h3 id="smartTrendingTitle">🔥 Trending Products</h3>
+          <button type="button" class="smart-merch-sidebar__view-all" data-sidebar-action="view-all">View All <span aria-hidden="true">→</span></button>
+        </div>
+        <div class="smart-merch-product-list">${data.trending.map(renderSidebarProduct).join('')}</div>
+      </section>
+
+      <section class="smart-merch-sidebar__section smart-merch-sidebar__section--bundle" aria-labelledby="smartBundleTitle">
+        <div class="smart-merch-sidebar__heading">
+          <h3 id="smartBundleTitle">Bundle &amp; Save</h3>
+        </div>
+        <div class="smart-merch-bundle-list">
+          ${data.bundles.map((bundle) => `
+            <div class="smart-merch-bundle">
+            <div class="smart-merch-bundle__items">
+              ${bundle.products.map((product, index) => `
+                ${index ? '<span class="smart-merch-bundle__plus" aria-hidden="true">+</span>' : ''}
+                <img src="${escapeHtml(product.images?.[0] || product.imageUrl || getProductFallbackImage(product))}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
+              `).join('')}
+            </div>
+            <strong>${escapeHtml(bundle.label)}</strong>
+            <span class="smart-merch-bundle__savings">${escapeHtml(bundle.savings)}</span>
+            <strong class="smart-merch-bundle__price">${escapeHtml(formatPrice(bundle.price))}</strong>
+            <button type="button" class="btn btn-primary smart-merch-sidebar__cta" data-sidebar-action="shop-bundle">Shop Bundle</button>
+            </div>
+          `).join('')}
+        </div>
+      </section>
+
+      <section class="smart-merch-sidebar__section smart-merch-sidebar__section--offer" aria-labelledby="smartOfferTitle">
+        ${data.offers.map((offer) => `
+          <div class="smart-merch-offer">
+            <p class="smart-merch-offer__eyebrow">${escapeHtml(offer.eyebrow)}</p>
+            <h3 id="smartOfferTitle">${escapeHtml(offer.title)}</h3>
+            <p>${escapeHtml(offer.detail)}</p>
+            <button type="button" class="smart-merch-sidebar__text-cta" data-sidebar-action="shop-offer">${escapeHtml(offer.cta)} <span aria-hidden="true">→</span></button>
+          </div>
+        `).join('')}
+      </section>
+
+      <section class="smart-merch-sidebar__section smart-merch-sidebar__section--benefits" aria-labelledby="smartBenefitsTitle">
+        <div class="smart-merch-sidebar__heading">
+          <h3 id="smartBenefitsTitle">♥ House Benefits</h3>
+        </div>
+        <ul class="smart-merch-benefits">
+          ${data.benefits.map((benefit) => `<li><span aria-hidden="true">✓</span>${escapeHtml(benefit)}</li>`).join('')}
+        </ul>
+      </section>
+
+      <section class="smart-merch-sidebar__section smart-merch-sidebar__section--recommended" aria-labelledby="smartRecommendedTitle">
+        <div class="smart-merch-sidebar__heading">
+          <h3 id="smartRecommendedTitle">Recommended For You</h3>
+          <button type="button" class="smart-merch-sidebar__view-all" data-sidebar-action="view-all">View All <span aria-hidden="true">→</span></button>
+        </div>
+        <div class="smart-merch-product-list">${data.recommended.map(renderSidebarProduct).join('')}</div>
+      </section>
+    `;
+
+    els.smartMerchSidebar.querySelectorAll('[data-sidebar-product-id]').forEach((button) => {
+      button.addEventListener('click', () => showProductDetail(Number(button.dataset.sidebarProductId)));
+    });
+    els.smartMerchSidebar.querySelectorAll('[data-sidebar-action="view-all"], [data-sidebar-action="shop-bundle"], [data-sidebar-action="shop-offer"]').forEach((button) => {
+      button.addEventListener('click', () => {
+        els.shopSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
   }
 
   function getDefaultPurchasableVariant(product) {
@@ -651,6 +808,43 @@
     return product?.name || item.productName || `Saved item #${item.productId || item.id || ''}`.trim();
   }
 
+  async function addToWishlist(product, variant) {
+    if (!state.authResolved) {
+      await loadCustomerContext();
+    }
+    const productId = Number(product?.id || 0) || null;
+    const variantId = Number(variant?.id || 0) || null;
+    if (!productId && !variantId) return;
+
+    const alreadySaved = state.merchWishlistItems.some((item) => (
+      Number(item.productId || 0) === Number(productId || 0)
+      && Number(item.variantId || 0) === Number(variantId || 0)
+    ));
+    if (alreadySaved) {
+      showCheckoutNotice('Wishlist', `${product.name} is already in your wishlist.`);
+      return;
+    }
+
+    try {
+      if (state.currentUser) {
+        const result = await api('/api/merch/wishlist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ productId, variantId }),
+        });
+        if (result?.item) state.merchWishlistItems.unshift(result.item);
+      } else {
+        const item = { id: `guest-${productId}-${variantId || 'default'}`, productId, variantId, productName: product.name };
+        state.merchWishlistItems.unshift(item);
+        localStorage.setItem('merch_wishlist_guest', JSON.stringify(state.merchWishlistItems));
+      }
+
+      showCheckoutNotice('Wishlist', `${product.name} was added to your wishlist.`);
+    } catch (error) {
+      showCheckoutNotice('Wishlist unavailable', error?.message || 'Please try again.', { variant: 'error' });
+    }
+  }
+
   function getAddressLabel(address) {
     return String(address?.label || address?.recipientName || 'Shipping Address').trim();
   }
@@ -820,6 +1014,7 @@
     }
 
     renderProductGrid();
+    renderSmartMerchSidebar();
 
     if (state.currentView === 'detail' && state.selectedProduct) {
       const refreshed = state.products.find((product) => Number(product.id) === Number(state.selectedProduct.id));
@@ -843,6 +1038,7 @@
   const els = {
     productGrid: document.getElementById('productGrid'),
     productEmpty: document.getElementById('productEmpty'),
+    smartMerchSidebar: document.getElementById('smartMerchSidebar'),
     productDetail: document.getElementById('productDetail'),
     productGallery: document.getElementById('productGallery'),
     productInfo: document.getElementById('productInfo'),
@@ -1061,10 +1257,8 @@
     els.cartFooter.hidden = false;
     if (els.cartCouponCode) els.cartCouponCode.value = state.merchCouponCode || '';
     if (els.cartCouponApplyBtn) {
-      els.cartCouponApplyBtn.textContent = state.currentUser
-        ? (state.merchCouponLoading ? 'Applying...' : 'Apply Coupon')
-        : 'Sign in to Apply';
-      els.cartCouponApplyBtn.disabled = Boolean(state.merchCouponLoading || !state.currentUser);
+      els.cartCouponApplyBtn.textContent = state.merchCouponLoading ? 'APPLYING...' : 'APPLY COUPON';
+      els.cartCouponApplyBtn.disabled = Boolean(state.merchCouponLoading);
     }
     renderMerchCouponPreview();
 
@@ -3187,6 +3381,10 @@
       if (state.selectedVariant && state.selectedVariant.stock > 0) {
         buyNow(state.selectedVariant.id, state.quantity, product);
       }
+    });
+
+    document.getElementById('addToWishlistBtn')?.addEventListener('click', () => {
+      addToWishlist(product, state.selectedVariant);
     });
   }
 

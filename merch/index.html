@@ -103,9 +103,16 @@
       <!-- Hero Section -->
       <section class="merch-hero">
         <div class="merch-hero__content">
+          <p class="merch-hero__eyebrow">HOUSE MERCH</p>
           <h1 class="merch-hero__title">Wear The <span class="text-accent">House</span></h1>
           <p class="merch-hero__subtitle">Premium merchandise crafted for wellness enthusiasts. Sustainably made, designed to move with you.</p>
           <button id="heroShopBtn" class="btn btn-primary btn-lg" type="button">Shop Now</button>
+        </div>
+        <div class="merch-hero__art" aria-label="Hydrogen Bottle, Hydrogen Mist, and Brown Hoodie">
+          <div class="merch-hero__surface" aria-hidden="true"></div>
+          <img class="merch-hero__image merch-hero__image--bottle" src="/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113" alt="Hydrogen Bottle" loading="eager" />
+          <img class="merch-hero__image merch-hero__image--mist" src="/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138" alt="Hydrogen Mist" loading="eager" />
+          <img class="merch-hero__image merch-hero__image--hoodie" src="/cdn/shop/files/hero/h2-hoodie-transparent-source.png" alt="Brown H2 hoodie with GOT HYDROGEN print" loading="eager" />
         </div>
       </section>
 
@@ -155,11 +162,18 @@
             </select>
           </div>
         </div>
-        <div id="productGrid" class="product-grid">
-          <!-- Products rendered by JS -->
-        </div>
-        <div id="productEmpty" class="product-empty" hidden>
-          <p>No products found matching your criteria.</p>
+        <div class="merch-shop-layout">
+          <div class="merch-product-column">
+            <div id="productGrid" class="product-grid">
+              <!-- Products rendered by JS -->
+            </div>
+            <div id="productEmpty" class="product-empty" hidden>
+              <p>No products found matching your criteria.</p>
+            </div>
+          </div>
+          <aside id="smartMerchSidebar" class="smart-merch-sidebar" aria-label="Curated House Merch recommendations">
+            <!-- Curated recommendations rendered by JS -->
+          </aside>
         </div>
       </section>
 
@@ -192,7 +206,7 @@
               <span>Coupon Code</span>
               <input id="cartCouponCode" type="text" placeholder="Enter coupon code" autocomplete="off" />
             </label>
-            <button id="cartCouponApplyBtn" class="btn btn-secondary btn-full" type="button">Apply Coupon</button>
+            <button id="cartCouponApplyBtn" class="btn btn-secondary btn-full" type="button">APPLY COUPON</button>
             <div id="cartCouponPreview" class="cart-coupon__preview" hidden></div>
           </div>
           <button id="checkoutBtn" class="btn btn-primary btn-full" type="button">Proceed to Checkout</button>
