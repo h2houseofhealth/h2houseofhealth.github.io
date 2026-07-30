@@ -4455,7 +4455,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         db.prepare(`
           UPDATE merch_influencers
           SET name = ?, handle = ?, phone = ?, notes = ?, avatar_url = ?, bio = ?, social_links_json = ?,
-             preferred_payment_details = ?, commission_per_order_paise = ?, active = ?, updated_at = datetime('now')
+             preferred_payment_details = ?, commission_per_order_paise = ?, paid_commission = ?, active = ?, updated_at = datetime('now')
           WHERE id = ?
         `).run(
           influencer.name,
@@ -4467,6 +4467,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           influencer.socialLinks.length ? JSON.stringify(influencer.socialLinks) : null,
           influencer.preferredPaymentDetails || null,
           influencer.commissionPerOrderPaise,
+          influencer.paidCommission,
           influencer.active,
           existingByEmail.id
         );

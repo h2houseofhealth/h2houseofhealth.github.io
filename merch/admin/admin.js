@@ -3017,15 +3017,15 @@
 
           <div class="admin-table-wrap">
             <table class="admin-table admin-influencer-table">
-              <thead><tr><th>Influencer</th><th>Contact</th><th>Status</th><th>Coupons</th><th>Orders</th><th>Revenue</th><th>Commission</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Influencer</th><th>Contact</th><th>Status</th><th>Coupons</th><th>Orders</th><th>Revenue</th><th>Commission</th><th>Commission Paid</th><th>Actions</th></tr></thead>
               <tbody>${visibleInfluencers.length ? visibleInfluencers.map((influencer) => { const stats = getMonthStats(influencer); return `<tr data-action="select-influencer" data-id="${influencer.id}">
                 <td><button class="admin-action-link" type="button" data-action="select-influencer" data-id="${influencer.id}">${escapeHtml(influencer.name || 'Unnamed')}</button><br><span class="admin-table__muted">${escapeHtml(influencer.handle || '')}</span></td>
                 <td>${escapeHtml(influencer.email || 'Not added yet')}<br><span class="admin-table__muted">${escapeHtml(influencer.phone || 'Not added yet')}</span></td>
                 <td><span class="admin-badge ${influencer.active ? 'admin-badge--active' : 'admin-badge--inactive'}">${influencer.active ? 'Active' : 'Inactive'}</span></td>
                 <td>${formatCount(getAssignedCouponCount(influencer))}<br><span class="admin-table__muted">${getInfluencerCouponRecords(influencer).map((coupon) => `${escapeHtml(coupon.code)} — ${escapeHtml(couponDiscountLabel(coupon))}`).join('<br>') || 'None'}</span></td>
-                <td>${formatCount(stats.orders)}</td><td>${money(stats.revenue)}</td><td>${money(stats.commission)}</td>
+                <td>${formatCount(stats.orders)}</td><td>${money(stats.revenue)}</td><td>${money(stats.commission)}</td><td>${money(influencer.paidCommission || 0)}</td>
                 <td><div class="admin-actions">${renderInfluencerActionLinks(influencer)}</div></td>
-              </tr>`; }).join('') : `<tr><td colspan="8">${renderEmptyState('No influencers found', 'Try a different search term or add a new influencer to start managing campaigns.')}</td></tr>`}</tbody>
+              </tr>`; }).join('') : `<tr><td colspan="9">${renderEmptyState('No influencers found', 'Try a different search term or add a new influencer to start managing campaigns.')}</td></tr>`}</tbody>
             </table>
           </div>
 
@@ -3698,6 +3698,7 @@
           <label class="admin-field"><span>Social Handle</span><input class="admin-input" name="handle" value="${escapeHtml(entity?.handle || '')}" required /></label>
           <label class="admin-field"><span>Email</span><input class="admin-input" name="email" value="${escapeHtml(entity?.email || '')}" /></label>
           <label class="admin-field"><span>Phone</span><input class="admin-input" name="phone" value="${escapeHtml(entity?.phone || '')}" /></label>
+          <label class="admin-field"><span>Commission Paid (rupees)</span><input class="admin-input" name="paidCommission" type="number" min="0" step="1" value="${escapeHtml(Number(entity?.paidCommission || 0) / 100)}" /></label>
           <div class="admin-field admin-field--wide"><span>Assigned Coupons</span>${renderAssignedCouponDetails(entity)}<div class="admin-chip-row" style="margin-top:10px;">${entity ? `<button class="admin-btn admin-btn--soft" type="button" data-action="assign-coupon" data-id="${escapeHtml(entity.id)}">Edit assignments</button>` : ''}</div><small class="admin-field__hint">Manage discount and commission in the coupon settings.</small></div>
           <label class="admin-field admin-field--wide"><span>Notes</span><textarea class="admin-textarea" name="notes">${escapeHtml(entity?.notes || '')}</textarea></label>
           <label class="admin-check"><input type="checkbox" name="active" ${entity?.active !== false ? 'checked' : ''} /><span>Active influencer</span></label>
@@ -4093,7 +4094,7 @@
       phone: String(fd.get('phone') || '').trim(),
       notes: String(fd.get('notes') || '').trim(),
       commissionPerOrderPaise: Number(existing?.commissionPerOrderPaise || 0),
-      paidCommission: Math.max(0, Math.round(Number(existing?.paidCommission || 0))),
+      paidCommission: Math.max(0, Math.round(Number(fd.get('paidCommission') || 0) * 100)),
       coupons: existing?.coupons || [],
       totalOrders: Number(existing?.totalOrders || 0),
       revenue: Number(existing?.revenue || 0),
