@@ -31,7 +31,18 @@
 
   const today = getAppToday();
   const LOW_STOCK_THRESHOLD = 15;
-  const REVENUE_BAR_COLORS = ['#d16f36', '#e0a07a', '#c99062', '#d8c0a8', '#b79a82', '#e2b18f', '#c77d52', '#d6b49a', '#b58b68', '#dfc3a8', '#c59a78', '#d9aa83'];
+  // Earthy chart palette based on the House of Health visual language.
+  // Keep the terracotta accent first so the revenue chart and line mode lead
+  // with the same color used throughout the admin UI.
+  const REVENUE_BAR_COLORS = ['var(--admin-accent)', '#cbb395', '#73320f', '#8e8a59', '#5d6669', '#c58d36', 'var(--admin-accent)', '#b77b57', '#9b755f', '#d9c3ab', '#a98970', '#cfa681'];
+  const ORDER_STATUS_COLORS = {
+    pending: '#cbb395',
+    processing: 'var(--admin-accent)',
+    shipped: '#73320f',
+    delivered: '#8e8a59',
+    cancelled: '#5d6669',
+    returned: '#c58d36',
+  };
   const REVENUE_PERIOD_OPTIONS = [
     { value: 'year', label: '12 Months (Jan-Dec)' },
     ...Array.from({ length: 12 }, (_, index) => ({
@@ -168,12 +179,12 @@
   }
 
   const ORDER_STATUS_META = {
-    pending: { label: 'Pending', color: REVENUE_BAR_COLORS[0] },
-    processing: { label: 'Processing', color: REVENUE_BAR_COLORS[1] },
-    shipped: { label: 'Shipped', color: REVENUE_BAR_COLORS[2] },
-    delivered: { label: 'Delivered', color: REVENUE_BAR_COLORS[3] },
-    cancelled: { label: 'Cancelled', color: REVENUE_BAR_COLORS[4] },
-    returned: { label: 'Returned', color: REVENUE_BAR_COLORS[5] },
+    pending: { label: 'Pending', color: ORDER_STATUS_COLORS.pending },
+    processing: { label: 'Processing', color: ORDER_STATUS_COLORS.processing },
+    shipped: { label: 'Shipped', color: ORDER_STATUS_COLORS.shipped },
+    delivered: { label: 'Delivered', color: ORDER_STATUS_COLORS.delivered },
+    cancelled: { label: 'Cancelled', color: ORDER_STATUS_COLORS.cancelled },
+    returned: { label: 'Returned', color: ORDER_STATUS_COLORS.returned },
   };
 
   function normalizeOrderStatus(status) {
