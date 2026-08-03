@@ -3433,6 +3433,117 @@ h1, h2, h3 {
   background: rgba(var(--ink-rgb), 0.14);
 }
 
+#authCard .mobile-auth-section {
+  display: grid;
+  gap: 0.72rem;
+  margin-top: 0.05rem;
+}
+
+#authCard .mobile-auth-section[hidden] {
+  display: none;
+}
+
+#authCard .mobile-auth-section .auth-divider {
+  margin: 0.45rem 0 0.15rem;
+}
+
+#authCard .mobile-auth-title {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+#authCard .mobile-auth-phone-icon,
+#authCard .mobile-auth-whatsapp-icon {
+  color: var(--brand-primary);
+}
+
+#authCard .mobile-auth-phone-icon {
+  width: 1.65rem;
+  height: 1.65rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(var(--brand-primary-rgb), 0.1);
+  font-size: 1.08rem;
+  transform: rotate(-25deg);
+}
+
+#authCard .mobile-auth-field {
+  display: grid;
+  gap: 0.38rem;
+}
+
+#authCard .mobile-auth-field-label {
+  color: rgba(var(--ink-rgb), 0.8);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+#authCard .mobile-auth-number-row {
+  display: grid;
+  grid-template-columns: 6.8rem minmax(0, 1fr);
+  min-height: 3rem;
+  overflow: hidden;
+  border: 1px solid rgba(var(--ink-rgb), 0.12);
+  border-radius: 10px;
+  background: #fff;
+}
+
+#authCard .mobile-auth-number-row select,
+#authCard .mobile-auth-number-row input {
+  width: 100%;
+  min-width: 0;
+  height: 3rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+#authCard .mobile-auth-number-row select {
+  padding: 0 0.8rem;
+  border-right: 1px solid rgba(var(--ink-rgb), 0.1);
+  color: rgba(var(--ink-rgb), 0.72);
+  font-size: 0.9rem;
+}
+
+#authCard .mobile-auth-number-row input {
+  padding: 0 0.95rem;
+  font-size: 0.95rem;
+}
+
+#authCard .mobile-auth-number-row:focus-within {
+  border-color: rgba(var(--brand-primary-rgb), 0.52);
+  box-shadow: 0 0 0 3px rgba(var(--brand-primary-rgb), 0.1);
+}
+
+#authCard .mobile-auth-send {
+  width: 100%;
+  min-height: 3rem;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--brand-primary);
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(var(--brand-primary-rgb), 0.46);
+}
+
+#authCard .mobile-auth-send:hover {
+  color: var(--brand-deep);
+  background: rgba(var(--brand-primary-rgb), 0.08);
+  border-color: rgba(var(--brand-primary-rgb), 0.7);
+}
+
+#authCard .mobile-auth-whatsapp-icon {
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
 .auth-google-btn {
   width: 100%;
   height: 3rem;
@@ -3480,6 +3591,29 @@ h1, h2, h3 {
 }
 .auth-back {
   margin-top: 1.5rem;
+}
+
+#authCard .auth-forgot {
+  margin-top: 0.45rem;
+  margin-bottom: 0.75rem;
+}
+
+#authCard .auth-switch {
+  justify-content: center;
+  margin-top: 0.75rem;
+  text-align: center;
+}
+
+#authCard .auth-back {
+  margin-top: 1.1rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid rgba(var(--ink-rgb), 0.08);
+  text-align: center;
+}
+
+#authCard .auth-error:empty {
+  min-height: 0;
+  margin: 0;
 }
 
 .auth-back .link-btn {
