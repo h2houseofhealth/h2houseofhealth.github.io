@@ -892,10 +892,10 @@ a {
 .admin-revenue-chart__grid span { border-top: 1px dashed rgba(0,0,0,.1); }
 .admin-revenue-chart__bars { position: relative; z-index: 1; height: 100%; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); align-items: end; gap: clamp(3px, 1.2vw, 12px); }
 .admin-revenue-chart__bar-wrap { height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 5px; min-width: 0; }
-.admin-revenue-chart__bar-wrap strong { max-width: none; overflow: visible; color: var(--admin-text); font-size: clamp(9px, .9vw, 13px); font-weight: 800; white-space: nowrap; transform: rotate(-45deg); transform-origin: center bottom; }
+.admin-revenue-chart__bar-wrap strong { max-width: none; overflow: visible; color: var(--admin-text); font-size: clamp(9px, .9vw, 13px); font-weight: 800; white-space: nowrap; transform: rotate(0deg); transform-origin: center bottom; }
 .admin-revenue-chart__bar { width: min(34px, 80%); min-height: 3px; border-radius: 5px 5px 0 0; background: linear-gradient(180deg, var(--admin-accent), #e08a55); }
 .admin-revenue-chart__labels { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: clamp(3px, 1.2vw, 12px); min-height: 42px; padding: 10px 8px 0; }
-.admin-revenue-chart__labels span { min-width: 0; color: var(--admin-muted); font-size: 11px; text-align: center; transform: rotate(-45deg); transform-origin: top center; white-space: nowrap; }
+.admin-revenue-chart__labels span { min-width: 0; color: var(--admin-muted); font-size: 11px; text-align: center; transform: rotate(0deg); transform-origin: top center; white-space: nowrap; }
 .admin-revenue-chart__svg { position: absolute; z-index: 1; inset: 30px 8px 0; width: calc(100% - 16px); height: calc(100% - 30px); overflow: visible; }
 .admin-revenue-chart--line .admin-revenue-chart__plot { padding-top: 0; }
 
