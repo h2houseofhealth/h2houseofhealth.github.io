@@ -8,7 +8,15 @@
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const express = require('express');
+const FormData = require('form-data');
 const router = express.Router();
+
+let puppeteer;
+try {
+  puppeteer = require('puppeteer');
+} catch {
+  puppeteer = null;
+}
 
 module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, JWT_SECRET, jwt, sendMerchEmail = null, couponHelpers = {} }) {
   const {
@@ -159,6 +167,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       coupon_id INTEGER REFERENCES coupons(id),
       coupon_code TEXT,
       influencer_id INTEGER REFERENCES merch_influencers(id),
+      commission_amount_paise INTEGER NOT NULL DEFAULT 0,
+      commission_snapshot_at TEXT,
       total_amount INTEGER NOT NULL,
       payment_method TEXT NOT NULL DEFAULT 'online',
       payment_status TEXT NOT NULL DEFAULT 'pending',
@@ -185,6 +195,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       unit_price INTEGER NOT NULL,
       quantity INTEGER NOT NULL,
       line_total INTEGER NOT NULL
+      ,commission_amount_paise INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS merch_influencer_commission_payments (
@@ -200,6 +211,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  if (!hasColumn('merch_orders', 'commission_amount_paise')) db.exec('ALTER TABLE merch_orders ADD COLUMN commission_amount_paise INTEGER NOT NULL DEFAULT 0');
+  if (!hasColumn('merch_orders', 'commission_snapshot_at')) db.exec('ALTER TABLE merch_orders ADD COLUMN commission_snapshot_at TEXT');
+  if (!hasColumn('merch_order_items', 'commission_amount_paise')) db.exec('ALTER TABLE merch_order_items ADD COLUMN commission_amount_paise INTEGER NOT NULL DEFAULT 0');
+  db.exec("UPDATE merch_orders SET commission_amount_paise = COALESCE((SELECT commission_per_order_paise FROM merch_influencers WHERE merch_influencers.id = merch_orders.influencer_id), 0), commission_snapshot_at = datetime('now') WHERE commission_snapshot_at IS NULL");
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS merch_customer_profiles (
@@ -364,6 +380,26 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function formatMerchPrice(paise) {
     return '₹' + Number(paise || 0).toLocaleString('en-IN');
+  }
+
+  const MERCH_TIME_ZONE = 'Asia/Kolkata';
+
+  function getMerchDateKey(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const normalized = raw.replace(' ', 'T');
+    const parsed = new Date(/(?:Z|[+\-]\d{2}:?\d{2})$/i.test(normalized) ? normalized : `${normalized}Z`);
+    if (Number.isNaN(parsed.getTime())) return '';
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: MERCH_TIME_ZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(parsed).reduce((result, part) => {
+      if (part.type !== 'literal') result[part.type] = part.value;
+      return result;
+    }, {});
+    return `${parts.year}-${parts.month}-${parts.day}`;
   }
 
   function formatMerchEmailCurrency(paise) {
@@ -603,6 +639,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       SELECT influencer_id AS influencerId,
              COUNT(*) AS totalOrders,
              COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'cod_pending') THEN total_amount ELSE 0 END), 0) AS revenue,
+             COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'cod_pending') THEN commission_amount_paise ELSE 0 END), 0) AS totalCommissionEarned,
              COALESCE(SUM(CASE WHEN coupon_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS couponUsage
       FROM merch_orders
       WHERE influencer_id IN (${ids.map(() => '?').join(', ')})
@@ -675,7 +712,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       revenue,
       couponUsage: Number(stats.couponUsage || 0),
       activeCampaigns: coupons.filter((coupon) => Number(coupon.isActive ?? coupon.active ?? 0) === 1).length,
-      commission: Math.round(Number(stats.totalOrders || 0) * commissionPerOrderPaise),
+      commission: Math.max(0, Math.round(Number(stats.totalCommissionEarned || 0))),
       createdAt: row.createdAt || row.created_at || null,
       updatedAt: row.updatedAt || row.updated_at || null,
     };
@@ -866,7 +903,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       SELECT mo.id, mo.order_number AS orderNumber, mo.customer_name AS customerName, mo.customer_email AS customerEmail,
              mo.is_guest AS isGuest, mo.status, mo.payment_status AS paymentStatus,
              mo.payment_method AS paymentMethod, mo.razorpay_payment_id AS paymentReference,
-             mo.total_amount AS totalAmount, mo.discount_amount AS discountAmount,
+             mo.total_amount AS totalAmount, mo.discount_amount AS discountAmount, mo.commission_amount_paise AS commissionAmountPaise,
              mo.coupon_id AS couponId, mo.coupon_code AS couponCode, mo.created_at AS createdAt
       FROM merch_orders mo
       WHERE mo.influencer_id = ?
@@ -892,7 +929,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const customerEmailCounts = new Map();
     const allOrders = orderRows.map((order) => {
       const items = itemsByOrderId.get(Number(order.id)) || [];
-      const commissionEarned = commissionPerOrderPaise;
+      const commissionEarned = Math.max(0, Number(order.commissionAmountPaise || 0));
       const productSummary = items.length
         ? items.map((item) => `${String(item.productName || 'Item')} x${Number(item.quantity || 0)}`).join(', ')
         : 'Merch order';
@@ -957,7 +994,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const activeOrders = allOrders.filter((order) => !['cancelled', 'refunded'].includes(String(order.orderStatus || '').toLowerCase()));
     const salesGenerated = paidOrders.reduce((sum, order) => sum + Number(order.orderAmount || 0), 0);
     const totalOrdersReferred = activeOrders.length;
-    const commissionEarned = Math.round(paidOrders.length * commissionPerOrderPaise);
+    const commissionEarned = paidOrders.reduce((sum, order) => sum + Math.max(0, Number(order.commissionEarned || 0)), 0);
     const commissionPayments = getInfluencerCommissionPayments(influencerId);
     const commissionPaidFromPayments = commissionPayments
       .filter((payment) => ['paid', 'processed', 'completed', 'settled'].includes(String(payment.status || '').toLowerCase()))
@@ -1434,8 +1471,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       primarySku: String(primaryVariant?.sku || ''),
       sku: String(primaryVariant?.sku || ''),
       stock,
-      status: Number(product.is_active || 1) === 1 ? 'published' : 'archived',
-      archived: Number(product.is_active || 1) !== 1,
+      // `is_active` is intentionally checked with nullish semantics here:
+      // zero means archived and must not be replaced by the fallback value.
+      status: Number(product.is_active ?? 1) === 1 ? 'published' : 'archived',
+      archived: Number(product.is_active ?? 1) !== 1,
       featured: false,
       comboPurchase: Number(product.combo_purchase || 0) === 1,
       isCombo: Number(product.is_combo || 0) === 1,
@@ -1567,6 +1606,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       gstAmount: Number(order.gstAmount || order.gst_amount || 0),
       shippingCharge: Number(order.shippingCharge || order.shipping_charge || 0),
       discountAmount: Number(order.discountAmount || order.discount_amount || 0),
+      commissionAmountPaise: Number(order.commissionAmountPaise || order.commission_amount_paise || 0),
       couponId: order.couponId || order.coupon_id || null,
       couponCode: String(order.couponCode || order.coupon_code || ''),
       influencerId: order.influencerId || order.influencer_id || null,
@@ -1652,7 +1692,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       SELECT mo.id, mo.order_number AS orderNumber, mo.customer_name AS customerName, mo.customer_email AS customerEmail,
              mo.customer_phone AS customerPhone, mo.guest_name AS guestName, mo.guest_email AS guestEmail,
              mo.guest_phone AS guestPhone, mo.is_guest AS isGuest, mo.status, mo.subtotal, mo.gst_amount AS gstAmount,
-             mo.shipping_charge AS shippingCharge, mo.discount_amount AS discountAmount, mo.coupon_id AS couponId,
+             mo.shipping_charge AS shippingCharge, mo.discount_amount AS discountAmount, mo.commission_amount_paise AS commissionAmountPaise, mo.coupon_id AS couponId,
              mo.coupon_code AS couponCode, mo.influencer_id AS influencerId, mi.name AS influencerName,
              mi.handle AS influencerHandle, mo.total_amount AS totalAmount, mo.payment_method AS paymentMethod,
              mo.payment_status AS paymentStatus, mo.razorpay_order_id AS razorpayOrderId,
@@ -1696,6 +1736,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function buildMerchReports({ startDate = null, endDate = null } = {}) {
     const allOrders = loadMerchOrders({ startDate, endDate });
+    // Reports keep the normal confirmed-order visibility rules, while the live
+    // feed must also see orders immediately after checkout creates them.
+    const notificationOrders = loadMerchOrders({ startDate, endDate, includeUnconfirmed: true });
     const products = loadMerchProductCatalog({ includeInactive: true });
     const profiles = db
       .prepare(
@@ -1709,6 +1752,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const coupons = db
       .prepare(
         `SELECT c.id, c.code, c.coupon_type AS couponType, c.active, c.influencer_id AS influencerId,
+                c.expires_at AS expiresAt, c.valid_till AS validTill,
+                c.created_at AS createdAt,
                 COUNT(cr.id) AS totalRedemptions
          FROM coupons c
          LEFT JOIN coupon_redemptions cr ON cr.coupon_id = c.id
@@ -1754,17 +1799,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const revenueByDate = new Map();
     const monthlyInfluencerMap = new Map();
     for (const order of paidOrders) {
-      const dateKey = String(order.createdAt || '').slice(0, 10);
+      const dateKey = getMerchDateKey(order.createdAt);
       if (!dateKey) continue;
       revenueByDate.set(dateKey, (revenueByDate.get(dateKey) || 0) + Number(order.totalAmount || 0));
     }
     for (const order of allOrders) {
       const influencerId = Number(order.influencerId || 0);
-      const monthKey = String(order.createdAt || '').slice(0, 7);
+      const monthKey = getMerchDateKey(order.createdAt).slice(0, 7);
       if (!influencerId || !monthKey) continue;
 
       const influencer = influencerById.get(influencerId) || null;
-      const commissionPerOrderPaise = Math.max(0, Math.round(Number(influencer?.commissionPerOrderPaise || 0)));
       const entryKey = `${monthKey}:${influencerId}`;
       const existing = monthlyInfluencerMap.get(entryKey) || {
         month: monthKey,
@@ -1780,7 +1824,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const orderRevenue = Number(order.totalAmount || 0);
       existing.orders += 1;
       existing.revenue += orderRevenue;
-      existing.commission += commissionPerOrderPaise;
+      existing.commission += Math.max(0, Number(order.commissionAmountPaise || 0));
       if (String(order.couponCode || '').trim()) {
         existing.couponUsage += 1;
       }
@@ -1789,7 +1833,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     const monthlyRevenueMap = new Map();
     for (const order of paidOrders) {
-      const monthKey = String(order.createdAt || '').slice(0, 7);
+      const monthKey = getMerchDateKey(order.createdAt).slice(0, 7);
       if (!monthKey) continue;
       const entry = monthlyRevenueMap.get(monthKey) || { month: monthKey, revenue: 0, orders: 0 };
       entry.revenue += Number(order.totalAmount || 0);
@@ -1855,6 +1899,105 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       })
       .sort((left, right) => String(right.registrationDate || right.lastOrder?.createdAt || '').localeCompare(String(left.registrationDate || left.lastOrder?.createdAt || '')))
       .slice(0, 5);
+
+    const notifications = [];
+    const pushNotification = ({ id, type, title, message, time, read = false }) => {
+      if (!time) return;
+      notifications.push({ id: String(id), type, title, message, time, read });
+    };
+
+    for (const product of products
+      .filter((item) => !item.archived && Number(item.stock || 0) <= LOW_STOCK_THRESHOLD)
+      .sort((left, right) => Number(left.stock || 0) - Number(right.stock || 0))) {
+      pushNotification({
+        id: `stock-${product.id}`,
+        type: Number(product.stock || 0) === 0 ? 'Out of Stock' : 'Low Stock',
+        title: Number(product.stock || 0) === 0 ? 'Out of Stock' : 'Low Stock',
+        message: Number(product.stock || 0) === 0
+          ? `${product.name} is out of stock.`
+          : `${product.name} has only ${Number(product.stock || 0)} units remaining.`,
+        time: product.updatedAt || product.createdAt || new Date().toISOString(),
+      });
+    }
+
+    for (const order of notificationOrders.slice(0, 10)) {
+      pushNotification({
+        id: `order-${order.id}`,
+        type: 'New Order',
+        title: 'New Order',
+        message: `${order.orderNumber} placed by ${order.customerName || 'a customer'}.`,
+        time: order.createdAt,
+      });
+      if (order.influencerName || order.couponCode) {
+        pushNotification({
+          id: `referral-${order.id}`,
+          type: 'Influencer Referral',
+          title: 'Influencer Referral',
+          message: `${order.orderNumber} used ${order.couponCode || 'an assigned influencer coupon'}.`,
+          time: order.createdAt,
+          read: true,
+        });
+      }
+      const paymentStatus = String(order.paymentStatus || '').toLowerCase();
+      if (['failed', 'failure'].includes(paymentStatus)) {
+        pushNotification({
+          id: `payment-failed-${order.id}`,
+          type: 'Payment Failed',
+          title: 'Payment Failed',
+          message: `${order.orderNumber} payment failed.`,
+          time: order.updatedAt || order.createdAt,
+        });
+      } else if (['paid', 'cod_pending'].includes(paymentStatus)) {
+        pushNotification({
+          id: `payment-${order.id}`,
+          type: 'Payment Received',
+          title: 'Payment Received',
+          message: `Payment received for ${order.orderNumber}.`,
+          time: order.updatedAt || order.createdAt,
+          read: true,
+        });
+      }
+      const orderStatus = String(order.status || '').toLowerCase();
+      if (['cancelled', 'returned'].includes(orderStatus)) {
+        pushNotification({
+          id: `order-status-${order.id}`,
+          type: 'Order Cancelled',
+          title: orderStatus === 'returned' ? 'Order Returned' : 'Order Cancelled',
+          message: `${order.orderNumber} was ${orderStatus}.`,
+          time: order.updatedAt || order.createdAt,
+          read: true,
+        });
+      }
+    }
+
+    for (const customer of recentCustomers) {
+      pushNotification({
+        id: `customer-${customer.id}`,
+        type: 'New Customer',
+        title: 'New Customer',
+        message: `${customer.name} created a new merch account.`,
+        time: customer.registrationDate,
+        read: true,
+      });
+    }
+
+    const now = Date.now();
+    for (const coupon of coupons) {
+      const expiry = String(coupon.expiresAt || coupon.validTill || '').trim();
+      const expiryTime = expiry ? new Date(expiry.replace(' ', 'T')).getTime() : NaN;
+      if (Number.isFinite(expiryTime) && expiryTime > now && expiryTime - now <= 14 * 24 * 60 * 60 * 1000) {
+        pushNotification({
+          id: `coupon-${coupon.id}`,
+          type: 'Coupon Expiring',
+          title: 'Coupon Expiring',
+          message: `${coupon.code} expires on ${expiry}.`,
+          time: coupon.updatedAt || coupon.createdAt || expiry,
+          read: true,
+        });
+      }
+    }
+
+    notifications.sort((left, right) => new Date(right.time).getTime() - new Date(left.time).getTime());
 
     const orderItemStats = new Map();
     for (const order of allOrders) {
@@ -2001,6 +2144,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       recentCouponUsage,
       recentCustomers,
       recentOrders: allOrders.slice(0, 5),
+      notifications: notifications.slice(0, 25),
     };
   }
 
@@ -2859,6 +3003,292 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return { html, text };
   }
 
+  function getMerchWhatsAppConfig() {
+    const enabledValue = String(process.env.WHATSAPP_ORDER_CONFIRMATION_ENABLED || '').trim().toLowerCase();
+    const token = String(process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_WHATSAPP_ACCESS_TOKEN || '').trim();
+    const phoneNumberId = String(process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.META_WHATSAPP_PHONE_NUMBER_ID || '').trim();
+    return {
+      enabled: enabledValue === 'true' || (!['false', '0', 'no', 'off'].includes(enabledValue) && Boolean(token && phoneNumberId)),
+      token,
+      phoneNumberId,
+      apiVersion: String(process.env.WHATSAPP_API_VERSION || 'v20.0').trim(),
+      actionTemplateName: String(process.env.WHATSAPP_ORDER_ACTION_TEMPLATE || '').trim(),
+      templateLanguage: String(process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'en').trim(),
+    };
+  }
+
+  function normalizeMerchWhatsAppPhone(phone) {
+    const digits = String(phone || '').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.length === 10) return `91${digits}`;
+    return digits;
+  }
+
+  function formatMerchWhatsAppCurrency(paise) {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(Number(paise || 0) / 100);
+  }
+
+  function buildMerchWhatsAppCardHtml({ order, items, req }) {
+    const links = buildMerchEmailLinks(req, order.id);
+    const expectedStart = addMerchEmailDays(order.createdAt, 5);
+    const expectedEnd = addMerchEmailDays(order.createdAt, 9);
+    const expectedDelivery = `${formatMerchEmailDate(expectedStart)} - ${formatMerchEmailDate(expectedEnd)}`;
+    const firstItem = items[0] || {};
+    const heroImage = links.hero;
+    const logo = links.logo;
+    const itemRows = (items.length ? items : [firstItem]).map((item) => `
+      <div class="product-row">
+        <img src="${escapeHtml(getMerchEmailAssetUrl(req, item.imageUrl || firstItem.imageUrl || links.placeholder))}" alt="">
+        <div class="product-copy">
+          <h3>${escapeHtml(item.productName || 'H2 House Merch')}</h3>
+          <p>${escapeHtml(item.variantLabel || item.sku || 'Standard')} <span>|</span> Quantity: ${escapeHtml(String(item.quantity || 1))}</p>
+        </div>
+        <strong>${formatMerchWhatsAppCurrency(item.lineTotal || order.totalAmount || 0)}</strong>
+      </div>
+    `).join('');
+
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; background: #FAF7F4; color: #2F2F2F; font-family: Arial, Helvetica, sans-serif; }
+      .card { width: 760px; min-height: 1060px; margin: 0; background: #FAF7F4; border: 6px solid #fff; border-radius: 24px; overflow: hidden; box-shadow: 0 18px 44px rgba(87, 48, 26, .16); }
+      .hero { position: relative; min-height: 278px; padding: 34px 36px 28px; background: linear-gradient(90deg, rgba(250,247,244,.98) 0%, rgba(250,247,244,.9) 48%, rgba(250,247,244,.35) 100%); }
+      .hero::after { content: ""; position: absolute; inset: 0; background: url("${escapeHtml(heroImage)}") right center / 43% auto no-repeat; opacity: .98; }
+      .hero-content { position: relative; z-index: 1; width: 58%; }
+      .logo { width: 148px; height: auto; display: block; margin-bottom: 24px; }
+      h1 { margin: 0; font-family: Georgia, 'Times New Roman', serif; color: #A0522D; font-size: 70px; line-height: .98; letter-spacing: 0; }
+      .tagline { margin: 22px 0 0; color: #6e3826; font-family: Georgia, 'Times New Roman', serif; font-size: 22px; line-height: 1.28; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+      .rule { width: 62px; height: 1px; margin-top: 24px; background: #A0522D; }
+      .confirmed { padding: 4px 44px 20px; text-align: center; }
+      .success { display: inline-flex; align-items: center; justify-content: center; width: 54px; height: 54px; border-radius: 999px; margin-bottom: 14px; background: #2E7D32; color: #fff; font-size: 38px; font-weight: 700; }
+      .confirmed h2 { margin: 0 0 8px; font-family: Georgia, 'Times New Roman', serif; font-size: 30px; line-height: 1.18; color: #141414; }
+      .confirmed p { margin: 0 auto; max-width: 510px; font-size: 18px; line-height: 1.35; color: #111; }
+      .info-grid { display: grid; grid-template-columns: repeat(4, 1fr); margin: 0 28px 8px; border: 1px solid #ead3c6; border-radius: 12px; overflow: hidden; background: rgba(255, 250, 247, .7); }
+      .info { min-height: 130px; padding: 20px 12px 16px; text-align: center; border-right: 1px solid #ead3c6; }
+      .info:last-child { border-right: 0; }
+      .info .icon { margin-bottom: 12px; color: #A0522D; font-size: 28px; line-height: 1; }
+      .info span { display: block; margin-bottom: 8px; font-size: 15px; color: #4d3328; }
+      .info strong { display: block; color: #982d18; font-size: 15px; line-height: 1.28; word-break: break-word; }
+      .products { margin: 8px 28px; display: grid; gap: 8px; }
+      .product-row { min-height: 108px; display: grid; grid-template-columns: 122px 1fr 144px; align-items: center; gap: 12px; padding: 12px 22px; border: 1px solid #ead3c6; border-radius: 12px; background: rgba(255, 250, 247, .72); }
+      .product-row img { width: 100px; height: 84px; object-fit: contain; }
+      .product-row h3 { margin: 0 0 8px; font-family: Georgia, 'Times New Roman', serif; color: #171717; font-size: 24px; line-height: 1.15; }
+      .product-row p { margin: 0; color: #111; font-size: 16px; line-height: 1.3; }
+      .product-row p span { margin: 0 10px; color: #A0522D; }
+      .product-row strong { justify-self: end; color: #111; font-size: 20px; white-space: nowrap; }
+      .summary { margin: 8px 28px 12px; padding: 10px 14px 4px; border: 1px solid #ead3c6; border-radius: 12px; background: rgba(255, 250, 247, .72); }
+      .summary-row { display: flex; justify-content: space-between; align-items: baseline; padding: 5px 0; font-size: 17px; line-height: 1.25; }
+      .summary-row strong { font-weight: 500; }
+      .summary-total { margin-top: 6px; padding-top: 12px; border-top: 1px dashed #ddbea9; color: #A0522D; font-family: Georgia, 'Times New Roman', serif; font-size: 22px; font-weight: 700; }
+      .footer-note { margin: 0 28px; padding: 12px 6px 14px; border-top: 1px solid #dfc2b3; font-size: 16px; line-height: 1.35; }
+      .footer-note p { margin: 0; }
+      .footer { display: flex; align-items: center; min-height: 58px; padding: 0 30px; border-top: 1px solid #ead3c6; background: rgba(255, 250, 247, .75); }
+      .footer img { width: 118px; height: auto; }
+      .footer .divider { width: 1px; height: 32px; background: #dfc2b3; margin: 0 32px; }
+      .follow { color: #5c3a2e; font-size: 15px; margin-right: 20px; }
+      .social { display: flex; gap: 34px; color: #A0522D; font-size: 26px; font-weight: 700; align-items: center; }
+      .time { margin-left: auto; color: #777; font-size: 15px; }
+    </style>
+  </head>
+  <body>
+    <article class="card">
+      <section class="hero">
+        <div class="hero-content">
+          <img class="logo" src="${escapeHtml(logo)}" alt="H2 House of Health">
+          <h1>Thank You!</h1>
+          <p class="tagline">Preventive Today,<br>Healthier Tomorrow.</p>
+          <div class="rule"></div>
+        </div>
+      </section>
+      <section class="confirmed">
+        <div class="success">✓</div>
+        <h2>Your order is confirmed.</h2>
+        <p>We're preparing your order with care and will notify you once it's on the way.</p>
+      </section>
+      <section class="info-grid">
+        <div class="info"><div class="icon">□</div><span>Order ID</span><strong>${escapeHtml(order.orderNumber || `Order #${order.id}`)}</strong></div>
+        <div class="info"><div class="icon">▦</div><span>Order Date</span><strong>${escapeHtml(formatMerchEmailDateTime(order.createdAt) || order.createdAt || '')}</strong></div>
+        <div class="info"><div class="icon">₹</div><span>Total Paid</span><strong>${formatMerchWhatsAppCurrency(order.totalAmount || 0)}</strong></div>
+        <div class="info"><div class="icon">▭</div><span>Estimated Delivery</span><strong>${escapeHtml(expectedDelivery)}<br>We'll keep you updated.</strong></div>
+      </section>
+      <section class="products">${itemRows}</section>
+      <section class="summary">
+        <div class="summary-row"><span>Subtotal</span><strong>${formatMerchWhatsAppCurrency(order.subtotal || 0)}</strong></div>
+        <div class="summary-row"><span>Shipping</span><strong>${formatMerchWhatsAppCurrency(order.shippingCharge || 0)}</strong></div>
+        <div class="summary-row"><span>GST (Inclusive)</span><strong>${formatMerchWhatsAppCurrency(order.gstAmount || 0)}</strong></div>
+        <div class="summary-row summary-total"><span>Total Paid</span><strong>${formatMerchWhatsAppCurrency(order.totalAmount || 0)}</strong></div>
+      </section>
+      <section class="footer-note">
+        <p>Thank you for choosing H2 House of Health.</p>
+        <p>We truly appreciate your trust in us.</p>
+      </section>
+      <footer class="footer">
+        <img src="${escapeHtml(logo)}" alt="H2 House of Health">
+        <div class="divider"></div>
+        <span class="follow">Follow us</span>
+        <div class="social"><span>◎</span><span>f</span><span>▶</span></div>
+        <span class="time">${escapeHtml(new Intl.DateTimeFormat('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date()))}</span>
+      </footer>
+    </article>
+  </body>
+</html>`;
+  }
+
+  async function renderMerchWhatsAppCardImage({ order, items, req }) {
+    if (!puppeteer) {
+      throw new Error('Puppeteer is not available for WhatsApp card rendering');
+    }
+    let browser;
+    try {
+      browser = await puppeteer.launch({
+        headless: 'new',
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      });
+      const page = await browser.newPage();
+      await page.setViewport({ width: 760, height: 1100, deviceScaleFactor: 2 });
+      await page.setContent(buildMerchWhatsAppCardHtml({ order, items, req }), { waitUntil: 'networkidle0', timeout: 30000 });
+      const card = await page.$('.card');
+      if (!card) throw new Error('WhatsApp card root was not rendered');
+      return card.screenshot({ type: 'png' });
+    } finally {
+      if (browser) await browser.close();
+    }
+  }
+
+  function submitWhatsAppMediaUpload({ config, toUploadBuffer, filename }) {
+    return new Promise((resolve, reject) => {
+      const form = new FormData();
+      form.append('messaging_product', 'whatsapp');
+      form.append('type', 'image/png');
+      form.append('file', toUploadBuffer, { filename, contentType: 'image/png' });
+      const request = form.submit({
+        protocol: 'https:',
+        host: 'graph.facebook.com',
+        path: `/${config.apiVersion}/${config.phoneNumberId}/media`,
+        headers: { Authorization: `Bearer ${config.token}` },
+      }, (error, response) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => { body += chunk; });
+        response.on('end', () => {
+          let parsed = {};
+          try {
+            parsed = body ? JSON.parse(body) : {};
+          } catch {
+            parsed = { raw: body };
+          }
+          if (response.statusCode < 200 || response.statusCode >= 300 || !parsed.id) {
+            reject(new Error(parsed?.error?.message || `WhatsApp media upload failed with HTTP ${response.statusCode}`));
+            return;
+          }
+          resolve(parsed.id);
+        });
+      });
+      request.on('error', reject);
+    });
+  }
+
+  async function sendWhatsAppGraphMessage(config, payload) {
+    const response = await fetch(`https://graph.facebook.com/${config.apiVersion}/${config.phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ messaging_product: 'whatsapp', ...payload }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.error?.message || `WhatsApp message failed with HTTP ${response.status}`);
+    }
+    return data;
+  }
+
+  async function sendMerchWhatsAppActionMessage({ config, to, order, links }) {
+    const actionText = "Choose an action below 👇\n\nWe're here to help!";
+    if (config.actionTemplateName) {
+      await sendWhatsAppGraphMessage(config, {
+        to,
+        type: 'template',
+        template: {
+          name: config.actionTemplateName,
+          language: { code: config.templateLanguage },
+          components: [
+            {
+              type: 'body',
+              parameters: [
+                { type: 'text', text: order.orderNumber || `Order #${order.id}` },
+              ],
+            },
+            { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: links.track }] },
+            { type: 'button', sub_type: 'url', index: '1', parameters: [{ type: 'text', text: links.home }] },
+            { type: 'button', sub_type: 'url', index: '2', parameters: [{ type: 'text', text: links.shop }] },
+          ],
+        },
+      });
+      return;
+    }
+
+    await sendWhatsAppGraphMessage(config, {
+      to,
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: actionText },
+        action: {
+          buttons: [
+            { type: 'reply', reply: { id: `track:${links.track}`, title: '📦 Track My Order' } },
+            { type: 'reply', reply: { id: `home:${links.home}`, title: '🏠 Back to Home' } },
+            { type: 'reply', reply: { id: `shop:${links.shop}`, title: '🛍 Continue Shopping' } },
+          ],
+        },
+      },
+    });
+  }
+
+  async function sendMerchWhatsAppOrderConfirmation(orderId, req) {
+    const config = getMerchWhatsAppConfig();
+    if (!config.enabled) return;
+    if (!config.token || !config.phoneNumberId) {
+      console.warn('[Merch] WhatsApp confirmation skipped: WhatsApp credentials are not configured.');
+      return;
+    }
+
+    const data = getMerchOrderEmailData(orderId);
+    const to = normalizeMerchWhatsAppPhone(data?.order?.customerPhone);
+    if (!data || !to) {
+      console.warn('[Merch] WhatsApp confirmation skipped: customer phone is missing.');
+      return;
+    }
+
+    const links = buildMerchEmailLinks(req, data.order.id);
+    const cardBuffer = await renderMerchWhatsAppCardImage({ order: data.order, items: data.items, req });
+    const mediaId = await submitWhatsAppMediaUpload({
+      config,
+      toUploadBuffer: cardBuffer,
+      filename: `h2-order-${String(data.order.orderNumber || data.order.id).replace(/[^a-z0-9_-]+/gi, '-')}.png`,
+    });
+    await sendWhatsAppGraphMessage(config, {
+      to,
+      type: 'image',
+      image: { id: mediaId },
+    });
+    await sendMerchWhatsAppActionMessage({ config, to, order: data.order, links });
+  }
+
   async function sendMerchOrderConfirmationEmail(orderId, req) {
     const data = getMerchOrderEmailData(orderId);
     if (!data || !isValidMerchEmail(data.order.customerEmail)) return;
@@ -2872,6 +3302,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       subject: `Your H2 order is confirmed - ${data.order.orderNumber || `Order #${data.order.id}`}`,
       text,
       html,
+    });
+    sendMerchWhatsAppOrderConfirmation(orderId, req).catch((error) => {
+      console.error('[Merch] Failed to send WhatsApp order confirmation:', error?.message || error);
     });
   }
 
@@ -2908,6 +3341,18 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       return { error: 'This influencer coupon is no longer active.' };
     }
     return result;
+  }
+
+  function getMerchCommissionSnapshot(coupon, items = []) {
+    if (!coupon?.influencerId) return { total: 0, byProduct: new Map() };
+    const fallback = Math.max(0, Math.round(Number(coupon.commissionPerOrderPaise || 0)));
+    const lineCommissions = new Map();
+    let total = items.length ? fallback : 0;
+    for (const item of items) {
+      const productCommission = fallback;
+      lineCommissions.set(Number(item.variantId), productCommission);
+    }
+    return { total, byProduct: lineCommissions };
   }
 
   function recordMerchCouponRedemption(payload) {
@@ -2998,9 +3443,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!couponCode) {
       return res.status(400).json({ error: 'couponCode is required' });
     }
-    if (!authUser) {
-      return res.status(401).json({ error: 'Sign in to redeem an influencer coupon.' });
-    }
 
     const subtotalAmountPaise = Number(req.body?.subtotalAmountPaise || 0);
     const couponResult = validateMerchCouponForUser({
@@ -3027,9 +3469,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const authUser = getMerchAuthUser(req);
     const merchProfile = authUser ? ensureMerchCustomerProfileForUser(authUser) : null;
     const couponCode = normalizeMerchCouponCode(req.body?.couponCode);
-    if (couponCode && !authUser) {
-      return res.status(401).json({ error: 'Sign in to redeem an influencer coupon.' });
-    }
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Cart is empty' });
     }
@@ -3088,6 +3527,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const shippingCharge = subtotal >= 99900 ? 0 : 9900; // Free above ₹999
     const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
     const influencerId = Number(couponResult.coupon?.influencerId || 0) > 0 ? Number(couponResult.coupon.influencerId) : null;
+    const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems);
     const totalAmount = Math.max(100, subtotal + shippingCharge - discountAmount);
     const orderNumber = generateOrderNumber();
     const shippingAddressPayload = address || {};
@@ -3106,24 +3546,24 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }).then(rpOrder => {
       // Save order to DB
       const insertOrder = db.prepare(`
-        INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, total_amount, payment_method, payment_status, razorpay_order_id, shipping_address, billing_address)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, 'online', 'pending', ?, ?, ?)
+        INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, commission_amount_paise, commission_snapshot_at, total_amount, payment_method, payment_status, razorpay_order_id, shipping_address, billing_address)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'online', 'pending', ?, ?, ?)
       `);
       const result = insertOrder.run(
         orderNumber, resolvedCustomer.name, resolvedCustomer.email, resolvedCustomer.phone,
         guestName, guestEmail, guestPhone, isGuestCheckout ? 1 : 0, authUser?.id || null, merchProfile?.id || null,
-        subtotal, gstAmount, shippingCharge, discountAmount, couponResult.coupon?.id || null, couponResult.couponCode || null, influencerId, totalAmount,
+        subtotal, gstAmount, shippingCharge, discountAmount, couponResult.coupon?.id || null, couponResult.couponCode || null, influencerId, commissionSnapshot.total, totalAmount,
         rpOrder.id, JSON.stringify(shippingAddressPayload || {}), JSON.stringify(billingAddressPayload || shippingAddressPayload || {})
       );
       const orderId = result.lastInsertRowid;
 
       // Save order items
       const insertItem = db.prepare(`
-        INSERT INTO merch_order_items (order_id, variant_id, product_name, variant_label, sku, unit_price, quantity, line_total)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO merch_order_items (order_id, variant_id, product_name, variant_label, sku, unit_price, quantity, line_total, commission_amount_paise)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       for (const item of validatedItems) {
-        insertItem.run(orderId, item.variantId, item.productName, item.variantLabel, item.sku, item.unitPrice, item.quantity, item.lineTotal);
+        insertItem.run(orderId, item.variantId, item.productName, item.variantLabel, item.sku, item.unitPrice, item.quantity, item.lineTotal, commissionSnapshot.byProduct.get(Number(item.variantId)) || 0);
       }
 
       res.json({
@@ -3211,9 +3651,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Cart is empty' });
     }
-    if (couponCode && !authUser) {
-      return res.status(401).json({ error: 'Sign in to apply a coupon.' });
-    }
     const resolvedCustomer = {
       name: String(customer?.name || merchProfile?.fullName || authUser?.name || '').trim(),
       email: String(customer?.email || merchProfile?.email || authUser?.email || '').trim().toLowerCase(),
@@ -3254,6 +3691,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const codSurcharge = 5000; // ₹50
     const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
     const influencerId = Number(couponResult.coupon?.influencerId || 0) > 0 ? Number(couponResult.coupon.influencerId) : null;
+    const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems);
     const totalAmount = Math.max(100, subtotal + shippingCharge + codSurcharge - discountAmount);
     const orderNumber = generateOrderNumber();
     const shippingAddressPayload = address || {};
@@ -3264,8 +3702,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const guestPhone = isGuestCheckout ? resolvedCustomer.phone : null;
 
     const result = db.prepare(`
-      INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, total_amount, payment_method, payment_status, shipping_address, billing_address)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?, ?, ?, 'cod', 'cod_pending', ?, ?)
+      INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, commission_amount_paise, commission_snapshot_at, total_amount, payment_method, payment_status, shipping_address, billing_address)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'cod', 'cod_pending', ?, ?)
     `).run(
       orderNumber,
       resolvedCustomer.name,
@@ -3284,15 +3722,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       couponResult.coupon?.id || null,
       couponResult.couponCode || null,
       influencerId,
+      commissionSnapshot.total,
       totalAmount,
       JSON.stringify(shippingAddressPayload || {}),
       JSON.stringify(billingAddressPayload || shippingAddressPayload || {})
     );
 
     const orderId = result.lastInsertRowid;
-    const insertItem = db.prepare('INSERT INTO merch_order_items (order_id, variant_id, product_name, variant_label, sku, unit_price, quantity, line_total) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    const insertItem = db.prepare('INSERT INTO merch_order_items (order_id, variant_id, product_name, variant_label, sku, unit_price, quantity, line_total, commission_amount_paise) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
     for (const item of validatedItems) {
-      insertItem.run(orderId, item.variantId, item.productName, item.variantLabel, item.sku, item.unitPrice, item.quantity, item.lineTotal);
+      insertItem.run(orderId, item.variantId, item.productName, item.variantLabel, item.sku, item.unitPrice, item.quantity, item.lineTotal, commissionSnapshot.byProduct.get(Number(item.variantId)) || 0);
       decrementMerchPurchaseVariant(item.variantId, item.quantity);
     }
 
@@ -3319,6 +3758,33 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   });
 
   // ─── ADMIN: Get all orders ───
+  app.post('/api/merch/wishlist', requireMerchAuth, (req, res) => {
+    const profile = ensureMerchCustomerProfileForUser(req.user);
+    const productId = Number(req.body?.productId || 0) || null;
+    const variantId = Number(req.body?.variantId || 0) || null;
+
+    if (!profile || (!productId && !variantId)) {
+      return res.status(400).json({ error: 'A product or variant is required' });
+    }
+
+    db.prepare(`
+      INSERT OR IGNORE INTO merch_customer_wishlist_items (customer_id, product_id, variant_id)
+      VALUES (?, ?, ?)
+    `).run(profile.id, productId, variantId);
+
+    const item = db.prepare(`
+      SELECT id, customer_id AS customerId, product_id AS productId, variant_id AS variantId,
+             created_at AS createdAt, updated_at AS updatedAt
+      FROM merch_customer_wishlist_items
+      WHERE customer_id = ?
+        AND ((product_id = ?) OR (product_id IS NULL AND ? IS NULL))
+        AND ((variant_id = ?) OR (variant_id IS NULL AND ? IS NULL))
+      LIMIT 1
+    `).get(profile.id, productId, productId, variantId, variantId);
+
+    return res.json({ success: true, item });
+  });
+
   app.get('/api/merch/profile', requireMerchAuth, (req, res) => {
     const profile = syncMerchGuestOrdersForUser(req.user) || ensureMerchCustomerProfileForUser(req.user);
     if (!profile) {
@@ -3921,7 +4387,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
              substr(mo.created_at, 1, 7) AS month,
              COUNT(*) AS orders,
              COALESCE(SUM(mo.total_amount), 0) AS revenue,
-             COUNT(*) * COALESCE(i.commission_per_order_paise, 0) AS commission,
+             COALESCE(SUM(mo.commission_amount_paise), 0) AS commission,
              SUM(CASE WHEN mo.coupon_id IS NOT NULL THEN 1 ELSE 0 END) AS couponUsage
       FROM merch_orders mo
       JOIN merch_influencers i ON i.id = mo.influencer_id
@@ -3951,7 +4417,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
              substr(mo.created_at, 1, 10) AS day,
              COUNT(*) AS orders,
              COALESCE(SUM(mo.total_amount), 0) AS revenue,
-             COUNT(*) * COALESCE(i.commission_per_order_paise, 0) AS commission,
+             COALESCE(SUM(mo.commission_amount_paise), 0) AS commission,
              SUM(CASE WHEN mo.coupon_id IS NOT NULL THEN 1 ELSE 0 END) AS couponUsage
       FROM merch_orders mo
       JOIN merch_influencers i ON i.id = mo.influencer_id
@@ -3989,7 +4455,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         db.prepare(`
           UPDATE merch_influencers
           SET name = ?, handle = ?, phone = ?, notes = ?, avatar_url = ?, bio = ?, social_links_json = ?,
-             preferred_payment_details = ?, commission_per_order_paise = ?, active = ?, updated_at = datetime('now')
+             preferred_payment_details = ?, commission_per_order_paise = ?, paid_commission = ?, active = ?, updated_at = datetime('now')
           WHERE id = ?
         `).run(
           influencer.name,
@@ -4001,6 +4467,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           influencer.socialLinks.length ? JSON.stringify(influencer.socialLinks) : null,
           influencer.preferredPaymentDetails || null,
           influencer.commissionPerOrderPaise,
+          influencer.paidCommission,
           influencer.active,
           existingByEmail.id
         );
@@ -4328,7 +4795,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       shippedOrders: Number(report.statusBreakdown?.shipped || 0),
       deliveredOrders: Number(report.statusBreakdown?.delivered || 0),
       todayOrders: Array.isArray(report.recentOrders)
-        ? report.recentOrders.filter((order) => String(order.createdAt || '').slice(0, 10) === new Date().toISOString().slice(0, 10)).length
+        ? report.recentOrders.filter((order) => getMerchDateKey(order.createdAt) === getMerchDateKey(new Date())).length
         : 0,
       summary,
       statusBreakdown: report.statusBreakdown || {},
@@ -4337,6 +4804,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       recentPayments: report.recentPayments || [],
       recentCouponUsage: report.recentCouponUsage || [],
       recentCustomers: report.recentCustomers || [],
+      notifications: report.notifications || [],
       topProducts: report.topProducts || [],
       topCategories: report.topCategories || [],
       revenueSeries: report.revenueSeries || [],
@@ -4400,6 +4868,29 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     } catch (error) {
       console.error('Failed to create merch combo:', error);
       return res.status(500).json({ message: error.message || 'Unable to create combo.' });
+    }
+  });
+
+  // ADMIN: Remove selected product variants from every combo that contains them.
+  app.post('/api/merch/admin/combos/remove-components', requireAdmin, (req, res) => {
+    const variantIds = [...new Set((Array.isArray(req.body?.variantIds) ? req.body.variantIds : [])
+      .map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0))];
+    if (!variantIds.length) return res.status(400).json({ message: 'At least one product variant is required.' });
+    const placeholders = variantIds.map(() => '?').join(', ');
+    try {
+      const result = db.transaction(() => {
+        const affected = db.prepare(`SELECT DISTINCT combo_product_id AS comboId FROM merch_combo_items WHERE component_variant_id IN (${placeholders})`).all(...variantIds);
+        const removed = db.prepare(`DELETE FROM merch_combo_items WHERE component_variant_id IN (${placeholders})`).run(...variantIds);
+        const deactivate = db.prepare(`UPDATE merch_products SET is_active = 0, updated_at = datetime('now') WHERE id = ? AND is_combo = 1`);
+        const countItems = db.prepare('SELECT COUNT(*) AS count FROM merch_combo_items WHERE combo_product_id = ?');
+        affected.forEach(({ comboId }) => {
+          if (Number(countItems.get(comboId).count || 0) < 2) deactivate.run(comboId);
+        });
+        return { removed: Number(removed.changes || 0), combosUpdated: affected.length };
+      })();
+      return res.json(result);
+    } catch (error) {
+      return res.status(400).json({ message: error.message || 'Unable to remove products from combos.' });
     }
   });
 

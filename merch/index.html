@@ -69,10 +69,6 @@
           </button>
         </div>
       </header>
-      <div class="merch-auth-row">
-        <div class="storefront-header__cta merch-auth-cta" id="merchAuthCta" aria-live="polite">
-        </div>
-      </div>
     </div>
 
     <!-- Account Drawer -->
@@ -100,68 +96,109 @@
     </div>
 
     <main id="appMain" class="merch-main">
-      <!-- Hero Section -->
-      <section class="merch-hero">
+      <div class="merch-page-container">
+        <!-- Hero Section -->
+        <section class="merch-hero">
+        <div class="merch-auth-row">
+          <div class="storefront-header__cta merch-auth-cta" id="merchAuthCta" aria-live="polite">
+          </div>
+        </div>
         <div class="merch-hero__content">
+          <p class="merch-hero__eyebrow">HOUSE MERCH</p>
           <h1 class="merch-hero__title">Wear The <span class="text-accent">House</span></h1>
           <p class="merch-hero__subtitle">Premium merchandise crafted for wellness enthusiasts. Sustainably made, designed to move with you.</p>
           <button id="heroShopBtn" class="btn btn-primary btn-lg" type="button">Shop Now</button>
         </div>
-      </section>
+        <div class="merch-hero__art" aria-label="Hydrogen Bottle, Hydrogen Mist, and Brown Hoodie">
+          <img class="merch-hero__image merch-hero__image--composition" src="/cdn/shop/files/hero/h2-merch-hero-editorial.png" alt="Hydrogen bottle, hydrogen mist, hoodie, and layered stone platforms" loading="eager" />
+        </div>
+        </section>
 
-      <!-- Category Cards -->
-      <section class="merch-categories" aria-label="Shop by category">
+        <!-- Category Cards -->
+        <section class="merch-categories" aria-label="Shop by category">
         <h2 class="section-title">Shop by Category</h2>
         <div class="category-grid">
-          <button class="category-card" type="button" data-category="hoodies">
-            <div class="category-card__image">
-              <img src="/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146&width=400" alt="Hoodies" loading="lazy" onerror="this.src='/booking/assets/service-hydrogen-session.jpg'" />
+          <button class="category-card category-card--mist" type="button" data-category="sprays">
+            <div class="category-card__copy">
+              <p class="category-card__eyebrow">HYDROGEN MIST</p>
+              <h3 class="category-card__title">Breathe Better.</h3>
+              <p class="category-card__desc">Refresh your skin with hydrogen-powered hydration.</p>
+              <span class="category-card__cta">Shop Now &rarr;</span>
             </div>
-            <h3 class="category-card__title">Hoodies</h3>
-            <p class="category-card__desc">450 GSM organic cotton blend</p>
+            <div class="category-card__image">
+              <img class="category-card__product category-card__product--mist" src="/cdn/shop/files/hero/h2-mist-transparent-source.png" alt="Hydrogen Mist" loading="lazy" />
+            </div>
           </button>
-          <button class="category-card" type="button" data-category="bottles">
-            <div class="category-card__image">
-              <img src="/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113" alt="Hydrogen Water Bottles" loading="lazy" />
+          <button class="category-card category-card--bottle" type="button" data-category="bottles">
+            <div class="category-card__copy">
+              <p class="category-card__eyebrow">HYDROGEN BOTTLE</p>
+              <h3 class="category-card__title">Hydration, Reimagined.</h3>
+              <p class="category-card__desc">Molecular hydrogen designed for everyday wellness.</p>
+              <span class="category-card__cta">Shop Now &rarr;</span>
             </div>
-            <h3 class="category-card__title">Hydrogen Water Bottles</h3>
-            <p class="category-card__desc">Molecular hydrogen on the go</p>
+            <div class="category-card__image">
+              <img class="category-card__product category-card__product--bottle" src="/cdn/shop/files/hero/h2-bottle-transparent-source.png" alt="Hydrogen Bottle" loading="lazy" />
+            </div>
           </button>
-          <button class="category-card" type="button" data-category="sprays">
-            <div class="category-card__image">
-              <img src="/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138" alt="Hydrogen Mists" loading="lazy" />
+          <button class="category-card category-card--hoodies" type="button" data-category="hoodies">
+            <div class="category-card__copy">
+              <p class="category-card__eyebrow">HOODIES</p>
+              <h3 class="category-card__title">Wear The House.</h3>
+              <p class="category-card__desc">Everyday comfort inspired by the House of Health.</p>
+              <span class="category-card__cta">Shop Now &rarr;</span>
             </div>
-            <h3 class="category-card__title">Hydrogen Mists / Sprays</h3>
-            <p class="category-card__desc">Refresh &amp; rejuvenate anywhere</p>
+            <div class="category-card__image">
+              <img class="category-card__product category-card__product--hoodie" src="/cdn/shop/files/hero/h2-hoodie-transparent-source.png" alt="Hoodies" loading="lazy" />
+            </div>
           </button>
         </div>
-      </section>
+        </section>
 
-      <!-- Product Listing -->
-      <section id="shopSection" class="merch-shop" aria-label="All products">
+        <!-- Product Listing -->
+        <section id="shopSection" class="merch-shop" aria-label="All products">
         <div class="shop-header">
-          <h2 class="section-title">All Products</h2>
-          <div class="shop-controls">
+          <div>
+            <h2 class="section-title">All Products</h2>
+            <p class="shop-subtitle">Premium merchandise crafted for wellness enthusiasts. Sustainably made, designed to move with you.</p>
+          </div>
+        </div>
+        <div class="product-filter-bar" aria-label="Product filters and sorting">
+          <div class="product-filter-bar__left">
             <select id="categoryFilter" class="shop-select" aria-label="Filter by category">
               <option value="all">All Categories</option>
               <option value="hoodies">Hoodies</option>
               <option value="bottles">Hydrogen Water Bottles</option>
               <option value="sprays">Hydrogen Mists / Sprays</option>
             </select>
+            <button id="filterToggleBtn" class="filter-button" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10m-7 6h4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+              Filter
+            </button>
+          </div>
+          <label class="sort-control">
+            <span>Sort by:</span>
             <select id="sortSelect" class="shop-select" aria-label="Sort by">
               <option value="newest">Newest First</option>
               <option value="price-asc">Price: Low to High</option>
               <option value="price-desc">Price: High to Low</option>
             </select>
+          </label>
+        </div>
+        <div class="merch-shop-layout">
+          <div class="merch-product-column">
+            <div id="productGrid" class="product-grid">
+              <!-- Products rendered by JS -->
+            </div>
+            <div id="productEmpty" class="product-empty" hidden>
+              <p>No products found matching your criteria.</p>
+            </div>
           </div>
+          <aside id="smartMerchSidebar" class="smart-merch-sidebar" aria-label="Curated House Merch recommendations">
+            <!-- Curated recommendations rendered by JS -->
+          </aside>
         </div>
-        <div id="productGrid" class="product-grid">
-          <!-- Products rendered by JS -->
-        </div>
-        <div id="productEmpty" class="product-empty" hidden>
-          <p>No products found matching your criteria.</p>
-        </div>
-      </section>
+        </section>
+      </div>
 
       <!-- Product Detail (SPA view, initially hidden) -->
       <section id="productDetail" class="product-detail" hidden>
@@ -192,7 +229,7 @@
               <span>Coupon Code</span>
               <input id="cartCouponCode" type="text" placeholder="Enter coupon code" autocomplete="off" />
             </label>
-            <button id="cartCouponApplyBtn" class="btn btn-secondary btn-full" type="button">Apply Coupon</button>
+            <button id="cartCouponApplyBtn" class="btn btn-secondary btn-full" type="button">APPLY COUPON</button>
             <div id="cartCouponPreview" class="cart-coupon__preview" hidden></div>
           </div>
           <button id="checkoutBtn" class="btn btn-primary btn-full" type="button">Proceed to Checkout</button>
@@ -203,6 +240,9 @@
         </div>
       </aside>
       <div id="cartOverlay" class="cart-overlay" hidden></div>
+
+      <!-- Shopify-style Checkout (SPA view) -->
+      <section id="checkoutPage" class="shopify-checkout" hidden aria-labelledby="checkoutPageTitle"></section>
 
       <!-- Booking / Order Confirmation (SPA view, shown after payment success) -->
       <section id="bookingConfirmation" class="booking-confirmation" hidden aria-labelledby="bookingConfirmationTitle"></section>
@@ -216,7 +256,7 @@
       <div class="merch-footer__inner">
         <div class="merch-footer__brand">
           <img src="/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=120" alt="House of Health" width="120" height="44" />
-          <p>Redefine wellness. Rejuvenate life.</p>
+          <p>Preventive Today, Healthier Tomorrow.</p>
         </div>
         <nav class="merch-footer__links" aria-label="Footer navigation">
           <div class="footer-col">

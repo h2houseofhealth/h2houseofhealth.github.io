@@ -860,6 +860,45 @@ a {
   min-height: 100%;
 }
 
+.admin-revenue-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.admin-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--admin-muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.admin-toggle input { accent-color: var(--admin-accent); }
+
+.admin-stock-value--ok { color: #16803c; }
+.admin-stock-value--low { color: #c62828; }
+
+.admin-influencer-table th,
+.admin-influencer-table td { vertical-align: middle; }
+
+.admin-revenue-chart { min-width: 0; padding-top: 8px; }
+.admin-revenue-chart__plot { position: relative; height: 230px; padding: 30px 8px 0; border-bottom: 1px solid rgba(0,0,0,.12); }
+.admin-revenue-chart__grid { position: absolute; inset: 30px 8px 0; display: grid; grid-template-rows: repeat(4, 1fr); pointer-events: none; }
+.admin-revenue-chart__grid span { border-top: 1px dashed rgba(0,0,0,.1); }
+.admin-revenue-chart__bars { position: relative; z-index: 1; height: 100%; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); align-items: end; gap: clamp(3px, 1.2vw, 12px); }
+.admin-revenue-chart__bar-wrap { height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 5px; min-width: 0; }
+.admin-revenue-chart__bar-wrap strong { max-width: none; overflow: visible; color: var(--admin-text); font-size: clamp(9px, .9vw, 13px); font-weight: 800; white-space: nowrap; transform: rotate(0deg); transform-origin: center bottom; }
+.admin-revenue-chart__bar { width: min(34px, 80%); min-height: 3px; border-radius: 5px 5px 0 0; background: linear-gradient(180deg, var(--admin-accent), #e08a55); }
+.admin-revenue-chart__labels { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: clamp(3px, 1.2vw, 12px); min-height: 42px; padding: 10px 8px 0; }
+.admin-revenue-chart__labels span { min-width: 0; color: var(--admin-muted); font-size: 11px; text-align: center; transform: rotate(0deg); transform-origin: top center; white-space: nowrap; }
+.admin-revenue-chart__svg { position: absolute; z-index: 1; inset: 30px 8px 0; width: calc(100% - 16px); height: calc(100% - 30px); overflow: visible; }
+.admin-revenue-chart--line .admin-revenue-chart__plot { padding-top: 0; }
+
 .admin-assigned-coupon-list {
   display: grid;
   gap: 8px;
@@ -1345,7 +1384,7 @@ a {
 }
 
 .admin-chart-ring small {
-  color: var(--admin-muted);
+  color: #0f0f0f;
   font-size: 12px;
 }
 
@@ -1624,6 +1663,10 @@ a {
 
 .admin-modal__dialog--lg {
   width: min(1040px, 100%);
+}
+
+.admin-modal__dialog--xl {
+  width: min(1280px, 100%);
 }
 
 .admin-modal__head {
