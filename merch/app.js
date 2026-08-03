@@ -217,6 +217,24 @@
     },
   ];
 
+  // Presentation-only fallbacks for the storefront card redesign. These are
+  // not product/API fields and should be replaced with real catalog metadata.
+  const PRODUCT_CARD_PRESENTATION = {
+    bottles: { badge: 'BESTSELLER', stars: '★★★★☆', reviews: 128, annotation: 'Molecular Hydrogen on the go' },
+    sprays: { badge: 'NEW ARRIVAL', stars: '★★★★★', reviews: 96, annotation: 'Refresh & rejuvenate anywhere' },
+    hoodies: { badge: 'LIMITED DROP', stars: '★★★★☆', reviews: 74, annotation: 'Wear the wellness lifestyle' },
+  };
+
+  function getProductCardPresentation(product) {
+    const category = String(product?.category || '').trim().toLowerCase();
+    return PRODUCT_CARD_PRESENTATION[category] || {
+      badge: 'NEW ARRIVAL',
+      stars: '★★★★☆',
+      reviews: 0,
+      annotation: 'Made for your everyday ritual',
+    };
+  }
+
   // Sidebar content is deliberately data-first so it can later be replaced by
   // GET /api/merch/sidebar without changing the rendering layer.
   const MERCH_SIDEBAR_DEMO_DATA = {
@@ -267,6 +285,10 @@
     return map;
   }, {});
 
+  const HOODIE_CARD_IMAGE = '/cdn/shop/files/hero/h2-hoodie-transparent-source.png';
+  PRODUCT_IMAGE_SOURCES['zenith-hoodie-black'] = { imageUrl: HOODIE_CARD_IMAGE, images: [HOODIE_CARD_IMAGE] };
+  PRODUCT_IMAGE_SOURCES['zenith-hoodie-sand'] = { imageUrl: HOODIE_CARD_IMAGE, images: [HOODIE_CARD_IMAGE] };
+
   const PRODUCT_GALLERY_VARIANT_PRICES = {
     'molecular-hydrogen-water-bottle': [6999.00, 6499.00, 7499.00],
     'h2-water-bottle': [6999.00, 6499.00, 7499.00],
@@ -311,7 +333,7 @@
     const name = String(product?.name || '').toLowerCase();
     if (category === 'sprays' || name.includes('mist') || name.includes('spray')) return '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138';
     if (category === 'bottles' || name.includes('bottle')) return '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113';
-    if (category === 'hoodies' || name.includes('hoodie')) return '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg';
+    if (category === 'hoodies' || name.includes('hoodie')) return HOODIE_CARD_IMAGE;
     return FALLBACK_PRODUCT_IMAGE;
   }
 
@@ -3170,15 +3192,30 @@
       const isSoldOut = !defaultVariant || Number(defaultVariant.stock || 0) <= 0;
       const lowStockVariants = getLowStockVariants(product);
       const stockState = getVariantStockState(defaultVariant);
+      const presentation = getProductCardPresentation(product);
       return `
-      <article class="product-card" data-product-id="${product.id}" tabindex="0" role="button" aria-label="View ${escapeHtml(product.name)}">
+      <article class="product-card ${String(product.category || '').toLowerCase() === 'hoodies' ? 'product-card--hoodie' : ''}" data-product-id="${product.id}" tabindex="0" role="button" aria-label="View ${escapeHtml(product.name)}">
         <div class="product-card__image">
-          ${isSoldOut ? '<span class="product-card__badge product-card__badge--sold-out">Sold out</span>' : lowStockVariants.length ? '<span class="product-card__badge product-card__badge--low-stock">Low stock</span>' : ''}
+          <div class="product-card__badges">
+            <span class="product-card__badge">${escapeHtml(presentation.badge)}</span>
+            ${isSoldOut ? '<span class="product-card__badge product-card__badge--sold-out">Sold out</span>' : lowStockVariants.length ? '<span class="product-card__badge product-card__badge--low-stock">Low stock</span>' : ''}
+          </div>
+          <button class="product-card__wishlist" type="button" aria-label="Add ${escapeHtml(product.name)} to wishlist" title="Wishlist">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 8.8c0 5.2-8.8 10.1-8.8 10.1S3.2 14 3.2 8.8A4.7 4.7 0 0 1 12 6.2a4.7 4.7 0 0 1 8.8 2.6Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="product-card__annotation" aria-hidden="true">
+            <span>${escapeHtml(presentation.annotation)}</span>
+            <svg viewBox="0 0 92 54"><path d="M5 7c2 29 26 41 70 34" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="m67 34 9 7-11 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
           <img src="${escapeHtml(product.images?.[0] || product.imageUrl || getProductFallbackImage(product))}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
         </div>
         <div class="product-card__body">
           <p class="product-card__category">${escapeHtml(getCategoryLabel(product.category))}</p>
           <h3 class="product-card__name">${escapeHtml(product.name)}</h3>
+          <div class="product-card__rating" aria-label="${escapeHtml(`${presentation.stars} (${presentation.reviews} reviews)`) }">
+            <span class="product-card__stars" aria-hidden="true">${presentation.stars}</span>
+            <span>(${presentation.reviews})</span>
+          </div>
           <p class="product-card__price">
             ${product.variants.length > 1 ? '<span class="price-from">From </span>' : ''}${getPriceRange(product)}
           </p>
@@ -3220,6 +3257,15 @@
         const product = state.products.find((item) => Number(item.id) === Number(button.dataset.productId));
         if (!product) return;
         await handleProductCardAction(button.dataset.productAction, product);
+      });
+    });
+
+    els.productGrid.querySelectorAll('.product-card__wishlist').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        button.classList.toggle('is-selected');
+        button.setAttribute('aria-pressed', String(button.classList.contains('is-selected')));
       });
     });
   }
