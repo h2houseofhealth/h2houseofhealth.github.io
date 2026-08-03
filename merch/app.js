@@ -3193,8 +3193,18 @@
       const lowStockVariants = getLowStockVariants(product);
       const stockState = getVariantStockState(defaultVariant);
       const presentation = getProductCardPresentation(product);
+      const isHoodie = String(product.category || '').toLowerCase() === 'hoodies';
+      const isHoodieCombo = Boolean(product.isCombo) && Array.isArray(product.comboItems)
+        && product.comboItems.some((item) => String(item.productName || item.name || '').toLowerCase().includes('hoodie'));
+      const cardImage = isHoodie || isHoodieCombo
+        ? HOODIE_CARD_IMAGE
+        : (product.images?.[0] || product.imageUrl || getProductFallbackImage(product));
+      const cardClasses = [
+        isHoodie ? 'product-card--hoodie' : '',
+        isHoodieCombo ? 'product-card--hoodie-combo' : '',
+      ].filter(Boolean).join(' ');
       return `
-      <article class="product-card ${String(product.category || '').toLowerCase() === 'hoodies' ? 'product-card--hoodie' : ''}" data-product-id="${product.id}" tabindex="0" role="button" aria-label="View ${escapeHtml(product.name)}">
+      <article class="product-card ${cardClasses}" data-product-id="${product.id}" tabindex="0" role="button" aria-label="View ${escapeHtml(product.name)}">
         <div class="product-card__image">
           <div class="product-card__badges">
             <span class="product-card__badge">${escapeHtml(presentation.badge)}</span>
@@ -3207,7 +3217,7 @@
             <span>${escapeHtml(presentation.annotation)}</span>
             <svg viewBox="0 0 92 54"><path d="M5 7c2 29 26 41 70 34" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="m67 34 9 7-11 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </div>
-          <img src="${escapeHtml(product.images?.[0] || product.imageUrl || getProductFallbackImage(product))}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
+          <img src="${escapeHtml(cardImage)}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
         </div>
         <div class="product-card__body">
           <p class="product-card__category">${escapeHtml(getCategoryLabel(product.category))}</p>

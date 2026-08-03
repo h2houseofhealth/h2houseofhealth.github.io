@@ -2794,10 +2794,35 @@ body.is-auth-loading .merch-auth-cta {
 }
 
 .product-card--hoodie .product-card__annotation {
-  top: 70px;
+  top: 68px;
   bottom: auto;
   left: 12px;
   width: 90px;
+}
+
+/* Keep the hoodie callout beside the garment, as in the editorial reference. */
+.product-card--hoodie .product-card__image img {
+  width: 82%;
+  margin-left: 18%;
+  padding: 12px 4px 12px 0;
+}
+
+.product-card--hoodie .product-card__annotation svg {
+  width: 82px;
+}
+
+.product-card--hoodie-combo .product-card__image img {
+  width: 82%;
+  margin-left: 18%;
+  padding: 12px 4px 12px 0;
+}
+
+.product-card--hoodie-combo .product-card__annotation {
+  width: 82px;
+}
+
+.product-card--hoodie-combo .product-card__annotation svg {
+  width: 82px;
 }
 
 .product-card__stock {
@@ -4109,10 +4134,7 @@ body.is-auth-loading .merch-auth-cta {
 .product-card { border-color: rgba(174,84,49,.09); border-radius: 20px; box-shadow: 0 10px 24px rgba(96,62,34,.055); }
 .product-card:hover { transform: translateY(-5px); box-shadow: 0 18px 34px rgba(96,62,34,.12); }
 .product-card__image { background: linear-gradient(145deg,#fbf5ef,#f5e9df); }
-.product-card__image::after { position: absolute; left: 13px; bottom: 18px; z-index: 1; width: 82px; color: #5c4034; font-family: Georgia,serif; font-size: 13px; font-style: italic; line-height: 1.2; }
-.product-card__image:has(img[alt*="Bottle" i])::after { content: 'Molecular Hydrogen on the go'; }
-.product-card__image:has(img[alt*="Mist" i])::after { content: 'Refresh & rejuvenate anywhere'; }
-.product-card__image:has(img[alt*="Hoodie" i])::after { content: 'Wear the wellness lifestyle'; }
+.product-card__image::after { content: none; }
 .product-card__body { padding: 19px; gap: 11px; }
 .product-card__name { font-family: var(--font-heading); font-size: 18px; }
 .product-card__price { font-size: 19px; }
