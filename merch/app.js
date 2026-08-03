@@ -3403,6 +3403,7 @@
       <h1 class="detail-title">${escapeHtml(product.name)}</h1>
       <p class="detail-price">${formatPrice(variant.price)}</p>
       <p class="detail-description">${escapeHtml(product.description)}</p>
+      <p class="detail-policy"><strong>7-Day Replacement Policy:</strong> Damaged or defective products are eligible for return/replace within 7 days of delivery. Contact support with your order details.</p>
       ${product.isCombo && Array.isArray(product.comboItems) && product.comboItems.length ? `
         <div class="combo-product-details">
           <strong>Included in this combo</strong>
