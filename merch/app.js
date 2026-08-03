@@ -4318,7 +4318,7 @@
       return;
     }
 
-    openGuestCheckoutModal();
+    showCheckoutPage({ name: '', email: '', phone: '' }, { country: 'India' });
   }
 
   async function startRazorpayCheckout(customer, address) {
