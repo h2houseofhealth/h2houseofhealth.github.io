@@ -118,6 +118,9 @@
   };
 
   const FALLBACK_PRODUCT_IMAGE = '/booking/assets/service-hydrogen-session.jpg';
+  const BOTTLE_DETAIL_FEATURE_IMAGE = '/cdn/shop/files/h2-bottle-product-features.png';
+  const HOODIE_DETAIL_FEATURE_IMAGE = '/cdn/shop/files/h2-hoodie-product-features.png';
+
 
   // â”€â”€â”€ Product Data (Static catalog until API is built) â”€â”€â”€
   const PRODUCTS = [
@@ -3335,7 +3338,7 @@
   }
 
   function renderProductGallery(product) {
-    const mainImage = product.images?.[0] || product.imageUrl || getProductFallbackImage(product);
+    const mainImage = getProductDetailMainImage(product);
     els.productGallery.innerHTML = `
       <div class="gallery-main">
         <img id="galleryMainImg" src="${escapeHtml(mainImage)}" alt="${escapeHtml(product.name)}" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
@@ -3369,6 +3372,23 @@
     });
   }
 
+  function getProductDetailMainImage(product) {
+    const isBottle = String(product?.slug || '').toLowerCase() === 'molecular-hydrogen-water-bottle'
+      || String(product?.category || '').toLowerCase() === 'bottles';
+    const isHoodie = String(product?.category || '').toLowerCase() === 'hoodies'
+      || String(product?.name || '').toLowerCase().includes('hoodie');
+    return isBottle
+      ? BOTTLE_DETAIL_FEATURE_IMAGE
+      : isHoodie
+        ? HOODIE_DETAIL_FEATURE_IMAGE
+      : (product.images?.[0] || product.imageUrl || getProductFallbackImage(product));
+  }
+
+  function updateProductDetailMainImage(product) {
+    const image = document.getElementById('galleryMainImg');
+    if (image) image.src = getProductDetailMainImage(product);
+  }
+
   function renderProductInfo(product) {
     const variant = state.selectedVariant;
     const stockState = getVariantStockState(variant);
@@ -3383,6 +3403,7 @@
       <h1 class="detail-title">${escapeHtml(product.name)}</h1>
       <p class="detail-price">${formatPrice(variant.price)}</p>
       <p class="detail-description">${escapeHtml(product.description)}</p>
+      <p class="detail-policy"><strong>7-Day Replacement Policy:</strong> Damaged or defective products are eligible for return/replace within 7 days of delivery. Contact support with your order details.</p>
       ${product.isCombo && Array.isArray(product.comboItems) && product.comboItems.length ? `
         <div class="combo-product-details">
           <strong>Included in this combo</strong>
@@ -3475,6 +3496,7 @@
           state.selectedVariant = match;
           state.quantity = 1;
           renderProductInfo(product);
+          updateProductDetailMainImage(product);
         }
       });
     });
@@ -3489,6 +3511,7 @@
           state.selectedVariant = match;
           state.quantity = 1;
           renderProductInfo(product);
+          updateProductDetailMainImage(product);
         }
       });
     });
