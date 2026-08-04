@@ -36,12 +36,12 @@
   // with the same color used throughout the admin UI.
   const REVENUE_BAR_COLORS = ['var(--admin-accent)', '#cbb395', '#73320f', '#8e8a59', '#5d6669', '#c58d36', 'var(--admin-accent)', '#b77b57', '#9b755f', '#d9c3ab', '#a98970', '#cfa681'];
   const ORDER_STATUS_COLORS = {
-    pending: '#cbb395',
-    processing: 'var(--admin-accent)',
-    shipped: '#73320f',
-    delivered: '#8e8a59',
-    cancelled: '#5d6669',
-    returned: '#c58d36',
+    pending: '#d7c5b9',
+    processing: '#f87532',
+    shipped: '#ffb23e',
+    delivered: '#a6a936',
+    cancelled: '#62686a',
+    returned: '#c98a36',
   };
   const REVENUE_PERIOD_OPTIONS = [
     { value: 'year', label: '12 Months (Jan-Dec)' },
@@ -1835,29 +1835,6 @@
     if (els.notificationBadgeCount) els.notificationBadgeCount.textContent = String(unreadNotificationCount);
 
     els.dashboardView.innerHTML = `
-      <section class="admin-section">
-        <div class="admin-section__head">
-          <div>
-            <h2 class="admin-section__title">Overview</h2>
-            <p class="admin-section__desc">Live merch orders, customers, coupons, and influencer data are synced from the merch API.</p>
-          </div>
-        </div>
-        <div class="admin-section__body">
-          <div class="admin-card-grid admin-card-grid--1">
-            <article class="admin-card">
-              <div class="admin-card__head">
-                <h3 class="admin-card__title">Live Notifications</h3>
-                <p class="admin-card__sub">Latest activity synced live from your merch operations</p>
-              </div>
-              <div class="admin-card__body admin-notifications">
-                ${state.dashboardStatsLoading ? renderEmptyState('Syncing live activity', 'Checking the merch API for the latest orders, payments, customers, and stock changes.') : visibleNotifications.length ? visibleNotifications.map(renderNotificationItem).join('') : renderEmptyState('All caught up', 'There are no active notifications right now.')}
-              </div>
-              ${activeNotifications.length > 5 ? `<div class="admin-card__foot admin-notifications__foot"><button class="admin-btn admin-btn--soft" type="button" data-action="toggle-notifications">${state.notificationsExpanded ? 'Show Less' : 'View More'}</button></div>` : ''}
-            </article>
-          </div>
-        </div>
-      </section>
-
       <section class="admin-section">
         <div class="admin-section__head">
           <div>
