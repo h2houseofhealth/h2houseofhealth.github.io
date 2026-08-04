@@ -3436,6 +3436,35 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!result.changes) throw new Error(`Stock changed while confirming ${purchase.variant.product_name}.`);
   }
 
+  // Put the inventory reserved by an order back when that order is cancelled
+  // before shipment. Combo orders reserve their component variants rather than
+  // the combo variant itself, so restore those components here as well.
+  function restoreMerchOrderStock(orderId) {
+    const items = db.prepare(`
+      SELECT oi.variant_id AS variantId, oi.quantity, p.is_combo AS isCombo
+      FROM merch_order_items oi
+      JOIN merch_variants v ON v.id = oi.variant_id
+      JOIN merch_products p ON p.id = v.product_id
+      WHERE oi.order_id = ?
+    `).all(Number(orderId));
+    const increment = db.prepare('UPDATE merch_variants SET stock = stock + ? WHERE id = ?');
+    const componentQuery = db.prepare(`
+      SELECT component_variant_id AS variantId, quantity
+      FROM merch_combo_items
+      WHERE combo_product_id = (SELECT product_id FROM merch_variants WHERE id = ?)
+    `);
+
+    for (const item of items) {
+      if (Number(item.isCombo || 0) === 1) {
+        for (const component of componentQuery.all(Number(item.variantId))) {
+          increment.run(Number(item.quantity || 0) * Math.max(1, Number(component.quantity || 1)), Number(component.variantId));
+        }
+      } else {
+        increment.run(Number(item.quantity || 0), Number(item.variantId));
+      }
+    }
+  }
+
   // ─── PUBLIC: Create Razorpay order for checkout ───
   app.post('/api/merch/preview-coupon',(req, res) => {
     const authUser = getMerchAuthUser(req);
@@ -4161,6 +4190,45 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     res.json({ orders });
   });
 
+  // Customers may cancel only while the order is still being prepared. The
+  // ownership check is done against both the user and the linked merch profile
+  // because older orders can have either identifier populated.
+  app.post('/api/merch/orders/:id/cancel', requireMerchAuth, (req, res) => {
+    const profile = syncMerchGuestOrdersForUser(req.user) || ensureMerchCustomerProfileForUser(req.user);
+    const order = db.prepare(`
+      SELECT * FROM merch_orders
+      WHERE id = ? AND (customer_user_id = ? OR customer_id = ?)
+    `).get(Number(req.params.id), Number(req.user.id), Number(profile?.id || 0));
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    const currentStatus = String(order.status || '').toLowerCase();
+    if (currentStatus === 'cancelled') {
+      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+      return res.json({ success: true, order: buildMerchOrderRecord(order, items) });
+    }
+    if (!['pending', 'processing'].includes(currentStatus)) {
+      return res.status(409).json({ error: 'This order can no longer be cancelled because it has been shipped or completed.' });
+    }
+
+    const cancel = db.transaction(() => {
+      const result = db.prepare(`
+        UPDATE merch_orders
+        SET status = 'cancelled',
+            payment_status = CASE WHEN payment_status IN ('paid', 'cod_pending') THEN 'refunded' ELSE payment_status END,
+            updated_at = datetime('now')
+        WHERE id = ? AND status IN ('pending', 'processing')
+      `).run(order.id);
+      if (result.changes && ['paid', 'cod_pending'].includes(String(order.payment_status || '').toLowerCase())) {
+        restoreMerchOrderStock(order.id);
+      }
+    });
+    cancel();
+
+    const updated = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(order.id);
+    const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+    res.json({ success: true, order: buildMerchOrderRecord(updated, items) });
+  });
+
   app.get('/api/merch/admin/orders', requireAdmin, (req, res) => {
     const { status, startDate, endDate } = req.query;
     const orders = loadMerchOrders({ status, startDate, endDate });
@@ -4757,7 +4825,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
     const existingOrder = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
     if (!existingOrder) return res.status(404).json({ error: 'Order not found' });
-    if (String(payment_status || '').toLowerCase() === 'refunded') {
+    const existingStatus = String(existingOrder.status || '').toLowerCase();
+    if (String(status).toLowerCase() === 'cancelled' && !['pending', 'processing', 'cancelled'].includes(existingStatus)) {
+      return res.status(409).json({ error: 'Shipped, delivered, and returned orders cannot be cancelled.' });
+    }
+    if (String(payment_status || '').toLowerCase() === 'refunded' && String(status).toLowerCase() !== 'cancelled') {
       const deliveredAt = existingOrder.delivered_at || (String(existingOrder.status || '').toLowerCase() === 'delivered' ? existingOrder.updated_at : null);
       const deliveredTime = deliveredAt ? new Date(deliveredAt).getTime() : NaN;
       if (String(existingOrder.status || '').toLowerCase() !== 'delivered' || !Number.isFinite(deliveredTime) || Date.now() - deliveredTime > 5 * 24 * 60 * 60 * 1000) {
@@ -4777,7 +4849,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (carrier_name) { updates.push('carrier_name = ?'); params.push(carrier_name); }
     params.push(req.params.id);
 
-    db.prepare(`UPDATE merch_orders SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    const save = db.transaction(() => {
+      const result = db.prepare(`UPDATE merch_orders SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+      if (result.changes && String(status).toLowerCase() === 'cancelled' && existingStatus !== 'cancelled'
+        && ['paid', 'cod_pending'].includes(String(existingOrder.payment_status || '').toLowerCase())) {
+        restoreMerchOrderStock(existingOrder.id);
+      }
+    });
+    save();
     const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
     const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(req.params.id);
     res.json({ success: true, order: buildMerchOrderRecord(order, items) });

@@ -2452,7 +2452,7 @@
                             <button class="admin-action-link" type="button" data-action="open-order-invoice" data-id="${order.id}">Invoice</button>
                             <button class="admin-action-link" type="button" data-action="email-order-invoice" data-id="${order.id}">Email</button>
                             <button class="admin-action-link" type="button" data-action="download-order-invoice" data-id="${order.id}">Download</button>
-                            <button class="admin-action-link" type="button" data-action="cancel-order" data-id="${order.id}">Cancel</button>
+                            <button class="admin-action-link" type="button" data-action="cancel-order" data-id="${order.id}" ${['pending', 'processing'].includes(normalizeOrderStatus(order.status)) ? '' : 'disabled title="Only pending or processing orders can be cancelled"'}>Cancel</button>
                             <button class="admin-action-link" type="button" data-action="refund-order" data-id="${order.id}">Refund</button>
                           </div>
                         </td>
@@ -2486,7 +2486,7 @@
                     <div class="admin-footer-actions">
                       <button class="admin-btn admin-btn--ghost" type="button" data-action="ship-order" data-id="${selectedOrder?.id || ''}">Ship</button>
                       <button class="admin-btn admin-btn--ghost" type="button" data-action="deliver-order" data-id="${selectedOrder?.id || ''}">Deliver</button>
-                      <button class="admin-btn admin-btn--danger" type="button" data-action="cancel-order" data-id="${selectedOrder?.id || ''}">Cancel</button>
+                      <button class="admin-btn admin-btn--danger" type="button" data-action="cancel-order" data-id="${selectedOrder?.id || ''}" ${['pending', 'processing'].includes(normalizeOrderStatus(selectedOrder?.status)) ? '' : 'disabled title="Only pending or processing orders can be cancelled"'}>Cancel</button>
                       <button class="admin-btn admin-btn--soft" type="button" data-action="refund-order" data-id="${selectedOrder?.id || ''}">Refund</button>
                     </div>
                   </div>
