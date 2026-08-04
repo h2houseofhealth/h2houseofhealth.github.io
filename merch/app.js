@@ -2394,6 +2394,7 @@
                   <button type="button" data-account-action="track-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Track ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('truck')}<span>Track Order</span></button>
                   <button type="button" data-account-action="invoice-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Open invoice for ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('document')}<span>Invoice</span></button>
                   <button type="button" data-account-action="download-invoice" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Download invoice for ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('download')}<span>Download Invoice</span></button>
+                  ${canCancelMerchOrder(order) ? `<button type="button" data-account-action="cancel-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Cancel ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">Cancel Order</button>` : ''}
                 </div>
               </article>
             `).join('')}
@@ -2612,6 +2613,26 @@
     return (Array.isArray(state.merchOrders) ? state.merchOrders : []).find((order) => String(order.id || '') === String(orderId || ''));
   }
 
+  function canCancelMerchOrder(order) {
+    return ['pending', 'processing'].includes(String(order?.status || '').trim().toLowerCase());
+  }
+
+  async function cancelMerchOrder(order) {
+    if (!order || !canCancelMerchOrder(order)) {
+      showCheckoutNotice('Cancellation unavailable', 'This order has already been shipped or completed.', { variant: 'error' });
+      return;
+    }
+    if (!window.confirm(`Cancel ${order.orderNumber || `Order #${order.id}`}? Any payment will be refunded.`)) return;
+    try {
+      const result = await api(`/api/merch/orders/${encodeURIComponent(order.id)}/cancel`, { method: 'POST' });
+      state.merchOrders = state.merchOrders.map((item) => String(item.id) === String(order.id) ? (result.order || { ...order, status: 'cancelled', paymentStatus: 'refunded' }) : item);
+      renderAccountDrawer();
+      showCheckoutNotice('Order cancelled', `${order.orderNumber || `Order #${order.id}`} was cancelled successfully.`);
+    } catch (error) {
+      showCheckoutNotice('Cancellation unavailable', error.message || 'Unable to cancel this order.', { variant: 'error' });
+    }
+  }
+
   function handleAccountOrderFilterSubmit(event) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
@@ -2757,6 +2778,11 @@
       if (button.dataset.orderId) {
         window.location.hash = `track-order/${encodeURIComponent(button.dataset.orderId)}`;
       }
+      return;
+    }
+
+    if (action === 'cancel-order') {
+      await cancelMerchOrder(getOrderById(button.dataset.orderId));
       return;
     }
 
