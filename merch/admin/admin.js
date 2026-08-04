@@ -676,83 +676,77 @@
     `;
   }
 
-  function buildMerchReportLines(report) {
+  function buildMerchReportLines(report, reportSection = 'all') {
     const summary = report?.summary || {};
     const influencerRows = Array.isArray(report?.influencerReports) ? report.influencerReports : [];
     const monthlyRows = Array.isArray(report?.monthlyInfluencerReports) ? report.monthlyInfluencerReports : [];
     const periodLabel = [state.reportFrom, state.reportTo].filter(Boolean).join(' to ') || 'all available dates';
+    const section = String(reportSection || 'all').replace(/-report$/, '').toLowerCase();
+    const moneyValue = (value) => Number(value || 0);
+
+    if (section === 'revenue') {
+      const rows = Array.isArray(report?.monthlyRevenueSeries) ? report.monthlyRevenueSeries : [];
+      return { summary, periodLabel, title: 'Revenue report', section, columns: ['Month', 'Orders', 'Revenue'], rows: rows.map((row) => [row.monthLabel || reportMonthLabel(row.month), row.orders || 0, moneyValue(row.revenue)]), metrics: [['Orders', summary.orderCount || 0], ['Total Revenue', moneyValue(summary.revenue)], ['Refunds', moneyValue(summary.refunds)], ['Net Revenue', moneyValue(summary.netRevenue)]] };
+    }
+
+    if (section === 'orders') {
+      const rows = Object.entries(report?.statusBreakdown || {}).map(([status, count]) => [getStatusLabel(status), Number(count || 0), summary.orderCount ? `${Math.round((Number(count || 0) / summary.orderCount) * 100)}%` : '0%']);
+      return { summary, periodLabel, title: 'Orders report', section, columns: ['Status', 'Orders', 'Share'], rows, metrics: [['Total Orders', summary.orderCount || 0], ['Paid Orders', summary.paidOrders || 0], ['Customers', summary.customerCount || 0], ['Repeat Customers', summary.repeatCustomerCount || 0]] };
+    }
+
+    if (section === 'products') {
+      const rows = Array.isArray(report?.productSales) ? report.productSales : [];
+      const units = rows.reduce((total, row) => total + Number(row.quantity || 0), 0);
+      return { summary, periodLabel, title: 'Products report', section, columns: ['Product', 'Category', 'Units Sold', 'Orders', 'Revenue'], rows: rows.map((row) => [row.name || '', row.category || 'Uncategorized', row.quantity || 0, row.orders || 0, moneyValue(row.revenue)]), metrics: [['Products', summary.productCount || rows.length], ['Units Sold', units], ['Sales Revenue', moneyValue(summary.revenue)], ['Low Stock', summary.lowStockCount || 0]] };
+    }
+
+    if (section === 'coupons') {
+      const rows = Array.isArray(state.coupons) ? state.coupons : [];
+      return { summary, periodLabel, title: 'Coupons report', section, columns: ['Coupon', 'Type', 'Usage', 'Status', 'Owner'], rows: rows.map((row) => [row.code || '', getCouponTypeLabel(row), row.totalRedemptions || row.usageCount || 0, Number(row.active ?? row.isActive ?? 0) === 1 ? 'Active' : 'Inactive', row.influencerName || row.owner || row.recipientEmail || 'Store']), metrics: [['Active Coupons', summary.activeCouponCount || 0], ['Coupon Records', rows.length], ['Discounts', moneyValue(summary.discounts)], ['Orders', summary.orderCount || 0]] };
+    }
+
+    if (section === 'influencer') {
+      return { summary, periodLabel, title: 'Influencer report', section, columns: ['Influencer', 'Handle', 'Orders', 'Revenue', 'Commission', 'Coupon Usage'], rows: influencerRows.map((row) => [row.name || '', row.handle || '', row.orders || 0, moneyValue(row.revenue), moneyValue(row.commission), row.couponUsage || 0]), metrics: [['Orders', summary.orderCount || 0], ['Revenue', moneyValue(summary.revenue)], ['Influencers', influencerRows.length], ['Commission', influencerRows.reduce((total, row) => total + Number(row.commission || 0), 0)]] };
+    }
+
+    if (section === 'monthly-influencer') {
+      return { summary, periodLabel, title: 'Monthly influencer report', section, columns: ['Month', 'Influencer', 'Handle', 'Orders', 'Revenue', 'Commission', 'Coupon Usage'], rows: monthlyRows.map((row) => [row.monthLabel || reportMonthLabel(row.month), row.name || '', row.handle || '', row.orders || 0, moneyValue(row.revenue), moneyValue(row.commission), row.couponUsage || 0]), metrics: [['Orders', summary.orderCount || 0], ['Revenue', moneyValue(summary.revenue)], ['Influencers', influencerRows.length], ['Monthly Rows', monthlyRows.length]] };
+    }
 
     return {
       summary,
       influencerRows,
       monthlyRows,
       periodLabel,
+      title: 'Merch influencer report',
+      section: 'all',
+      columns: ['Month', 'Influencer', 'Handle', 'Orders', 'Revenue', 'Commission', 'Coupon Usage'],
+      rows: monthlyRows.map((row) => [row.monthLabel || reportMonthLabel(row.month), row.name || '', row.handle || '', row.orders || 0, moneyValue(row.revenue), moneyValue(row.commission), row.couponUsage || 0]),
+      metrics: [['Orders', summary.orderCount || 0], ['Revenue', moneyValue(summary.revenue)], ['Influencers', influencerRows.length], ['Monthly Rows', monthlyRows.length]],
     };
   }
 
-  function buildMerchReportCsv(report) {
-    const { summary, influencerRows, monthlyRows, periodLabel } = buildMerchReportLines(report);
-    const rows = [
-      ['Merch influencer report'],
-      ['Period', periodLabel],
-      ['Orders', summary.orderCount || 0],
-      ['Revenue', summary.revenue || 0],
-      ['Influencers', influencerRows.length],
-      ['Monthly rows', monthlyRows.length],
-      [],
-      ['Month', 'Influencer', 'Handle', 'Orders', 'Revenue', 'Commission', 'Coupon Usage'],
-      ...monthlyRows.map((row) => [
-        row.monthLabel || reportMonthLabel(row.month),
-        row.name || '',
-        row.handle || '',
-        row.orders || 0,
-        row.revenue || 0,
-        row.commission || 0,
-        row.couponUsage || 0,
-      ]),
-    ];
+  function buildMerchReportCsv(report, reportSection = 'all') {
+    const lines = buildMerchReportLines(report, reportSection);
+    const rows = [[lines.title], ['Period', lines.periodLabel], ...lines.metrics, [], lines.columns, ...lines.rows];
 
     return rows.map((row) => row.map(csvCell).join(',')).join('\n');
   }
 
-  function buildMerchReportTsv(report) {
-    const { summary, influencerRows, monthlyRows, periodLabel } = buildMerchReportLines(report);
-    const rows = [
-      ['Merch influencer report'],
-      ['Period', periodLabel],
-      ['Orders', summary.orderCount || 0],
-      ['Revenue', summary.revenue || 0],
-      ['Influencers', influencerRows.length],
-      ['Monthly rows', monthlyRows.length],
-      [],
-      ['Month', 'Influencer', 'Handle', 'Orders', 'Revenue', 'Commission', 'Coupon Usage'],
-      ...monthlyRows.map((row) => [
-        row.monthLabel || reportMonthLabel(row.month),
-        row.name || '',
-        row.handle || '',
-        row.orders || 0,
-        row.revenue || 0,
-        row.commission || 0,
-        row.couponUsage || 0,
-      ]),
-    ];
+  function buildMerchReportTsv(report, reportSection = 'all') {
+    const lines = buildMerchReportLines(report, reportSection);
+    const rows = [[lines.title], ['Period', lines.periodLabel], ...lines.metrics, [], lines.columns, ...lines.rows];
 
     return rows.map((row) => row.join('\t')).join('\n');
   }
 
-  function buildMerchReportHtml(report) {
-    const { summary, monthlyRows, periodLabel } = buildMerchReportLines(report);
-    const rows = monthlyRows.map((row) => `
-      <tr>
-        <td>${escapeHtml(row.monthLabel || reportMonthLabel(row.month))}</td>
-        <td>${escapeHtml(row.name || '')}</td>
-        <td>${escapeHtml(row.handle || '')}</td>
-        <td>${formatCount(row.orders)}</td>
-        <td>${money(row.revenue)}</td>
-        <td>${money(row.commission)}</td>
-        <td>${formatCount(row.couponUsage)}</td>
-      </tr>
+  function buildMerchReportHtml(report, reportSection = 'all') {
+    const lines = buildMerchReportLines(report, reportSection);
+    const rows = lines.rows.map((row) => `
+      <tr>${row.map((value, index) => `<td>${typeof value === 'number' && (index >= 2 || lines.section === 'revenue') ? escapeHtml(lines.columns[index]?.toLowerCase().includes('revenue') || lines.columns[index]?.toLowerCase().includes('commission') ? money(value) : String(value)) : escapeHtml(String(value ?? ''))}</td>`).join('')}</tr>
     `).join('');
+    const metricCards = lines.metrics.map(([label, value]) => `<div><strong>${escapeHtml(label)}</strong><br />${escapeHtml(String(label.toLowerCase().includes('revenue') || label.toLowerCase().includes('commission') || label.toLowerCase().includes('refund') || label.toLowerCase().includes('discount') ? money(value) : value))}</div>`).join('');
+    const headers = lines.columns.map((column) => `<th>${escapeHtml(column)}</th>`).join('');
 
     return `
       <!DOCTYPE html>
@@ -760,43 +754,39 @@
         <head>
           <meta charset="UTF-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-          <title>Merch Influencer Report</title>
+          <title>${escapeHtml(lines.title)}</title>
           <style>
-            body { font-family: Arial, sans-serif; color: #1f2937; margin: 24px; }
+            @page { size: 240mm 320mm; margin: 0; }
+            body { font-family: Arial, sans-serif; color: #111; margin: 0; background: #f3f3f7; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .page { position: relative; width: min(240mm, calc(100% - 24px)); min-height: 320mm; margin: 18px auto; box-sizing: border-box; background: #fff; padding: 46mm 18mm 18mm; box-shadow: 0 10px 32px rgba(0,0,0,.10); overflow: hidden; }
+            .page::before { content: ""; position: absolute; inset: 0 0 auto; height: 120mm; background: url('${String(window.location.origin || '')}/booking/assets/invoice-page.png') no-repeat top center; background-size: 100% auto; pointer-events: none; }
+            .page > * { position: relative; z-index: 1; }
             h1, h2, p { margin: 0 0 12px; }
+            h2 { font-size: 14px; color: #fff; background: #AE5431; padding: 10px 12px; text-align: center; }
             .meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-width: 720px; margin-bottom: 20px; }
-            .meta div { border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px 14px; }
+            .meta div { border: 1px solid rgba(174,84,49,.35); padding: 12px 14px; }
             table { border-collapse: collapse; width: 100%; }
-            th, td { border: 1px solid #e5e7eb; padding: 10px 12px; text-align: left; }
-            th { background: #f9fafb; }
+            th, td { border: 1px solid rgba(174,84,49,.35); padding: 10px 12px; text-align: left; }
+            th { background: #AE5431; color: #fff; }
           </style>
         </head>
         <body>
-          <h1>Merch influencer report</h1>
-          <p>Period: ${escapeHtml(periodLabel)}</p>
+          <div class="page">
+          <h1>${escapeHtml(lines.title)}</h1>
+          <p>Period: ${escapeHtml(lines.periodLabel)}</p>
           <div class="meta">
-            <div><strong>Orders</strong><br />${escapeHtml(String(summary.orderCount || 0))}</div>
-            <div><strong>Revenue</strong><br />${escapeHtml(money(summary.revenue || 0))}</div>
-            <div><strong>Influencers</strong><br />${escapeHtml(String((report?.influencerReports || []).length))}</div>
-            <div><strong>Monthly rows</strong><br />${escapeHtml(String(monthlyRows.length))}</div>
+            ${metricCards}
           </div>
-          <h2>Monthly Influencer Breakdown</h2>
+          <h2>${escapeHtml(lines.title)} Breakdown</h2>
           <table>
             <thead>
-              <tr>
-                <th>Month</th>
-                <th>Influencer</th>
-                <th>Handle</th>
-                <th>Orders</th>
-                <th>Revenue</th>
-                <th>Commission</th>
-                <th>Coupon Usage</th>
-              </tr>
+              <tr>${headers}</tr>
             </thead>
             <tbody>
-              ${rows || '<tr><td colspan="7">No monthly rows available.</td></tr>'}
+              ${rows || `<tr><td colspan="${lines.columns.length}">No rows available.</td></tr>`}
             </tbody>
           </table>
+          </div>
         </body>
       </html>
     `;
@@ -825,20 +815,24 @@
           <title>${escapeHtml(influencer.name || 'Influencer')} report</title>
           <style>
             :root { color-scheme: light; }
-            body { font-family: Arial, sans-serif; color: #1f2937; margin: 24px; background: #fff; font-size: 13px; line-height: 1.45; }
+            @page { size: 240mm 320mm; margin: 0; }
+            body { font-family: Arial, sans-serif; color: #111; margin: 0; background: #f3f3f7; font-size: 13px; line-height: 1.45; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .page { position: relative; width: min(240mm, calc(100% - 24px)); min-height: 320mm; margin: 18px auto; box-sizing: border-box; background: #fff; padding: 46mm 18mm 18mm; box-shadow: 0 10px 32px rgba(0,0,0,.10); overflow: hidden; }
+            .page::before { content: ""; position: absolute; inset: 0 0 auto; height: 120mm; background: url('${String(window.location.origin || '')}/booking/assets/invoice-page.png') no-repeat top center; background-size: 100% auto; pointer-events: none; }
+            .page > * { position: relative; z-index: 1; }
             h1, h2, h3, p { margin: 0 0 10px; }
             h1 { font-size: 26px; line-height: 1.1; }
-            h2 { font-size: 18px; line-height: 1.15; }
+            h2 { font-size: 14px; line-height: 1.15; color: #fff; background: #AE5431; padding: 10px 12px; text-align: center; }
             h3 { font-size: 15px; line-height: 1.2; }
             .hero { display: grid; gap: 12px; margin-bottom: 20px; }
             .meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
-            .meta div, .panel { border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px 14px; background: #fff; }
+            .meta div, .panel { border: 1px solid rgba(174,84,49,.35); border-radius: 0; padding: 12px 14px; background: #fff; }
             .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
-            .stats div { border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px 14px; }
+            .stats div { border: 1px solid rgba(174,84,49,.35); border-radius: 0; padding: 12px 14px; }
             .stats strong { display: block; font-size: 14px; margin-top: 4px; }
             table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
-            th, td { border: 1px solid #e5e7eb; padding: 8px 10px; text-align: left; vertical-align: top; font-size: 12px; }
-            th { background: #f9fafb; }
+            th, td { border: 1px solid rgba(174,84,49,.35); padding: 8px 10px; text-align: left; vertical-align: top; font-size: 12px; }
+            th { background: #AE5431; color: #fff; }
             .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; }
             .muted { color: #6b7280; font-size: 13px; }
             .chips { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -847,6 +841,7 @@
           </style>
         </head>
         <body>
+          <div class="page">
           <div class="hero">
             <div class="muted">Generated ${escapeHtml(generatedAt)}</div>
             <h1>Influencer report</h1>
@@ -981,6 +976,8 @@
               </tbody>
             </table>
           </section>
+          </div>
+          </div>
         </body>
       </html>
     `;
@@ -3224,11 +3221,14 @@
 
           <div class="admin-report-grid">
             ${reportTiles.map((tile) => `
-              <button class="admin-report-card admin-report-card--interactive" type="button" data-action="open-report-section" data-target="${escapeHtml(tile.target)}">
+              <div class="admin-report-card admin-report-card--interactive">
                 <h3 class="admin-report-card__title">${escapeHtml(tile.title)}</h3>
                 <p class="admin-report-card__meta">${escapeHtml(tile.meta)}</p>
-                <span class="admin-report-card__link">View report</span>
-              </button>
+                <div class="admin-actions">
+                  <button class="admin-action-link" type="button" data-action="open-report-section" data-target="${escapeHtml(tile.target)}">View report</button>
+                  <button class="admin-action-link" type="button" data-action="download-report-section" data-target="${escapeHtml(tile.target)}">Download</button>
+                </div>
+              </div>
             `).join('')}
           </div>
 
@@ -4293,7 +4293,7 @@
     }
   }
 
-  function downloadCurrentReport() {
+  function downloadCurrentReport(reportSection = 'all') {
     if (!state.reports) {
       toast('Reports unavailable', 'Load the report data before downloading.', 'warning');
       return;
@@ -4303,21 +4303,22 @@
     const report = state.reports;
     const startLabel = String(state.reportFrom || 'start').replace(/[^0-9-]/g, '');
     const endLabel = String(state.reportTo || 'end').replace(/[^0-9-]/g, '');
-    const baseName = `merch-influencer-report-${startLabel}-${endLabel}`;
+    const sectionLabel = String(reportSection || 'all').replace(/[^a-z0-9-]/gi, '-').toLowerCase();
+    const baseName = `merch-${sectionLabel}-report-${startLabel}-${endLabel}`;
 
     if (format === 'excel') {
-      downloadMerchReportFile(`${baseName}.xls`, buildMerchReportTsv(report), 'application/vnd.ms-excel;charset=utf-8');
+      downloadMerchReportFile(`${baseName}.xls`, buildMerchReportTsv(report, reportSection), 'application/vnd.ms-excel;charset=utf-8');
       toast('Download ready', 'The Excel-friendly report has been downloaded.', 'success');
       return;
     }
 
     if (format === 'pdf') {
-      downloadMerchReportFile(`${baseName}.html`, buildMerchReportHtml(report), 'text/html;charset=utf-8');
-      toast('Download ready', 'The printable report has been downloaded as HTML. Open it and print to PDF if needed.', 'success');
+      downloadMerchReportFile(`${baseName}.html`, buildMerchReportHtml(report, reportSection), 'text/html;charset=utf-8');
+      toast('Download ready', 'The invoice-style report has been downloaded. Open it and print to PDF if needed.', 'success');
       return;
     }
 
-    downloadMerchReportFile(`${baseName}.csv`, buildMerchReportCsv(report), 'text/csv;charset=utf-8');
+    downloadMerchReportFile(`${baseName}.csv`, buildMerchReportCsv(report, reportSection), 'text/csv;charset=utf-8');
     toast('Download ready', 'The CSV report has been downloaded.', 'success');
   }
 
@@ -5175,6 +5176,9 @@
         return;
       case 'export-report':
         downloadCurrentReport();
+        return;
+      case 'download-report-section':
+        downloadCurrentReport(String(target.dataset.target || 'all'));
         return;
       case 'email-report':
         await emailCurrentReport();

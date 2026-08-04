@@ -8203,10 +8203,13 @@ app.get('/invoice/merch', async (req, res) => {
     return res.status(404).send('Invoice not found');
   }
 
-  let ownsOrder = access.isGuest
+  // Admin invoice links are intentionally scoped to the admin token created by
+  // /api/merch/orders/:id/invoice-link. They do not belong to the admin's
+  // customer account, so the normal customer ownership check must be bypassed.
+  let ownsOrder = Boolean(access.isAdmin) || (access.isGuest
     ? Number(order.isGuest || 0) === 1 && !Number(order.customerUserId || 0)
-    : Number(order.customerUserId || 0) === Number(access.userId);
-  if (!ownsOrder && Number(order.customerId || 0) > 0) {
+    : Number(order.customerUserId || 0) === Number(access.userId));
+  if (!ownsOrder && !access.isAdmin && Number(order.customerId || 0) > 0) {
     const profile = db
       .prepare('SELECT id FROM merch_customer_profiles WHERE id = ? AND user_id = ?')
       .get(Number(order.customerId), Number(access.userId));
