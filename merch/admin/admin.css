@@ -1956,6 +1956,151 @@ a {
     grid-column: auto;
   }
 }
+
+/* House Merch visual system: warm paper, soft panels, and orange utility accents. */
+:root {
+  --admin-bg: #fff7f1;
+  --admin-panel: #fffdfb;
+  --admin-panel-soft: #fff4eb;
+  --admin-panel-border: rgba(213, 112, 54, 0.14);
+  --admin-text: #17191d;
+  --admin-muted: #6d625d;
+  --admin-subtle: #92837b;
+  --admin-accent: #ed6d2d;
+  --admin-accent-dark: #c74d1e;
+  --admin-shadow: 0 12px 28px rgba(186, 95, 47, 0.12);
+  --admin-shadow-soft: 0 5px 16px rgba(186, 95, 47, 0.09);
+  --admin-radius: 18px;
+  --admin-radius-sm: 12px;
+  --admin-sidebar-width: 325px;
+}
+
+body.merch-admin-page {
+  background:
+    radial-gradient(circle at 58% 12%, rgba(255, 220, 195, 0.48), transparent 34%),
+    linear-gradient(135deg, #fffaf6 0%, #fff1e9 100%);
+  font-family: "DM Sans", Arial, sans-serif;
+}
+
+.admin-shell { grid-template-columns: var(--admin-sidebar-width) minmax(0, 1fr); }
+.admin-sidebar {
+  padding: 22px 15px 24px;
+  background: rgba(255, 250, 246, 0.72);
+  border-right: 1px solid rgba(234, 148, 103, 0.12);
+  box-shadow: 12px 0 32px rgba(196, 107, 57, 0.06);
+}
+.admin-sidebar__brand { padding: 0 2px 2px; min-height: 66px; align-items: center; }
+.admin-brand img { width: 158px; }
+.admin-sidebar__meta {
+  padding: 18px 17px;
+  border-color: rgba(232, 142, 94, 0.12);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 7px 18px rgba(181, 95, 45, 0.1);
+}
+.admin-kicker { color: var(--admin-accent-dark); font-size: 12px; letter-spacing: .12em; }
+.admin-sidebar__meta strong { font-size: 18px; }
+.admin-nav { gap: 7px; margin-top: 1px; }
+.admin-nav__item {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 19px;
+  padding: 12px 15px;
+  border-radius: 13px;
+  color: #403b3a;
+  font-size: 17px;
+  font-weight: 500;
+}
+.admin-nav__icon {
+  width: 26px;
+  color: #625b58;
+  font-size: 25px;
+  line-height: 1;
+  text-align: center;
+  font-family: Arial, sans-serif;
+}
+.admin-nav__item:hover { background: rgba(244, 128, 66, .1); border-color: transparent; }
+.admin-nav__item.is-active {
+  color: var(--admin-accent-dark);
+  background: linear-gradient(100deg, #fff2dd 0%, #ffb074 100%);
+  border-color: rgba(239, 129, 62, .12);
+  box-shadow: 0 5px 12px rgba(230, 125, 54, .13);
+  font-weight: 700;
+}
+.admin-nav__item.is-active .admin-nav__icon { color: var(--admin-accent-dark); }
+.admin-nav__item--danger { color: var(--admin-accent-dark); margin-top: 7px; }
+.admin-nav__item--danger .admin-nav__icon { color: var(--admin-accent-dark); }
+
+.admin-topbar {
+  padding: 23px 32px 21px;
+  background: rgba(255, 247, 241, .72);
+  border-bottom-color: rgba(231, 151, 111, .1);
+}
+.admin-topbar h1 { font-size: clamp(32px, 3vw, 40px); }
+.admin-topbar__right { gap: 17px; }
+.admin-pill {
+  min-width: 112px;
+  justify-content: center;
+  padding: 13px 17px;
+  border: 0;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #fff7ed, #ffd0a8);
+  color: var(--admin-accent-dark);
+  font-size: 20px;
+  box-shadow: 0 7px 16px rgba(231, 123, 55, .14);
+}
+.admin-pill__dot { display: none; }
+.admin-profile { padding: 10px 16px; min-width: 267px; border: 0; border-radius: 20px; background: #fff; box-shadow: var(--admin-shadow-soft); }
+.admin-profile__avatar { width: 48px; height: 48px; font-size: 14px; background: linear-gradient(135deg, #ff9b4c, #d95a25); }
+.admin-profile__meta strong { font-size: 16px; }
+.admin-profile__meta::after { content: "⌄"; position: absolute; right: 19px; top: 19px; color: #615b58; font-size: 22px; }
+.admin-profile { position: relative; }
+.admin-content { padding: 0 24px 32px; gap: 16px; }
+.admin-view { gap: 16px; }
+.admin-section { border-color: rgba(230, 143, 99, .13); background: rgba(255,255,255,.76); box-shadow: 0 7px 22px rgba(183, 94, 48, .08); }
+.admin-section__head { padding: 24px 24px 0; }
+.admin-section__title { font-size: 23px; }
+.admin-section__desc { font-size: 14px; }
+.admin-section__body { padding: 24px; }
+.admin-card { border-color: rgba(229, 141, 96, .22); background: linear-gradient(180deg, #fff 0%, #fff3e9 100%); box-shadow: var(--admin-shadow-soft); }
+.admin-card__head { padding: 20px 24px; border-bottom-color: rgba(222, 133, 83, .14); }
+.admin-card__title { font-size: 20px; }
+.admin-card__sub { font-size: 14px; }
+.admin-card__body { padding: 24px; }
+.admin-card-grid { gap: 18px; }
+.admin-card-grid--2 { grid-template-columns: minmax(0, 1.02fr) minmax(0, 1fr); }
+.admin-revenue-card .admin-card__body { min-height: 382px; }
+.admin-revenue-chart__plot { height: 260px; }
+.admin-revenue-chart__bar { width: min(42px, 82%); background: linear-gradient(180deg, #ff7131, #e55e24); }
+.admin-chart-ring { width: 218px; box-shadow: inset 0 0 0 19px rgba(255,255,255,.92); }
+.admin-coupon-overview { gap: 12px; }
+.admin-coupon-overview__item { background: rgba(255,255,255,.72); border-color: rgba(229, 141, 96, .15); }
+
+@media (max-width: 980px) {
+  .admin-shell { grid-template-columns: 1fr; }
+  .admin-content { padding: 0 16px 24px; }
+}
+
+/* A real donut: the center is a solid cutout, not an inset shadow. */
+.admin-chart-ring {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  box-shadow: none;
+  border: 1px solid rgba(90, 74, 65, .1);
+}
+.admin-chart-ring::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  width: 46%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: #fff8f2;
+  box-shadow: 0 0 0 1px rgba(236, 151, 108, .14);
+}
+.admin-chart-ring span { position: relative; z-index: 1; }
+.admin-chart-ring--empty::after { display: none; }
 .admin-combo-items { display: grid; gap: 8px; margin-top: 8px; }
 .admin-combo-item { display: flex; align-items: center; gap: 10px; padding: 8px; border: 1px solid var(--admin-border); border-radius: 10px; }
 .admin-combo-item img { width: 42px; height: 42px; object-fit: cover; border-radius: 7px; background: #f5f1ed; }
