@@ -18,7 +18,7 @@ try {
   puppeteer = null;
 }
 
-module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, JWT_SECRET, jwt, sendMerchEmail = null, couponHelpers = {} }) {
+module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, JWT_SECRET, jwt, sendMerchEmail = null, couponHelpers = {}, merchImageUpload = null }) {
   const {
     normalizeCouponCode,
     validateCouponForUser,
@@ -4898,6 +4898,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const products = loadMerchProductCatalog({ includeInactive: true })
       .filter((product) => Array.isArray(product.variants) && product.variants.some((variant) => Number(variant.isActive ?? 1) === 1));
     res.json(products);
+  });
+
+  // ADMIN: Store merch imagery in the server uploads directory and return the
+  // same public path saved on the product record and rendered by the storefront.
+  app.post('/api/merch/admin/upload-image', requireAdmin, (req, res) => {
+    if (!merchImageUpload) return res.status(500).json({ message: 'Image uploads are not configured.' });
+    merchImageUpload.single('image')(req, res, (error) => {
+      if (error) return res.status(400).json({ message: error.message || 'Image upload failed.' });
+      if (!req.file) return res.status(400).json({ message: 'Choose an image to upload.' });
+      return res.status(201).json({ imageUrl: `/uploads/${req.file.filename}` });
+    });
   });
 
   // ADMIN: Create a purchasable combo card from existing product variants.

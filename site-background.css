@@ -118,3 +118,14 @@ body > .leaf,
 body > .grain {
   display: none !important;
 }
+
+/* Keep House Merch storefront and admin on the same peach gradient canvas. */
+body.merch-page:not(.merch-admin-page) {
+  background-color: #fff1e9 !important;
+  background-image:
+    radial-gradient(circle at 58% 12%, rgba(255, 220, 195, 0.48), transparent 34%),
+    linear-gradient(135deg, #fffaf6 0%, #fff1e9 100%) !important;
+  background-size: auto, auto !important;
+  background-position: center !important;
+  background-attachment: fixed !important;
+}
