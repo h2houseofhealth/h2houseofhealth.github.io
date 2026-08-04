@@ -905,9 +905,10 @@
   function getAuthenticatedCheckoutCustomer() {
     const profile = getMerchantProfile();
     return {
-      name: profile.fullName,
-      email: profile.email,
-      phone: profile.mobile,
+      // Guest checkout must start empty; only signed-in users get profile autofill.
+      name: state.currentUser ? profile.fullName : '',
+      email: state.currentUser ? profile.email : '',
+      phone: state.currentUser ? profile.mobile : '',
     };
   }
 
@@ -3193,8 +3194,6 @@
     els.productGrid.innerHTML = products.map(product => {
       const defaultVariant = getDefaultPurchasableVariant(product);
       const isSoldOut = !defaultVariant || Number(defaultVariant.stock || 0) <= 0;
-      const lowStockVariants = getLowStockVariants(product);
-      const stockState = getVariantStockState(defaultVariant);
       const presentation = getProductCardPresentation(product);
       const isHoodie = String(product.category || '').toLowerCase() === 'hoodies';
       const isHoodieCombo = Boolean(product.isCombo) && Array.isArray(product.comboItems)
@@ -3211,7 +3210,7 @@
         <div class="product-card__image">
           <div class="product-card__badges">
             <span class="product-card__badge">${escapeHtml(presentation.badge)}</span>
-            ${isSoldOut ? '<span class="product-card__badge product-card__badge--sold-out">Sold out</span>' : lowStockVariants.length ? '<span class="product-card__badge product-card__badge--low-stock">Low stock</span>' : ''}
+            ${isSoldOut ? '<span class="product-card__badge product-card__badge--sold-out">Sold out</span>' : ''}
           </div>
           <button class="product-card__wishlist" type="button" aria-label="Add ${escapeHtml(product.name)} to wishlist" title="Wishlist">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 8.8c0 5.2-8.8 10.1-8.8 10.1S3.2 14 3.2 8.8A4.7 4.7 0 0 1 12 6.2a4.7 4.7 0 0 1 8.8 2.6Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
@@ -3231,9 +3230,6 @@
           </div>
           <p class="product-card__price">
             ${product.variants.length > 1 ? '<span class="price-from">From </span>' : ''}${getPriceRange(product)}
-          </p>
-          <p class="product-card__stock ${stockState.className}">
-            ${isSoldOut ? 'UNAVAILABLE' : 'IN STOCK'}
           </p>
           <div class="product-card__actions">
             <button class="btn btn-secondary product-card__action" type="button" data-product-action="add-to-cart" data-product-id="${product.id}" ${isSoldOut ? 'disabled' : ''}>
@@ -3391,8 +3387,6 @@
 
   function renderProductInfo(product) {
     const variant = state.selectedVariant;
-    const stockState = getVariantStockState(variant);
-    const lowStockVariants = getLowStockVariants(product);
 
     // Get unique sizes and colors
     const sizes = [...new Set(product.variants.map(v => v.size).filter(Boolean))];
@@ -3462,18 +3456,6 @@
         <button id="addToWishlistBtn" class="btn btn-outline btn-lg" type="button">♡ Wishlist</button>
       </div>
 
-      <p class="stock-status ${stockState.className}">
-        ${escapeHtml(stockState.label)}
-      </p>
-      <p class="stock-status__detail">
-        ${escapeHtml(stockState.detail)}
-      </p>
-      ${lowStockVariants.length ? `
-        <div class="stock-alert stock-alert--low">
-          <strong>Low stock details</strong>
-          <span>${escapeHtml(lowStockVariants.map((item) => `${getVariantLabel(item)} (${Number(item.stock || 0)})`).join(', '))}</span>
-        </div>
-      ` : ''}
     `;
 
     const moreDetailsButton = document.getElementById('moreDetailsButton');
@@ -4186,57 +4168,6 @@
     showCheckoutPage(getAuthenticatedCheckoutCustomer(), serializeAddress(selected));
   }
 
-  function openGuestCheckoutModal() {
-    const modal = showMerchModal({
-      title: 'Guest checkout',
-      body: `
-        <form id="guestCheckoutForm" class="account-form guest-checkout-form">
-          <label class="account-field">
-            <span>Full Name</span>
-            <input name="name" type="text" autocomplete="name" required />
-          </label>
-          <label class="account-field">
-            <span>Email</span>
-            <input name="email" type="email" autocomplete="email" required />
-          </label>
-          <label class="account-field">
-            <span>Mobile Number</span>
-            <input name="phone" type="tel" autocomplete="tel" required />
-          </label>
-          <label class="account-field">
-            <span>Shipping Address</span>
-            <textarea name="address" rows="4" autocomplete="street-address" required></textarea>
-          </label>
-        </form>
-      `,
-      footer: `
-        <button class="btn btn-outline account-action-btn" type="button" data-modal-close>Cancel</button>
-        <button class="btn btn-primary account-action-btn" type="submit" form="guestCheckoutForm">Continue</button>
-      `,
-    });
-    modal.querySelector('[data-modal-close]')?.addEventListener('click', closeMerchModal);
-    modal.querySelector('#guestCheckoutForm')?.addEventListener('submit', handleGuestCheckoutSubmit);
-  }
-
-  function handleGuestCheckoutSubmit(event) {
-    event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-    const customer = {
-      name: String(formData.get('name') || '').trim(),
-      email: String(formData.get('email') || '').trim(),
-      phone: String(formData.get('phone') || '').trim(),
-    };
-    const address = { full: String(formData.get('address') || '').trim() };
-
-    if (!customer.name || !customer.email || !customer.phone || !address.full) {
-      showCheckoutNotice('Missing details', 'Please complete all guest checkout fields.', { variant: 'error' });
-      return;
-    }
-
-    closeMerchModal();
-    showCheckoutPage(customer, address);
-  }
-
   // â”€â”€â”€ Event Bindings â”€â”€â”€
   function bindEvents() {
     // Hero shop button
@@ -4341,7 +4272,7 @@
       return;
     }
 
-    openGuestCheckoutModal();
+    showCheckoutPage();
   }
 
   async function startRazorpayCheckout(customer, address) {
