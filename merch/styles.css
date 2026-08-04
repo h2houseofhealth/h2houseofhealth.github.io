@@ -1665,8 +1665,7 @@ body.is-auth-loading .merch-auth-cta {
   text-transform: uppercase;
 }
 
-.checkout-address-form,
-.guest-checkout-form {
+.checkout-address-form {
   margin: 0;
 }
 
