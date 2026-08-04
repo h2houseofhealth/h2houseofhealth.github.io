@@ -3222,6 +3222,12 @@
       const isSoldOut = !defaultVariant || Number(defaultVariant.stock || 0) <= 0;
       const presentation = getProductCardPresentation(product);
       const isHoodie = String(product.category || '').toLowerCase() === 'hoodies';
+      const normalizedCategory = String(product.category || '').toLowerCase();
+      const normalizedName = String(product.name || '').toLowerCase();
+      const isMist = normalizedCategory.includes('mist') || normalizedCategory === 'sprays'
+        || normalizedName.includes('mist') || normalizedName.includes('spray');
+      const isBottle = normalizedCategory.includes('bottle') || normalizedCategory === 'bottles'
+        || normalizedName.includes('bottle');
       const isHoodieCombo = Boolean(product.isCombo) && Array.isArray(product.comboItems)
         && product.comboItems.some((item) => String(item.productName || item.name || '').toLowerCase().includes('hoodie'));
       const cardImage = isHoodie || isHoodieCombo
@@ -3229,6 +3235,8 @@
         : (product.images?.[0] || product.imageUrl || getProductFallbackImage(product));
       const cardClasses = [
         isHoodie ? 'product-card--hoodie' : '',
+        isMist ? 'product-card--mist' : '',
+        isBottle ? 'product-card--bottle' : '',
         isHoodieCombo ? 'product-card--hoodie-combo' : '',
       ].filter(Boolean).join(' ');
       return `

@@ -3560,7 +3560,7 @@
           <div class="admin-form__grid">
             <label class="admin-field"><span>Combo Name</span><input class="admin-input" name="name" value="${escapeHtml(entity?.name || '')}" required /></label>
             <label class="admin-field"><span>Overall Combo Price (rupees)</span><input class="admin-input" name="price" type="number" min="1" step="1" value="${escapeHtml(Number(entity?.price || comboVariant.price || 0))}" required /></label>
-            <label class="admin-field admin-field--wide"><span>Combo Image URL</span><input class="admin-input" name="image" value="${escapeHtml(entity?.image || '')}" placeholder="Optional image URL" /></label>
+            <label class="admin-field admin-field--wide"><span>Combo Image</span><input class="admin-input" name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" ${entity ? '' : 'required'} /><small class="admin-field__hint">Upload a JPG, PNG, or WEBP image${entity?.image ? ' to replace the current image' : ''}.</small></label>
             <label class="admin-field admin-field--wide"><span>Combo Details</span><textarea class="admin-textarea" name="description" placeholder="Optional description">${escapeHtml(entity?.description || '')}</textarea></label>
             <label class="admin-field"><span>Status</span><select class="admin-select" name="status"><option value="published" ${entity?.status !== 'archived' ? 'selected' : ''}>Published</option><option value="archived" ${entity?.status === 'archived' ? 'selected' : ''}>Archived</option></select></label>
             <div class="admin-field admin-field--wide"><span>Included products and variants (edit component stock)</span><div class="admin-combo-items">
@@ -3599,7 +3599,7 @@
               ${['published', 'draft', 'archived'].map((status) => `<option value="${status}" ${String(entity?.status || 'published') === status ? 'selected' : ''}>${getStatusLabel(status)}</option>`).join('')}
             </select>
           </label>
-          <label class="admin-field admin-field--wide"><span>Image URL</span><input class="admin-input" name="image" value="${escapeHtml(entity?.image || '')}" /></label>
+          <label class="admin-field admin-field--wide"><span>Product Image</span><input class="admin-input" name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" ${entity ? '' : 'required'} /><small class="admin-field__hint">Upload a JPG, PNG, or WEBP image${entity?.image ? ' to replace the current image' : ''}.</small></label>
           <label class="admin-field admin-field--wide"><span>Description</span><textarea class="admin-textarea" name="description">${escapeHtml(entity?.description || '')}</textarea></label>
           <label class="admin-field admin-field--wide"><span>Product specifications</span><textarea class="admin-textarea" name="specifications" rows="7" placeholder="One per line: Label: Value">${escapeHtml(formatProductSpecifications(entity?.specifications))}</textarea><small class="admin-field__hint">Add one specification per line in the format <code>Label: Value</code>. These appear under More details.</small></label>
           <label class="admin-check"><input type="checkbox" name="comboPurchase" ${entity?.comboPurchase ? 'checked' : ''} /><span>Available for combo purchase</span></label>
@@ -3998,7 +3998,7 @@
       productId: existing?.productId || existing?.parentProductId || existing?.id,
       parentProductId: existing?.parentProductId || existing?.productId || existing?.id,
       variantId: existing?.variantId || existing?.id,
-      image: String(fd.get('image') || '').trim() || '/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=120',
+      image: String(fd.get('image') || '').trim() || existing?.image || '',
       description: String(fd.get('description') || '').trim(),
       specifications: parseProductSpecifications(fd.get('specifications')),
     };
@@ -5256,19 +5256,39 @@
     }
   }
 
+  async function uploadMerchImage(form) {
+    const file = form.elements.imageFile?.files?.[0];
+    if (!file) return '';
+    const uploadData = new FormData();
+    uploadData.append('image', file);
+    const result = await apiRequest('/api/merch/admin/upload-image', {
+      method: 'POST',
+      body: uploadData,
+    });
+    return String(result.imageUrl || '').trim();
+  }
+
   async function submitEntityForm(form) {
     const type = form.dataset.entityForm;
     const id = form.dataset.entityId ? Number(form.dataset.entityId) : null;
     const existingId = Number.isFinite(id) && id ? id : null;
+    const existingEntity = existingId ? state.products.find((item) => Number(item.id) === existingId) : null;
 
     if (type === 'combo') {
       const fd = new FormData(form);
       const componentVariantIds = fd.getAll('componentVariantId').map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0);
       const componentStocks = fd.getAll('componentStock').map((value) => Math.max(0, Math.floor(Number(value || 0))));
+      let uploadedImage = '';
+      try {
+        uploadedImage = await uploadMerchImage(form);
+      } catch (error) {
+        toast('Image upload failed', error.message || 'Unable to upload the combo image.', 'danger');
+        return;
+      }
       const payload = {
         name: String(fd.get('name') || '').trim(),
         price: Number(fd.get('price') || 0),
-        image: String(fd.get('image') || '').trim(),
+        image: uploadedImage || String(existingEntity?.image || '').trim(),
         description: String(fd.get('description') || '').trim(),
         status: String(fd.get('status') || 'published'),
         componentVariantIds,
@@ -5299,6 +5319,13 @@
       const entity = updateProductFromForm(form, existingId ? state.products.find((item) => Number(item.id) === existingId) : null);
       if (!entity.name || !entity.sku) {
         toast('Missing details', 'Product name and SKU are required.', 'warning');
+        return;
+      }
+      try {
+        const uploadedImage = await uploadMerchImage(form);
+        if (uploadedImage) entity.image = uploadedImage;
+      } catch (error) {
+        toast('Image upload failed', error.message || 'Unable to upload the product image.', 'danger');
         return;
       }
       if (existingId) {

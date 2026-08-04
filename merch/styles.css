@@ -26,6 +26,80 @@
   --max-width: 1200px;
 }
 
+/* Storefront palette: keep the customer-facing merch experience on the same
+   warm, translucent admin design system. */
+body.merch-page:not(.merch-admin-page) {
+  --bg-main: #f7f1ea;
+  --bg-card: #ffffff;
+  --primary: #c8652d;
+  --primary-dark: #9f3e1f;
+  --primary-light: #e08a55;
+  --text-dark: #1a1a1a;
+  --text-muted: #6f6f6f;
+  --text-light: #9a8f86;
+  --border: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.12);
+  background:
+    radial-gradient(circle at top left, rgba(200, 101, 45, 0.08), transparent 30%),
+    linear-gradient(180deg, #f8f3ee 0%, #f6efe8 100%) !important;
+}
+
+body.merch-page:not(.merch-admin-page) .merch-main {
+  background: transparent;
+}
+
+body.merch-page:not(.merch-admin-page) .merch-hero {
+  background:
+    radial-gradient(circle at 75% 30%, rgba(255, 255, 255, 0.78), transparent 34%),
+    linear-gradient(180deg, #f8f3ee 0%, #f6efe8 100%);
+}
+
+body.merch-page:not(.merch-admin-page) .category-card,
+body.merch-page:not(.merch-admin-page) .product-card,
+body.merch-page:not(.merch-admin-page) .tracking-card,
+body.merch-page:not(.merch-admin-page) .tracking-empty {
+  border-color: var(--border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(251, 247, 242, 0.92) 100%);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+}
+
+body.merch-page:not(.merch-admin-page) .category-card:hover,
+body.merch-page:not(.merch-admin-page) .product-card:hover {
+  border-color: rgba(200, 101, 45, 0.24);
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.11);
+}
+
+body.merch-page:not(.merch-admin-page) .product-card__image {
+  background: linear-gradient(145deg, #fff 0%, #fbf6f1 100%);
+}
+
+/* The editorial hero is a black-backed render. Screen blending makes only
+   the black backdrop disappear into the admin-style ivory canvas while the
+   highlights, product colors, and 3D shading remain visible. */
+body.merch-page:not(.merch-admin-page) .merch-hero__art::after {
+  position: absolute;
+  right: 6%;
+  bottom: 5%;
+  left: 8%;
+  z-index: 0;
+  height: 13%;
+  content: '';
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(60, 39, 27, 0.22) 0%, rgba(60, 39, 27, 0.09) 42%, transparent 76%);
+  filter: blur(14px);
+  pointer-events: none;
+}
+
+body.merch-page:not(.merch-admin-page) .merch-hero__image--composition {
+  z-index: 1;
+  mix-blend-mode: normal;
+  filter: drop-shadow(0 18px 22px rgba(60, 39, 27, 0.18));
+}
+
+body.merch-page:not(.merch-admin-page) .merch-hero__image--composition:hover {
+  filter: drop-shadow(0 24px 28px rgba(60, 39, 27, 0.24));
+}
+
 *, *::before, *::after {
   box-sizing: border-box;
 }
@@ -4395,6 +4469,35 @@ body.is-auth-loading .merch-auth-cta {
   position: relative;
   overflow: visible;  /* so the widget isn't clipped if it slightly overflows */
 }
+
+/* Final storefront pass: mirror the admin page's peach/orange gradient system. */
+body.merch-page:not(.merch-admin-page) .storefront-header,
+body.merch-page:not(.merch-admin-page) .merch-hero {
+  background:
+    radial-gradient(circle at 58% 12%, rgba(255, 220, 195, 0.48), transparent 34%),
+    linear-gradient(135deg, #fffaf6 0%, #fff1e9 100%) !important;
+}
+
+body.merch-page:not(.merch-admin-page) .merch-hero::before {
+  background:
+    radial-gradient(ellipse at 17% 72%, rgba(237, 109, 45, 0.09), transparent 34%),
+    radial-gradient(ellipse at 88% 15%, rgba(255, 255, 255, 0.72), transparent 31%);
+}
+
+body.merch-page:not(.merch-admin-page) .category-card,
+body.merch-page:not(.merch-admin-page) .product-card,
+body.merch-page:not(.merch-admin-page) .tracking-card,
+body.merch-page:not(.merch-admin-page) .tracking-empty,
+body.merch-page:not(.merch-admin-page) .smart-merch-sidebar__section {
+  border-color: rgba(229, 141, 96, 0.22);
+  background: linear-gradient(180deg, #fff 0%, #fff3e9 100%) !important;
+  box-shadow: 0 5px 16px rgba(186, 95, 47, 0.09);
+}
+
+body.merch-page:not(.merch-admin-page) .product-card__image,
+body.merch-page:not(.merch-admin-page) .category-card__image {
+  background: linear-gradient(145deg, #fff7ed 0%, #ffd0a8 100%);
+}
 @media (max-width: 900px) {
   .merch-page-container {
     --hero-columns: 42% 58%;
@@ -5561,4 +5664,25 @@ body.is-auth-loading .merch-auth-cta {
   .shopify-total strong {
     font-size: 25px;
   }
+}
+
+/* Category tiles use the same peach gradient as the product image panels. */
+body.merch-page:not(.merch-admin-page) .category-card {
+  background: linear-gradient(145deg, #fff7ed 0%, #ffd0a8 100%) !important;
+}
+
+/* Keep the artwork itself transparent so it blends into the card gradient. */
+body.merch-page:not(.merch-admin-page) .category-card__image {
+  background: transparent !important;
+}
+
+/* Match the mist spray and water bottle image panels to the hoodie peach. */
+body.merch-page:not(.merch-admin-page) .product-card--mist .product-card__image,
+body.merch-page:not(.merch-admin-page) .product-card--bottle .product-card__image {
+  background: linear-gradient(145deg, #fff7ed 0%, #ffd0a8 100%) !important;
+}
+
+body.merch-page:not(.merch-admin-page) .product-card--mist .product-card__image img,
+body.merch-page:not(.merch-admin-page) .product-card--bottle .product-card__image img {
+  mix-blend-mode: multiply;
 }

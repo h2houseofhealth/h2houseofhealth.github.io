@@ -803,6 +803,21 @@ app.use('/booking', express.static(path.join(__dirname)));
 app.use('/merch', express.static(path.join(WEBSITE_ROOT, 'merch')));
 app.use('/uploads', express.static(uploadsDir));
 
+const merchImageUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname || '').toLowerCase();
+      cb(null, `merch_${Date.now()}_${crypto.randomBytes(6).toString('hex')}${ext}`);
+    },
+  }),
+  limits: { fileSize: AVATAR_MAX_SIZE_BYTES },
+  fileFilter: (_req, file, cb) => {
+    const ok = ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype);
+    cb(ok ? null : new Error('Only JPG, PNG, or WEBP images are allowed'), ok);
+  },
+});
+
 // Mount Merch API routes
 const mountMerchApi = require('./merch-api');
 mountMerchApi(app, {
@@ -812,6 +827,7 @@ mountMerchApi(app, {
   RAZORPAY_KEY_SECRET,
   JWT_SECRET,
   jwt,
+  merchImageUpload,
   sendMerchEmail: ({ to, subject, text, html }) => sendConfiguredEmail({
     to,
     from: MAIL_FROM,
