@@ -1234,6 +1234,51 @@
     renderCart();
   }
 
+  async function removeWishlistItem(item) {
+    if (!item) return false;
+
+    if (state.currentUser && item.id && !String(item.id).startsWith('guest-')) {
+      await api(`/api/merch/wishlist/${encodeURIComponent(String(item.id))}`, { method: 'DELETE' });
+    }
+
+    state.merchWishlistItems = state.merchWishlistItems.filter((entry) => String(entry.id || '') !== String(item.id || ''));
+    if (!state.currentUser) {
+      localStorage.setItem('merch_wishlist_guest', JSON.stringify(state.merchWishlistItems));
+    }
+    return true;
+  }
+
+  async function moveWishlistItemToCart(item) {
+    const product = state.products.find((entry) => Number(entry.id) === Number(item?.productId));
+    if (!product) {
+      showCheckoutNotice('Wishlist', 'This product is no longer available.', { variant: 'error' });
+      return;
+    }
+
+    const variant = product.variants.find((entry) => Number(entry.id) === Number(item?.variantId))
+      || getDefaultPurchasableVariant(product);
+    if (!variant || Number(variant.stock || 0) <= 0) {
+      showCheckoutNotice('Out of stock', 'This wishlist product is currently unavailable.', { variant: 'error' });
+      return;
+    }
+
+    const added = addToCart(variant.id, 1, product, { openDrawerAfterAdd: false });
+    if (!added) {
+      showCheckoutNotice('Out of stock', 'This wishlist product is currently unavailable.', { variant: 'error' });
+      return;
+    }
+
+    try {
+      await removeWishlistItem(item);
+      renderWishlistBadge();
+      renderAccountDrawer();
+      showCheckoutNotice('Added to Cart', `${product.name} was moved to your cart.`);
+      openCart();
+    } catch (error) {
+      showCheckoutNotice('Wishlist update failed', error?.message || 'The product was added to cart, but could not be removed from your wishlist.', { variant: 'error' });
+    }
+  }
+
   function getCartTotal() {
     return state.cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   }
@@ -2799,14 +2844,21 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     }
 
     if (action === 'wishlist-remove') {
-      state.merchWishlistItems = state.merchWishlistItems.filter((item) => String(item.id || '') !== String(button.dataset.wishlistId || ''));
-      renderWishlistBadge();
-      renderAccountDrawer();
+      const item = state.merchWishlistItems.find((entry) => String(entry.id || '') === String(button.dataset.wishlistId || ''));
+      if (!item) return;
+      try {
+        await removeWishlistItem(item);
+        renderWishlistBadge();
+        renderAccountDrawer();
+      } catch (error) {
+        showCheckoutNotice('Wishlist update failed', error?.message || 'Please try again.', { variant: 'error' });
+      }
       return;
     }
 
     if (action === 'wishlist-move') {
-      showCheckoutNotice('Wishlist', 'Move to Cart is ready for the wishlist service connection.');
+      const item = state.merchWishlistItems.find((entry) => String(entry.id || '') === String(button.dataset.wishlistId || ''));
+      if (item) await moveWishlistItemToCart(item);
       return;
     }
 
@@ -3738,13 +3790,40 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     });
   }
 
+  const CHECKOUT_PHONE_COUNTRY_CODES = [
+    { value: '+91', label: 'India (+91)' },
+    { value: '+1', label: 'United States (+1)' },
+  ];
+
+  function parseCheckoutPhone(value = '') {
+    const raw = String(value || '').trim();
+    const digits = raw.replace(/\D+/g, '');
+    if (digits.length === 12 && digits.startsWith('91')) {
+      return { countryCode: '+91', localNumber: digits.slice(2) };
+    }
+    if (digits.length === 11 && digits.startsWith('1')) {
+      return { countryCode: '+1', localNumber: digits.slice(1) };
+    }
+    return { countryCode: '+91', localNumber: digits };
+  }
+
+  function getCheckoutPhonePayload(draft = {}) {
+    const countryCode = CHECKOUT_PHONE_COUNTRY_CODES.some((option) => option.value === draft.phoneCountryCode)
+      ? draft.phoneCountryCode
+      : '+91';
+    const localNumber = String(draft.phone || '').replace(/\D+/g, '');
+    return localNumber ? `${countryCode}${localNumber}` : '';
+  }
+
   function buildCheckoutDraft(customer = {}, address = {}) {
     const nameParts = String(customer?.name || address?.recipientName || '').trim().split(/\s+/).filter(Boolean);
     const firstName = nameParts.shift() || '';
     const lastName = nameParts.join(' ');
+    const phone = parseCheckoutPhone(customer?.phone || address?.phone || '');
     return {
       email: String(customer?.email || '').trim(),
-      phone: String(customer?.phone || address?.phone || '').trim(),
+      phone: phone.localNumber,
+      phoneCountryCode: phone.countryCode,
       firstName,
       lastName,
       country: String(address?.country || 'India').trim() || 'India',
@@ -3763,6 +3842,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     return {
       email: String(formData.get('email') || '').trim(),
       phone: String(formData.get('phone') || '').trim(),
+      phoneCountryCode: String(formData.get('phoneCountryCode') || '+91').trim(),
       firstName: String(formData.get('firstName') || '').trim(),
       lastName: String(formData.get('lastName') || '').trim(),
       country: String(formData.get('country') || '').trim(),
@@ -3782,11 +3862,11 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       customer: {
         name: fullName,
         email: String(draft.email || '').trim(),
-        phone: String(draft.phone || '').trim(),
+        phone: getCheckoutPhonePayload(draft),
       },
       address: {
         recipientName: fullName,
-        phone: String(draft.phone || '').trim(),
+        phone: getCheckoutPhonePayload(draft),
         line1: String(draft.line1 || '').trim(),
         line2: String(draft.line2 || '').trim(),
         city: String(draft.city || '').trim(),
@@ -3815,7 +3895,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     if (!draft.postalCode) errors.postalCode = 'PIN code is required.';
     else if (digitsOnly(draft.postalCode).length !== 6) errors.postalCode = 'Enter a 6-digit PIN code.';
     if (!draft.phone) errors.phone = 'Phone is required.';
-    else if (digitsOnly(draft.phone).length !== 10) errors.phone = 'Enter a 10-digit phone number.';
+    else if (digitsOnly(draft.phone).length !== 10) {
+      const countryLabel = draft.phoneCountryCode === '+1' ? 'United States' : 'India';
+      errors.phone = `Enter a 10-digit phone number for ${countryLabel}.`;
+    }
 
     return errors;
   }
@@ -3846,6 +3929,25 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           ${options.map((option) => `<option value="${escapeHtml(option)}" ${String(option) === String(value) ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}
         </select>
         ${fieldError(name)}
+      </label>
+    `;
+  }
+
+  function renderCheckoutPhoneField(draft = {}) {
+    const error = state.checkoutErrors?.phone;
+    const selectedCode = CHECKOUT_PHONE_COUNTRY_CODES.some((option) => option.value === draft.phoneCountryCode)
+      ? draft.phoneCountryCode
+      : '+91';
+    return `
+      <label class="shopify-field shopify-field--wide checkout-phone-field${error ? ' has-error' : ''}">
+        <span>Phone</span>
+        <div class="checkout-phone-control">
+          <select name="phoneCountryCode" aria-label="Phone country code" autocomplete="tel-country-code">
+            ${CHECKOUT_PHONE_COUNTRY_CODES.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === selectedCode ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}
+          </select>
+          <input name="phone" type="tel" value="${escapeHtml(draft.phone || '')}" placeholder="10-digit mobile number" autocomplete="tel-national" required ${error ? 'aria-describedby="checkout-phone-error"' : ''} />
+        </div>
+        ${fieldError('phone')}
       </label>
     `;
   }
@@ -3946,7 +4048,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
               ${renderCheckoutField({ name: 'city', label: 'City', value: draft.city, placeholder: 'City', autocomplete: 'address-level2' })}
               ${renderCheckoutSelect({ name: 'state', label: 'State', value: draft.state || 'Telangana', options: ['Telangana', 'Andhra Pradesh', 'Karnataka', 'Maharashtra', 'Tamil Nadu', 'Delhi', 'Kerala', 'Gujarat', 'Rajasthan', 'Uttar Pradesh', 'West Bengal'] })}
               ${renderCheckoutField({ name: 'postalCode', label: 'PIN code', value: draft.postalCode, placeholder: 'PIN code', autocomplete: 'postal-code', inputmode: 'numeric' })}
-              ${renderCheckoutField({ name: 'phone', label: 'Phone', value: draft.phone, type: 'tel', placeholder: '10-digit mobile number', autocomplete: 'tel', wide: true, icon: mailIcon })}
+              ${renderCheckoutPhoneField(draft)}
             </div>
             <label class="shopify-check"><input name="saveInformation" type="checkbox" ${draft.saveInformation ? 'checked' : ''} /><span>Save this information for next time</span></label>
           </section>
