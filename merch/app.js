@@ -72,6 +72,7 @@
     searchQuery: '',
     currentView: 'shop', // 'shop' | 'detail' | 'checkout' | 'confirmation' | 'tracking'
     selectedProduct: null,
+    trendingProducts: null,
     selectedVariant: null,
     quantity: 1,
     authResolved: false,
@@ -119,7 +120,10 @@
 
   const FALLBACK_PRODUCT_IMAGE = '/booking/assets/service-hydrogen-session.jpg';
   const BOTTLE_DETAIL_FEATURE_IMAGE = '/cdn/shop/files/h2-bottle-product-features.png';
+  const MIST_DETAIL_FEATURE_IMAGE = '/cdn/shop/files/h2-mist-product-features.png';
   const HOODIE_DETAIL_FEATURE_IMAGE = '/cdn/shop/files/h2-hoodie-product-features.png';
+
+
 
 
   // â”€â”€â”€ Product Data (Static catalog until API is built) â”€â”€â”€
@@ -422,9 +426,9 @@
   }
 
   function getSmartSidebarData() {
-    const trending = MERCH_SIDEBAR_DEMO_DATA.trending
-      .map((entry, index) => ({ ...entry, product: findSidebarProduct(entry.key, index) }))
-      .filter((entry) => entry.product);
+    const trending = Array.isArray(state.trendingProducts)
+      ? state.trendingProducts.map((product) => ({ product, hypeLabel: product.hypeLabel }))
+      : [];
     const recommended = MERCH_SIDEBAR_DEMO_DATA.recommended
       .map((entry, index) => ({ ...entry, product: findSidebarProduct(entry.key, index) }))
       .filter((entry) => entry.product);
@@ -454,6 +458,7 @@
         <img src="${escapeHtml(image)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
         <span class="smart-merch-product__info">
           <strong>${escapeHtml(product.name)}</strong>
+          ${item.hypeLabel ? `<span class="smart-merch-product__hype">${escapeHtml(item.hypeLabel)}</span>` : ''}
           <span class="smart-merch-product__rating" aria-label="${Number(item.rating || 5)} out of 5 stars">★★★★★</span>
           <span class="smart-merch-product__price">${escapeHtml(getPriceRange(product))}</span>
         </span>
@@ -465,13 +470,13 @@
     if (!els.smartMerchSidebar) return;
     const data = getSmartSidebarData();
     els.smartMerchSidebar.innerHTML = `
-      <section class="smart-merch-sidebar__section smart-merch-sidebar__section--trending" aria-labelledby="smartTrendingTitle">
+      ${data.trending.length ? `<section class="smart-merch-sidebar__section smart-merch-sidebar__section--trending" aria-labelledby="smartTrendingTitle">
         <div class="smart-merch-sidebar__heading">
           <h3 id="smartTrendingTitle">🔥 Trending Products</h3>
           <button type="button" class="smart-merch-sidebar__view-all" data-sidebar-action="view-all">View All <span aria-hidden="true">→</span></button>
         </div>
         <div class="smart-merch-product-list">${data.trending.map(renderSidebarProduct).join('')}</div>
-      </section>
+      </section>` : ''}
 
       <section class="smart-merch-sidebar__section smart-merch-sidebar__section--bundle" aria-labelledby="smartBundleTitle">
         <div class="smart-merch-sidebar__heading">
@@ -870,6 +875,7 @@
         localStorage.setItem('merch_wishlist_guest', JSON.stringify(state.merchWishlistItems));
       }
 
+      renderWishlistBadge();
       showCheckoutNotice('Wishlist', `${product.name} was added to your wishlist.`);
     } catch (error) {
       showCheckoutNotice('Wishlist unavailable', error?.message || 'Please try again.', { variant: 'error' });
@@ -1094,6 +1100,17 @@
     }
   }
 
+  async function loadTrendingProducts() {
+    try {
+      const result = await api('/api/merch/trending-products');
+      state.trendingProducts = Array.isArray(result) ? result.map(normalizeMerchProduct) : [];
+    } catch (error) {
+      state.trendingProducts = [];
+      console.error('Unable to load top trending products:', error);
+    }
+    renderSmartMerchSidebar();
+  }
+
   // â”€â”€â”€ Elements â”€â”€â”€
   const els = {
     productGrid: document.getElementById('productGrid'),
@@ -1113,6 +1130,7 @@
     searchCloseBtn: document.getElementById('searchCloseBtn'),
     searchResults: document.getElementById('searchResults'),
     cartToggleBtn: document.getElementById('cartToggleBtn'),
+    wishlistToggleBtn: document.getElementById('wishlistToggleBtn'),
     cartDrawer: document.getElementById('cartDrawer'),
     cartOverlay: document.getElementById('cartOverlay'),
     cartCloseBtn: document.getElementById('cartCloseBtn'),
@@ -1124,6 +1142,7 @@
     cartCouponApplyBtn: document.getElementById('cartCouponApplyBtn'),
     cartCouponPreview: document.getElementById('cartCouponPreview'),
     cartBadge: document.getElementById('cartBadge'),
+    wishlistBadge: document.getElementById('wishlistBadge'),
     cartShopBtn: document.getElementById('cartShopBtn'),
     checkoutBtn: document.getElementById('checkoutBtn'),
     checkoutPage: document.getElementById('checkoutPage'),
@@ -1333,6 +1352,13 @@
     } else {
       els.cartBadge.hidden = true;
     }
+  }
+
+  function renderWishlistBadge() {
+    const count = Array.isArray(state.merchWishlistItems) ? state.merchWishlistItems.length : 0;
+    if (!els.wishlistBadge) return;
+    els.wishlistBadge.textContent = count;
+    els.wishlistBadge.hidden = count === 0;
   }
 
   // â”€â”€â”€ Render: Cart Drawer â”€â”€â”€
@@ -2774,6 +2800,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
     if (action === 'wishlist-remove') {
       state.merchWishlistItems = state.merchWishlistItems.filter((item) => String(item.id || '') !== String(button.dataset.wishlistId || ''));
+      renderWishlistBadge();
       renderAccountDrawer();
       return;
     }
@@ -3071,12 +3098,13 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     renderAccountDrawer();
   }
 
-  async function openAccountDrawer() {
+  async function openAccountDrawer(initialSection = 'account-orders') {
     if (!els.accountDrawer) return;
+    if (!state.authResolved) await loadCustomerContext();
 
     state.accountDrawerOpen = true;
     state.accountDrawerTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    state.accountActiveSection = 'account-orders';
+    state.accountActiveSection = initialSection;
     els.accountDrawer.hidden = false;
     els.accountDrawerOverlay.hidden = false;
     requestAnimationFrame(() => {
@@ -3119,6 +3147,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     state.merchOrders = [];
     state.merchAddresses = [];
     state.merchWishlistItems = [];
+    renderWishlistBadge();
     state.merchCartItems = [];
     state.merchCouponHistory = [];
     state.influencerDashboard = null;
@@ -3171,18 +3200,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     return products;
   }
 
-  function renderProductGrid() {
-    const products = getFilteredProducts();
-
-    if (products.length === 0) {
-      els.productGrid.innerHTML = '';
-      els.productEmpty.hidden = false;
-      return;
-    }
-
-    els.productEmpty.hidden = true;
-
-    els.productGrid.innerHTML = products.map(product => {
+  function renderProductCard(product, hypeLabel = '') {
       const defaultVariant = getDefaultPurchasableVariant(product);
       const isSoldOut = !defaultVariant || Number(defaultVariant.stock || 0) <= 0;
       const presentation = getProductCardPresentation(product);
@@ -3209,6 +3227,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         <div class="product-card__image">
           <div class="product-card__badges">
             <span class="product-card__badge">${escapeHtml(presentation.badge)}</span>
+            ${hypeLabel ? `<span class="product-card__badge product-card__badge--hype">${escapeHtml(hypeLabel)}</span>` : ''}
             ${isSoldOut ? '<span class="product-card__badge product-card__badge--sold-out">Sold out</span>' : ''}
           </div>
           <button class="product-card__wishlist" type="button" aria-label="Add ${escapeHtml(product.name)} to wishlist" title="Wishlist">
@@ -3241,10 +3260,11 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         </div>
       </article>
     `;
-    }).join('');
+  }
 
-    // Bind click events
-    els.productGrid.querySelectorAll('.product-card').forEach(card => {
+  function bindProductCards(container) {
+    if (!container) return;
+    container.querySelectorAll('.product-card').forEach(card => {
       card.addEventListener('click', () => {
         const id = Number(card.dataset.productId);
         showProductDetail(id);
@@ -3258,7 +3278,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       });
     });
 
-    els.productGrid.querySelectorAll('[data-product-action]').forEach((button) => {
+    container.querySelectorAll('[data-product-action]').forEach((button) => {
       button.addEventListener('click', async (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -3268,7 +3288,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       });
     });
 
-    els.productGrid.querySelectorAll('.product-card__wishlist').forEach((button) => {
+    container.querySelectorAll('.product-card__wishlist').forEach((button) => {
       button.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -3276,6 +3296,20 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         button.setAttribute('aria-pressed', String(button.classList.contains('is-selected')));
       });
     });
+  }
+
+  function renderProductGrid() {
+    const products = getFilteredProducts();
+
+    if (products.length === 0) {
+      els.productGrid.innerHTML = '';
+      els.productEmpty.hidden = false;
+      return;
+    }
+
+    els.productEmpty.hidden = true;
+    els.productGrid.innerHTML = products.map((product) => renderProductCard(product)).join('');
+    bindProductCards(els.productGrid);
   }
 
   function getCategoryLabel(category) {
@@ -3372,16 +3406,30 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     // newly created products faithful to the images selected in admin while
     // preserving the established fallback art for the original catalog.
     if (Array.isArray(product?.images) && product.images.length) return product.images[0];
-    const isBottle = String(product?.slug || '').toLowerCase() === 'molecular-hydrogen-water-bottle'
-      || String(product?.category || '').toLowerCase() === 'bottles';
-    const isHoodie = String(product?.category || '').toLowerCase() === 'hoodies'
-      || String(product?.name || '').toLowerCase().includes('hoodie');
+    const category = String(product?.category || '').toLowerCase();
+    const name = String(product?.name || '').toLowerCase();
+    const slug = String(product?.slug || '').toLowerCase();
+
+    const isBottle =
+      slug === 'molecular-hydrogen-water-bottle' ||
+      category === 'bottles';
+    const isMist =
+      category === 'sprays' ||
+      category.includes('mist') ||
+      name.includes('mist') ||
+      name.includes('spray');
+    const isHoodie =
+      category === 'hoodies' ||
+      name.includes('hoodie');
     return isBottle
       ? BOTTLE_DETAIL_FEATURE_IMAGE
-      : isHoodie
-        ? HOODIE_DETAIL_FEATURE_IMAGE
-      : (product.images?.[0] || product.imageUrl || getProductFallbackImage(product));
+      : isMist
+        ? MIST_DETAIL_FEATURE_IMAGE
+        : isHoodie
+          ? HOODIE_DETAIL_FEATURE_IMAGE
+          : (product.images?.[0] || product.imageUrl || getProductFallbackImage(product));
   }
+
 
   function updateProductDetailMainImage(product) {
     const image = document.getElementById('galleryMainImg');
@@ -4227,6 +4275,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
     // Cart
     els.cartToggleBtn.addEventListener('click', openCart);
+    els.wishlistToggleBtn?.addEventListener('click', () => openAccountDrawer('account-wishlist'));
     els.cartCloseBtn.addEventListener('click', closeCart);
     els.cartOverlay.addEventListener('click', closeCart);
     els.cartShopBtn.addEventListener('click', () => {
@@ -4441,13 +4490,19 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       state.merchProfile = null;
       state.merchOrders = [];
       state.merchAddresses = [];
-      state.merchWishlistItems = [];
+      try {
+        const savedWishlist = localStorage.getItem('merch_wishlist_guest');
+        state.merchWishlistItems = savedWishlist ? JSON.parse(savedWishlist) : [];
+      } catch {
+        state.merchWishlistItems = [];
+      }
       state.merchCartItems = [];
       state.merchCouponHistory = [];
       state.influencerDashboard = null;
     }
 
     state.authResolved = true;
+    renderWishlistBadge();
     setBodyAuthLoading(false);
     renderAccountTrigger();
 
@@ -4455,6 +4510,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       const trackingOrderId = getTrackingOrderIdFromHash();
       if (trackingOrderId) showOrderTracking(trackingOrderId);
     }
+    if (state.accountDrawerOpen) renderAccountDrawer();
   }
 
   // â”€â”€â”€ Initialize â”€â”€â”€
@@ -4467,6 +4523,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     setBodyAuthLoading(true);
     renderAccountTrigger();
     loadMerchProducts();
+    loadTrendingProducts();
     loadCustomerContext();
   }
 

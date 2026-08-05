@@ -1411,6 +1411,8 @@
     customersLoading: false,
     dashboardStatsLoading: true,
     dashboardStats: null,
+    hypes: [],
+    hypesLoading: false,
     reports: null,
   };
 
@@ -1939,27 +1941,85 @@
             </article>
 
             <article class="admin-card">
-              <div class="admin-card__head">
-                <h3 class="admin-card__title">Top Selling Products</h3>
-                <p class="admin-card__sub">Using storefront catalog prices</p>
+              <div class="admin-card__head admin-card__head--with-filter">
+                <div>
+                  <h3 class="admin-card__title">Top Trending Products</h3>
+                  <p class="admin-card__sub">Admin-curated promotional products</p>
+                </div>
+                <button class="admin-btn admin-btn--soft" type="button" data-action="open-hype-modal">HYPE</button>
               </div>
               <div class="admin-card__body admin-list">
-                ${state.products.slice(0, 5).map((product) => `
+                ${state.hypes.length ? state.hypes.map((hype) => {
+                  const product = state.products.find((item) => Number(item.productId || item.parentProductId || item.id) === Number(hype.productId));
+                  return product ? `
                   <div class="admin-list__item">
                     <div class="admin-list__item-head">
                       <div>
                         <p class="admin-list__item-title">${escapeHtml(product.name)}</p>
-                        <p class="admin-list__item-sub">${escapeHtml(product.category)}</p>
+                        <p class="admin-list__item-sub">${escapeHtml(hype.effectiveLabel || hype.label || 'Hyped product')}</p>
                       </div>
                       <strong>${escapeHtml(product.priceLabel || catalogPrice(product.price))}</strong>
                     </div>
                   </div>
-                `).join('')}
+                ` : '';
+                }).join('') : '<p class="admin-table__muted" style="margin:0;">No products hyped yet. Click HYPE to curate this section.</p>'}
               </div>
             </article>
         </div>
       </section>
     `;
+  }
+
+  function getUniqueAdminProducts() {
+    const productsById = new Map();
+    state.products.forEach((product) => {
+      const productId = Number(product.productId || product.parentProductId || product.id);
+      if (!productId || productsById.has(productId)) return;
+      productsById.set(productId, product);
+    });
+    return [...productsById.values()];
+  }
+
+  function renderHypeModal() {
+    const hypesByProductId = new Map(state.hypes.map((hype) => [Number(hype.productId), hype]));
+    const options = [
+      'Most Selling Product', 'Limited Stock — Hurry Up', 'Customer Favorite',
+      'Best Rated', 'Trending Now', 'Most Loved', 'Popular Choice', 'Custom Label',
+    ];
+    openModal({
+      title: 'Curate Top Trending Products',
+      subtitle: 'HYPE',
+      size: 'lg',
+      body: `
+        <form id="hypeConfigForm" class="admin-hype-form">
+          <p class="admin-table__muted">Select one or more existing products and assign the label customers will see on the storefront.</p>
+          <div class="admin-hype-list">
+            ${getUniqueAdminProducts().map((product) => {
+              const productId = Number(product.productId || product.parentProductId || product.id);
+              const existing = hypesByProductId.get(productId);
+              const selectedLabel = existing?.label || options[0];
+              return `
+                <div class="admin-hype-row">
+                  <label class="admin-hype-row__product">
+                    <input type="checkbox" name="hypedProductId" value="${productId}" ${existing ? 'checked' : ''} />
+                    <span><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(product.category || '')}</small></span>
+                  </label>
+                  <label class="admin-hype-row__label">Label
+                    <select name="hypeLabel-${productId}" class="admin-select" data-hype-label-select>
+                      ${options.map((option) => `<option value="${escapeHtml(option)}" ${option === selectedLabel ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}
+                    </select>
+                  </label>
+                  <label class="admin-hype-row__custom" data-hype-custom-wrap ${selectedLabel === 'Custom Label' ? '' : 'hidden'}>Custom text
+                    <input class="admin-input" name="hypeCustomLabel-${productId}" maxlength="60" value="${escapeHtml(existing?.customLabel || '')}" placeholder="Short label" />
+                  </label>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </form>
+      `,
+      footer: '<button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button><button class="admin-btn admin-btn--primary" type="button" data-action="save-hype-config">Save</button>',
+    });
   }
 
   function filterProducts() {
@@ -4218,6 +4278,20 @@
     }
   }
 
+  async function loadHypeData() {
+    state.hypesLoading = true;
+    try {
+      const result = await apiRequest('/api/merch/admin/hype');
+      state.hypes = Array.isArray(result.hypes) ? result.hypes : [];
+    } catch (error) {
+      state.hypes = [];
+      toast('Trending products unavailable', error.message || 'Unable to load HYPE configuration.', 'warning');
+    } finally {
+      state.hypesLoading = false;
+      renderDashboard();
+    }
+  }
+
   async function loadProductData() {
     try {
       const result = await apiRequest('/api/merch/admin/products');
@@ -4673,6 +4747,41 @@
       case 'open-profile':
         renderProfileModal();
         return;
+      case 'open-hype-modal':
+        renderHypeModal();
+        return;
+      case 'save-hype-config': {
+        const form = document.getElementById('hypeConfigForm');
+        if (!form) return;
+        const hypes = [...form.querySelectorAll('input[name="hypedProductId"]:checked')].map((checkbox) => {
+          const productId = Number(checkbox.value);
+          const label = String(form.elements[`hypeLabel-${productId}`]?.value || '').trim();
+          return {
+            productId,
+            label,
+            customLabel: String(form.elements[`hypeCustomLabel-${productId}`]?.value || '').trim(),
+          };
+        });
+        const invalidCustom = hypes.some((item) => item.label === 'Custom Label' && !item.customLabel);
+        if (invalidCustom) {
+          toast('Custom label required', 'Add short text for every product using Custom Label.', 'warning');
+          return;
+        }
+        try {
+          const result = await apiRequest('/api/merch/admin/hype', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ hypes }),
+          });
+          state.hypes = Array.isArray(result.hypes) ? result.hypes : [];
+          closeModal();
+          renderDashboard();
+          toast('HYPE saved', `${hypes.length} product${hypes.length === 1 ? '' : 's'} will appear in Top Trending Products.`, 'success');
+        } catch (error) {
+          toast('HYPE not saved', error.message || 'Unable to save the trending product configuration.', 'danger');
+        }
+        return;
+      }
       case 'close-modal':
         closeModal();
         return;
@@ -5776,6 +5885,10 @@
         handleAction(target.dataset.action, target);
         return;
       }
+      if (target.matches('[data-hype-label-select]')) {
+        const customWrap = target.closest('.admin-hype-row')?.querySelector('[data-hype-custom-wrap]');
+        if (customWrap) customWrap.hidden = target.value !== 'Custom Label';
+      }
       if (target.closest('[data-entity-form]')) return;
       handleInput(target);
     });
@@ -5828,6 +5941,7 @@
     bindEvents();
     renderAll();
     loadDashboardStats();
+    loadHypeData();
     loadProductData();
     loadOrderData();
     loadCustomerData();

@@ -11,6 +11,17 @@ const express = require('express');
 const FormData = require('form-data');
 const router = express.Router();
 
+const MERCH_HYPE_LABELS = [
+  'Most Selling Product',
+  'Limited Stock — Hurry Up',
+  'Customer Favorite',
+  'Best Rated',
+  'Trending Now',
+  'Most Loved',
+  'Popular Choice',
+  'Custom Label',
+];
+
 let puppeteer;
 try {
   puppeteer = require('puppeteer');
@@ -151,6 +162,15 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       component_variant_id INTEGER NOT NULL REFERENCES merch_variants(id),
       quantity INTEGER NOT NULL DEFAULT 1,
       UNIQUE(combo_product_id, component_variant_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS merch_product_hypes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER NOT NULL UNIQUE REFERENCES merch_products(id) ON DELETE CASCADE,
+      label TEXT NOT NULL,
+      custom_label TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS merch_orders (
@@ -380,6 +400,30 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   function hasColumn(tableName, columnName) {
     if (!hasTable(tableName)) return false;
     return db.prepare(`PRAGMA table_info(${tableName})`).all().some((row) => row.name === columnName);
+  }
+
+  function getMerchHypeRows({ includeInactive = false } = {}) {
+    return db.prepare(`
+      SELECT h.id,
+             h.product_id AS productId,
+             h.label,
+             h.custom_label AS customLabel,
+             h.created_at AS createdAt,
+             h.updated_at AS updatedAt,
+             p.name AS productName,
+             p.slug AS productSlug,
+             p.is_active AS productActive
+      FROM merch_product_hypes h
+      JOIN merch_products p ON p.id = h.product_id
+      ${includeInactive ? '' : 'WHERE p.is_active = 1'}
+      ORDER BY h.id ASC
+    `).all().map((row) => ({ ...row, effectiveLabel: getMerchHypeLabel(row) }));
+  }
+
+  function getMerchHypeLabel(row) {
+    return String(row?.label || '').trim() === 'Custom Label'
+      ? String(row?.customLabel || '').trim()
+      : String(row?.label || '').trim();
   }
 
   function formatMerchPrice(paise) {
@@ -3398,7 +3442,26 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
 
   app.get('/api/merch/products', (req, res) => {
-    res.json(loadMerchProductCatalog({ includeInactive: false }));
+    const hypeByProductId = new Map(
+      getMerchHypeRows().map((row) => [Number(row.productId), getMerchHypeLabel(row)])
+    );
+    res.json(loadMerchProductCatalog({ includeInactive: false }).map((product) => ({
+      ...product,
+      hypeLabel: hypeByProductId.get(Number(product.id)) || '',
+    })));
+  });
+
+  // Public promotional catalog. HYPE is deliberately separate from sales and
+  // order statistics: admins control this merchandising section directly.
+  app.get('/api/merch/trending-products', (req, res) => {
+    const catalogById = new Map(
+      loadMerchProductCatalog({ includeInactive: false }).map((product) => [Number(product.id), product])
+    );
+    const products = getMerchHypeRows().map((row) => ({
+      ...(catalogById.get(Number(row.productId)) || {}),
+      hypeLabel: getMerchHypeLabel(row),
+    })).filter((product) => product.id);
+    res.json(products);
   });
 
   function getMerchPurchaseVariant(variantId) {
@@ -4920,6 +4983,47 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       topCategories: report.topCategories || [],
       revenueSeries: report.revenueSeries || [],
     });
+  });
+
+  // ─── ADMIN: Promotional HYPE configuration ───
+  app.get('/api/merch/admin/hype', requireAdmin, (req, res) => {
+    res.json({ labels: MERCH_HYPE_LABELS, hypes: getMerchHypeRows({ includeInactive: true }) });
+  });
+
+  app.put('/api/merch/admin/hype', requireAdmin, (req, res) => {
+    const submitted = Array.isArray(req.body?.hypes) ? req.body.hypes : [];
+    const seenProductIds = new Set();
+    const hypes = [];
+
+    for (const item of submitted) {
+      const productId = Number(item?.productId);
+      const label = String(item?.label || '').trim();
+      const customLabel = String(item?.customLabel || '').trim();
+      if (!Number.isInteger(productId) || productId <= 0 || seenProductIds.has(productId)) {
+        return res.status(400).json({ message: 'Each hyped product must be selected once.' });
+      }
+      if (!MERCH_HYPE_LABELS.includes(label)) {
+        return res.status(400).json({ message: 'Choose a valid hype label for every product.' });
+      }
+      if (label === 'Custom Label' && (!customLabel || customLabel.length > 60)) {
+        return res.status(400).json({ message: 'Custom labels must be between 1 and 60 characters.' });
+      }
+      const product = db.prepare('SELECT id FROM merch_products WHERE id = ? AND is_active = 1').get(productId);
+      if (!product) return res.status(400).json({ message: 'One or more selected products are unavailable.' });
+      seenProductIds.add(productId);
+      hypes.push({ productId, label, customLabel: label === 'Custom Label' ? customLabel : null });
+    }
+
+    const saveHypes = db.transaction(() => {
+      db.prepare('DELETE FROM merch_product_hypes').run();
+      const insert = db.prepare(`
+        INSERT INTO merch_product_hypes (product_id, label, custom_label, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+      `);
+      hypes.forEach((item) => insert.run(item.productId, item.label, item.customLabel));
+    });
+    saveHypes();
+    res.json({ labels: MERCH_HYPE_LABELS, hypes: getMerchHypeRows({ includeInactive: true }) });
   });
 
   // ─── ADMIN: Get all products (including inactive) ───
