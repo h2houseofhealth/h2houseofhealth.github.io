@@ -3402,10 +3402,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   function getProductDetailMainImage(product) {
-    // Uploaded galleries take precedence over category feature art. This keeps
-    // newly created products faithful to the images selected in admin while
-    // preserving the established fallback art for the original catalog.
-    if (Array.isArray(product?.images) && product.images.length) return product.images[0];
+    
     const category = String(product?.category || '').toLowerCase();
     const name = String(product?.name || '').toLowerCase();
     const slug = String(product?.slug || '').toLowerCase();
