@@ -5820,3 +5820,9 @@ body.merch-page:not(.merch-admin-page) .product-card--mist .product-card__image 
 body.merch-page:not(.merch-admin-page) .product-card--bottle .product-card__image img {
   mix-blend-mode: multiply;
 }
+@media (min-width: 769px) {
+  .product-card--bottle .product-card__image img {
+    width: 82%;
+    margin-left: 18%;
+  }
+}
