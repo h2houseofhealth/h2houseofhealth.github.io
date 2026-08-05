@@ -1034,6 +1034,33 @@
     `;
   }
 
+  function renderReplacementPolicyAccordion() {
+    return `
+      <div class="replacement-policy-accordion">
+        <button class="replacement-policy-accordion__button" id="replacementPolicyButton" type="button" aria-expanded="false" aria-controls="replacementPolicyContent">
+          <span class="replacement-policy-accordion__heading">
+            <svg class="replacement-policy-accordion__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 11a8.1 8.1 0 0 0-14.4-4.8L4 8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M4 4v4h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M4 13a8.1 8.1 0 0 0 14.4 4.8L20 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M20 20v-4h-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>10-Day Replacement Policy</span>
+          </span>
+          <span class="replacement-policy-accordion__toggle" aria-hidden="true">+</span>
+        </button>
+        <div class="replacement-policy-accordion__content" id="replacementPolicyContent" aria-hidden="true">
+          <div class="replacement-policy-accordion__body">
+            <p>Damaged or defective products are eligible for replacement within 10 days of delivery.</p>
+            <p>Please contact support with your order details.</p>
+            <h3>6-Month Warranty</h3>
+            <p>This product includes a 6-month warranty on the mechanical parts of the bottle and mist spray.</p>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   async function loadMerchProducts() {
     try {
       const result = await api('/api/merch/products');
@@ -1499,14 +1526,24 @@
   }
 
   function BookingDetailsCard(data) {
-    const details = [
+    const orderDate = new Date(data.dateLabel.replace(/^[A-Za-z]+,\s*/, ''));
+
+const deliveryDate = new Date(orderDate);
+deliveryDate.setDate(orderDate.getDate() + 7);
+
+const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric',
+});
+        const details = [
       { icon: 'calendar', label: 'Date & Time', lines: [data.dateLabel, data.timeLabel] },
       { icon: 'user', label: 'Service', lines: [data.service] },
       { icon: 'map', label: data.locationTitle || 'Location', lines: [data.location] },
       {
         icon: 'truck',
         label: 'Estimated Delivery Date',
-        lines: ['27 Jul 2026 - 31 Jul 2026', "We'll notify you once your order is shipped."],
+        lines: [estimatedDelivery, "We'll notify you once your order is shipped."],
         isDelivery: true,
       },
     ];
@@ -3431,7 +3468,6 @@
       <h1 class="detail-title">${escapeHtml(product.name)}</h1>
       <p class="detail-price">${formatPrice(variant.price)}</p>
       <p class="detail-description">${escapeHtml(product.description)}</p>
-      <p class="detail-policy"><strong>7-Day Replacement Policy:</strong> Damaged or defective products are eligible for return/replace within 7 days of delivery. Contact support with your order details.</p>
       ${product.isCombo && Array.isArray(product.comboItems) && product.comboItems.length ? `
         <div class="combo-product-details">
           <strong>Included in this combo</strong>
@@ -3480,6 +3516,8 @@
         <button class="qty-btn" id="qtyInc" type="button">+</button>
       </div>
 
+      ${renderReplacementPolicyAccordion()}
+
       <div class="detail-actions">
         <button id="addToCartBtn" class="btn btn-primary btn-lg" type="button" ${variant.stock <= 0 ? 'disabled' : ''}>
           ${variant.stock <= 0 ? 'Out of Stock' : 'Add to Cart'}
@@ -3499,6 +3537,16 @@
       specificationsPanel.hidden = isOpen;
       moreDetailsButton.setAttribute('aria-expanded', String(!isOpen));
       moreDetailsButton.querySelector('span').textContent = isOpen ? '＋' : '−';
+    });
+
+    const replacementPolicyButton = document.getElementById('replacementPolicyButton');
+    const replacementPolicyContent = document.getElementById('replacementPolicyContent');
+    replacementPolicyButton?.addEventListener('click', () => {
+      const isOpen = replacementPolicyButton.getAttribute('aria-expanded') === 'true';
+      replacementPolicyButton.setAttribute('aria-expanded', String(!isOpen));
+      replacementPolicyContent?.setAttribute('aria-hidden', String(isOpen));
+      replacementPolicyButton.closest('.replacement-policy-accordion')?.classList.toggle('is-open', !isOpen);
+      replacementPolicyButton.querySelector('.replacement-policy-accordion__toggle').textContent = isOpen ? '+' : '−';
     });
 
     // Bind variant selectors
