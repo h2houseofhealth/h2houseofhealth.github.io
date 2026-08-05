@@ -775,10 +775,13 @@
   }
 
   function OrderTrackingPage(order) {
+    const trackingBackButton = isAdminTrackingRequest()
+      ? ''
+      : '<button class="tracking-back-btn" type="button" data-tracking-action="back">&larr; Back</button>';
     if (!order) {
       return `
         <div class="order-tracking__inner">
-          <button class="tracking-back-btn" type="button" data-tracking-action="back">&larr; Back</button>
+          ${trackingBackButton}
           <div class="tracking-empty">
             <h1 id="orderTrackingTitle">Order tracking</h1>
             <p>We could not find this merchandise order in your account yet.</p>
@@ -791,7 +794,7 @@
     const statusLabel = formatOrderStatus(order.status || 'processing');
     return `
       <div class="order-tracking__inner">
-        <button class="tracking-back-btn" type="button" data-tracking-action="back">&larr; Back</button>
+        ${trackingBackButton}
         <article class="tracking-card">
           <header class="tracking-product">
             <img src="${escapeHtml(product.imageUrl)}" alt="${escapeHtml(product.name)}" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
@@ -1748,6 +1751,45 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   function getTrackingOrderIdFromHash() {
     const match = String(window.location.hash || '').match(/^#track-order\/([^/?#]+)/);
     return match ? decodeURIComponent(match[1]) : '';
+  }
+
+  function isAdminTrackingRequest() {
+    return new URLSearchParams(window.location.search).get('adminTracking') === '1'
+      && Boolean(getTrackingOrderIdFromHash());
+  }
+
+  function normalizeAdminTrackingOrder(result) {
+    const raw = result?.order || {};
+    const items = Array.isArray(result?.items) ? result.items : [];
+    return {
+      id: raw.id,
+      orderNumber: raw.order_number || raw.orderNumber,
+      customerEmail: raw.customer_email || raw.customerEmail || '',
+      email: raw.customer_email || raw.customerEmail || '',
+      status: raw.status || 'processing',
+      createdAt: raw.created_at || raw.createdAt || null,
+      updatedAt: raw.updated_at || raw.updatedAt || null,
+      trackingNumber: raw.tracking_number || raw.trackingNumber || '',
+      carrier: raw.carrier_name || raw.carrierName || '',
+      totalAmount: Number(raw.total_amount || raw.totalAmount || 0),
+      items: items.map((item) => ({
+        name: item.product_name || item.productName || '',
+        productName: item.product_name || item.productName || '',
+        variantLabel: item.variant_label || item.variantLabel || '',
+        qty: Number(item.quantity || item.qty || 1),
+        quantity: Number(item.quantity || item.qty || 1),
+        sku: item.sku || '',
+      })),
+    };
+  }
+
+  async function loadAdminTrackingOrder(orderId) {
+    try {
+      const result = await api(`/api/merch/admin/orders/${encodeURIComponent(orderId)}`);
+      state.merchOrders = [normalizeAdminTrackingOrder(result)];
+    } catch {
+      state.merchOrders = [];
+    }
   }
 
   function bindOrderTrackingActions(order) {
@@ -4556,10 +4598,11 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   async function loadCustomerContext() {
+    const adminTrackingRequest = isAdminTrackingRequest();
     try {
       const authResult = await api('/api/auth/me');
       state.currentUser = authResult.user || null;
-      if (state.currentUser && String(state.currentUser.role || '').toLowerCase() === 'admin') {
+      if (state.currentUser && String(state.currentUser.role || '').toLowerCase() === 'admin' && !adminTrackingRequest) {
     window.location.replace('/merch/admin/index.html');
     return;
 }
@@ -4567,7 +4610,15 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       state.currentUser = null;
     }
 
-    if (state.currentUser) {
+    if (state.currentUser && adminTrackingRequest) {
+      await loadAdminTrackingOrder(getTrackingOrderIdFromHash());
+      state.merchProfile = null;
+      state.merchAddresses = [];
+      state.merchWishlistItems = [];
+      state.merchCartItems = [];
+      state.merchCouponHistory = [];
+      state.influencerDashboard = null;
+    } else if (state.currentUser) {
       try {
         const profileResult = await api('/api/merch/profile');
         state.merchProfile = profileResult.profile || null;

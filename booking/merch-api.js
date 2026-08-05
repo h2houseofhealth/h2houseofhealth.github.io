@@ -154,6 +154,60 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     })();
   }
 
+  // Restore the other bundled merch products if they were removed by the
+  // previous admin delete flow. Existing stock values are preserved.
+  const bundledProductRestores = [
+    {
+      name: 'H2 Molecular Hydrogen Water Bottle',
+      slug: 'h2-water-bottle',
+      description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 3 minutes. BPA-free, USB-C rechargeable.',
+      category: 'bottles',
+      basePrice: 649900,
+      image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113',
+      weight: 380,
+      variants: [
+        ['HM-BTL-300-SLV', '300ml', 'Silver', 699900, 40],
+        ['HM-BTL-500-SLV', '500ml', 'Silver', 649900, 35],
+        ['HM-BTL-300-BLK', '300ml', 'Black', 749900, 30],
+        ['HM-BTL-500-BLK', '500ml', 'Black', 849900, 25],
+      ],
+    },
+    {
+      name: 'H2 Hydrogen Mist Spray',
+      slug: 'h2-mist-spray',
+      description: 'Compact hydrogen mist spray for skin rejuvenation. Antioxidant-rich hydrogen water delivery.',
+      category: 'sprays',
+      basePrice: 249900,
+      image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138',
+      weight: 150,
+      variants: [
+        ['HM-SPR-050-WHT', '50ml', 'White', 249900, 50],
+        ['HM-SPR-100-WHT', '100ml', 'White', 349900, 40],
+        ['HM-SPR-050-RSG', '50ml', 'Rose Gold', 279900, 35],
+        ['HM-SPR-100-RSG', '100ml', 'Rose Gold', 379900, 30],
+      ],
+    },
+  ];
+  const restoreProduct = db.transaction((product) => {
+    let row = db.prepare('SELECT id FROM merch_products WHERE slug = ?').get(product.slug);
+    if (!row) {
+      const result = db.prepare(`
+        INSERT INTO merch_products (name, slug, description, category, base_price, image_url, gst_rate, weight_grams, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, 18, ?, 1)
+      `).run(product.name, product.slug, product.description, product.category, product.basePrice, product.image, product.weight);
+      row = { id: Number(result.lastInsertRowid) };
+    } else {
+      db.prepare("UPDATE merch_products SET is_active = 1, updated_at = datetime('now') WHERE id = ?").run(row.id);
+    }
+    const insertVariant = db.prepare('INSERT OR IGNORE INTO merch_variants (product_id, sku, size, color, price, stock) VALUES (?, ?, ?, ?, ?, ?)');
+    const activateVariant = db.prepare('UPDATE merch_variants SET is_active = 1 WHERE product_id = ? AND sku = ?');
+    product.variants.forEach(([sku, size, color, price, stock]) => {
+      insertVariant.run(row.id, sku, size, color, price, stock);
+      activateVariant.run(row.id, sku);
+    });
+  });
+  bundledProductRestores.forEach(restoreProduct);
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS merch_combo_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -5091,6 +5145,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (components.length !== componentVariantIds.length || components.some((item) => !item.isActive || !item.productActive || item.isCombo)) {
       return res.status(400).json({ message: 'All selected combo components must be active normal products.' });
     }
+    const componentStocks = new Map(
+      (Array.isArray(body.componentStocks) ? body.componentStocks : [])
+        .map((item) => {
+          const rawStock = item?.stock;
+          const stock = rawStock === undefined || rawStock === null || String(rawStock).trim() === ''
+            ? 10
+            : Math.max(0, Math.floor(Number(rawStock)));
+          return [Number(item?.variantId), Number.isFinite(stock) ? stock : 10];
+        })
+        .filter(([variantId]) => Number.isInteger(variantId) && variantId > 0)
+    );
     const comboSku = `COMBO-${slug.toUpperCase().slice(0, 38)}-${Date.now().toString().slice(-6)}`;
       const image = normalizeMerchImageInput(body.image) || normalizeMerchImageInput(components[0]?.imageUrl);
     const description = String(body.description || '').trim();
@@ -5104,7 +5169,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         const variantResult = db.prepare(`INSERT INTO merch_variants (product_id, sku, size, color, price, stock) VALUES (?, ?, NULL, NULL, ?, 0)`)
           .run(productId, comboSku, Math.round(priceRupees * 100));
         const insertItem = db.prepare('INSERT INTO merch_combo_items (combo_product_id, component_product_id, component_variant_id, quantity) VALUES (?, ?, ?, 1)');
-        components.forEach((item) => insertItem.run(productId, item.productId, item.variantId));
+        const updateStock = db.prepare('UPDATE merch_variants SET stock = ? WHERE id = ?');
+        components.forEach((item) => {
+          insertItem.run(productId, item.productId, item.variantId);
+          updateStock.run(componentStocks.has(item.variantId) ? componentStocks.get(item.variantId) : 10, item.variantId);
+        });
         return { productId, variantId: Number(variantResult.lastInsertRowid) };
       });
       const result = createCombo();
