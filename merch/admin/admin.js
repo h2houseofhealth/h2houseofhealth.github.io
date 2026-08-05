@@ -2058,6 +2058,13 @@
       toast('Select products', 'Select at least one product before editing.', 'warning');
       return;
     }
+    // Combo rows are expanded from their single combo variant in the product
+    // table, but their editable data lives on the combo and its component
+    // variants. Open the combo editor so its individual products are shown.
+    if (selected.length === 1 && selected[0].isCombo) {
+      renderComboFormModal([], selected[0]);
+      return;
+    }
     openModal({
       title: 'Edit selected products',
       subtitle: `${selected.length} product${selected.length === 1 ? '' : 's'} selected`,
@@ -2137,7 +2144,6 @@
             <div class="admin-toolbar__group">
               <button class="admin-btn admin-btn--soft" type="button" data-action="open-product-modal">Add Product</button>
               <button class="admin-btn admin-btn--ghost" type="button" data-action="bulk-combo-on" ${selectedCount ? '' : 'disabled'}>Add to Combo</button>
-              <button class="admin-btn admin-btn--ghost" type="button" data-action="bulk-combo-off" ${selectedCount ? '' : 'disabled'}>Remove from Combo</button>
             </div>
           </div>
 
@@ -3684,20 +3690,23 @@
           const source = state.products.find((product) => Number(product.variantId) === Number(item.variantId)) || item;
           return { variantId: item.variantId, productName: source.name || item.name, imageUrl: source.image || item.imageUrl || getProductFallbackImage(source), sku: source.sku || item.sku, size: source.size || item.size, color: source.color || item.color };
         });
+    // Product rows are expanded from variants, so a combo row's `id` is its
+    // variant id. Combo endpoints expect the parent product id instead.
+    const comboProductId = entity?.productId || entity?.parentProductId || entity?.id || '';
     const comboVariant = entity?.variants?.[0] || entity || {};
     openModal({
       title: entity ? 'Edit Combo' : 'Create Combo',
       subtitle: 'Combo Products',
       body: `
-        <form class="admin-form" data-entity-form="combo" data-entity-id="${escapeHtml(entity?.id || '')}">
+        <form class="admin-form" data-entity-form="combo" data-entity-id="${escapeHtml(comboProductId)}">
           <div class="admin-form__grid">
             <label class="admin-field"><span>Combo Name</span><input class="admin-input" name="name" value="${escapeHtml(entity?.name || '')}" required /></label>
             <label class="admin-field"><span>Overall Combo Price (rupees)</span><input class="admin-input" name="price" type="number" min="1" step="1" value="${escapeHtml(Number(entity?.price || comboVariant.price || 0))}" required /></label>
-            <label class="admin-field admin-field--wide"><span>Combo Image</span><input class="admin-input" name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" ${entity ? '' : 'required'} /><small class="admin-field__hint">Upload a JPG, PNG, or WEBP image${entity?.image ? ' to replace the current image' : ''}.</small></label>
+            <label class="admin-field admin-field--wide"><span>Combo Image</span><input class="admin-input" name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" /><small class="admin-field__hint">Optional. Upload a JPG, PNG, or WEBP image${entity?.image ? ' to replace the current image' : ''}.</small></label>
             <label class="admin-field admin-field--wide"><span>Combo Details</span><textarea class="admin-textarea" name="description" placeholder="Optional description">${escapeHtml(entity?.description || '')}</textarea></label>
             <label class="admin-field"><span>Status</span><select class="admin-select" name="status"><option value="published" ${entity?.status !== 'archived' ? 'selected' : ''}>Published</option><option value="archived" ${entity?.status === 'archived' ? 'selected' : ''}>Archived</option></select></label>
             <div class="admin-field admin-field--wide"><span>Included products and variants (edit component stock)</span><div class="admin-combo-items">
-              ${selectedItems.map((item) => { const fallback = getProductFallbackImage(item); const image = normalizeAdminImageUrl(item.imageUrl, fallback); return `<label class="admin-combo-item"><input type="hidden" name="componentVariantId" value="${escapeHtml(item.variantId)}" /><img src="${escapeHtml(image)}" alt="" onerror="this.onerror=null;this.src='${escapeHtml(fallback)}';" /><span><strong>${escapeHtml(item.productName || item.name)}</strong><small>${escapeHtml([item.size, item.color].filter(Boolean).join(' / ') || item.sku || 'Default variant')}</small></span><input class="admin-input" name="componentStock" type="number" min="0" value="${escapeHtml(item.stock ?? 0)}" aria-label="Stock for ${escapeHtml(item.productName || item.name)}" /></label>`; }).join('')}
+              ${selectedItems.map((item) => { const fallback = getProductFallbackImage(item); const image = normalizeAdminImageUrl(item.imageUrl, fallback); const stock = entity ? (item.stock ?? 10) : 10; return `<label class="admin-combo-item"><input type="hidden" name="componentVariantId" value="${escapeHtml(item.variantId)}" /><img src="${escapeHtml(image)}" alt="" onerror="this.onerror=null;this.src='${escapeHtml(fallback)}';" /><span><strong>${escapeHtml(item.productName || item.name)}</strong><small>${escapeHtml([item.size, item.color].filter(Boolean).join(' / ') || item.sku || 'Default variant')}</small></span><input class="admin-input" name="componentStock" type="number" min="0" value="${escapeHtml(stock)}" aria-label="Stock for ${escapeHtml(item.productName || item.name)}" /></label>`; }).join('')}
             </div></div>
           </div>
         </form>
@@ -5082,10 +5091,7 @@
         renderOrderEditModal(state.orders.filter((item) => state.selectedOrderIds.includes(Number(item.id))));
         return;
       case 'track-admin-order':
-        if (order) {
-          state.selectedOrderId = Number(order.id);
-          handleNav('orders');
-        }
+        if (order) window.open(`/merch/index.html?adminTracking=1#track-order/${encodeURIComponent(order.id)}`, '_blank', 'noopener,noreferrer');
         return;
       case 'save-order-edits': {
         const form = els.adminModalDialog.querySelector('[data-order-edit-form]');
