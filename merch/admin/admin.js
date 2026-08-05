@@ -34,14 +34,14 @@
   // Earthy chart palette based on the House of Health visual language.
   // Keep the terracotta accent first so the revenue chart and line mode lead
   // with the same color used throughout the admin UI.
-  const REVENUE_BAR_COLORS = ['var(--admin-accent)', '#cbb395', '#73320f', '#8e8a59', '#5d6669', '#c58d36', 'var(--admin-accent)', '#b77b57', '#9b755f', '#d9c3ab', '#a98970', '#cfa681'];
+  const REVENUE_BAR_COLORS = ['var(--admin-accent)', '#d9825e', '#a9472f', '#b9674b', '#8f392b', '#e0a080', 'var(--admin-accent)', '#c96d4b', '#9f4937', '#e7b49a', '#b85a40', '#d49372'];
   const ORDER_STATUS_COLORS = {
-    pending: '#d7c5b9',
-    processing: '#f87532',
-    shipped: '#ffb23e',
-    delivered: '#a6a936',
-    cancelled: '#62686a',
-    returned: '#c98a36',
+    pending: '#e7b49a',
+    processing: '#c8652d',
+    shipped: '#d9825e',
+    delivered: '#b9674b',
+    cancelled: '#8f392b',
+    returned: '#a9472f',
   };
   const REVENUE_PERIOD_OPTIONS = [
     { value: 'year', label: '12 Months (Jan-Dec)' },
@@ -544,6 +544,7 @@
     const couponRows = Array.isArray(report?.couponPerformance) ? report.couponPerformance : [];
     const orderRows = Array.isArray(report?.salesHistory?.items) ? report.salesHistory.items : [];
     const periodLabel = report?.periodLabel || 'all available dates';
+    const houseBalancePending = Number(summary.commissionPending || 0);
 
     return `
       <div class="admin-report-detail">
@@ -560,6 +561,7 @@
           <article class="admin-stat"><p class="admin-stat__label">Sales Generated</p><p class="admin-stat__value">${money(summary.totalSalesGenerated)}</p></article>
           <article class="admin-stat"><p class="admin-stat__label">Commission Earned</p><p class="admin-stat__value">${money(summary.totalCommissionEarned)}</p></article>
           <article class="admin-stat"><p class="admin-stat__label">Commission Paid</p><p class="admin-stat__value">${money(summary.commissionPaid)}</p></article>
+          <article class="admin-stat"><p class="admin-stat__label">House Balance Pending</p><p class="admin-stat__value">${money(houseBalancePending)}</p></article>
         </div>
         <div class="admin-card-grid admin-card-grid--2" style="margin-top:16px;">
           <section class="admin-card"><div class="admin-card__head"><h4 class="admin-card__title">Performance</h4></div><div class="admin-card__body">
@@ -578,7 +580,7 @@
     `;
   }
 
-  async function viewInfluencerReport(influencer) {
+  async function viewInfluencerReport(influencer, month = '') {
     if (!influencer) return;
     openModal({
       title: `${influencer.name || 'Influencer'} Report`,
@@ -587,7 +589,7 @@
       size: 'lg',
     });
     try {
-      const result = await fetchInfluencerReport(influencer.id);
+      const result = await fetchInfluencerReport(influencer.id, month);
       const report = result?.report || result;
       openModal({
         title: `${report?.influencer?.name || influencer.name || 'Influencer'} Report`,
@@ -995,8 +997,9 @@
     URL.revokeObjectURL(objectUrl);
   }
 
-  async function fetchInfluencerReport(influencerId) {
-    return apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencerId)}/report`);
+  async function fetchInfluencerReport(influencerId, month = '') {
+    const query = month ? `?month=${encodeURIComponent(month)}` : '';
+    return apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencerId)}/report${query}`);
   }
 
   function buildInfluencerReportFilename(influencer, extension = 'html') {
@@ -1004,10 +1007,10 @@
     return `merch-influencer-report-${slug}.${extension}`;
   }
 
-  async function downloadInfluencerReport(influencer) {
+  async function downloadInfluencerReport(influencer, month = '') {
     if (!influencer) return;
     try {
-      const result = await fetchInfluencerReport(influencer.id);
+      const result = await fetchInfluencerReport(influencer.id, month);
       const report = result?.report || result;
       downloadMerchReportFile(
         buildInfluencerReportFilename(influencer, 'html'),
@@ -1020,7 +1023,7 @@
     }
   }
 
-  async function emailInfluencerReport(influencer) {
+  async function emailInfluencerReport(influencer, month = '') {
     if (!influencer) return;
     if (!String(influencer.email || '').trim()) {
       toast('Email unavailable', `${influencer.name} does not have an email address on file.`, 'warning');
@@ -1031,7 +1034,7 @@
       await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencer.id)}/report/email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ month: month || null }),
       });
       toast('Report emailed', `A detailed report was sent to ${influencer.email}.`, 'success');
     } catch (error) {
@@ -1336,9 +1339,11 @@
     selectedProductIds: [],
     selectedProductId: 101,
     selectedOrderId: null,
+    selectedOrderIds: [],
     selectedCustomerId: null,
     selectedCouponId: null,
     selectedInfluencerId: null,
+    selectedInfluencerIds: [],
     productsSearch: '',
     productsCategory: 'all',
     productsSort: 'newest',
@@ -1838,6 +1843,20 @@
       <section class="admin-section">
         <div class="admin-section__head">
           <div>
+            <h2 class="admin-section__title">Live Notifications</h2>
+            <p class="admin-section__desc">Real-time order, payment, inventory, and customer activity.</p>
+          </div>
+          <button class="admin-btn admin-btn--ghost" type="button" data-action="toggle-notifications">${state.notificationsExpanded ? 'Show less' : 'View all'}</button>
+        </div>
+        <div class="admin-section__body">
+          <div class="admin-notifications">
+            ${visibleNotifications.length ? visibleNotifications.map(renderNotificationItem).join('') : '<p class="admin-table__muted" style="margin:0;">No new live notifications.</p>'}
+          </div>
+        </div>
+      </section>
+      <section class="admin-section">
+        <div class="admin-section__head">
+          <div>
             <h2 class="admin-section__title">Revenue Overview</h2>
             <p class="admin-section__desc">Revenue, orders, customer activity, and coupon usage streamed from the merch API.</p>
           </div>
@@ -2309,6 +2328,40 @@
     `;
   }
 
+  function renderOrderEditModal(orders) {
+    const selected = Array.isArray(orders) ? orders.filter(Boolean) : [];
+    if (!selected.length) {
+      toast('Select orders', 'Select at least one order before editing.', 'warning');
+      return;
+    }
+    openModal({
+      title: 'Edit selected orders',
+      subtitle: `${selected.length} order${selected.length === 1 ? '' : 's'} selected`,
+      body: `
+        <form class="admin-form" data-order-edit-form>
+          <label class="admin-field"><span>Set status for selected orders</span>
+            <select class="admin-select" name="status">
+              ${Object.keys(ORDER_STATUS_META).map((status) => `<option value="${status}">${escapeHtml(getStatusLabel(status))}</option>`).join('')}
+            </select>
+          </label>
+          <div class="admin-list" style="margin-top:14px;">
+            ${selected.map((order) => `<div class="admin-list__item"><div class="admin-list__item-head"><div><strong>${escapeHtml(order.orderNumber || `Order #${order.id}`)}</strong><span class="admin-table__muted">${escapeHtml(order.customerName || '')}</span></div><span class="admin-badge ${statusClass(order.status)}">${escapeHtml(getStatusLabel(order.status))}</span></div></div>`).join('')}
+          </div>
+          <p class="admin-table__muted" style="margin:14px 0 6px;">Actions apply to every selected order.</p>
+          <div class="admin-actions">
+            <button class="admin-action-link" type="button" data-action="bulk-order-invoice">Invoice</button>
+            <button class="admin-action-link" type="button" data-action="bulk-order-email">Email</button>
+            <button class="admin-action-link" type="button" data-action="bulk-order-download">Download / Print</button>
+            <button class="admin-action-link" type="button" data-action="bulk-order-cancel">Cancel</button>
+            <button class="admin-action-link" type="button" data-action="bulk-order-refund">Refund</button>
+          </div>
+        </form>
+      `,
+      footer: '<button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Close</button><button class="admin-btn admin-btn--primary" type="button" data-action="save-order-edits">Save status</button>',
+      size: 'lg',
+    });
+  }
+
   function renderOrders() {
     if (state.ordersLoading) {
       els.ordersView.innerHTML = `
@@ -2392,46 +2445,36 @@
 
           <div class="admin-grid admin-grid--two" ${showOrderDetails ? '' : 'style="grid-template-columns:1fr;"'}>
             <section class="admin-card">
-              <div class="admin-card__head">
-                <h3 class="admin-card__title">Order List</h3>
-                <p class="admin-card__sub">${filtered.length} order(s) match the current filters</p>
+              <div class="admin-card__head admin-card__head--with-actions">
+                <div><h3 class="admin-card__title">Order List</h3><p class="admin-card__sub">${filtered.length} order(s) match the current filters</p></div>
+                <button class="admin-btn admin-btn--soft admin-edit-action admin-order-edit-action" type="button" data-action="edit-selected-orders" ${state.selectedOrderIds.length ? '' : 'disabled'}>Edit${state.selectedOrderIds.length ? ` (${state.selectedOrderIds.length})` : ''}</button>
               </div>
               <div class="admin-card__body admin-table-wrap">
                 <table class="admin-table">
                   <thead>
                     <tr>
-                      <th>Order ID</th>
+                      <th><input type="checkbox" data-action="toggle-orders-page-selection" ${pageItems.length && pageItems.every((item) => state.selectedOrderIds.includes(Number(item.id))) ? 'checked' : ''} aria-label="Select visible orders" /> Order ID</th>
                       <th>Customer</th>
-                      <th>Coupon</th>
                       <th>Discount</th>
                       <th>Payment</th>
                       <th>Total</th>
                       <th>Status</th>
-                      <th>Actions</th>
+                      <th>Track order</th>
                     </tr>
                   </thead>
                   <tbody>
                     ${pageItems.map((order) => `
                       <tr data-action="select-order" data-id="${order.id}" style="cursor:pointer;">
-                        <td><strong>${escapeHtml(order.orderNumber)}</strong><br><span class="admin-table__muted">${escapeHtml(dateLabel(order.createdAt))}</span></td>
+                        <td><input type="checkbox" data-action="toggle-order-selection" data-id="${order.id}" ${state.selectedOrderIds.includes(Number(order.id)) ? 'checked' : ''} aria-label="Select ${escapeHtml(order.orderNumber)}" /> <strong>${escapeHtml(order.orderNumber)}</strong><br><span class="admin-table__muted">${escapeHtml(dateLabel(order.createdAt))}</span></td>
                         <td>${escapeHtml(order.customerName)}<br><span class="admin-table__muted">${escapeHtml(order.email)}</span></td>
-                        <td>${escapeHtml(order.couponCode || '—')}</td>
                         <td>${escapeHtml(order.couponCode ? money(order.discountAmount) : '—')}</td>
                         <td>${escapeHtml(order.paymentMethod.toUpperCase())}<br><span class="admin-table__muted">${escapeHtml(getStatusLabel(order.paymentStatus))}</span></td>
                         <td><strong>${escapeHtml(money(order.totalAmount))}</strong></td>
                         <td>
-                          <select class="admin-select admin-order-status-select" data-action="update-order-status" data-id="${order.id}" aria-label="Status for ${escapeHtml(order.orderNumber)}">
-                            ${Object.keys(ORDER_STATUS_META).map((status) => `<option value="${status}" ${normalizeOrderStatus(order.status) === status ? 'selected' : ''}>${escapeHtml(getStatusLabel(status))}</option>`).join('')}
-                          </select>
+                          <span class="admin-badge ${statusClass(order.status)}">${escapeHtml(getStatusLabel(order.status))}</span>
                         </td>
                         <td>
-                          <div class="admin-actions">
-                            <button class="admin-action-link" type="button" data-action="open-order-invoice" data-id="${order.id}">Invoice</button>
-                            <button class="admin-action-link" type="button" data-action="email-order-invoice" data-id="${order.id}">Email</button>
-                            <button class="admin-action-link" type="button" data-action="download-order-invoice" data-id="${order.id}">Download</button>
-                            <button class="admin-action-link" type="button" data-action="cancel-order" data-id="${order.id}" ${['pending', 'processing'].includes(normalizeOrderStatus(order.status)) ? '' : 'disabled title="Only pending or processing orders can be cancelled"'}>Cancel</button>
-                            <button class="admin-action-link" type="button" data-action="refund-order" data-id="${order.id}">Refund</button>
-                          </div>
+                          <button class="admin-action-link" type="button" data-action="track-admin-order" data-id="${order.id}">Track order</button>
                         </td>
                       </tr>
                     `).join('')}
@@ -2891,6 +2934,34 @@
     `;
   }
 
+  function renderInfluencerEditModal(influencers) {
+    const selected = Array.isArray(influencers) ? influencers.filter(Boolean) : [];
+    if (!selected.length) {
+      toast('Select influencers', 'Select at least one influencer before editing.', 'warning');
+      return;
+    }
+    const months = [...new Set(selected.flatMap((item) => (item.monthlySales || []).map((row) => row.month)).filter(Boolean))].sort().reverse();
+    openModal({
+      title: 'Edit selected influencers',
+      subtitle: `${selected.length} influencer${selected.length === 1 ? '' : 's'} selected`,
+      body: `
+        <div class="admin-form">
+          <label class="admin-field"><span>Report month</span><select class="admin-select" data-influencer-report-month><option value="">All months</option>${months.map((month) => `<option value="${escapeHtml(month)}">${escapeHtml(month)}</option>`).join('')}</select></label>
+          <div class="admin-list" style="margin-top:14px;">${selected.map((item) => `<div class="admin-list__item"><strong>${escapeHtml(item.name || item.handle || `Influencer ${item.id}`)}</strong><span class="admin-table__muted">${escapeHtml(item.email || '')}</span></div>`).join('')}</div>
+          <p class="admin-table__muted" style="margin:14px 0 6px;">Choose an action for every selected influencer.</p>
+          <div class="admin-actions">
+            <button class="admin-action-link" type="button" data-action="bulk-influencer-edit">Edit Influencer</button>
+            <button class="admin-action-link" type="button" data-action="bulk-influencer-view-report">View Report</button>
+            <button class="admin-action-link" type="button" data-action="bulk-influencer-download-report">Download Report</button>
+            <button class="admin-action-link" type="button" data-action="bulk-influencer-email-report">Send to Email</button>
+          </div>
+        </div>
+      `,
+      footer: '<button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Close</button>',
+      size: 'lg',
+    });
+  }
+
   function renderInfluencers() {
     const query = state.influencersSearch.trim().toLowerCase();
     const selectedInfluencerFilter = String(state.influencerDetailsFilter || 'all');
@@ -2948,7 +3019,7 @@
           ${renderDateFilterControls('influencers', state.influencersDatePeriod, state.influencersDateFrom, state.influencersDateTo, state.influencers.flatMap((influencer) => influencer.monthlySales || []), (row) => row.month)}
         </div>
         <div class="admin-section__body">
-          <div class="admin-grid admin-grid--stats">
+          <div class="admin-grid admin-grid--stats admin-influencer-kpis">
             <article class="admin-stat">
               <div class="admin-stat__top">
                 <div>
@@ -2988,7 +3059,7 @@
           </div>
 
           <div class="admin-toolbar">
-            <div class="admin-toolbar__group" style="flex:1 1 420px;">
+            <div class="admin-toolbar__group admin-influencer-search" style="flex:0 1 330px;">
               <input class="admin-input" data-input="influencersSearch" value="${escapeHtml(state.influencersSearch)}" placeholder="Search by name, handle, email, or phone" />
             </div>
             <div class="admin-toolbar__group" style="flex:0 1 220px;">
@@ -2997,19 +3068,21 @@
                 ${state.influencers.map((influencer) => `<option value="${escapeHtml(influencer.id)}" ${String(influencer.id) === selectedInfluencerFilter ? 'selected' : ''}>${escapeHtml(influencer.name || influencer.handle || `Influencer ${influencer.id}`)}</option>`).join('')}
               </select>
             </div>
-            <button class="admin-btn admin-btn--soft" type="button" data-action="open-influencer-modal">Add Influencer</button>
+            <div class="admin-toolbar__group admin-influencer-actions">
+              <button class="admin-btn admin-btn--soft" type="button" data-action="open-influencer-modal">Add Influencer</button>
+              <button class="admin-btn admin-btn--soft admin-edit-action" type="button" data-action="edit-selected-influencers" ${state.selectedInfluencerIds.length ? '' : 'disabled'}>Edit${state.selectedInfluencerIds.length ? ` (${state.selectedInfluencerIds.length})` : ''}</button>
+            </div>
           </div>
 
           <div class="admin-table-wrap">
             <table class="admin-table admin-influencer-table">
-              <thead><tr><th>Influencer</th><th>Contact</th><th>Status</th><th>Coupons</th><th>Orders</th><th>Revenue</th><th>Commission</th><th>Commission Paid</th><th>Actions</th></tr></thead>
-              <tbody>${visibleInfluencers.length ? visibleInfluencers.map((influencer) => { const stats = getMonthStats(influencer); return `<tr data-action="select-influencer" data-id="${influencer.id}">
-                <td><button class="admin-action-link" type="button" data-action="select-influencer" data-id="${influencer.id}">${escapeHtml(influencer.name || 'Unnamed')}</button><br><span class="admin-table__muted">${escapeHtml(influencer.handle || '')}</span></td>
+              <thead><tr><th><input type="checkbox" data-action="toggle-influencers-page-selection" aria-label="Select visible influencers" /> Influencer</th><th>Contact</th><th>Status</th><th>Coupons</th><th>Orders</th><th>Revenue</th><th>Commission Earned</th><th>Commission Paid</th><th>Balance Commission</th></tr></thead>
+              <tbody>${visibleInfluencers.length ? visibleInfluencers.map((influencer) => { const stats = getMonthStats(influencer); const commissionBalance = Math.max(0, Number(stats.commission || 0) - Number(influencer.paidCommission || 0)); return `<tr data-action="select-influencer" data-id="${influencer.id}">
+                <td><input type="checkbox" data-action="toggle-influencer-selection" data-id="${influencer.id}" ${state.selectedInfluencerIds.includes(Number(influencer.id)) ? 'checked' : ''} aria-label="Select ${escapeHtml(influencer.name || 'influencer')}" /> <button class="admin-action-link" type="button" data-action="select-influencer" data-id="${influencer.id}">${escapeHtml(influencer.name || 'Unnamed')}</button><br><span class="admin-table__muted">${escapeHtml(influencer.handle || '')}</span></td>
                 <td>${escapeHtml(influencer.email || 'Not added yet')}<br><span class="admin-table__muted">${escapeHtml(influencer.phone || 'Not added yet')}</span></td>
                 <td><span class="admin-badge ${influencer.active ? 'admin-badge--active' : 'admin-badge--inactive'}">${influencer.active ? 'Active' : 'Inactive'}</span></td>
                 <td>${formatCount(getAssignedCouponCount(influencer))}<br><span class="admin-table__muted">${getInfluencerCouponRecords(influencer).map((coupon) => `${escapeHtml(coupon.code)} — ${escapeHtml(couponDiscountLabel(coupon))}`).join('<br>') || 'None'}</span></td>
-                <td>${formatCount(stats.orders)}</td><td>${money(stats.revenue)}</td><td>${money(stats.commission)}</td><td>${money(influencer.paidCommission || 0)}</td>
-                <td><div class="admin-actions">${renderInfluencerActionLinks(influencer)}</div></td>
+                <td>${formatCount(stats.orders)}</td><td>${money(stats.revenue)}</td><td>${money(stats.commission)}</td><td>${money(influencer.paidCommission || 0)}</td><td>${money(commissionBalance)}</td>
               </tr>`; }).join('') : `<tr><td colspan="9">${renderEmptyState('No influencers found', 'Try a different search term or add a new influencer to start managing campaigns.')}</td></tr>`}</tbody>
             </table>
           </div>
@@ -3156,7 +3229,7 @@
       .map(([status, count]) => ({
         status,
         label: ORDER_STATUS_META[normalizeOrderStatus(status)]?.label || getStatusLabel(status),
-        color: ORDER_STATUS_META[normalizeOrderStatus(status)]?.color || '#9ca3af',
+        color: ORDER_STATUS_META[normalizeOrderStatus(status)]?.color || '#a65b43',
         count: Number(count || 0),
         percent: reportOrderTotal ? (Number(count || 0) / reportOrderTotal) * 100 : 0,
       }));
@@ -3180,7 +3253,7 @@
           </div>
         </div>
         <div class="admin-section__body">
-          <div class="admin-toolbar">
+          <div class="admin-toolbar admin-influencer-toolbar">
             <div class="admin-toolbar__group">
               <input class="admin-input" type="date" data-input="reportFrom" value="${escapeHtml(state.reportFrom)}" />
               <input class="admin-input" type="date" data-input="reportTo" value="${escapeHtml(state.reportTo)}" />
@@ -3599,7 +3672,7 @@
               ${['published', 'draft', 'archived'].map((status) => `<option value="${status}" ${String(entity?.status || 'published') === status ? 'selected' : ''}>${getStatusLabel(status)}</option>`).join('')}
             </select>
           </label>
-          <label class="admin-field admin-field--wide"><span>Product Image</span><input class="admin-input" name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" ${entity ? '' : 'required'} /><small class="admin-field__hint">Upload a JPG, PNG, or WEBP image${entity?.image ? ' to replace the current image' : ''}.</small></label>
+          <label class="admin-field admin-field--wide"><span>Product Images</span><input class="admin-input" name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" multiple ${entity ? '' : 'required'} /><small class="admin-field__hint">Upload one or more JPG, PNG, or WEBP images${entity?.image ? ' to replace the current gallery' : ''}. The first image is used on product cards.</small></label>
           <label class="admin-field admin-field--wide"><span>Description</span><textarea class="admin-textarea" name="description">${escapeHtml(entity?.description || '')}</textarea></label>
           <label class="admin-field admin-field--wide"><span>Product specifications</span><textarea class="admin-textarea" name="specifications" rows="7" placeholder="One per line: Label: Value">${escapeHtml(formatProductSpecifications(entity?.specifications))}</textarea><small class="admin-field__hint">Add one specification per line in the format <code>Label: Value</code>. These appear under More details.</small></label>
           <label class="admin-check"><input type="checkbox" name="comboPurchase" ${entity?.comboPurchase ? 'checked' : ''} /><span>Available for combo purchase</span></label>
@@ -3998,7 +4071,8 @@
       productId: existing?.productId || existing?.parentProductId || existing?.id,
       parentProductId: existing?.parentProductId || existing?.productId || existing?.id,
       variantId: existing?.variantId || existing?.id,
-      image: String(fd.get('image') || '').trim() || existing?.image || '',
+      image: String(fd.get('image') || '').trim() || existing?.image || existing?.images?.[0] || '',
+      images: Array.isArray(existing?.images) ? [...existing.images] : (existing?.image ? [existing.image] : []),
       description: String(fd.get('description') || '').trim(),
       specifications: parseProductSpecifications(fd.get('specifications')),
     };
@@ -4147,9 +4221,10 @@
   async function loadProductData() {
     try {
       const result = await apiRequest('/api/merch/admin/products');
+      const productRows = Array.isArray(result) ? result : (Array.isArray(result?.products) ? result.products : []);
       const categoryIds = { hoodies: 1, bottles: 2, sprays: 3 };
       const unknownCategories = new Map();
-      const products = Array.isArray(result) ? result.map((product) => {
+      const products = productRows.map((product) => {
         const variants = Array.isArray(product.variants) ? product.variants : [];
         const firstVariant = variants[0] || {};
         const price = Number(firstVariant.price || product.basePrice || 0) / 100;
@@ -4184,7 +4259,8 @@
           comboPurchase: Boolean(product.comboPurchase),
           isCombo: Boolean(product.isCombo),
           comboItems: Array.isArray(product.comboItems) ? product.comboItems : [],
-          image: product.imageUrl || product.image || '',
+          image: product.imageUrl || product.image || (Array.isArray(product.images) ? product.images[0] : '') || '',
+          images: (Array.isArray(product.images) ? product.images : (Array.isArray(product.imageUrls) ? product.imageUrls : [product.imageUrl || product.image])).filter(Boolean),
           description: product.description || '',
           specifications: product.specifications || {},
           variants: variants.map((variant) => ({
@@ -4193,7 +4269,7 @@
             stock: Number(variant.stock || 0),
           })),
         };
-      }) : [];
+      });
       unknownCategories.forEach((category) => {
         if (!state.categories.some((item) => String(item.id) === String(category.id))) state.categories.push(category);
       });
@@ -4378,6 +4454,26 @@
     return state.products.filter((item) => state.selectedProductIds.includes(item.id));
   }
 
+  async function deleteMerchProduct(productId) {
+    try {
+      await apiRequest(`/api/merch/admin/products/${encodeURIComponent(productId)}`, { method: 'DELETE' });
+      return { deleted: true, archived: false };
+    } catch (error) {
+      // Some older API deployments reject hard deletion when order history
+      // references a product. Archiving is the safe storefront-equivalent
+      // fallback and keeps those historical records intact.
+      if (error?.status === 404 || error?.status === 405 || error?.status >= 500) {
+        await apiRequest(`/api/merch/admin/products/${encodeURIComponent(productId)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'archived', archived: true }),
+        });
+        return { deleted: false, archived: true };
+      }
+      throw error;
+    }
+  }
+
   function renderAll() {
     els.pageTitle.textContent = SECTION_TITLES[state.view] || 'Dashboard';
     if (els.profileAvatar) els.profileAvatar.textContent = initials('Admin House');
@@ -4411,6 +4507,21 @@
     await loadCustomerData();
     await loadReportData();
     return response;
+  }
+
+  async function refundOrderOnServer(order) {
+    try {
+      return await apiRequest(`/api/merch/admin/orders/${encodeURIComponent(order.id)}/refund`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+    } catch (error) {
+      // Keep compatibility with deployments that expose refund through the
+      // existing status endpoint rather than a dedicated refund route.
+      if (![404, 405].includes(error?.status)) throw error;
+      return updateOrderOnServer(order, { status: order.status || 'processing', payment_status: 'refunded' });
+    }
   }
 
   async function fetchOrderInvoiceLink(orderId) {
@@ -4662,10 +4773,10 @@
             confirmLabel: 'Delete',
             onConfirm: async () => {
               try {
-                await apiRequest(`/api/merch/admin/products/${encodeURIComponent(productId)}`, { method: 'DELETE' });
+                const result = await deleteMerchProduct(productId);
                 state.selectedProductIds = state.selectedProductIds.filter((itemId) => itemId !== id);
                 await loadProductData();
-                toast('Product deleted', `${product.name} has been removed from the storefront.`, 'danger');
+                toast(result.archived ? 'Product hidden' : 'Product deleted', `${product.name} has been removed from the storefront.`, 'danger');
                 renderAll();
               } catch (error) {
                 toast('Delete failed', error.message || 'Unable to remove the product.', 'warning');
@@ -4767,10 +4878,12 @@
               .map((item) => Number(item.parentProductId || item.productId || item.id))
               .filter((itemId) => Number.isInteger(itemId) && itemId > 0))];
             try {
-              await Promise.all(ids.map((productId) => apiRequest(`/api/merch/admin/products/${encodeURIComponent(productId)}`, { method: 'DELETE' })));
+              const results = [];
+              for (const productId of ids) results.push(await deleteMerchProduct(productId));
               state.selectedProductIds = [];
               await loadProductData();
-              toast('Bulk delete complete', 'Selected products were removed from the storefront.', 'danger');
+              const archivedCount = results.filter((item) => item.archived).length;
+              toast('Bulk delete complete', `${ids.length - archivedCount} deleted${archivedCount ? `, ${archivedCount} hidden to preserve order history` : ''}.`, 'danger');
               renderAll();
             } catch (error) {
               toast('Bulk delete failed', error.message || 'Unable to remove the selected products.', 'warning');
@@ -4840,6 +4953,83 @@
           renderOrders();
         }
         return;
+      case 'toggle-order-selection':
+        if (target.checked) {
+          if (!state.selectedOrderIds.includes(id)) state.selectedOrderIds.push(id);
+        } else {
+          state.selectedOrderIds = state.selectedOrderIds.filter((orderId) => orderId !== id);
+        }
+        renderOrders();
+        return;
+      case 'toggle-orders-page-selection': {
+        const visible = filteredOrders().slice((state.ordersPage - 1) * 5, (state.ordersPage - 1) * 5 + 5);
+        const allSelected = visible.length && visible.every((item) => state.selectedOrderIds.includes(Number(item.id)));
+        if (allSelected) state.selectedOrderIds = state.selectedOrderIds.filter((orderId) => !visible.some((item) => Number(item.id) === orderId));
+        else visible.forEach((item) => { if (!state.selectedOrderIds.includes(Number(item.id))) state.selectedOrderIds.push(Number(item.id)); });
+        renderOrders();
+        return;
+      }
+      case 'edit-selected-orders':
+        renderOrderEditModal(state.orders.filter((item) => state.selectedOrderIds.includes(Number(item.id))));
+        return;
+      case 'track-admin-order':
+        if (order) {
+          state.selectedOrderId = Number(order.id);
+          handleNav('orders');
+        }
+        return;
+      case 'save-order-edits': {
+        const form = els.adminModalDialog.querySelector('[data-order-edit-form]');
+        const nextStatus = normalizeOrderStatus(form?.elements?.status?.value);
+        const selectedOrders = state.orders.filter((item) => state.selectedOrderIds.includes(Number(item.id)));
+        try {
+          for (const selectedOrder of selectedOrders) {
+            const payload = { status: nextStatus };
+            if (nextStatus === 'shipped' && !selectedOrder.trackingNumber) {
+              payload.tracking_number = `TRK-${Math.floor(10000 + Math.random() * 90000)}-HM`;
+              payload.carrier_name = selectedOrder.carrier || 'Shiprocket';
+            }
+            await updateOrderOnServer(selectedOrder, payload);
+          }
+          closeModal();
+          toast('Orders updated', `${selectedOrders.length} selected order${selectedOrders.length === 1 ? '' : 's'} updated.`, 'success');
+        } catch (error) {
+          toast('Order update failed', error.message || 'Unable to update the selected orders.', 'warning');
+        }
+        return;
+      }
+      case 'bulk-order-invoice':
+      case 'bulk-order-email':
+      case 'bulk-order-download':
+      case 'bulk-order-cancel':
+      case 'bulk-order-refund': {
+        const selectedOrders = state.orders.filter((item) => state.selectedOrderIds.includes(Number(item.id)));
+        if (action === 'bulk-order-refund') {
+          openConfirmModal({
+            title: 'Approve refunds',
+            message: `Approve and record refunds for ${selectedOrders.length} selected order${selectedOrders.length === 1 ? '' : 's'}?`,
+            confirmLabel: 'Approve refunds',
+            onConfirm: async () => {
+              try {
+                for (const selectedOrder of selectedOrders) await refundOrderOnServer(selectedOrder);
+                await loadOrderData();
+                toast('Refunds approved', `${selectedOrders.length} refund${selectedOrders.length === 1 ? '' : 's'} recorded.`, 'success');
+              } catch (error) {
+                toast('Refund failed', error.message || 'Unable to record the selected refunds.', 'warning');
+              }
+            },
+          });
+          return;
+        }
+        for (const selectedOrder of selectedOrders) {
+          if (action === 'bulk-order-invoice') await openOrderInvoice(selectedOrder.id);
+          if (action === 'bulk-order-email') await emailOrderInvoice(selectedOrder.id);
+          if (action === 'bulk-order-download') await downloadOrderInvoice(selectedOrder.id);
+          if (action === 'bulk-order-cancel') await updateOrderOnServer(selectedOrder, { status: 'cancelled', payment_status: 'refunded' });
+        }
+        if (['bulk-order-cancel', 'bulk-order-refund'].includes(action)) await loadOrderData();
+        return;
+      }
       case 'toggle-customers-today':
         state.customersTodayOnly = !state.customersTodayOnly;
         if (state.customersTodayOnly) {
@@ -4983,20 +5173,13 @@
         return;
       case 'refund-order':
         if (order) {
-          const deliveredAt = order.deliveredAt || order.updatedAt;
-          const deliveredTime = deliveredAt ? new Date(deliveredAt).getTime() : NaN;
-          const refundWindowMs = 5 * 24 * 60 * 60 * 1000;
-          if (String(order.status || '').toLowerCase() !== 'delivered' || !Number.isFinite(deliveredTime) || Date.now() - deliveredTime > refundWindowMs) {
-            toast('Refund unavailable', 'Refunds are allowed only within 5 days of delivery.', 'warning');
-            return;
-          }
           openConfirmModal({
             title: 'Approve refund',
             message: `Approve and record a refund for ${order.orderNumber}? This changes the payment status and cannot be undone here.`,
             confirmLabel: 'Approve refund',
             onConfirm: async () => {
               try {
-                await updateOrderOnServer(order, { status: order.status || 'processing', payment_status: 'refunded' });
+                await refundOrderOnServer(order);
                 toast('Refund approved', `${order.orderNumber} has been flagged for refund.`, 'success');
               } catch (error) {
                 toast('Refund failed', error.message || 'Unable to record the refund.', 'warning');
@@ -5096,6 +5279,46 @@
           }, 0);
         }
         return;
+      case 'toggle-influencer-selection':
+        if (target.checked) {
+          if (!state.selectedInfluencerIds.includes(id)) state.selectedInfluencerIds.push(id);
+        } else {
+          state.selectedInfluencerIds = state.selectedInfluencerIds.filter((influencerId) => influencerId !== id);
+        }
+        renderInfluencers();
+        return;
+      case 'toggle-influencers-page-selection': {
+        const visible = state.influencers.filter((item) => {
+          const query = state.influencersSearch.trim().toLowerCase();
+          return !query || [item.name, item.handle, item.email, item.phone].filter(Boolean).some((value) => String(value).toLowerCase().includes(query));
+        });
+        const allSelected = visible.length && visible.every((item) => state.selectedInfluencerIds.includes(Number(item.id)));
+        if (allSelected) state.selectedInfluencerIds = state.selectedInfluencerIds.filter((influencerId) => !visible.some((item) => Number(item.id) === influencerId));
+        else visible.forEach((item) => { if (!state.selectedInfluencerIds.includes(Number(item.id))) state.selectedInfluencerIds.push(Number(item.id)); });
+        renderInfluencers();
+        return;
+      }
+      case 'edit-selected-influencers':
+        renderInfluencerEditModal(state.influencers.filter((item) => state.selectedInfluencerIds.includes(Number(item.id))));
+        return;
+      case 'bulk-influencer-edit': {
+        const selectedInfluencer = state.influencers.find((item) => state.selectedInfluencerIds.includes(Number(item.id)));
+        if (selectedInfluencer) renderEntityFormModal('influencer', selectedInfluencer);
+        return;
+      }
+      case 'bulk-influencer-view-report':
+      case 'bulk-influencer-download-report':
+      case 'bulk-influencer-email-report': {
+        const month = String(els.adminModalDialog.querySelector('[data-influencer-report-month]')?.value || '');
+        const selectedInfluencers = state.influencers.filter((item) => state.selectedInfluencerIds.includes(Number(item.id)));
+        closeModal();
+        for (const selectedInfluencer of selectedInfluencers) {
+          if (action === 'bulk-influencer-view-report') await viewInfluencerReport(selectedInfluencer, month);
+          if (action === 'bulk-influencer-download-report') await downloadInfluencerReport(selectedInfluencer, month);
+          if (action === 'bulk-influencer-email-report') await emailInfluencerReport(selectedInfluencer, month);
+        }
+        return;
+      }
       case 'open-influencer-modal':
         renderEntityFormModal('influencer');
         return;
@@ -5256,16 +5479,20 @@
     }
   }
 
-  async function uploadMerchImage(form) {
-    const file = form.elements.imageFile?.files?.[0];
-    if (!file) return '';
-    const uploadData = new FormData();
-    uploadData.append('image', file);
-    const result = await apiRequest('/api/merch/admin/upload-image', {
-      method: 'POST',
-      body: uploadData,
-    });
-    return String(result.imageUrl || '').trim();
+  async function uploadMerchImages(form) {
+    const files = [...(form.elements.imageFile?.files || [])];
+    if (!files.length) return [];
+    return Promise.all(files.map(async (file) => {
+      const uploadData = new FormData();
+      uploadData.append('image', file);
+      const result = await apiRequest('/api/merch/admin/upload-image', {
+        method: 'POST',
+        body: uploadData,
+      });
+      const imageUrl = String(result.imageUrl || result.url || '').trim();
+      if (!imageUrl) throw new Error(`The image upload for ${file.name} returned no image URL.`);
+      return imageUrl;
+    }));
   }
 
   async function submitEntityForm(form) {
@@ -5280,7 +5507,7 @@
       const componentStocks = fd.getAll('componentStock').map((value) => Math.max(0, Math.floor(Number(value || 0))));
       let uploadedImage = '';
       try {
-        uploadedImage = await uploadMerchImage(form);
+        uploadedImage = (await uploadMerchImages(form))[0] || '';
       } catch (error) {
         toast('Image upload failed', error.message || 'Unable to upload the combo image.', 'danger');
         return;
@@ -5322,8 +5549,11 @@
         return;
       }
       try {
-        const uploadedImage = await uploadMerchImage(form);
-        if (uploadedImage) entity.image = uploadedImage;
+        const uploadedImages = await uploadMerchImages(form);
+        if (uploadedImages.length) {
+          entity.images = uploadedImages;
+          entity.image = uploadedImages[0];
+        }
       } catch (error) {
         toast('Image upload failed', error.message || 'Unable to upload the product image.', 'danger');
         return;
@@ -5345,6 +5575,8 @@
               color: entity.color,
               status: entity.status,
               image: entity.image,
+              images: entity.images,
+              imageUrls: entity.images,
               description: entity.description,
               specifications: entity.specifications,
               comboPurchase: entity.comboPurchase,
@@ -5378,6 +5610,8 @@
             stock: entity.stock,
             status: entity.status,
             image: entity.image,
+            images: entity.images,
+            imageUrls: entity.images,
             description: entity.description,
             specifications: entity.specifications,
             size: entity.size,
