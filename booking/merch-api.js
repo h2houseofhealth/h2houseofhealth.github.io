@@ -3893,6 +3893,25 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return res.json({ success: true, item });
   });
 
+  app.delete('/api/merch/wishlist/:id', requireMerchAuth, (req, res) => {
+    const profile = ensureMerchCustomerProfileForUser(req.user);
+    const itemId = Number(req.params.id || 0);
+    if (!profile || !itemId) {
+      return res.status(400).json({ error: 'A wishlist item is required' });
+    }
+
+    const result = db.prepare(`
+      DELETE FROM merch_customer_wishlist_items
+      WHERE id = ? AND customer_id = ?
+    `).run(itemId, profile.id);
+
+    if (!result.changes) {
+      return res.status(404).json({ error: 'Wishlist item not found' });
+    }
+
+    return res.json({ success: true, id: itemId });
+  });
+
   app.get('/api/merch/profile', requireMerchAuth, (req, res) => {
     const profile = syncMerchGuestOrdersForUser(req.user) || ensureMerchCustomerProfileForUser(req.user);
     if (!profile) {

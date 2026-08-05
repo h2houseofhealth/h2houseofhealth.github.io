@@ -2237,6 +2237,21 @@ body.is-auth-loading .merch-auth-cta {
   grid-column: 1 / -1;
 }
 
+.checkout-phone-control {
+  display: grid;
+  grid-template-columns: minmax(148px, 0.38fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.checkout-phone-control select,
+.checkout-phone-control input {
+  min-width: 0;
+}
+
+.checkout-phone-control select {
+  padding-right: 34px;
+}
+
 .shopify-field-grid .shopify-field:nth-last-of-type(3),
 .shopify-field-grid .shopify-field:nth-last-of-type(2),
 .shopify-field-grid .shopify-field:nth-last-of-type(1):not(.shopify-field--wide) {
