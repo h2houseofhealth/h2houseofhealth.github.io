@@ -400,6 +400,38 @@ a {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.admin-influencer-kpis {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.admin-influencer-search {
+  max-width: 330px;
+}
+
+.admin-edit-action {
+  padding: 12px 14px;
+}
+
+.admin-card__head--with-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.admin-influencer-toolbar {
+  justify-content: flex-start;
+}
+
+.admin-influencer-toolbar .admin-influencer-actions {
+  margin-left: auto;
+}
+
+.admin-influencer-table th,
+.admin-influencer-table td {
+  white-space: nowrap;
+}
+
 .admin-combo-guide {
   margin: 0 0 18px;
   padding: 14px 16px;
@@ -1335,9 +1367,9 @@ a {
   background:
     conic-gradient(
       var(--admin-accent) 0 38%,
-      #e5b48d 38% 62%,
-      #8cc3a3 62% 78%,
-      #c9c0b8 78% 100%
+      #d9825e 38% 62%,
+      #b9674b 62% 78%,
+      #8f392b 78% 100%
     );
   display: grid;
   place-items: center;
@@ -1899,6 +1931,14 @@ a {
     flex-direction: column;
   }
 
+  .admin-card__head--with-actions {
+    align-items: flex-start;
+  }
+
+  .admin-influencer-toolbar .admin-influencer-actions {
+    margin-left: 0;
+  }
+
   .admin-revenue-filter {
     flex-basis: auto;
     width: 100%;
@@ -1966,8 +2006,8 @@ a {
   --admin-text: #17191d;
   --admin-muted: #6d625d;
   --admin-subtle: #92837b;
-  --admin-accent: #ed6d2d;
-  --admin-accent-dark: #c74d1e;
+  --admin-accent: #c8652d;
+  --admin-accent-dark: #9f3e1f;
   --admin-shadow: 0 12px 28px rgba(186, 95, 47, 0.12);
   --admin-shadow-soft: 0 5px 16px rgba(186, 95, 47, 0.09);
   --admin-radius: 18px;
@@ -2019,6 +2059,7 @@ body.merch-admin-page {
   text-align: center;
   font-family: Arial, sans-serif;
 }
+.admin-nav__icon svg { display: block; margin: 0 auto; }
 .admin-nav__item:hover { background: rgba(244, 128, 66, .1); border-color: transparent; }
 .admin-nav__item.is-active {
   color: var(--admin-accent-dark);
@@ -2071,7 +2112,7 @@ body.merch-admin-page {
 .admin-card-grid--2 { grid-template-columns: minmax(0, 1.02fr) minmax(0, 1fr); }
 .admin-revenue-card .admin-card__body { min-height: 382px; }
 .admin-revenue-chart__plot { height: 260px; }
-.admin-revenue-chart__bar { width: min(42px, 82%); background: linear-gradient(180deg, #ff7131, #e55e24); }
+.admin-revenue-chart__bar { width: min(42px, 82%); background: linear-gradient(180deg, #c8652d, #a9472f); }
 .admin-chart-ring { width: 218px; box-shadow: inset 0 0 0 19px rgba(255,255,255,.92); }
 .admin-coupon-overview { gap: 12px; }
 .admin-coupon-overview__item { background: rgba(255,255,255,.72); border-color: rgba(229, 141, 96, .15); }

@@ -313,7 +313,8 @@
       null
     );
     const fallbackImages = Array.isArray(source?.images) ? source.images.filter(Boolean) : [];
-    const productImages = Array.isArray(product?.images) ? product.images.filter(Boolean).map(normalizeProductImageUrl) : [];
+    const productImageList = Array.isArray(product?.images) ? product.images : (Array.isArray(product?.imageUrls) ? product.imageUrls : []);
+    const productImages = productImageList.filter(Boolean).map(normalizeProductImageUrl);
     const imageUrl = normalizeProductImageUrl(product?.imageUrl || product?.image || product?.image_url || source?.imageUrl || '');
 
     return {
@@ -1064,7 +1065,8 @@
   async function loadMerchProducts() {
     try {
       const result = await api('/api/merch/products');
-      state.products = Array.isArray(result) ? result.map(normalizeMerchProduct) : [];
+      const productRows = Array.isArray(result) ? result : (Array.isArray(result?.products) ? result.products : []);
+      state.products = productRows.map(normalizeMerchProduct);
       renderDynamicCategoryOptions();
     } catch (error) {
       state.products = [];
@@ -1875,12 +1877,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const coupons = Array.isArray(dashboard.couponPerformance) ? dashboard.couponPerformance : [];
     const commissions = Array.isArray(dashboard.commissionHistory) ? dashboard.commissionHistory : [];
     const notifications = Array.isArray(dashboard.notifications) ? dashboard.notifications : [];
-    const filteredSales = getInfluencerSalesRows();
-    const pageSize = 5;
-    const pageCount = Math.max(1, Math.ceil(filteredSales.length / pageSize));
-    const currentPage = Math.min(Math.max(1, Number(state.influencerSalesPage || 1)), pageCount);
-    const pageSlice = filteredSales.slice((currentPage - 1) * pageSize, (currentPage - 1) * pageSize + pageSize);
-
     const socialLinksText = Array.isArray(influencer.socialLinks) ? influencer.socialLinks.join('\n') : '';
     // Kept available for legacy markup while the insights panel remains hidden.
     const bestCoupon = analytics.bestCoupon || dashboard.performance?.bestCoupon || null;
@@ -1889,7 +1885,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const averageOrderValue = dashboard.performance?.averageOrderValue ?? summary.averageOrderValue ?? 0;
     const repeatCustomerPercentage = dashboard.performance?.repeatCustomerPercentage ?? analytics.repeatCustomerPercentage ?? 0;
     const conversionRate = dashboard.performance?.conversionRate ?? summary.conversionRate ?? 0;
-    const upcomingPayment = dashboard.commission?.upcomingPayment ? formatDateLabel(dashboard.commission.upcomingPayment) : 'No payout scheduled';
     const lastPayment = dashboard.commission?.lastPaymentDate ? formatDateLabel(dashboard.commission.lastPaymentDate) : 'No payments yet';
     const monthlyTrend = Array.isArray(analytics.monthlyTrend) ? analytics.monthlyTrend : [];
     const isCouponExpired = (coupon) => {
@@ -1933,13 +1928,16 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             <p class="account-section__eyebrow">Influencer Dashboard</p>
             <h4>Premium creator analytics</h4>
           </div>
-          <label class="influencer-month-select">
-            <span>Month</span>
-            <select data-influencer-filter="month">
-              <option value="all" ${state.influencerSalesMonth === 'all' ? 'selected' : ''}>All months</option>
-              ${monthOptions.map((item) => `<option value="${escapeHtml(item.value)}" ${state.influencerSalesMonth === item.value ? 'selected' : ''}>${escapeHtml(item.label)}</option>`).join('')}
-            </select>
-          </label>
+          <div class="influencer-dashboard-actions">
+            <button type="button" class="btn btn-outline account-action-btn" data-account-action="influencer-back">Back to account</button>
+            <label class="influencer-month-select">
+              <span>Month</span>
+              <select data-influencer-filter="month">
+                <option value="all" ${state.influencerSalesMonth === 'all' ? 'selected' : ''}>All months</option>
+                ${monthOptions.map((item) => `<option value="${escapeHtml(item.value)}" ${state.influencerSalesMonth === item.value ? 'selected' : ''}>${escapeHtml(item.label)}</option>`).join('')}
+              </select>
+            </label>
+          </div>
         </div>
         <p class="account-card__note">Your dashboard updates from live merch sales, assigned coupons, and commission payments.</p>
 
@@ -2078,80 +2076,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           </div>
         </article>
 
-        <details class="influencer-details influencer-details--sales-history" open>
-          <summary>
-            <span>Sales History</span>
-            <small>${filteredSales.length} records</small>
-          </summary>
-          <div class="influencer-toolbar">
-            <label class="account-field">
-              <span>Search</span>
-              <input type="search" data-influencer-filter="search" value="${escapeHtml(state.influencerSalesSearch)}" placeholder="Order number, coupon, customer, product" />
-            </label>
-            <label class="account-field">
-              <span>Status</span>
-              <select data-influencer-filter="status">
-                <option value="all" ${state.influencerSalesStatus === 'all' ? 'selected' : ''}>All</option>
-                <option value="paid" ${state.influencerSalesStatus === 'paid' ? 'selected' : ''}>Paid</option>
-                <option value="cod_pending" ${state.influencerSalesStatus === 'cod_pending' ? 'selected' : ''}>COD Pending</option>
-                <option value="processing" ${state.influencerSalesStatus === 'processing' ? 'selected' : ''}>Processing</option>
-                <option value="shipped" ${state.influencerSalesStatus === 'shipped' ? 'selected' : ''}>Shipped</option>
-                <option value="delivered" ${state.influencerSalesStatus === 'delivered' ? 'selected' : ''}>Delivered</option>
-                <option value="cancelled" ${state.influencerSalesStatus === 'cancelled' ? 'selected' : ''}>Cancelled</option>
-              </select>
-            </label>
-            <label class="account-field">
-              <span>From</span>
-              <input type="date" data-influencer-filter="from" value="${escapeHtml(state.influencerSalesFrom)}" />
-            </label>
-            <label class="account-field">
-              <span>To</span>
-              <input type="date" data-influencer-filter="to" value="${escapeHtml(state.influencerSalesTo)}" />
-            </label>
-          </div>
-          <div class="influencer-table-wrap">
-            ${pageSlice.length ? `
-              <table class="influencer-table">
-                <thead>
-                  <tr>
-                    <th>Order</th>
-                    <th>Date</th>
-                    <th>Product Summary</th>
-                    <th>Customer</th>
-                    <th>Coupon</th>
-                    <th>Amount</th>
-                    <th>Commission</th>
-                    <th>Status</th>
-                    <th>Payment</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${pageSlice.map((order) => `
-                    <tr>
-                      <td><strong>${escapeHtml(order.orderNumber || '')}</strong></td>
-                      <td>${escapeHtml(formatDateLabel(order.orderDate))}</td>
-                      <td>${escapeHtml(order.productSummary || 'Merch order')}</td>
-                      <td>${escapeHtml(order.customerName || 'Customer')}</td>
-                      <td>${escapeHtml(order.couponUsed || '—')}</td>
-                      <td>${escapeHtml(formatMoneyFromPaise(order.orderAmount || 0))}</td>
-                      <td>${escapeHtml(formatMoneyFromPaise(order.commissionEarned || 0))}</td>
-                      <td>${escapeHtml(order.orderStatus || 'pending')}</td>
-                      <td>${escapeHtml(order.paymentStatus || 'pending')}</td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-              <div class="influencer-pagination">
-                <span>Page ${currentPage} of ${pageCount}</span>
-                <div>
-                  <button type="button" class="btn btn-outline account-action-btn" data-account-action="influencer-history-page" data-direction="prev" ${currentPage <= 1 ? 'disabled' : ''}>Previous</button>
-                  <button type="button" class="btn btn-outline account-action-btn" data-account-action="influencer-history-page" data-direction="next" ${currentPage >= pageCount ? 'disabled' : ''}>Next</button>
-                </div>
-              </div>
-            ` : '<div class="account-empty-state"><p>No sales match your filters.</p><span>Try a wider date range or clear the search.</span></div>'}
-          </div>
-        </details>
-
         <div class="influencer-grid influencer-grid--two">
           <details class="influencer-details" open>
             <summary>
@@ -2163,7 +2087,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
               <article class="influencer-commission-card"><span>Total Paid</span><strong>${escapeHtml(formatMoneyFromPaise(dashboard.commission?.totalPaid || 0))}</strong></article>
               <article class="influencer-commission-card"><span>Pending</span><strong>${escapeHtml(formatMoneyFromPaise(dashboard.commission?.pending || 0))}</strong></article>
               <article class="influencer-commission-card"><span>Last Payment</span><strong>${escapeHtml(lastPayment)}</strong></article>
-              <article class="influencer-commission-card"><span>Upcoming Payment</span><strong>${escapeHtml(upcomingPayment)}</strong></article>
             </div>
             <div class="influencer-table-wrap">
               ${commissions.length ? `
@@ -2300,7 +2223,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         <button type="button" data-account-nav="account-orders" aria-current="${state.accountActiveSection === 'account-orders' ? 'page' : 'false'}">${renderAccountNavIcon('orders')}<span>My Orders</span></button>
         <button type="button" data-account-nav="account-addresses" aria-current="${state.accountActiveSection === 'account-addresses' ? 'page' : 'false'}">${renderAccountNavIcon('addresses')}<span>My Addresses</span></button>
         <button type="button" data-account-nav="account-wishlist" aria-current="${state.accountActiveSection === 'account-wishlist' ? 'page' : 'false'}">${renderAccountNavIcon('wishlist')}<span>Wishlist</span></button>
-        <button id="merchLogoutNavBtn" class="account-panel-nav__logout" type="button">${renderAccountNavIcon('logout')}<span>Logout</span></button>
         ${state.influencerDashboard?.influencer ? `<button type="button" data-account-nav="account-influencer" aria-current="${state.accountActiveSection === 'account-influencer' ? 'page' : 'false'}">${renderAccountNavIcon('influencer')}<span>Influencer Dashboard</span></button>` : ''}
       </nav>
       <section id="account-profile" data-account-section="account-profile" class="account-card account-card--profile">
@@ -2549,13 +2471,13 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       <button id="merchLogoutBtn" class="btn btn-secondary btn-full account-logout-btn" type="button">Logout</button>
     `;
 
+    els.accountDrawer.classList.toggle('account-drawer--influencer', state.accountActiveSection === 'account-influencer');
     const activeSection = state.accountActiveSection || '';
     els.accountDrawerContent.querySelectorAll('[data-account-section]').forEach((section) => {
       section.hidden = !activeSection || section.dataset.accountSection !== activeSection;
     });
 
     document.getElementById('merchLogoutBtn')?.addEventListener('click', handleLogout);
-    document.getElementById('merchLogoutNavBtn')?.addEventListener('click', handleLogout);
     bindAccountDrawerActions();
   }
 
@@ -2698,6 +2620,12 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   async function handleAccountAction(button) {
     const action = button.dataset.accountAction;
+
+    if (action === 'influencer-back') {
+      state.accountActiveSection = 'account-orders';
+      renderAccountDrawer();
+      return;
+    }
 
     if (action === 'edit-profile') {
       state.accountProfileEditing = true;
@@ -3440,6 +3368,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   function getProductDetailMainImage(product) {
+    // Uploaded galleries take precedence over category feature art. This keeps
+    // newly created products faithful to the images selected in admin while
+    // preserving the established fallback art for the original catalog.
+    if (Array.isArray(product?.images) && product.images.length) return product.images[0];
     const isBottle = String(product?.slug || '').toLowerCase() === 'molecular-hydrogen-water-bottle'
       || String(product?.category || '').toLowerCase() === 'bottles';
     const isHoodie = String(product?.category || '').toLowerCase() === 'hoodies'

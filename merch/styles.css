@@ -358,6 +358,10 @@ body.is-auth-loading .merch-auth-cta {
   pointer-events: auto;
 }
 
+.account-drawer--influencer { width: 100vw; }
+.account-drawer--influencer .account-drawer__shell { border-left: 0; }
+.account-drawer--influencer .account-drawer__content { width: min(1400px, 100%); margin: 0 auto; }
+
 .account-drawer__shell {
   height: 100%;
   display: flex;
@@ -489,10 +493,20 @@ body.is-auth-loading .merch-auth-cta {
 }
 
 .account-section--coupon-history,
-.account-section--extra,
-.influencer-panel--removed-insights,
-.influencer-details--sales-history {
+.account-section--extra {
   display: none !important;
+}
+
+.influencer-dashboard-actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.account-drawer--influencer .account-panel-nav__logout {
+  display: flex !important;
 }
 
 .influencer-month-select {
@@ -5766,6 +5780,13 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
   .shopify-total strong {
     font-size: 25px;
   }
+}
+
+@media (max-width: 600px) {
+  .account-drawer--influencer .account-drawer__header { padding: 18px 16px; }
+  .account-drawer--influencer .account-drawer__header h2 { font-size: 25px; }
+  .influencer-dashboard-actions { align-items: stretch; justify-content: stretch; width: 100%; }
+  .influencer-dashboard-actions > * { flex: 1 1 140px; }
 }
 
 /* Category tiles use the same peach gradient as the product image panels. */
