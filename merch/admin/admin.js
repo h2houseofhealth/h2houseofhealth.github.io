@@ -2058,11 +2058,15 @@
       toast('Select products', 'Select at least one product before editing.', 'warning');
       return;
     }
-    // Combo rows are expanded from their single combo variant in the product
-    // table, but their editable data lives on the combo and its component
-    // variants. Open the combo editor so its individual products are shown.
-    if (selected.length === 1 && selected[0].isCombo) {
-      renderComboFormModal([], selected[0]);
+    // A single selected product should use the complete product editor. Keep
+    // the table editor for multi-select updates, while combo rows continue to
+    // open their dedicated editor with component products and stock fields.
+    if (selected.length === 1) {
+      if (selected[0].isCombo) {
+        renderComboFormModal([], selected[0]);
+      } else {
+        renderEntityFormModal('product', selected[0]);
+      }
       return;
     }
     openModal({
@@ -2173,7 +2177,7 @@
               <li>Select at least two product variants using the checkboxes below.</li>
               <li>Click <em>Add to Combo</em>, then add the combo image, details, and overall selling price.</li>
               <li>The combo appears here as its own product and on the customer merch page.</li>
-              <li>Customers purchase the combo price while component stock is reduced automatically.</li>
+              <li>Customers purchase the combo price from stock allocated separately to the combo.</li>
             </ol>
           </div>
 
@@ -3705,8 +3709,8 @@
             <label class="admin-field admin-field--wide"><span>Combo Image</span><input class="admin-input" name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" /><small class="admin-field__hint">Optional. Upload a JPG, PNG, or WEBP image${entity?.image ? ' to replace the current image' : ''}.</small></label>
             <label class="admin-field admin-field--wide"><span>Combo Details</span><textarea class="admin-textarea" name="description" placeholder="Optional description">${escapeHtml(entity?.description || '')}</textarea></label>
             <label class="admin-field"><span>Status</span><select class="admin-select" name="status"><option value="published" ${entity?.status !== 'archived' ? 'selected' : ''}>Published</option><option value="archived" ${entity?.status === 'archived' ? 'selected' : ''}>Archived</option></select></label>
-            <div class="admin-field admin-field--wide"><span>Included products and variants (edit component stock)</span><div class="admin-combo-items">
-              ${selectedItems.map((item) => { const fallback = getProductFallbackImage(item); const image = normalizeAdminImageUrl(item.imageUrl, fallback); const stock = entity ? (item.stock ?? 10) : 10; return `<label class="admin-combo-item"><input type="hidden" name="componentVariantId" value="${escapeHtml(item.variantId)}" /><img src="${escapeHtml(image)}" alt="" onerror="this.onerror=null;this.src='${escapeHtml(fallback)}';" /><span><strong>${escapeHtml(item.productName || item.name)}</strong><small>${escapeHtml([item.size, item.color].filter(Boolean).join(' / ') || item.sku || 'Default variant')}</small></span><input class="admin-input" name="componentStock" type="number" min="0" value="${escapeHtml(stock)}" aria-label="Stock for ${escapeHtml(item.productName || item.name)}" /></label>`; }).join('')}
+            <div class="admin-field admin-field--wide"><span>Included products and variants (set combo stock)</span><small class="admin-field__hint">This stock belongs to the combo and does not change the individual products.</small><div class="admin-combo-items">
+              ${selectedItems.map((item) => { const fallback = getProductFallbackImage(item); const image = normalizeAdminImageUrl(item.imageUrl, fallback); const stock = entity ? (comboVariant.stock ?? 10) : 10; return `<label class="admin-combo-item"><input type="hidden" name="componentVariantId" value="${escapeHtml(item.variantId)}" /><img src="${escapeHtml(image)}" alt="" onerror="this.onerror=null;this.src='${escapeHtml(fallback)}';" /><span><strong>${escapeHtml(item.productName || item.name)}</strong><small>${escapeHtml([item.size, item.color].filter(Boolean).join(' / ') || item.sku || 'Default variant')}</small></span><input class="admin-input" name="componentStock" type="number" min="0" value="${escapeHtml(stock)}" aria-label="Combo stock for ${escapeHtml(item.productName || item.name)}" /></label>`; }).join('')}
             </div></div>
           </div>
         </form>
@@ -3719,6 +3723,9 @@
   }
 
   function renderEntityFormModal(type, entity = null) {
+    const existingProductImages = type === 'product'
+      ? [...new Set((Array.isArray(entity?.images) ? entity.images : [entity?.image]).filter(Boolean))]
+      : [];
     const config = {
       product: {
         title: entity ? 'Edit Product' : 'Add Product',
@@ -3741,7 +3748,11 @@
               ${['published', 'draft', 'archived'].map((status) => `<option value="${status}" ${String(entity?.status || 'published') === status ? 'selected' : ''}>${getStatusLabel(status)}</option>`).join('')}
             </select>
           </label>
-          <label class="admin-field admin-field--wide"><span>Product Images</span><input class="admin-input" name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" multiple ${entity ? '' : 'required'} /><small class="admin-field__hint">Upload one or more JPG, PNG, or WEBP images${entity?.image ? ' to replace the current gallery' : ''}. The first image is used on product cards.</small></label>
+          <label class="admin-field admin-field--wide"><span>Product Images</span>
+            ${existingProductImages.length ? `<div class="admin-current-images">${existingProductImages.map((image) => `<img src="${escapeHtml(normalizeAdminImageUrl(image, getProductFallbackImage(entity)))}" alt="Current product image" onerror="this.onerror=null;this.src='${escapeHtml(getProductFallbackImage(entity))}';" /><input type="hidden" name="currentImage" value="${escapeHtml(image)}" />`).join('')}</div>` : ''}
+            <input class="admin-input" name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" multiple ${entity ? '' : 'required'} />
+            <small class="admin-field__hint">${existingProductImages.length ? 'Current gallery shown above. ' : ''}Upload one or more JPG, PNG, or WEBP images${existingProductImages.length ? ' to replace the current gallery' : ''}. The first image is used on product cards.</small>
+          </label>
           <label class="admin-field admin-field--wide"><span>Description</span><textarea class="admin-textarea" name="description">${escapeHtml(entity?.description || '')}</textarea></label>
           <label class="admin-field admin-field--wide"><span>Product specifications</span><textarea class="admin-textarea" name="specifications" rows="7" placeholder="One per line: Label: Value">${escapeHtml(formatProductSpecifications(entity?.specifications))}</textarea><small class="admin-field__hint">Add one specification per line in the format <code>Label: Value</code>. These appear under More details.</small></label>
           <label class="admin-check"><input type="checkbox" name="comboPurchase" ${entity?.comboPurchase ? 'checked' : ''} /><span>Available for combo purchase</span></label>
@@ -4113,6 +4124,10 @@
 
   function updateProductFromForm(form, existing = null) {
     const fd = new FormData(form);
+    const currentImages = [...new Set(fd.getAll('currentImage').map((value) => String(value || '').trim()).filter(Boolean))];
+    const preservedImages = currentImages.length
+      ? currentImages
+      : (Array.isArray(existing?.images) ? [...existing.images] : [existing?.image].filter(Boolean));
     const categoryIdValue = String(fd.get('categoryId') || '').trim();
     const categoryId = /^\d+$/.test(categoryIdValue) ? Number(categoryIdValue) : categoryIdValue;
     const category = state.categories.find((item) => String(item.id) === String(categoryId));
@@ -4140,8 +4155,8 @@
       productId: existing?.productId || existing?.parentProductId || existing?.id,
       parentProductId: existing?.parentProductId || existing?.productId || existing?.id,
       variantId: existing?.variantId || existing?.id,
-      image: String(fd.get('image') || '').trim() || existing?.image || existing?.images?.[0] || '',
-      images: Array.isArray(existing?.images) ? [...existing.images] : (existing?.image ? [existing.image] : []),
+      image: String(fd.get('image') || '').trim() || preservedImages[0] || '',
+      images: preservedImages,
       description: String(fd.get('description') || '').trim(),
       specifications: parseProductSpecifications(fd.get('specifications')),
     };

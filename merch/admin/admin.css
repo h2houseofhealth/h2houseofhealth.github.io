@@ -1455,6 +1455,24 @@ a {
   grid-column: 1 / -1;
 }
 
+.admin-current-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: var(--admin-radius-sm);
+  background: #faf7f4;
+}
+
+.admin-current-images img {
+  width: 76px;
+  height: 76px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: #f3ebe4;
+}
+
 .admin-product-multiselect {
   position: relative;
 }

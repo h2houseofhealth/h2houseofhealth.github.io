@@ -1997,7 +1997,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const topProducts = Array.isArray(analytics.topProducts) ? analytics.topProducts : Array.isArray(dashboard.performance?.topSellingProducts) ? dashboard.performance.topSellingProducts : [];
     const averageOrderValue = dashboard.performance?.averageOrderValue ?? summary.averageOrderValue ?? 0;
     const repeatCustomerPercentage = dashboard.performance?.repeatCustomerPercentage ?? analytics.repeatCustomerPercentage ?? 0;
-    const conversionRate = dashboard.performance?.conversionRate ?? summary.conversionRate ?? 0;
     const lastPayment = dashboard.commission?.lastPaymentDate ? formatDateLabel(dashboard.commission.lastPaymentDate) : 'No payments yet';
     const monthlyTrend = Array.isArray(analytics.monthlyTrend) ? analytics.monthlyTrend : [];
     const isCouponExpired = (coupon) => {
@@ -2018,9 +2017,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const activeMonthlyRows = monthlyRows.filter((row) => !['cancelled', 'refunded', 'failed'].includes(String(row.orderStatus || row.paymentStatus || '').toLowerCase()));
     const activeMonthlySales = activeMonthlyRows.reduce((total, row) => total + Number(row.orderAmount || 0), 0);
     const monthlyCommission = activeMonthlyRows.reduce((total, row) => total + Number(row.commissionEarned || 0), 0);
-    const monthlyPaidRows = activeMonthlyRows.filter((row) => ['paid', 'cod_pending'].includes(String(row.paymentStatus || '').toLowerCase()));
     const monthlyCouponUsage = activeMonthlyRows.filter((row) => row.couponUsed).length;
-    const monthlyConversion = activeMonthlyRows.length ? (monthlyPaidRows.length / activeMonthlyRows.length) * 100 : 0;
     const isMonthlyView = Boolean(selectedMonth);
     const primaryCouponUnavailable = isCouponUnavailable(primaryCoupon);
     const kpis = [
@@ -2031,7 +2028,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       { label: 'Commission Paid', value: formatMoneyFromPaise(isMonthlyView ? 0 : summary.commissionPaid || 0), note: isMonthlyView ? 'Monthly payout details are recorded separately.' : 'Already processed and recorded.' },
       { label: 'Active Coupons', value: Number(summary.activeCoupons || coupons.filter((coupon) => coupon.active).length || 0).toLocaleString('en-IN'), note: 'Assignable and currently live.' },
       { label: 'Coupon Usage', value: (isMonthlyView ? monthlyCouponUsage : Number(summary.couponUsage || 0)).toLocaleString('en-IN'), note: isMonthlyView ? `${selectedMonth.label} orders captured through your codes.` : 'Orders captured through your codes.' },
-      { label: 'Conversion Rate', value: `${(isMonthlyView ? monthlyConversion : Number(summary.conversionRate || 0)).toFixed(1)}%`, note: 'Paid orders from referred traffic.' },
     ];
 
     return `
@@ -2145,7 +2141,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
               <span class="account-chip">Highest sales month: ${escapeHtml(highestSalesMonth?.label || 'N/A')}</span>
               <span class="account-chip">Average order value: ${escapeHtml(formatMoneyFromPaise(averageOrderValue || 0))}</span>
               <span class="account-chip">Repeat customers: ${escapeHtml(`${repeatCustomerPercentage.toFixed ? repeatCustomerPercentage.toFixed(1) : repeatCustomerPercentage}%`)}</span>
-              <span class="account-chip">Conversion rate: ${escapeHtml(`${Number(conversionRate || 0).toFixed(1)}%`)}</span>
             </div>
             <div class="influencer-mini-list">
               ${topProducts.length ? topProducts.map((product) => `

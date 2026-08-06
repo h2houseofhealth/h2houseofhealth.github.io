@@ -1538,9 +1538,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           ORDER BY ci.id ASC
         `).all(Number(product.id)).map((item) => ({ ...item, imageUrl: getMerchProductImage(item) }))
       : [];
-    const comboStock = comboItems.length
-      ? Math.max(0, Math.min(...comboItems.map((item) => Math.floor(Number(item.stock || 0) / Math.max(1, Number(item.quantity || 1))))))
-      : null;
     const isCombo = Number(product.is_combo || 0) === 1;
     const customComboImage = isCombo && product.image_url && !String(product.image_url).startsWith('/booking/')
       ? [String(product.image_url)]
@@ -1548,12 +1545,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const productImages = isCombo
       ? [...new Set([...customComboImage, ...comboItems.map((item) => item.imageUrl)].filter(Boolean).map(String))]
       : (parseMerchImages(product.images_json).length ? parseMerchImages(product.images_json) : (product.image_url ? [getMerchProductImage(product)] : []));
-    const stock = Number(product.is_combo || 0) === 1 && comboStock !== null
-      ? comboStock
-      : normalizedVariants.reduce((sum, variant) => sum + Number(variant.stock || 0), 0);
-    if (Number(product.is_combo || 0) === 1 && comboStock !== null) {
-      normalizedVariants.forEach((variant) => { variant.stock = comboStock; });
-    }
+    // A combo has its own inventory. Its component rows are only used to
+    // describe what is included and must never determine or mutate stock.
+    const stock = normalizedVariants.reduce((sum, variant) => sum + Number(variant.stock || 0), 0);
     const salesCount = Number(sales?.sales || 0);
     const orderCount = Number(sales?.orderCount || 0);
 
@@ -3538,9 +3532,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         `).all(Number(variant.product_id))
       : [];
     if (Number(variant.is_combo || 0) === 1 && !components.length) return null;
-    const stock = Number(variant.is_combo || 0) === 1
-      ? Math.max(0, Math.min(...components.map((item) => Math.floor(Number(item.stock || 0) / Math.max(1, Number(item.quantity || 1))))))
-      : Number(variant.stock || 0);
+    const stock = Number(variant.stock || 0);
     return { variant, components, stock };
   }
 
@@ -3555,23 +3547,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   function decrementMerchPurchaseVariant(variantId, quantity) {
     const purchase = getMerchPurchaseVariant(variantId);
     if (!purchase || purchase.stock < quantity) throw new Error('Insufficient stock for this product.');
-    if (Number(purchase.variant.is_combo || 0) === 1) {
-      const decrement = db.prepare('UPDATE merch_variants SET stock = stock - ? WHERE id = ? AND stock >= ?');
-      for (const component of purchase.components) {
-        const required = Number(quantity) * Math.max(1, Number(component.quantity || 1));
-        const result = decrement.run(required, component.variantId, required);
-        if (!result.changes) throw new Error(`Stock changed while confirming ${purchase.variant.product_name}.`);
-      }
-      return;
-    }
     const result = db.prepare('UPDATE merch_variants SET stock = stock - ? WHERE id = ? AND stock >= ?')
       .run(quantity, Number(variantId), quantity);
     if (!result.changes) throw new Error(`Stock changed while confirming ${purchase.variant.product_name}.`);
   }
 
   // Put the inventory reserved by an order back when that order is cancelled
-  // before shipment. Combo orders reserve their component variants rather than
-  // the combo variant itself, so restore those components here as well.
+  // before shipment. Combo inventory is held by the combo variant itself.
   function restoreMerchOrderStock(orderId) {
     const items = db.prepare(`
       SELECT oi.variant_id AS variantId, oi.quantity, p.is_combo AS isCombo
@@ -3581,20 +3563,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       WHERE oi.order_id = ?
     `).all(Number(orderId));
     const increment = db.prepare('UPDATE merch_variants SET stock = stock + ? WHERE id = ?');
-    const componentQuery = db.prepare(`
-      SELECT component_variant_id AS variantId, quantity
-      FROM merch_combo_items
-      WHERE combo_product_id = (SELECT product_id FROM merch_variants WHERE id = ?)
-    `);
-
     for (const item of items) {
-      if (Number(item.isCombo || 0) === 1) {
-        for (const component of componentQuery.all(Number(item.variantId))) {
-          increment.run(Number(item.quantity || 0) * Math.max(1, Number(component.quantity || 1)), Number(component.variantId));
-        }
-      } else {
-        increment.run(Number(item.quantity || 0), Number(item.variantId));
-      }
+      increment.run(Number(item.quantity || 0), Number(item.variantId));
     }
   }
 
@@ -5156,6 +5126,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         })
         .filter(([variantId]) => Number.isInteger(variantId) && variantId > 0)
     );
+    const comboStock = Math.min(...components.map((item) => componentStocks.has(item.variantId) ? componentStocks.get(item.variantId) : 10));
     const comboSku = `COMBO-${slug.toUpperCase().slice(0, 38)}-${Date.now().toString().slice(-6)}`;
       const image = normalizeMerchImageInput(body.image) || normalizeMerchImageInput(components[0]?.imageUrl);
     const description = String(body.description || '').trim();
@@ -5166,13 +5137,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           VALUES (?, ?, ?, ?, 'combos', ?, ?, ?, 18, 0, 0, 1)
         `).run(name, slug, description, JSON.stringify({ 'Combo items': components.map((item) => item.name).join(', ') }), Math.round(priceRupees * 100), image, String(body.status || 'published').toLowerCase() === 'published' ? 1 : 0);
         const productId = Number(productResult.lastInsertRowid);
-        const variantResult = db.prepare(`INSERT INTO merch_variants (product_id, sku, size, color, price, stock) VALUES (?, ?, NULL, NULL, ?, 0)`)
-          .run(productId, comboSku, Math.round(priceRupees * 100));
+        const variantResult = db.prepare(`INSERT INTO merch_variants (product_id, sku, size, color, price, stock) VALUES (?, ?, NULL, NULL, ?, ?)`)
+          .run(productId, comboSku, Math.round(priceRupees * 100), comboStock);
         const insertItem = db.prepare('INSERT INTO merch_combo_items (combo_product_id, component_product_id, component_variant_id, quantity) VALUES (?, ?, ?, 1)');
-        const updateStock = db.prepare('UPDATE merch_variants SET stock = ? WHERE id = ?');
         components.forEach((item) => {
           insertItem.run(productId, item.productId, item.variantId);
-          updateStock.run(componentStocks.has(item.variantId) ? componentStocks.get(item.variantId) : 10, item.variantId);
         });
         return { productId, variantId: Number(variantResult.lastInsertRowid) };
       });
@@ -5245,10 +5214,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         }
         if (componentStocks) {
           const stockVariantIds = componentIds || db.prepare('SELECT component_variant_id AS variantId FROM merch_combo_items WHERE combo_product_id = ?').all(comboId).map((item) => Number(item.variantId));
-          const updateStock = db.prepare('UPDATE merch_variants SET stock = ? WHERE id = ?');
-          stockVariantIds.forEach((variantId) => {
-            if (componentStocks.has(variantId)) updateStock.run(componentStocks.get(variantId), variantId);
-          });
+          const stocks = stockVariantIds.filter((variantId) => componentStocks.has(variantId)).map((variantId) => componentStocks.get(variantId));
+          if (stocks.length) {
+            db.prepare('UPDATE merch_variants SET stock = ? WHERE product_id = ?').run(Math.min(...stocks), comboId);
+          }
         }
       })();
       return res.json(loadMerchProductCatalog({ includeInactive: true }).find((item) => Number(item.id) === comboId) || { id: comboId });
