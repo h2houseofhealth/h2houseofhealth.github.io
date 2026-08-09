@@ -70,8 +70,9 @@
     selectedCategory: 'all',
     sortBy: 'newest',
     searchQuery: '',
-    currentView: 'shop', // 'shop' | 'detail' | 'confirmation' | 'tracking'
+    currentView: 'shop', // 'shop' | 'detail' | 'checkout' | 'confirmation' | 'tracking'
     selectedProduct: null,
+    trendingProducts: null,
     selectedVariant: null,
     quantity: 1,
     authResolved: false,
@@ -106,6 +107,9 @@
     accountOrderFilterMessage: '',
     checkoutModalOpen: false,
     checkoutSelectedAddressId: '',
+    checkoutDraft: null,
+    checkoutErrors: {},
+    checkoutSubmitting: false,
     checkoutMessage: '',
     merchCouponCode: '',
     merchCouponPreview: null,
@@ -115,6 +119,12 @@
   };
 
   const FALLBACK_PRODUCT_IMAGE = '/booking/assets/service-hydrogen-session.jpg';
+  const BOTTLE_DETAIL_FEATURE_IMAGE = '/cdn/shop/files/h2-bottle-product-features.png';
+  const MIST_DETAIL_FEATURE_IMAGE = '/cdn/shop/files/h2-mist-product-features.png';
+  const HOODIE_DETAIL_FEATURE_IMAGE = '/cdn/shop/files/h2-hoodie-product-features.png';
+
+
+
 
   // â”€â”€â”€ Product Data (Static catalog until API is built) â”€â”€â”€
   const PRODUCTS = [
@@ -214,6 +224,53 @@
     },
   ];
 
+  // Presentation-only fallbacks for the storefront card redesign. These are
+  // not product/API fields and should be replaced with real catalog metadata.
+  const PRODUCT_CARD_PRESENTATION = {
+    bottles: { badge: 'BESTSELLER', stars: '★★★★☆', reviews: 128, annotation: 'Molecular Hydrogen on the go' },
+    sprays: { badge: 'NEW ARRIVAL', stars: '★★★★★', reviews: 96, annotation: 'Refresh & rejuvenate anywhere' },
+    hoodies: { badge: 'LIMITED DROP', stars: '★★★★☆', reviews: 74, annotation: 'Wear the wellness lifestyle' },
+  };
+
+  function getProductCardPresentation(product) {
+    const category = String(product?.category || '').trim().toLowerCase();
+    return PRODUCT_CARD_PRESENTATION[category] || {
+      badge: 'NEW ARRIVAL',
+      stars: '★★★★☆',
+      reviews: 0,
+      annotation: 'Made for your everyday ritual',
+    };
+  }
+
+  // Sidebar content is deliberately data-first so it can later be replaced by
+  // GET /api/merch/sidebar without changing the rendering layer.
+  const MERCH_SIDEBAR_DEMO_DATA = {
+    trending: [
+      { key: 'bottle', rating: 5 },
+      { key: 'mist', rating: 5 },
+      { key: 'hoodie-sand', rating: 5 },
+      { key: 'hoodie-black', rating: 5 },
+    ],
+    bundles: [
+      { keys: ['bottle', 'mist'], label: 'Bottle + Mist', savings: 'Save 15%', discount: 0.85 },
+    ],
+    offers: [
+      { eyebrow: '🏷 Limited Time Offer', title: 'Up to 10% OFF', detail: 'Make space for a more intentional everyday ritual.', cta: 'Shop Now' },
+    ],
+    benefits: [
+      'Secure Payments',
+      'Easy Returns',
+      'Sustainably Made',
+      'Trusted by Wellness Enthusiasts',
+    ],
+    recommended: [
+      { key: 'bottle' },
+      { key: 'mist' },
+      { key: 'hoodie-black' },
+      { key: 'hoodie-sand' },
+    ],
+  };
+
   const PRODUCT_IMAGE_SOURCES = PRODUCTS.reduce((map, product) => {
     const source = {
       imageUrl: product.images?.[0] || '',
@@ -234,6 +291,10 @@
     }
     return map;
   }, {});
+
+  const HOODIE_CARD_IMAGE = '/cdn/shop/files/hero/h2-hoodie-transparent-source.png';
+  PRODUCT_IMAGE_SOURCES['zenith-hoodie-black'] = { imageUrl: HOODIE_CARD_IMAGE, images: [HOODIE_CARD_IMAGE] };
+  PRODUCT_IMAGE_SOURCES['zenith-hoodie-sand'] = { imageUrl: HOODIE_CARD_IMAGE, images: [HOODIE_CARD_IMAGE] };
 
   const PRODUCT_GALLERY_VARIANT_PRICES = {
     'molecular-hydrogen-water-bottle': [6999.00, 6499.00, 7499.00],
@@ -256,7 +317,8 @@
       null
     );
     const fallbackImages = Array.isArray(source?.images) ? source.images.filter(Boolean) : [];
-    const productImages = Array.isArray(product?.images) ? product.images.filter(Boolean).map(normalizeProductImageUrl) : [];
+    const productImageList = Array.isArray(product?.images) ? product.images : (Array.isArray(product?.imageUrls) ? product.imageUrls : []);
+    const productImages = productImageList.filter(Boolean).map(normalizeProductImageUrl);
     const imageUrl = normalizeProductImageUrl(product?.imageUrl || product?.image || product?.image_url || source?.imageUrl || '');
 
     return {
@@ -279,7 +341,7 @@
     const name = String(product?.name || '').toLowerCase();
     if (category === 'sprays' || name.includes('mist') || name.includes('spray')) return '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138';
     if (category === 'bottles' || name.includes('bottle')) return '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113';
-    if (category === 'hoodies' || name.includes('hoodie')) return '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg';
+    if (category === 'hoodies' || name.includes('hoodie')) return HOODIE_CARD_IMAGE;
     return FALLBACK_PRODUCT_IMAGE;
   }
 
@@ -346,6 +408,135 @@
     const max = Math.max(...prices);
     if (min === max) return formatPrice(min);
     return `${formatPrice(min)} - ${formatPrice(max)}`;
+  }
+
+  function findSidebarProduct(key, fallbackIndex = 0) {
+    const normalizedKey = String(key || '').toLowerCase();
+    const productPool = state.products.length ? state.products : PRODUCTS;
+    const product = productPool.find((entry) => {
+      const name = String(entry.name || '').toLowerCase();
+      const category = String(entry.category || '').toLowerCase();
+      if (normalizedKey === 'bottle') return category === 'bottles' || name.includes('bottle');
+      if (normalizedKey === 'mist') return category === 'sprays' || name.includes('mist') || name.includes('spray');
+      if (normalizedKey === 'hoodie-sand') return name.includes('hoodie') && name.includes('sand');
+      if (normalizedKey === 'hoodie-black') return name.includes('hoodie') && name.includes('black');
+      return name.includes(normalizedKey);
+    });
+    return product || productPool[fallbackIndex % Math.max(1, productPool.length)] || null;
+  }
+
+  function getSmartSidebarData() {
+    const trending = Array.isArray(state.trendingProducts)
+      ? state.trendingProducts.map((product) => ({ product, hypeLabel: product.hypeLabel }))
+      : [];
+    const recommended = MERCH_SIDEBAR_DEMO_DATA.recommended
+      .map((entry, index) => ({ ...entry, product: findSidebarProduct(entry.key, index) }))
+      .filter((entry) => entry.product);
+    const bundles = MERCH_SIDEBAR_DEMO_DATA.bundles.map((bundle) => {
+      const products = bundle.keys.map((key, index) => findSidebarProduct(key, index)).filter(Boolean);
+      const basePrice = products.reduce((total, product) => total + Number(product.variants?.[0]?.price || product.basePrice || 0), 0);
+      return {
+        ...bundle,
+        products,
+        price: basePrice * Number(bundle.discount || 1),
+      };
+    }).filter((bundle) => bundle.products.length);
+    return {
+      trending,
+      bundles,
+      offers: MERCH_SIDEBAR_DEMO_DATA.offers,
+      benefits: MERCH_SIDEBAR_DEMO_DATA.benefits,
+      recommended,
+    };
+  }
+
+  function renderSidebarProduct(item) {
+    const product = item.product;
+    const image = product.images?.[0] || product.imageUrl || getProductFallbackImage(product);
+    return `
+      <button class="smart-merch-product" type="button" data-sidebar-product-id="${escapeHtml(String(product.id))}" aria-label="View ${escapeHtml(product.name)}">
+        <img src="${escapeHtml(image)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
+        <span class="smart-merch-product__info">
+          <strong>${escapeHtml(product.name)}</strong>
+          ${item.hypeLabel ? `<span class="smart-merch-product__hype">${escapeHtml(item.hypeLabel)}</span>` : ''}
+          <span class="smart-merch-product__rating" aria-label="${Number(item.rating || 5)} out of 5 stars">★★★★★</span>
+          <span class="smart-merch-product__price">${escapeHtml(getPriceRange(product))}</span>
+        </span>
+      </button>
+    `;
+  }
+
+  function renderSmartMerchSidebar() {
+    if (!els.smartMerchSidebar) return;
+    const data = getSmartSidebarData();
+    els.smartMerchSidebar.innerHTML = `
+      ${data.trending.length ? `<section class="smart-merch-sidebar__section smart-merch-sidebar__section--trending" aria-labelledby="smartTrendingTitle">
+        <div class="smart-merch-sidebar__heading">
+          <h3 id="smartTrendingTitle">🔥 Trending Products</h3>
+          <button type="button" class="smart-merch-sidebar__view-all" data-sidebar-action="view-all">View All <span aria-hidden="true">→</span></button>
+        </div>
+        <div class="smart-merch-product-list">${data.trending.map(renderSidebarProduct).join('')}</div>
+      </section>` : ''}
+
+      <section class="smart-merch-sidebar__section smart-merch-sidebar__section--bundle" aria-labelledby="smartBundleTitle">
+        <div class="smart-merch-sidebar__heading">
+          <h3 id="smartBundleTitle">Bundle &amp; Save</h3>
+        </div>
+        <div class="smart-merch-bundle-list">
+          ${data.bundles.map((bundle) => `
+            <div class="smart-merch-bundle">
+            <div class="smart-merch-bundle__items">
+              ${bundle.products.map((product, index) => `
+                ${index ? '<span class="smart-merch-bundle__plus" aria-hidden="true">+</span>' : ''}
+                <img src="${escapeHtml(product.images?.[0] || product.imageUrl || getProductFallbackImage(product))}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
+              `).join('')}
+            </div>
+            <strong>${escapeHtml(bundle.label)}</strong>
+            <span class="smart-merch-bundle__savings">${escapeHtml(bundle.savings)}</span>
+            <strong class="smart-merch-bundle__price">${escapeHtml(formatPrice(bundle.price))}</strong>
+            <button type="button" class="btn btn-primary smart-merch-sidebar__cta" data-sidebar-action="shop-bundle">Shop Bundle</button>
+            </div>
+          `).join('')}
+        </div>
+      </section>
+
+      <section class="smart-merch-sidebar__section smart-merch-sidebar__section--offer" aria-labelledby="smartOfferTitle">
+        ${data.offers.map((offer) => `
+          <div class="smart-merch-offer">
+            <p class="smart-merch-offer__eyebrow">${escapeHtml(offer.eyebrow)}</p>
+            <h3 id="smartOfferTitle">${escapeHtml(offer.title)}</h3>
+            <p>${escapeHtml(offer.detail)}</p>
+            <button type="button" class="smart-merch-sidebar__text-cta" data-sidebar-action="shop-offer">${escapeHtml(offer.cta)} <span aria-hidden="true">→</span></button>
+          </div>
+        `).join('')}
+      </section>
+
+      <section class="smart-merch-sidebar__section smart-merch-sidebar__section--benefits" aria-labelledby="smartBenefitsTitle">
+        <div class="smart-merch-sidebar__heading">
+          <h3 id="smartBenefitsTitle">♥ House Benefits</h3>
+        </div>
+        <ul class="smart-merch-benefits">
+          ${data.benefits.map((benefit) => `<li><span aria-hidden="true">✓</span>${escapeHtml(benefit)}</li>`).join('')}
+        </ul>
+      </section>
+
+      <section class="smart-merch-sidebar__section smart-merch-sidebar__section--recommended" aria-labelledby="smartRecommendedTitle">
+        <div class="smart-merch-sidebar__heading">
+          <h3 id="smartRecommendedTitle">Recommended For You</h3>
+          <button type="button" class="smart-merch-sidebar__view-all" data-sidebar-action="view-all">View All <span aria-hidden="true">→</span></button>
+        </div>
+        <div class="smart-merch-product-list">${data.recommended.map(renderSidebarProduct).join('')}</div>
+      </section>
+    `;
+
+    els.smartMerchSidebar.querySelectorAll('[data-sidebar-product-id]').forEach((button) => {
+      button.addEventListener('click', () => showProductDetail(Number(button.dataset.sidebarProductId)));
+    });
+    els.smartMerchSidebar.querySelectorAll('[data-sidebar-action="view-all"], [data-sidebar-action="shop-bundle"], [data-sidebar-action="shop-offer"]').forEach((button) => {
+      button.addEventListener('click', () => {
+        els.shopSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
   }
 
   function getDefaultPurchasableVariant(product) {
@@ -546,6 +737,8 @@
     return {
       id: confirmation.orderId,
       orderNumber: confirmation.bookingId,
+      customerEmail: confirmation.email,
+      email: confirmation.email,
       status: 'processing',
       createdAt: confirmation.createdAt,
       updatedAt: confirmation.createdAt,
@@ -582,10 +775,13 @@
   }
 
   function OrderTrackingPage(order) {
+    const trackingBackButton = isAdminTrackingRequest()
+      ? ''
+      : '<button class="tracking-back-btn" type="button" data-tracking-action="back">&larr; Back</button>';
     if (!order) {
       return `
         <div class="order-tracking__inner">
-          <button class="tracking-back-btn" type="button" data-tracking-action="back">&larr; Back</button>
+          ${trackingBackButton}
           <div class="tracking-empty">
             <h1 id="orderTrackingTitle">Order tracking</h1>
             <p>We could not find this merchandise order in your account yet.</p>
@@ -598,7 +794,7 @@
     const statusLabel = formatOrderStatus(order.status || 'processing');
     return `
       <div class="order-tracking__inner">
-        <button class="tracking-back-btn" type="button" data-tracking-action="back">&larr; Back</button>
+        ${trackingBackButton}
         <article class="tracking-card">
           <header class="tracking-product">
             <img src="${escapeHtml(product.imageUrl)}" alt="${escapeHtml(product.name)}" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
@@ -651,6 +847,44 @@
     return product?.name || item.productName || `Saved item #${item.productId || item.id || ''}`.trim();
   }
 
+  async function addToWishlist(product, variant) {
+    if (!state.authResolved) {
+      await loadCustomerContext();
+    }
+    const productId = Number(product?.id || 0) || null;
+    const variantId = Number(variant?.id || 0) || null;
+    if (!productId && !variantId) return;
+
+    const alreadySaved = state.merchWishlistItems.some((item) => (
+      Number(item.productId || 0) === Number(productId || 0)
+      && Number(item.variantId || 0) === Number(variantId || 0)
+    ));
+    if (alreadySaved) {
+      showCheckoutNotice('Wishlist', `${product.name} is already in your wishlist.`);
+      return;
+    }
+
+    try {
+      if (state.currentUser) {
+        const result = await api('/api/merch/wishlist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ productId, variantId }),
+        });
+        if (result?.item) state.merchWishlistItems.unshift(result.item);
+      } else {
+        const item = { id: `guest-${productId}-${variantId || 'default'}`, productId, variantId, productName: product.name };
+        state.merchWishlistItems.unshift(item);
+        localStorage.setItem('merch_wishlist_guest', JSON.stringify(state.merchWishlistItems));
+      }
+
+      renderWishlistBadge();
+      showCheckoutNotice('Wishlist', `${product.name} was added to your wishlist.`);
+    } catch (error) {
+      showCheckoutNotice('Wishlist unavailable', error?.message || 'Please try again.', { variant: 'error' });
+    }
+  }
+
   function getAddressLabel(address) {
     return String(address?.label || address?.recipientName || 'Shipping Address').trim();
   }
@@ -681,9 +915,10 @@
   function getAuthenticatedCheckoutCustomer() {
     const profile = getMerchantProfile();
     return {
-      name: profile.fullName,
-      email: profile.email,
-      phone: profile.mobile,
+      // Guest checkout must start empty; only signed-in users get profile autofill.
+      name: state.currentUser ? profile.fullName : '',
+      email: state.currentUser ? profile.email : '',
+      phone: state.currentUser ? profile.mobile : '',
     };
   }
 
@@ -809,10 +1044,38 @@
     `;
   }
 
+  function renderReplacementPolicyAccordion() {
+    return `
+      <div class="replacement-policy-accordion">
+        <button class="replacement-policy-accordion__button" id="replacementPolicyButton" type="button" aria-expanded="false" aria-controls="replacementPolicyContent">
+          <span class="replacement-policy-accordion__heading">
+            <svg class="replacement-policy-accordion__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 11a8.1 8.1 0 0 0-14.4-4.8L4 8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M4 4v4h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M4 13a8.1 8.1 0 0 0 14.4 4.8L20 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M20 20v-4h-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>10-Day Replacement Policy</span>
+          </span>
+          <span class="replacement-policy-accordion__toggle" aria-hidden="true">+</span>
+        </button>
+        <div class="replacement-policy-accordion__content" id="replacementPolicyContent" aria-hidden="true">
+          <div class="replacement-policy-accordion__body">
+            <p>Damaged or defective products are eligible for replacement within 10 days of delivery.</p>
+            <p>Please contact support with your order details.</p>
+            <h3>6-Month Warranty</h3>
+            <p>This product includes a 6-month warranty on the mechanical parts of the bottle and mist spray.</p>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   async function loadMerchProducts() {
     try {
       const result = await api('/api/merch/products');
-      state.products = Array.isArray(result) ? result.map(normalizeMerchProduct) : [];
+      const productRows = Array.isArray(result) ? result : (Array.isArray(result?.products) ? result.products : []);
+      state.products = productRows.map(normalizeMerchProduct);
       renderDynamicCategoryOptions();
     } catch (error) {
       state.products = [];
@@ -820,6 +1083,7 @@
     }
 
     renderProductGrid();
+    renderSmartMerchSidebar();
 
     if (state.currentView === 'detail' && state.selectedProduct) {
       const refreshed = state.products.find((product) => Number(product.id) === Number(state.selectedProduct.id));
@@ -839,10 +1103,22 @@
     }
   }
 
+  async function loadTrendingProducts() {
+    try {
+      const result = await api('/api/merch/trending-products');
+      state.trendingProducts = Array.isArray(result) ? result.map(normalizeMerchProduct) : [];
+    } catch (error) {
+      state.trendingProducts = [];
+      console.error('Unable to load top trending products:', error);
+    }
+    renderSmartMerchSidebar();
+  }
+
   // â”€â”€â”€ Elements â”€â”€â”€
   const els = {
     productGrid: document.getElementById('productGrid'),
     productEmpty: document.getElementById('productEmpty'),
+    smartMerchSidebar: document.getElementById('smartMerchSidebar'),
     productDetail: document.getElementById('productDetail'),
     productGallery: document.getElementById('productGallery'),
     productInfo: document.getElementById('productInfo'),
@@ -857,6 +1133,7 @@
     searchCloseBtn: document.getElementById('searchCloseBtn'),
     searchResults: document.getElementById('searchResults'),
     cartToggleBtn: document.getElementById('cartToggleBtn'),
+    wishlistToggleBtn: document.getElementById('wishlistToggleBtn'),
     cartDrawer: document.getElementById('cartDrawer'),
     cartOverlay: document.getElementById('cartOverlay'),
     cartCloseBtn: document.getElementById('cartCloseBtn'),
@@ -868,8 +1145,10 @@
     cartCouponApplyBtn: document.getElementById('cartCouponApplyBtn'),
     cartCouponPreview: document.getElementById('cartCouponPreview'),
     cartBadge: document.getElementById('cartBadge'),
+    wishlistBadge: document.getElementById('wishlistBadge'),
     cartShopBtn: document.getElementById('cartShopBtn'),
     checkoutBtn: document.getElementById('checkoutBtn'),
+    checkoutPage: document.getElementById('checkoutPage'),
     bookingConfirmation: document.getElementById('bookingConfirmation'),
     orderTracking: document.getElementById('orderTracking'),
     merchAuthCta: document.getElementById('merchAuthCta'),
@@ -958,8 +1237,87 @@
     renderCart();
   }
 
+  async function removeWishlistItem(item) {
+    if (!item) return false;
+
+    if (state.currentUser && item.id && !String(item.id).startsWith('guest-')) {
+      await api(`/api/merch/wishlist/${encodeURIComponent(String(item.id))}`, { method: 'DELETE' });
+    }
+
+    state.merchWishlistItems = state.merchWishlistItems.filter((entry) => String(entry.id || '') !== String(item.id || ''));
+    if (!state.currentUser) {
+      localStorage.setItem('merch_wishlist_guest', JSON.stringify(state.merchWishlistItems));
+    }
+    return true;
+  }
+
+  async function moveWishlistItemToCart(item) {
+    const product = state.products.find((entry) => Number(entry.id) === Number(item?.productId));
+    if (!product) {
+      showCheckoutNotice('Wishlist', 'This product is no longer available.', { variant: 'error' });
+      return;
+    }
+
+    const variant = product.variants.find((entry) => Number(entry.id) === Number(item?.variantId))
+      || getDefaultPurchasableVariant(product);
+    if (!variant || Number(variant.stock || 0) <= 0) {
+      showCheckoutNotice('Out of stock', 'This wishlist product is currently unavailable.', { variant: 'error' });
+      return;
+    }
+
+    const added = addToCart(variant.id, 1, product, { openDrawerAfterAdd: false });
+    if (!added) {
+      showCheckoutNotice('Out of stock', 'This wishlist product is currently unavailable.', { variant: 'error' });
+      return;
+    }
+
+    try {
+      await removeWishlistItem(item);
+      renderWishlistBadge();
+      renderAccountDrawer();
+      showCheckoutNotice('Added to Cart', `${product.name} was moved to your cart.`);
+      openCart();
+    } catch (error) {
+      showCheckoutNotice('Wishlist update failed', error?.message || 'The product was added to cart, but could not be removed from your wishlist.', { variant: 'error' });
+    }
+  }
+
   function getCartTotal() {
     return state.cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  }
+
+  function getMerchShippingCharge(subtotalInr = getCartTotal()) {
+    return Number(subtotalInr || 0) >= 999 ? 0 : 99;
+  }
+
+  function getIncludedGstAmount(subtotalInr = getCartTotal()) {
+    const subtotalPaise = Math.round(Number(subtotalInr || 0) * 100);
+    return Math.max(0, (subtotalPaise - Math.round(subtotalPaise / 1.18)) / 100);
+  }
+
+  function formatCheckoutMoney(amountInr) {
+    return '₹' + Number(amountInr || 0).toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+
+  function getCheckoutDiscountAmount() {
+    return Math.max(0, Number(state.merchCouponPreview?.discountAmountInr || 0));
+  }
+
+  function getCheckoutTotals() {
+    const subtotal = getCartTotal();
+    const shipping = getMerchShippingCharge(subtotal);
+    const discount = getCheckoutDiscountAmount();
+    const total = Math.max(1, subtotal + shipping - discount);
+    return {
+      subtotal,
+      shipping,
+      discount,
+      total,
+      gstIncluded: getIncludedGstAmount(subtotal),
+    };
   }
 
   function getCartCount() {
@@ -1044,6 +1402,13 @@
     }
   }
 
+  function renderWishlistBadge() {
+    const count = Array.isArray(state.merchWishlistItems) ? state.merchWishlistItems.length : 0;
+    if (!els.wishlistBadge) return;
+    els.wishlistBadge.textContent = count;
+    els.wishlistBadge.hidden = count === 0;
+  }
+
   // â”€â”€â”€ Render: Cart Drawer â”€â”€â”€
   function renderCart() {
     if (state.cart.length === 0) {
@@ -1061,10 +1426,8 @@
     els.cartFooter.hidden = false;
     if (els.cartCouponCode) els.cartCouponCode.value = state.merchCouponCode || '';
     if (els.cartCouponApplyBtn) {
-      els.cartCouponApplyBtn.textContent = state.currentUser
-        ? (state.merchCouponLoading ? 'Applying...' : 'Apply Coupon')
-        : 'Sign in to Apply';
-      els.cartCouponApplyBtn.disabled = Boolean(state.merchCouponLoading || !state.currentUser);
+      els.cartCouponApplyBtn.textContent = state.merchCouponLoading ? 'APPLYING...' : 'APPLY COUPON';
+      els.cartCouponApplyBtn.disabled = Boolean(state.merchCouponLoading);
     }
     renderMerchCouponPreview();
 
@@ -1239,14 +1602,24 @@
   }
 
   function BookingDetailsCard(data) {
-    const details = [
+    const orderDate = new Date(data.dateLabel.replace(/^[A-Za-z]+,\s*/, ''));
+
+const deliveryDate = new Date(orderDate);
+deliveryDate.setDate(orderDate.getDate() + 7);
+
+const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric',
+});
+        const details = [
       { icon: 'calendar', label: 'Date & Time', lines: [data.dateLabel, data.timeLabel] },
       { icon: 'user', label: 'Service', lines: [data.service] },
-      { icon: 'map', label: data.locationTitle || 'Location', lines: ['H2 House of Health', data.location] },
+      { icon: 'map', label: data.locationTitle || 'Location', lines: [data.location] },
       {
         icon: 'truck',
         label: 'Estimated Delivery Date',
-        lines: ['27 Jul 2026 - 31 Jul 2026', "We'll notify you once your order is shipped."],
+        lines: [estimatedDelivery, "We'll notify you once your order is shipped."],
         isDelivery: true,
       },
     ];
@@ -1362,6 +1735,7 @@
 
     els.productDetail.hidden = true;
     els.shopSection.hidden = true;
+    if (els.checkoutPage) els.checkoutPage.hidden = true;
     if (els.orderTracking) els.orderTracking.hidden = true;
     document.querySelector('.merch-hero').hidden = true;
     document.querySelector('.merch-categories').hidden = true;
@@ -1379,6 +1753,45 @@
     return match ? decodeURIComponent(match[1]) : '';
   }
 
+  function isAdminTrackingRequest() {
+    return new URLSearchParams(window.location.search).get('adminTracking') === '1'
+      && Boolean(getTrackingOrderIdFromHash());
+  }
+
+  function normalizeAdminTrackingOrder(result) {
+    const raw = result?.order || {};
+    const items = Array.isArray(result?.items) ? result.items : [];
+    return {
+      id: raw.id,
+      orderNumber: raw.order_number || raw.orderNumber,
+      customerEmail: raw.customer_email || raw.customerEmail || '',
+      email: raw.customer_email || raw.customerEmail || '',
+      status: raw.status || 'processing',
+      createdAt: raw.created_at || raw.createdAt || null,
+      updatedAt: raw.updated_at || raw.updatedAt || null,
+      trackingNumber: raw.tracking_number || raw.trackingNumber || '',
+      carrier: raw.carrier_name || raw.carrierName || '',
+      totalAmount: Number(raw.total_amount || raw.totalAmount || 0),
+      items: items.map((item) => ({
+        name: item.product_name || item.productName || '',
+        productName: item.product_name || item.productName || '',
+        variantLabel: item.variant_label || item.variantLabel || '',
+        qty: Number(item.quantity || item.qty || 1),
+        quantity: Number(item.quantity || item.qty || 1),
+        sku: item.sku || '',
+      })),
+    };
+  }
+
+  async function loadAdminTrackingOrder(orderId) {
+    try {
+      const result = await api(`/api/merch/admin/orders/${encodeURIComponent(orderId)}`);
+      state.merchOrders = [normalizeAdminTrackingOrder(result)];
+    } catch {
+      state.merchOrders = [];
+    }
+  }
+
   function bindOrderTrackingActions(order) {
     if (!els.orderTracking) return;
     els.orderTracking.querySelectorAll('[data-tracking-action]').forEach((button) => {
@@ -1390,7 +1803,7 @@
           return;
         }
         if (action === 'invoice' && order?.id) {
-          await openMerchInvoice(order.id);
+          await openTrackingMerchInvoice(order);
         }
       });
     });
@@ -1402,6 +1815,7 @@
 
     els.productDetail.hidden = true;
     els.shopSection.hidden = true;
+    if (els.checkoutPage) els.checkoutPage.hidden = true;
     if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
     document.querySelector('.merch-hero').hidden = true;
     document.querySelector('.merch-categories').hidden = true;
@@ -1423,6 +1837,10 @@
     }
     if (window.location.hash === '#booking-confirmation') {
       showBookingConfirmation();
+      return true;
+    }
+    if (window.location.hash === '#checkout') {
+      showCheckoutPage();
       return true;
     }
     return false;
@@ -1572,12 +1990,6 @@
     const coupons = Array.isArray(dashboard.couponPerformance) ? dashboard.couponPerformance : [];
     const commissions = Array.isArray(dashboard.commissionHistory) ? dashboard.commissionHistory : [];
     const notifications = Array.isArray(dashboard.notifications) ? dashboard.notifications : [];
-    const filteredSales = getInfluencerSalesRows();
-    const pageSize = 5;
-    const pageCount = Math.max(1, Math.ceil(filteredSales.length / pageSize));
-    const currentPage = Math.min(Math.max(1, Number(state.influencerSalesPage || 1)), pageCount);
-    const pageSlice = filteredSales.slice((currentPage - 1) * pageSize, (currentPage - 1) * pageSize + pageSize);
-
     const socialLinksText = Array.isArray(influencer.socialLinks) ? influencer.socialLinks.join('\n') : '';
     // Kept available for legacy markup while the insights panel remains hidden.
     const bestCoupon = analytics.bestCoupon || dashboard.performance?.bestCoupon || null;
@@ -1585,8 +1997,6 @@
     const topProducts = Array.isArray(analytics.topProducts) ? analytics.topProducts : Array.isArray(dashboard.performance?.topSellingProducts) ? dashboard.performance.topSellingProducts : [];
     const averageOrderValue = dashboard.performance?.averageOrderValue ?? summary.averageOrderValue ?? 0;
     const repeatCustomerPercentage = dashboard.performance?.repeatCustomerPercentage ?? analytics.repeatCustomerPercentage ?? 0;
-    const conversionRate = dashboard.performance?.conversionRate ?? summary.conversionRate ?? 0;
-    const upcomingPayment = dashboard.commission?.upcomingPayment ? formatDateLabel(dashboard.commission.upcomingPayment) : 'No payout scheduled';
     const lastPayment = dashboard.commission?.lastPaymentDate ? formatDateLabel(dashboard.commission.lastPaymentDate) : 'No payments yet';
     const monthlyTrend = Array.isArray(analytics.monthlyTrend) ? analytics.monthlyTrend : [];
     const isCouponExpired = (coupon) => {
@@ -1607,9 +2017,7 @@
     const activeMonthlyRows = monthlyRows.filter((row) => !['cancelled', 'refunded', 'failed'].includes(String(row.orderStatus || row.paymentStatus || '').toLowerCase()));
     const activeMonthlySales = activeMonthlyRows.reduce((total, row) => total + Number(row.orderAmount || 0), 0);
     const monthlyCommission = activeMonthlyRows.reduce((total, row) => total + Number(row.commissionEarned || 0), 0);
-    const monthlyPaidRows = activeMonthlyRows.filter((row) => ['paid', 'cod_pending'].includes(String(row.paymentStatus || '').toLowerCase()));
     const monthlyCouponUsage = activeMonthlyRows.filter((row) => row.couponUsed).length;
-    const monthlyConversion = activeMonthlyRows.length ? (monthlyPaidRows.length / activeMonthlyRows.length) * 100 : 0;
     const isMonthlyView = Boolean(selectedMonth);
     const primaryCouponUnavailable = isCouponUnavailable(primaryCoupon);
     const kpis = [
@@ -1620,7 +2028,6 @@
       { label: 'Commission Paid', value: formatMoneyFromPaise(isMonthlyView ? 0 : summary.commissionPaid || 0), note: isMonthlyView ? 'Monthly payout details are recorded separately.' : 'Already processed and recorded.' },
       { label: 'Active Coupons', value: Number(summary.activeCoupons || coupons.filter((coupon) => coupon.active).length || 0).toLocaleString('en-IN'), note: 'Assignable and currently live.' },
       { label: 'Coupon Usage', value: (isMonthlyView ? monthlyCouponUsage : Number(summary.couponUsage || 0)).toLocaleString('en-IN'), note: isMonthlyView ? `${selectedMonth.label} orders captured through your codes.` : 'Orders captured through your codes.' },
-      { label: 'Conversion Rate', value: `${(isMonthlyView ? monthlyConversion : Number(summary.conversionRate || 0)).toFixed(1)}%`, note: 'Paid orders from referred traffic.' },
     ];
 
     return `
@@ -1630,13 +2037,16 @@
             <p class="account-section__eyebrow">Influencer Dashboard</p>
             <h4>Premium creator analytics</h4>
           </div>
-          <label class="influencer-month-select">
-            <span>Month</span>
-            <select data-influencer-filter="month">
-              <option value="all" ${state.influencerSalesMonth === 'all' ? 'selected' : ''}>All months</option>
-              ${monthOptions.map((item) => `<option value="${escapeHtml(item.value)}" ${state.influencerSalesMonth === item.value ? 'selected' : ''}>${escapeHtml(item.label)}</option>`).join('')}
-            </select>
-          </label>
+          <div class="influencer-dashboard-actions">
+            <button type="button" class="btn btn-outline account-action-btn" data-account-action="influencer-back">Back to account</button>
+            <label class="influencer-month-select">
+              <span>Month</span>
+              <select data-influencer-filter="month">
+                <option value="all" ${state.influencerSalesMonth === 'all' ? 'selected' : ''}>All months</option>
+                ${monthOptions.map((item) => `<option value="${escapeHtml(item.value)}" ${state.influencerSalesMonth === item.value ? 'selected' : ''}>${escapeHtml(item.label)}</option>`).join('')}
+              </select>
+            </label>
+          </div>
         </div>
         <p class="account-card__note">Your dashboard updates from live merch sales, assigned coupons, and commission payments.</p>
 
@@ -1731,7 +2141,6 @@
               <span class="account-chip">Highest sales month: ${escapeHtml(highestSalesMonth?.label || 'N/A')}</span>
               <span class="account-chip">Average order value: ${escapeHtml(formatMoneyFromPaise(averageOrderValue || 0))}</span>
               <span class="account-chip">Repeat customers: ${escapeHtml(`${repeatCustomerPercentage.toFixed ? repeatCustomerPercentage.toFixed(1) : repeatCustomerPercentage}%`)}</span>
-              <span class="account-chip">Conversion rate: ${escapeHtml(`${Number(conversionRate || 0).toFixed(1)}%`)}</span>
             </div>
             <div class="influencer-mini-list">
               ${topProducts.length ? topProducts.map((product) => `
@@ -1775,80 +2184,6 @@
           </div>
         </article>
 
-        <details class="influencer-details influencer-details--sales-history" open>
-          <summary>
-            <span>Sales History</span>
-            <small>${filteredSales.length} records</small>
-          </summary>
-          <div class="influencer-toolbar">
-            <label class="account-field">
-              <span>Search</span>
-              <input type="search" data-influencer-filter="search" value="${escapeHtml(state.influencerSalesSearch)}" placeholder="Order number, coupon, customer, product" />
-            </label>
-            <label class="account-field">
-              <span>Status</span>
-              <select data-influencer-filter="status">
-                <option value="all" ${state.influencerSalesStatus === 'all' ? 'selected' : ''}>All</option>
-                <option value="paid" ${state.influencerSalesStatus === 'paid' ? 'selected' : ''}>Paid</option>
-                <option value="cod_pending" ${state.influencerSalesStatus === 'cod_pending' ? 'selected' : ''}>COD Pending</option>
-                <option value="processing" ${state.influencerSalesStatus === 'processing' ? 'selected' : ''}>Processing</option>
-                <option value="shipped" ${state.influencerSalesStatus === 'shipped' ? 'selected' : ''}>Shipped</option>
-                <option value="delivered" ${state.influencerSalesStatus === 'delivered' ? 'selected' : ''}>Delivered</option>
-                <option value="cancelled" ${state.influencerSalesStatus === 'cancelled' ? 'selected' : ''}>Cancelled</option>
-              </select>
-            </label>
-            <label class="account-field">
-              <span>From</span>
-              <input type="date" data-influencer-filter="from" value="${escapeHtml(state.influencerSalesFrom)}" />
-            </label>
-            <label class="account-field">
-              <span>To</span>
-              <input type="date" data-influencer-filter="to" value="${escapeHtml(state.influencerSalesTo)}" />
-            </label>
-          </div>
-          <div class="influencer-table-wrap">
-            ${pageSlice.length ? `
-              <table class="influencer-table">
-                <thead>
-                  <tr>
-                    <th>Order</th>
-                    <th>Date</th>
-                    <th>Product Summary</th>
-                    <th>Customer</th>
-                    <th>Coupon</th>
-                    <th>Amount</th>
-                    <th>Commission</th>
-                    <th>Status</th>
-                    <th>Payment</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${pageSlice.map((order) => `
-                    <tr>
-                      <td><strong>${escapeHtml(order.orderNumber || '')}</strong></td>
-                      <td>${escapeHtml(formatDateLabel(order.orderDate))}</td>
-                      <td>${escapeHtml(order.productSummary || 'Merch order')}</td>
-                      <td>${escapeHtml(order.customerName || 'Customer')}</td>
-                      <td>${escapeHtml(order.couponUsed || '—')}</td>
-                      <td>${escapeHtml(formatMoneyFromPaise(order.orderAmount || 0))}</td>
-                      <td>${escapeHtml(formatMoneyFromPaise(order.commissionEarned || 0))}</td>
-                      <td>${escapeHtml(order.orderStatus || 'pending')}</td>
-                      <td>${escapeHtml(order.paymentStatus || 'pending')}</td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-              <div class="influencer-pagination">
-                <span>Page ${currentPage} of ${pageCount}</span>
-                <div>
-                  <button type="button" class="btn btn-outline account-action-btn" data-account-action="influencer-history-page" data-direction="prev" ${currentPage <= 1 ? 'disabled' : ''}>Previous</button>
-                  <button type="button" class="btn btn-outline account-action-btn" data-account-action="influencer-history-page" data-direction="next" ${currentPage >= pageCount ? 'disabled' : ''}>Next</button>
-                </div>
-              </div>
-            ` : '<div class="account-empty-state"><p>No sales match your filters.</p><span>Try a wider date range or clear the search.</span></div>'}
-          </div>
-        </details>
-
         <div class="influencer-grid influencer-grid--two">
           <details class="influencer-details" open>
             <summary>
@@ -1860,7 +2195,6 @@
               <article class="influencer-commission-card"><span>Total Paid</span><strong>${escapeHtml(formatMoneyFromPaise(dashboard.commission?.totalPaid || 0))}</strong></article>
               <article class="influencer-commission-card"><span>Pending</span><strong>${escapeHtml(formatMoneyFromPaise(dashboard.commission?.pending || 0))}</strong></article>
               <article class="influencer-commission-card"><span>Last Payment</span><strong>${escapeHtml(lastPayment)}</strong></article>
-              <article class="influencer-commission-card"><span>Upcoming Payment</span><strong>${escapeHtml(upcomingPayment)}</strong></article>
             </div>
             <div class="influencer-table-wrap">
               ${commissions.length ? `
@@ -1952,6 +2286,28 @@
     `;
   }
 
+  function renderOrderActionIcon(name) {
+    const icons = {
+      eye: '<svg class="account-order-action__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.8"/></svg>',
+      truck: '<svg class="account-order-action__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 7h11v9H3V7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 10h4l3 3v3h-7v-6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM18 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" stroke="currentColor" stroke-width="1.8"/></svg>',
+      document: '<svg class="account-order-action__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3h7l4 4v14H7V3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3v5h4M10 12h5M10 16h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+      download: '<svg class="account-order-action__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12M7.5 10.5 12 15l4.5-4.5M5 21h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    };
+    return icons[name] || '';
+  }
+
+  function renderAccountNavIcon(name) {
+    const icons = {
+      profile: '<svg class="account-panel-nav__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="1.8"/><path d="M4 21a8 8 0 0 1 16 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+      orders: '<svg class="account-panel-nav__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 8h12l-1 12H7L6 8Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 8a3 3 0 0 1 6 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+      addresses: '<svg class="account-panel-nav__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s7-5.3 7-11a7 7 0 1 0-14 0c0 5.7 7 11 7 11Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 12.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4Z" stroke="currentColor" stroke-width="1.8"/></svg>',
+      wishlist: '<svg class="account-panel-nav__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20.5 5.8c-1.7-1.8-4.4-1.8-6.1 0L12 8.2 9.6 5.8c-1.7-1.8-4.4-1.8-6.1 0-1.8 1.9-1.8 4.9 0 6.7L12 21l8.5-8.5c1.8-1.8 1.8-4.8 0-6.7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+      logout: '<svg class="account-panel-nav__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M10 7V5a2 2 0 0 1 2-2h7v18h-7a2 2 0 0 1-2-2v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 12h9M10 9l3 3-3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      influencer: '<svg class="account-panel-nav__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 13v5a2 2 0 0 0 2 2h3l7-16h2a2 2 0 0 1 2 2v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 13h5M15 13h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'
+    };
+    return icons[name] || '';
+  }
+
   function renderAccountDrawer() {
     if (!els.accountDrawerContent) return;
 
@@ -1971,11 +2327,11 @@
 
     els.accountDrawerContent.innerHTML = `
       <nav class="account-panel-nav" aria-label="Account sections">
-        <button type="button" data-account-nav="account-profile" aria-current="${state.accountActiveSection === 'account-profile' ? 'page' : 'false'}">My Profile</button>
-        <button type="button" data-account-nav="account-orders" aria-current="${state.accountActiveSection === 'account-orders' ? 'page' : 'false'}">My Orders</button>
-        <button type="button" data-account-nav="account-addresses" aria-current="${state.accountActiveSection === 'account-addresses' ? 'page' : 'false'}">My Addresses</button>
-        <button type="button" data-account-nav="account-wishlist" aria-current="${state.accountActiveSection === 'account-wishlist' ? 'page' : 'false'}">Wishlist</button>
-        ${state.influencerDashboard?.influencer ? `<button type="button" data-account-nav="account-influencer" aria-current="${state.accountActiveSection === 'account-influencer' ? 'page' : 'false'}">Influencer Dashboard</button>` : ''}
+        <button type="button" data-account-nav="account-profile" aria-current="${state.accountActiveSection === 'account-profile' ? 'page' : 'false'}">${renderAccountNavIcon('profile')}<span>My Profile</span></button>
+        <button type="button" data-account-nav="account-orders" aria-current="${state.accountActiveSection === 'account-orders' ? 'page' : 'false'}">${renderAccountNavIcon('orders')}<span>My Orders</span></button>
+        <button type="button" data-account-nav="account-addresses" aria-current="${state.accountActiveSection === 'account-addresses' ? 'page' : 'false'}">${renderAccountNavIcon('addresses')}<span>My Addresses</span></button>
+        <button type="button" data-account-nav="account-wishlist" aria-current="${state.accountActiveSection === 'account-wishlist' ? 'page' : 'false'}">${renderAccountNavIcon('wishlist')}<span>Wishlist</span></button>
+        ${state.influencerDashboard?.influencer ? `<button type="button" data-account-nav="account-influencer" aria-current="${state.accountActiveSection === 'account-influencer' ? 'page' : 'false'}">${renderAccountNavIcon('influencer')}<span>Influencer Dashboard</span></button>` : ''}
       </nav>
       <section id="account-profile" data-account-section="account-profile" class="account-card account-card--profile">
         <div class="account-card__avatar profile-avatar${profile.avatarUrl ? ' has-image' : ''}"${avatarStyle}>${accountInitials}</div>
@@ -2057,16 +2413,13 @@
         `}
       </section>
 
-      <section id="account-orders" data-account-section="account-orders" class="account-section">
+      <section id="account-orders" data-account-section="account-orders" class="account-section account-section--orders">
         <div class="account-section__head">
           <div>
             <p class="account-section__eyebrow">My Orders</p>
             <h4>Merchandise orders</h4>
           </div>
-          <div class="account-section__actions">
-            ${filteredOrders.length > 4 ? `<button class="btn btn-outline account-action-btn" type="button" data-account-action="view-all-orders">${state.accountOrdersExpanded ? 'Show Less' : 'View All'}</button>` : ''}
-            <span class="account-section__count">${orders.length}</span>
-          </div>
+          <span class="account-section__count">${orders.length}</span>
         </div>
         ${orders.length ? `
           <form class="account-order-filter" id="accountOrderFilterForm">
@@ -2086,13 +2439,13 @@
           </form>
         ` : ''}
         ${filteredOrders.length ? `
-          <div class="account-list">
+          <div class="account-list account-order-list">
             ${visibleOrders.map((order) => `
-              <article class="account-list__item account-list__item--stacked">
+              <article class="account-list__item account-list__item--stacked account-order-card">
                 <div class="account-list__row">
                   <strong>${escapeHtml(order.orderNumber || `Order #${order.id}`)}</strong>
                   <div class="order-status-group">
-                    <span class="payment-status payment-status--paid">
+                    <span class="payment-status payment-status--${order.paymentStatus === 'paid' ? 'paid' : 'pending'}">
                       ${order.paymentStatus === 'paid' ? 'Paid' : 'Pending Payment'}
                     </span>
                     <span class="order-status">
@@ -2101,14 +2454,14 @@
                   </div>
                   
                 </div>
-                <p>${escapeHtml(formatDateLabel(order.createdAt))} - ${escapeHtml(order.totalAmount ? formatMoneyFromPaise(order.totalAmount) : 'Total unavailable')}</p>
+                <p>${escapeHtml(formatDateLabel(order.createdAt))} <span class="account-order-meta-dot" aria-hidden="true">•</span> ${escapeHtml(order.totalAmount ? formatMoneyFromPaise(order.totalAmount) : 'Total unavailable')}</p>
                 ${(order.influencerCoupon || order.couponCode || order.coupon_code) ? `<p class="account-order-coupon"><span>Coupon applied</span><strong>${escapeHtml(order.influencerCoupon || order.couponCode || order.coupon_code)}</strong></p>` : ''}
-                <div class="account-item-actions account-item-actions--inline">
-                  <button type="button" data-account-action="view-order" data-order-id="${escapeHtml(String(order.id || ''))}">View Details</button>
-                  <button type="button" data-account-action="track-order" data-order-id="${escapeHtml(String(order.id || ''))}">Track Order</button>
-                  <button type="button" data-account-action="invoice-order" data-order-id="${escapeHtml(String(order.id || ''))}">Invoice</button>
-                  <button type="button" data-account-action="email-invoice" data-order-id="${escapeHtml(String(order.id || ''))}">Email</button>
-                  <button type="button" data-account-action="download-invoice" data-order-id="${escapeHtml(String(order.id || ''))}">Download PDF</button>
+                <div class="account-item-actions account-item-actions--inline account-order-actions">
+                  <button type="button" data-account-action="view-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="View details for ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('eye')}<span>View Details</span></button>
+                  <button type="button" data-account-action="track-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Track ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('truck')}<span>Track Order</span></button>
+                  <button type="button" data-account-action="invoice-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Open invoice for ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('document')}<span>Invoice</span></button>
+                  <button type="button" data-account-action="download-invoice" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Download invoice for ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('download')}<span>Download Invoice</span></button>
+                  ${canCancelMerchOrder(order) ? `<button type="button" data-account-action="cancel-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Cancel ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">Cancel Order</button>` : ''}
                 </div>
               </article>
             `).join('')}
@@ -2226,6 +2579,7 @@
       <button id="merchLogoutBtn" class="btn btn-secondary btn-full account-logout-btn" type="button">Logout</button>
     `;
 
+    els.accountDrawer.classList.toggle('account-drawer--influencer', state.accountActiveSection === 'account-influencer');
     const activeSection = state.accountActiveSection || '';
     els.accountDrawerContent.querySelectorAll('[data-account-section]').forEach((section) => {
       section.hidden = !activeSection || section.dataset.accountSection !== activeSection;
@@ -2326,6 +2680,26 @@
     return (Array.isArray(state.merchOrders) ? state.merchOrders : []).find((order) => String(order.id || '') === String(orderId || ''));
   }
 
+  function canCancelMerchOrder(order) {
+    return ['pending', 'processing'].includes(String(order?.status || '').trim().toLowerCase());
+  }
+
+  async function cancelMerchOrder(order) {
+    if (!order || !canCancelMerchOrder(order)) {
+      showCheckoutNotice('Cancellation unavailable', 'This order has already been shipped or completed.', { variant: 'error' });
+      return;
+    }
+    if (!window.confirm(`Cancel ${order.orderNumber || `Order #${order.id}`}? Any payment will be refunded.`)) return;
+    try {
+      const result = await api(`/api/merch/orders/${encodeURIComponent(order.id)}/cancel`, { method: 'POST' });
+      state.merchOrders = state.merchOrders.map((item) => String(item.id) === String(order.id) ? (result.order || { ...order, status: 'cancelled', paymentStatus: 'refunded' }) : item);
+      renderAccountDrawer();
+      showCheckoutNotice('Order cancelled', `${order.orderNumber || `Order #${order.id}`} was cancelled successfully.`);
+    } catch (error) {
+      showCheckoutNotice('Cancellation unavailable', error.message || 'Unable to cancel this order.', { variant: 'error' });
+    }
+  }
+
   function handleAccountOrderFilterSubmit(event) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
@@ -2354,6 +2728,12 @@
 
   async function handleAccountAction(button) {
     const action = button.dataset.accountAction;
+
+    if (action === 'influencer-back') {
+      state.accountActiveSection = 'account-orders';
+      renderAccountDrawer();
+      return;
+    }
 
     if (action === 'edit-profile') {
       state.accountProfileEditing = true;
@@ -2474,6 +2854,11 @@
       return;
     }
 
+    if (action === 'cancel-order') {
+      await cancelMerchOrder(getOrderById(button.dataset.orderId));
+      return;
+    }
+
     if (action === 'invoice-order') {
       await openMerchInvoice(button.dataset.orderId);
       return;
@@ -2496,13 +2881,21 @@
     }
 
     if (action === 'wishlist-remove') {
-      state.merchWishlistItems = state.merchWishlistItems.filter((item) => String(item.id || '') !== String(button.dataset.wishlistId || ''));
-      renderAccountDrawer();
+      const item = state.merchWishlistItems.find((entry) => String(entry.id || '') === String(button.dataset.wishlistId || ''));
+      if (!item) return;
+      try {
+        await removeWishlistItem(item);
+        renderWishlistBadge();
+        renderAccountDrawer();
+      } catch (error) {
+        showCheckoutNotice('Wishlist update failed', error?.message || 'Please try again.', { variant: 'error' });
+      }
       return;
     }
 
     if (action === 'wishlist-move') {
-      showCheckoutNotice('Wishlist', 'Move to Cart is ready for the wishlist service connection.');
+      const item = state.merchWishlistItems.find((entry) => String(entry.id || '') === String(button.dataset.wishlistId || ''));
+      if (item) await moveWishlistItemToCart(item);
       return;
     }
 
@@ -2548,6 +2941,16 @@
     return api(`/api/merch/orders/${encodeURIComponent(id)}/invoice-link`);
   }
 
+  async function fetchTrackingMerchInvoiceLink(order) {
+    const id = Number(order?.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error('Order details are unavailable.');
+    }
+    const guestEmail = !state.currentUser ? String(order?.customerEmail || order?.email || '').trim() : '';
+    const query = guestEmail ? `?guestEmail=${encodeURIComponent(guestEmail)}` : '';
+    return api(`/api/merch/orders/${encodeURIComponent(id)}/invoice-link${query}`);
+  }
+
   function openMerchDocument(url) {
     const targetUrl = buildApiUrl(url);
     const opened = window.open(targetUrl, '_blank', 'noopener,noreferrer');
@@ -2572,6 +2975,16 @@
   async function openMerchInvoice(orderId) {
     try {
       const data = await fetchMerchInvoiceLink(orderId);
+      if (!data.invoiceUrl) throw new Error('Invoice link missing.');
+      openMerchDocument(data.invoiceUrl);
+    } catch (error) {
+      showCheckoutNotice('Invoice unavailable', error.message || 'Unable to open the invoice. Please try again.', { variant: 'error' });
+    }
+  }
+
+  async function openTrackingMerchInvoice(order) {
+    try {
+      const data = await fetchTrackingMerchInvoiceLink(order);
       if (!data.invoiceUrl) throw new Error('Invoice link missing.');
       openMerchDocument(data.invoiceUrl);
     } catch (error) {
@@ -2774,12 +3187,13 @@
     renderAccountDrawer();
   }
 
-  async function openAccountDrawer() {
+  async function openAccountDrawer(initialSection = 'account-orders') {
     if (!els.accountDrawer) return;
+    if (!state.authResolved) await loadCustomerContext();
 
     state.accountDrawerOpen = true;
     state.accountDrawerTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    state.accountActiveSection = null;
+    state.accountActiveSection = initialSection;
     els.accountDrawer.hidden = false;
     els.accountDrawerOverlay.hidden = false;
     requestAnimationFrame(() => {
@@ -2822,6 +3236,7 @@
     state.merchOrders = [];
     state.merchAddresses = [];
     state.merchWishlistItems = [];
+    renderWishlistBadge();
     state.merchCartItems = [];
     state.merchCouponHistory = [];
     state.influencerDashboard = null;
@@ -2874,43 +3289,55 @@
     return products;
   }
 
-  function renderProductGrid() {
-    const products = getFilteredProducts();
-
-    if (products.length === 0) {
-      els.productGrid.innerHTML = '';
-      els.productEmpty.hidden = false;
-      return;
-    }
-
-    els.productEmpty.hidden = true;
-
-    els.productGrid.innerHTML = products.map(product => {
+  function renderProductCard(product, hypeLabel = '') {
       const defaultVariant = getDefaultPurchasableVariant(product);
       const isSoldOut = !defaultVariant || Number(defaultVariant.stock || 0) <= 0;
-      const lowStockVariants = getLowStockVariants(product);
-      const stockState = getVariantStockState(defaultVariant);
+      const presentation = getProductCardPresentation(product);
+      const isHoodie = String(product.category || '').toLowerCase() === 'hoodies';
+      const normalizedCategory = String(product.category || '').toLowerCase();
+      const normalizedName = String(product.name || '').toLowerCase();
+      const isMist = normalizedCategory.includes('mist') || normalizedCategory === 'sprays'
+        || normalizedName.includes('mist') || normalizedName.includes('spray');
+      const isBottle = normalizedCategory.includes('bottle') || normalizedCategory === 'bottles'
+        || normalizedName.includes('bottle');
+      const isHoodieCombo = Boolean(product.isCombo) && Array.isArray(product.comboItems)
+        && product.comboItems.some((item) => String(item.productName || item.name || '').toLowerCase().includes('hoodie'));
+      const cardImage = isHoodie || isHoodieCombo
+        ? HOODIE_CARD_IMAGE
+        : (product.images?.[0] || product.imageUrl || getProductFallbackImage(product));
+      const cardClasses = [
+        isHoodie ? 'product-card--hoodie' : '',
+        isMist ? 'product-card--mist' : '',
+        isBottle ? 'product-card--bottle' : '',
+        isHoodieCombo ? 'product-card--hoodie-combo' : '',
+      ].filter(Boolean).join(' ');
       return `
-      <article class="product-card" data-product-id="${product.id}" tabindex="0" role="button" aria-label="View ${escapeHtml(product.name)}">
+      <article class="product-card ${cardClasses}" data-product-id="${product.id}" tabindex="0" role="button" aria-label="View ${escapeHtml(product.name)}">
         <div class="product-card__image">
-          ${isSoldOut ? '<span class="product-card__badge product-card__badge--sold-out">Sold out</span>' : lowStockVariants.length ? '<span class="product-card__badge product-card__badge--low-stock">Low stock</span>' : ''}
-          <img src="${escapeHtml(product.images?.[0] || product.imageUrl || getProductFallbackImage(product))}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
+          <div class="product-card__badges">
+            <span class="product-card__badge">${escapeHtml(presentation.badge)}</span>
+            ${hypeLabel ? `<span class="product-card__badge product-card__badge--hype">${escapeHtml(hypeLabel)}</span>` : ''}
+            ${isSoldOut ? '<span class="product-card__badge product-card__badge--sold-out">Sold out</span>' : ''}
+          </div>
+          <button class="product-card__wishlist" type="button" aria-label="Add ${escapeHtml(product.name)} to wishlist" title="Wishlist">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 8.8c0 5.2-8.8 10.1-8.8 10.1S3.2 14 3.2 8.8A4.7 4.7 0 0 1 12 6.2a4.7 4.7 0 0 1 8.8 2.6Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="product-card__annotation" aria-hidden="true">
+            <span>${escapeHtml(presentation.annotation)}</span>
+            <svg viewBox="0 0 92 54"><path d="M5 7c2 29 26 41 70 34" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="m67 34 9 7-11 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <img src="${escapeHtml(cardImage)}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
         </div>
         <div class="product-card__body">
           <p class="product-card__category">${escapeHtml(getCategoryLabel(product.category))}</p>
           <h3 class="product-card__name">${escapeHtml(product.name)}</h3>
+          <div class="product-card__rating" aria-label="${escapeHtml(`${presentation.stars} (${presentation.reviews} reviews)`) }">
+            <span class="product-card__stars" aria-hidden="true">${presentation.stars}</span>
+            <span>(${presentation.reviews})</span>
+          </div>
           <p class="product-card__price">
             ${product.variants.length > 1 ? '<span class="price-from">From </span>' : ''}${getPriceRange(product)}
           </p>
-          <p class="product-card__stock ${stockState.className}">
-            ${escapeHtml(stockState.label)}
-          </p>
-          ${lowStockVariants.length ? `
-            <p class="product-card__stock-details">
-              ${escapeHtml(lowStockVariants.slice(0, 2).map((variant) => `${getVariantLabel(variant)}: ${Number(variant.stock || 0)} left`).join(' · '))}
-              ${lowStockVariants.length > 2 ? ` · +${lowStockVariants.length - 2} more` : ''}
-            </p>
-          ` : ''}
           <div class="product-card__actions">
             <button class="btn btn-secondary product-card__action" type="button" data-product-action="add-to-cart" data-product-id="${product.id}" ${isSoldOut ? 'disabled' : ''}>
               ${isSoldOut ? 'Out of Stock' : 'Add to Cart'}
@@ -2922,10 +3349,11 @@
         </div>
       </article>
     `;
-    }).join('');
+  }
 
-    // Bind click events
-    els.productGrid.querySelectorAll('.product-card').forEach(card => {
+  function bindProductCards(container) {
+    if (!container) return;
+    container.querySelectorAll('.product-card').forEach(card => {
       card.addEventListener('click', () => {
         const id = Number(card.dataset.productId);
         showProductDetail(id);
@@ -2939,7 +3367,7 @@
       });
     });
 
-    els.productGrid.querySelectorAll('[data-product-action]').forEach((button) => {
+    container.querySelectorAll('[data-product-action]').forEach((button) => {
       button.addEventListener('click', async (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -2948,6 +3376,29 @@
         await handleProductCardAction(button.dataset.productAction, product);
       });
     });
+
+    container.querySelectorAll('.product-card__wishlist').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        button.classList.toggle('is-selected');
+        button.setAttribute('aria-pressed', String(button.classList.contains('is-selected')));
+      });
+    });
+  }
+
+  function renderProductGrid() {
+    const products = getFilteredProducts();
+
+    if (products.length === 0) {
+      els.productGrid.innerHTML = '';
+      els.productEmpty.hidden = false;
+      return;
+    }
+
+    els.productEmpty.hidden = true;
+    els.productGrid.innerHTML = products.map((product) => renderProductCard(product)).join('');
+    bindProductCards(els.productGrid);
   }
 
   function getCategoryLabel(category) {
@@ -2976,6 +3427,7 @@
     els.shopSection.hidden = true;
     document.querySelector('.merch-hero').hidden = true;
     document.querySelector('.merch-categories').hidden = true;
+    if (els.checkoutPage) els.checkoutPage.hidden = true;
     if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
     if (els.orderTracking) els.orderTracking.hidden = true;
     els.productDetail.hidden = false;
@@ -2992,18 +3444,19 @@
     state.selectedVariant = null;
 
     els.productDetail.hidden = true;
+    if (els.checkoutPage) els.checkoutPage.hidden = true;
     if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
     if (els.orderTracking) els.orderTracking.hidden = true;
     els.shopSection.hidden = false;
     document.querySelector('.merch-hero').hidden = false;
     document.querySelector('.merch-categories').hidden = false;
-    if (window.location.hash === '#booking-confirmation' || getTrackingOrderIdFromHash()) {
+    if (window.location.hash === '#booking-confirmation' || window.location.hash === '#checkout' || getTrackingOrderIdFromHash()) {
       history.replaceState(null, '', window.location.pathname + window.location.search);
     }
   }
 
   function renderProductGallery(product) {
-    const mainImage = product.images?.[0] || product.imageUrl || getProductFallbackImage(product);
+    const mainImage = getProductDetailMainImage(product);
     els.productGallery.innerHTML = `
       <div class="gallery-main">
         <img id="galleryMainImg" src="${escapeHtml(mainImage)}" alt="${escapeHtml(product.name)}" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
@@ -3037,10 +3490,40 @@
     });
   }
 
+  function getProductDetailMainImage(product) {
+    
+    const category = String(product?.category || '').toLowerCase();
+    const name = String(product?.name || '').toLowerCase();
+    const slug = String(product?.slug || '').toLowerCase();
+
+    const isBottle =
+      slug === 'molecular-hydrogen-water-bottle' ||
+      category === 'bottles';
+    const isMist =
+      category === 'sprays' ||
+      category.includes('mist') ||
+      name.includes('mist') ||
+      name.includes('spray');
+    const isHoodie =
+      category === 'hoodies' ||
+      name.includes('hoodie');
+    return isBottle
+      ? BOTTLE_DETAIL_FEATURE_IMAGE
+      : isMist
+        ? MIST_DETAIL_FEATURE_IMAGE
+        : isHoodie
+          ? HOODIE_DETAIL_FEATURE_IMAGE
+          : (product.images?.[0] || product.imageUrl || getProductFallbackImage(product));
+  }
+
+
+  function updateProductDetailMainImage(product) {
+    const image = document.getElementById('galleryMainImg');
+    if (image) image.src = getProductDetailMainImage(product);
+  }
+
   function renderProductInfo(product) {
     const variant = state.selectedVariant;
-    const stockState = getVariantStockState(variant);
-    const lowStockVariants = getLowStockVariants(product);
 
     // Get unique sizes and colors
     const sizes = [...new Set(product.variants.map(v => v.size).filter(Boolean))];
@@ -3099,6 +3582,8 @@
         <button class="qty-btn" id="qtyInc" type="button">+</button>
       </div>
 
+      ${renderReplacementPolicyAccordion()}
+
       <div class="detail-actions">
         <button id="addToCartBtn" class="btn btn-primary btn-lg" type="button" ${variant.stock <= 0 ? 'disabled' : ''}>
           ${variant.stock <= 0 ? 'Out of Stock' : 'Add to Cart'}
@@ -3109,18 +3594,6 @@
         <button id="addToWishlistBtn" class="btn btn-outline btn-lg" type="button">♡ Wishlist</button>
       </div>
 
-      <p class="stock-status ${stockState.className}">
-        ${escapeHtml(stockState.label)}
-      </p>
-      <p class="stock-status__detail">
-        ${escapeHtml(stockState.detail)}
-      </p>
-      ${lowStockVariants.length ? `
-        <div class="stock-alert stock-alert--low">
-          <strong>Low stock details</strong>
-          <span>${escapeHtml(lowStockVariants.map((item) => `${getVariantLabel(item)} (${Number(item.stock || 0)})`).join(', '))}</span>
-        </div>
-      ` : ''}
     `;
 
     const moreDetailsButton = document.getElementById('moreDetailsButton');
@@ -3130,6 +3603,16 @@
       specificationsPanel.hidden = isOpen;
       moreDetailsButton.setAttribute('aria-expanded', String(!isOpen));
       moreDetailsButton.querySelector('span').textContent = isOpen ? '＋' : '−';
+    });
+
+    const replacementPolicyButton = document.getElementById('replacementPolicyButton');
+    const replacementPolicyContent = document.getElementById('replacementPolicyContent');
+    replacementPolicyButton?.addEventListener('click', () => {
+      const isOpen = replacementPolicyButton.getAttribute('aria-expanded') === 'true';
+      replacementPolicyButton.setAttribute('aria-expanded', String(!isOpen));
+      replacementPolicyContent?.setAttribute('aria-hidden', String(isOpen));
+      replacementPolicyButton.closest('.replacement-policy-accordion')?.classList.toggle('is-open', !isOpen);
+      replacementPolicyButton.querySelector('.replacement-policy-accordion__toggle').textContent = isOpen ? '+' : '−';
     });
 
     // Bind variant selectors
@@ -3143,6 +3626,7 @@
           state.selectedVariant = match;
           state.quantity = 1;
           renderProductInfo(product);
+          updateProductDetailMainImage(product);
         }
       });
     });
@@ -3157,6 +3641,7 @@
           state.selectedVariant = match;
           state.quantity = 1;
           renderProductInfo(product);
+          updateProductDetailMainImage(product);
         }
       });
     });
@@ -3187,6 +3672,10 @@
       if (state.selectedVariant && state.selectedVariant.stock > 0) {
         buyNow(state.selectedVariant.id, state.quantity, product);
       }
+    });
+
+    document.getElementById('addToWishlistBtn')?.addEventListener('click', () => {
+      addToWishlist(product, state.selectedVariant);
     });
   }
 
@@ -3338,6 +3827,370 @@
     });
   }
 
+  const CHECKOUT_PHONE_COUNTRY_CODES = [
+    { value: '+91', label: 'India (+91)' },
+    { value: '+1', label: 'United States (+1)' },
+  ];
+
+  function parseCheckoutPhone(value = '') {
+    const raw = String(value || '').trim();
+    const digits = raw.replace(/\D+/g, '');
+    if (digits.length === 12 && digits.startsWith('91')) {
+      return { countryCode: '+91', localNumber: digits.slice(2) };
+    }
+    if (digits.length === 11 && digits.startsWith('1')) {
+      return { countryCode: '+1', localNumber: digits.slice(1) };
+    }
+    return { countryCode: '+91', localNumber: digits };
+  }
+
+  function getCheckoutPhonePayload(draft = {}) {
+    const countryCode = CHECKOUT_PHONE_COUNTRY_CODES.some((option) => option.value === draft.phoneCountryCode)
+      ? draft.phoneCountryCode
+      : '+91';
+    const localNumber = String(draft.phone || '').replace(/\D+/g, '');
+    return localNumber ? `${countryCode}${localNumber}` : '';
+  }
+
+  function buildCheckoutDraft(customer = {}, address = {}) {
+    const nameParts = String(customer?.name || address?.recipientName || '').trim().split(/\s+/).filter(Boolean);
+    const firstName = nameParts.shift() || '';
+    const lastName = nameParts.join(' ');
+    const phone = parseCheckoutPhone(customer?.phone || address?.phone || '');
+    return {
+      email: String(customer?.email || '').trim(),
+      phone: phone.localNumber,
+      phoneCountryCode: phone.countryCode,
+      firstName,
+      lastName,
+      country: String(address?.country || 'India').trim() || 'India',
+      line1: String(address?.line1 || address?.full || '').trim(),
+      line2: String(address?.line2 || '').trim(),
+      city: String(address?.city || '').trim(),
+      state: String(address?.state || '').trim(),
+      postalCode: String(address?.postalCode || '').trim(),
+      emailOffers: true,
+      saveInformation: Boolean(address?.isDefault),
+    };
+  }
+
+  function getCheckoutDraftFromForm(form) {
+    const formData = new FormData(form);
+    return {
+      email: String(formData.get('email') || '').trim(),
+      phone: String(formData.get('phone') || '').trim(),
+      phoneCountryCode: String(formData.get('phoneCountryCode') || '+91').trim(),
+      firstName: String(formData.get('firstName') || '').trim(),
+      lastName: String(formData.get('lastName') || '').trim(),
+      country: String(formData.get('country') || '').trim(),
+      line1: String(formData.get('line1') || '').trim(),
+      line2: String(formData.get('line2') || '').trim(),
+      city: String(formData.get('city') || '').trim(),
+      state: String(formData.get('state') || '').trim(),
+      postalCode: String(formData.get('postalCode') || '').trim(),
+      emailOffers: formData.get('emailOffers') === 'on',
+      saveInformation: formData.get('saveInformation') === 'on',
+    };
+  }
+
+  function getCheckoutPayloadFromDraft(draft = state.checkoutDraft || {}) {
+    const fullName = [draft.firstName, draft.lastName].filter(Boolean).join(' ').trim();
+    return {
+      customer: {
+        name: fullName,
+        email: String(draft.email || '').trim(),
+        phone: getCheckoutPhonePayload(draft),
+      },
+      address: {
+        recipientName: fullName,
+        phone: getCheckoutPhonePayload(draft),
+        line1: String(draft.line1 || '').trim(),
+        line2: String(draft.line2 || '').trim(),
+        city: String(draft.city || '').trim(),
+        state: String(draft.state || '').trim(),
+        postalCode: String(draft.postalCode || '').trim(),
+        country: String(draft.country || 'India').trim() || 'India',
+        isDefault: Boolean(draft.saveInformation),
+        full: [draft.line1, draft.line2, draft.city, draft.state, draft.postalCode, draft.country].filter(Boolean).join(', '),
+      },
+    };
+  }
+
+  function validateCheckoutDraft(draft = {}) {
+    const errors = {};
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const digitsOnly = (value) => String(value || '').replace(/\D+/g, '');
+
+    if (!draft.email) errors.email = 'Email is required.';
+    else if (!emailPattern.test(draft.email)) errors.email = 'Enter a valid email address.';
+    if (!draft.firstName) errors.firstName = 'First name is required.';
+    if (!draft.lastName) errors.lastName = 'Last name is required.';
+    if (!draft.country) errors.country = 'Country is required.';
+    if (!draft.line1) errors.line1 = 'Address is required.';
+    if (!draft.city) errors.city = 'City is required.';
+    if (!draft.state) errors.state = 'State is required.';
+    if (!draft.postalCode) errors.postalCode = 'PIN code is required.';
+    else if (digitsOnly(draft.postalCode).length !== 6) errors.postalCode = 'Enter a 6-digit PIN code.';
+    if (!draft.phone) errors.phone = 'Phone is required.';
+    else if (digitsOnly(draft.phone).length !== 10) {
+      const countryLabel = draft.phoneCountryCode === '+1' ? 'United States' : 'India';
+      errors.phone = `Enter a 10-digit phone number for ${countryLabel}.`;
+    }
+
+    return errors;
+  }
+
+  function fieldError(name) {
+    const message = state.checkoutErrors?.[name];
+    return message ? `<span class="checkout-field-error" id="checkout-${name}-error">${escapeHtml(message)}</span>` : '';
+  }
+
+  function renderCheckoutField({ name, label, value = '', type = 'text', placeholder = '', autocomplete = '', wide = false, icon = '', required = true }) {
+    const error = state.checkoutErrors?.[name];
+    return `
+      <label class="shopify-field${wide ? ' shopify-field--wide' : ''}${error ? ' has-error' : ''}">
+        <span>${escapeHtml(label)}</span>
+        <input name="${escapeHtml(name)}" type="${escapeHtml(type)}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" autocomplete="${escapeHtml(autocomplete)}" ${required ? 'required' : ''} ${error ? `aria-describedby="checkout-${escapeHtml(name)}-error"` : ''} />
+        ${icon ? `<span class="shopify-field__icon" aria-hidden="true">${icon}</span>` : ''}
+        ${fieldError(name)}
+      </label>
+    `;
+  }
+
+  function renderCheckoutSelect({ name, label, value = '', options = [], wide = false }) {
+    const error = state.checkoutErrors?.[name];
+    return `
+      <label class="shopify-field shopify-field--select${wide ? ' shopify-field--wide' : ''}${error ? ' has-error' : ''}">
+        <span>${escapeHtml(label)}</span>
+        <select name="${escapeHtml(name)}" required ${error ? `aria-describedby="checkout-${escapeHtml(name)}-error"` : ''}>
+          ${options.map((option) => `<option value="${escapeHtml(option)}" ${String(option) === String(value) ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}
+        </select>
+        ${fieldError(name)}
+      </label>
+    `;
+  }
+
+  function renderCheckoutPhoneField(draft = {}) {
+    const error = state.checkoutErrors?.phone;
+    const selectedCode = CHECKOUT_PHONE_COUNTRY_CODES.some((option) => option.value === draft.phoneCountryCode)
+      ? draft.phoneCountryCode
+      : '+91';
+    return `
+      <label class="shopify-field shopify-field--wide checkout-phone-field${error ? ' has-error' : ''}">
+        <span>Phone</span>
+        <div class="checkout-phone-control">
+          <select name="phoneCountryCode" aria-label="Phone country code" autocomplete="tel-country-code">
+            ${CHECKOUT_PHONE_COUNTRY_CODES.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === selectedCode ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}
+          </select>
+          <input name="phone" type="tel" value="${escapeHtml(draft.phone || '')}" placeholder="10-digit mobile number" autocomplete="tel-national" required ${error ? 'aria-describedby="checkout-phone-error"' : ''} />
+        </div>
+        ${fieldError('phone')}
+      </label>
+    `;
+  }
+
+  function renderCheckoutSummary() {
+    const totals = getCheckoutTotals();
+    const hasShippingAddress = Boolean(state.checkoutDraft?.line1 && state.checkoutDraft?.city && state.checkoutDraft?.state && state.checkoutDraft?.postalCode);
+    const discount = totals.discount > 0 ? `
+      <div class="shopify-price-row shopify-price-row--discount">
+        <span>Discount${state.merchCouponCode ? ` (${escapeHtml(state.merchCouponCode)})` : ''}</span>
+        <strong>- ${formatCheckoutMoney(totals.discount)}</strong>
+      </div>
+    ` : '';
+    return `
+      <aside class="shopify-summary" aria-label="Order summary">
+        <h2>Order Summary</h2>
+        <div class="shopify-summary-products">
+          ${state.cart.map((item) => `
+            <div class="shopify-summary-product">
+              <div class="shopify-summary-product__image">
+                <img src="${escapeHtml(item.image || FALLBACK_PRODUCT_IMAGE)}" alt="${escapeHtml(item.productName)}" />
+                <span>${escapeHtml(String(item.quantity))}</span>
+              </div>
+              <div class="shopify-summary-product__copy">
+                <strong>${escapeHtml(item.productName)}</strong>
+                <small>${escapeHtml(item.variantLabel || 'Default')}</small>
+                <small>${escapeHtml(`${item.quantity} Piece${Number(item.quantity) === 1 ? '' : 's'}`)}</small>
+              </div>
+              <strong class="shopify-summary-product__price">${formatCheckoutMoney(item.price * item.quantity)}</strong>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="shopify-coupon">
+          <label class="shopify-coupon__field">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="m20 12-8 8-9-9V3h8l9 9Z"/><circle cx="7.5" cy="7.5" r="1.2"/></svg>
+            </span>
+            <input id="checkoutCouponCode" type="text" value="${escapeHtml(state.merchCouponCode || '')}" placeholder="Discount code or gift card" autocomplete="off" aria-label="Discount code or gift card" />
+          </label>
+          <button id="checkoutCouponApplyBtn" class="shopify-coupon__apply" type="button" ${state.merchCouponLoading ? 'disabled' : ''}>${state.merchCouponLoading ? 'APPLYING' : 'APPLY'}</button>
+          <div class="shopify-coupon__message${state.merchCouponError ? ' is-error' : ''}" ${state.merchCouponPreview || state.merchCouponError ? '' : 'hidden'}>
+            ${state.merchCouponPreview ? `${escapeHtml(state.merchCouponPreview.code || state.merchCouponCode)} applied` : escapeHtml(state.merchCouponError || '')}
+          </div>
+        </div>
+
+        <div class="shopify-pricing">
+          <div class="shopify-price-row"><span>Subtotal</span><strong>${formatCheckoutMoney(totals.subtotal)}</strong></div>
+          ${discount}
+          <div class="shopify-price-row"><span>Shipping <em aria-label="Shipping help">?</em></span><strong>${hasShippingAddress ? (totals.shipping ? formatCheckoutMoney(totals.shipping) : 'Free') : 'Enter shipping address'}</strong></div>
+          <div class="shopify-price-row"><span>GST (Included)</span><strong>${formatCheckoutMoney(totals.gstIncluded)}</strong></div>
+        </div>
+
+        <div class="shopify-total">
+          <span>Total</span>
+          <strong><small>INR</small> ${formatCheckoutMoney(totals.total)}</strong>
+          <p>Including ${formatCheckoutMoney(totals.gstIncluded)} in taxes</p>
+        </div>
+
+        <div class="shopify-trust">
+          <div><span><svg viewBox="0 0 24 24"><path d="M20 4c-8 1-13 6-14 14 6-1 12-6 14-14Z"/><path d="M9 15c2-3 4-5 7-7"/></svg></span><strong>100% Authentic<br>Products</strong></div>
+          <div><span><svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="1"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span><strong>Secure<br>Payments</strong></div>
+          <div><span><svg viewBox="0 0 24 24"><path d="M3 7h11v10H3z"/><path d="M14 11h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.5"/><circle cx="18" cy="18" r="1.5"/></svg></span><strong>Fast &amp; Reliable<br>Delivery</strong></div>
+          <div><span><svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 5 3 8 7 10 4-2 7-5 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></svg></span><strong>H2 Quality<br>Promise</strong></div>
+        </div>
+      </aside>
+    `;
+  }
+
+  function renderCheckoutPage() {
+    if (!els.checkoutPage) return;
+    const draft = state.checkoutDraft || buildCheckoutDraft(getAuthenticatedCheckoutCustomer(), serializeAddress(getDefaultAddress()));
+    state.checkoutDraft = draft;
+    const shippingReady = Boolean(draft.line1 && draft.city && draft.state && draft.postalCode);
+    const mailIcon = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.6 2.6 0 1 1 4.2 2c-.9.6-1.7 1.2-1.7 2.5"/><path d="M12 17h.01"/></svg>';
+    const searchIcon = '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>';
+
+    els.checkoutPage.innerHTML = `
+      <div class="shopify-checkout__inner">
+        <form id="shopifyCheckoutForm" class="shopify-checkout-form" novalidate>
+          <section class="shopify-section shopify-section--contact">
+            <div class="shopify-section__head">
+              <h1 id="checkoutPageTitle">Contact</h1>
+              <p>Already have an account? <a href="/merch/auth.html">Sign in</a></p>
+            </div>
+            ${renderCheckoutField({ name: 'email', label: 'Email', value: draft.email, type: 'email', placeholder: 'Enter your email', autocomplete: 'email', wide: true, icon: mailIcon })}
+            <label class="shopify-check"><input name="emailOffers" type="checkbox" ${draft.emailOffers ? 'checked' : ''} /><span>Email me with news and offers</span></label>
+          </section>
+
+          <section class="shopify-section">
+            <h2>Delivery</h2>
+            <div class="shopify-field-grid">
+              ${renderCheckoutSelect({ name: 'country', label: 'Country/Region', value: draft.country || 'India', options: ['India'], wide: true })}
+              ${renderCheckoutField({ name: 'firstName', label: 'First name', value: draft.firstName, placeholder: 'First name', autocomplete: 'given-name' })}
+              ${renderCheckoutField({ name: 'lastName', label: 'Last name', value: draft.lastName, placeholder: 'Last name', autocomplete: 'family-name' })}
+              ${renderCheckoutField({ name: 'line1', label: 'Address', value: draft.line1, placeholder: 'House number and street name', autocomplete: 'address-line1', wide: true, icon: searchIcon })}
+              ${renderCheckoutField({ name: 'line2', label: 'Apartment, suite, etc. (optional)', value: draft.line2, placeholder: 'Apartment, suite, building, floor, etc.', autocomplete: 'address-line2', wide: true, required: false })}
+              ${renderCheckoutField({ name: 'city', label: 'City', value: draft.city, placeholder: 'City', autocomplete: 'address-level2' })}
+              ${renderCheckoutSelect({ name: 'state', label: 'State', value: draft.state || 'Telangana', options: ['Telangana', 'Andhra Pradesh', 'Karnataka', 'Maharashtra', 'Tamil Nadu', 'Delhi', 'Kerala', 'Gujarat', 'Rajasthan', 'Uttar Pradesh', 'West Bengal'] })}
+              ${renderCheckoutField({ name: 'postalCode', label: 'PIN code', value: draft.postalCode, placeholder: 'PIN code', autocomplete: 'postal-code', inputmode: 'numeric' })}
+              ${renderCheckoutPhoneField(draft)}
+            </div>
+            <label class="shopify-check"><input name="saveInformation" type="checkbox" ${draft.saveInformation ? 'checked' : ''} /><span>Save this information for next time</span></label>
+          </section>
+
+          <section class="shopify-section">
+            <h2>Shipping method</h2>
+            <div class="shopify-shipping-box${shippingReady ? ' is-ready' : ''}">
+              <span><svg viewBox="0 0 24 24"><path d="M3 7h11v10H3z"/><path d="M14 11h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.5"/><circle cx="18" cy="18" r="1.5"/></svg></span>
+              <p>${shippingReady ? `${getMerchShippingCharge() ? `${formatCheckoutMoney(getMerchShippingCharge())} standard shipping` : 'Free shipping available'}` : 'Enter your shipping address to view available shipping methods.'}</p>
+            </div>
+          </section>
+
+          <section class="shopify-section">
+            <h2>Payment</h2>
+            <label class="shopify-payment-option">
+              <input type="radio" name="paymentMethod" value="razorpay" checked />
+              <span>Razorpay</span>
+              <strong>Razorpay</strong>
+            </label>
+          </section>
+
+          <button class="shopify-pay-button" type="submit" ${state.checkoutSubmitting ? 'disabled' : ''}>
+            <span>${state.checkoutSubmitting ? 'PROCESSING...' : 'CONTINUE TO PAYMENT'}</span>
+            <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+          </button>
+        </form>
+        ${renderCheckoutSummary()}
+      </div>
+    `;
+    bindCheckoutPageEvents();
+  }
+
+  function showCheckoutPage(customer = null, address = null) {
+    if (!state.cart.length) {
+      showShop();
+      return;
+    }
+    if (customer || address || !state.checkoutDraft) {
+      state.checkoutDraft = buildCheckoutDraft(customer || getAuthenticatedCheckoutCustomer(), address || serializeAddress(getDefaultAddress()));
+    }
+    state.currentView = 'checkout';
+    state.checkoutErrors = {};
+    els.productDetail.hidden = true;
+    els.shopSection.hidden = true;
+    if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
+    if (els.orderTracking) els.orderTracking.hidden = true;
+    if (els.checkoutPage) els.checkoutPage.hidden = false;
+    document.querySelector('.merch-hero').hidden = true;
+    document.querySelector('.merch-categories').hidden = true;
+    closeCart();
+    renderCheckoutPage();
+    if (window.location.hash !== '#checkout') window.location.hash = 'checkout';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function bindCheckoutPageEvents() {
+    const form = els.checkoutPage?.querySelector('#shopifyCheckoutForm');
+    if (!form) return;
+    form.addEventListener('input', () => {
+      state.checkoutDraft = getCheckoutDraftFromForm(form);
+      if (Object.keys(state.checkoutErrors || {}).length) {
+        state.checkoutErrors = validateCheckoutDraft(state.checkoutDraft);
+        renderCheckoutPage();
+      }
+    });
+    form.addEventListener('change', () => {
+      state.checkoutDraft = getCheckoutDraftFromForm(form);
+      renderCheckoutPage();
+    });
+    form.addEventListener('submit', handleCheckoutPageSubmit);
+    els.checkoutPage?.querySelector('#checkoutCouponApplyBtn')?.addEventListener('click', applyMerchCouponFromCheckout);
+    els.checkoutPage?.querySelector('#checkoutCouponCode')?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        applyMerchCouponFromCheckout();
+      }
+    });
+  }
+
+  async function applyMerchCouponFromCheckout() {
+    const input = els.checkoutPage?.querySelector('#checkoutCouponCode');
+    if (input) state.merchCouponCode = normalizeCouponCode(input.value);
+    await applyMerchCouponFromCart();
+    renderCheckoutPage();
+  }
+
+  async function handleCheckoutPageSubmit(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    state.checkoutDraft = getCheckoutDraftFromForm(form);
+    state.checkoutErrors = validateCheckoutDraft(state.checkoutDraft);
+    if (Object.keys(state.checkoutErrors).length) {
+      renderCheckoutPage();
+      els.checkoutPage?.querySelector('.has-error input, .has-error select')?.focus();
+      return;
+    }
+
+    const { customer, address } = getCheckoutPayloadFromDraft(state.checkoutDraft);
+    state.checkoutSubmitting = true;
+    renderCheckoutPage();
+    await startRazorpayCheckout(customer, address);
+    state.checkoutSubmitting = false;
+    renderCheckoutPage();
+  }
+
   function renderCheckoutAddressCards() {
     const addresses = Array.isArray(state.merchAddresses) ? state.merchAddresses : [];
     const selectedId = state.checkoutSelectedAddressId || getAddressId(getDefaultAddress());
@@ -3402,7 +4255,7 @@
         return;
       }
       closeMerchModal();
-      startRazorpayCheckout(customer, serializeAddress(selected));
+      showCheckoutPage(customer, serializeAddress(selected));
     });
   }
 
@@ -3510,58 +4363,7 @@
     }
 
     closeMerchModal();
-    startRazorpayCheckout(getAuthenticatedCheckoutCustomer(), serializeAddress(selected));
-  }
-
-  function openGuestCheckoutModal() {
-    const modal = showMerchModal({
-      title: 'Guest checkout',
-      body: `
-        <form id="guestCheckoutForm" class="account-form guest-checkout-form">
-          <label class="account-field">
-            <span>Full Name</span>
-            <input name="name" type="text" autocomplete="name" required />
-          </label>
-          <label class="account-field">
-            <span>Email</span>
-            <input name="email" type="email" autocomplete="email" required />
-          </label>
-          <label class="account-field">
-            <span>Mobile Number</span>
-            <input name="phone" type="tel" autocomplete="tel" required />
-          </label>
-          <label class="account-field">
-            <span>Shipping Address</span>
-            <textarea name="address" rows="4" autocomplete="street-address" required></textarea>
-          </label>
-        </form>
-      `,
-      footer: `
-        <button class="btn btn-outline account-action-btn" type="button" data-modal-close>Cancel</button>
-        <button class="btn btn-primary account-action-btn" type="submit" form="guestCheckoutForm">Continue</button>
-      `,
-    });
-    modal.querySelector('[data-modal-close]')?.addEventListener('click', closeMerchModal);
-    modal.querySelector('#guestCheckoutForm')?.addEventListener('submit', handleGuestCheckoutSubmit);
-  }
-
-  function handleGuestCheckoutSubmit(event) {
-    event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-    const customer = {
-      name: String(formData.get('name') || '').trim(),
-      email: String(formData.get('email') || '').trim(),
-      phone: String(formData.get('phone') || '').trim(),
-    };
-    const address = { full: String(formData.get('address') || '').trim() };
-
-    if (!customer.name || !customer.email || !customer.phone || !address.full) {
-      showCheckoutNotice('Missing details', 'Please complete all guest checkout fields.', { variant: 'error' });
-      return;
-    }
-
-    closeMerchModal();
-    startRazorpayCheckout(customer, address);
+    showCheckoutPage(getAuthenticatedCheckoutCustomer(), serializeAddress(selected));
   }
 
   // â”€â”€â”€ Event Bindings â”€â”€â”€
@@ -3609,6 +4411,7 @@
 
     // Cart
     els.cartToggleBtn.addEventListener('click', openCart);
+    els.wishlistToggleBtn?.addEventListener('click', () => openAccountDrawer('account-wishlist'));
     els.cartCloseBtn.addEventListener('click', closeCart);
     els.cartOverlay.addEventListener('click', closeCart);
     els.cartShopBtn.addEventListener('click', () => {
@@ -3668,7 +4471,7 @@
       return;
     }
 
-    openGuestCheckoutModal();
+    showCheckoutPage();
   }
 
   async function startRazorpayCheckout(customer, address) {
@@ -3790,10 +4593,11 @@
   }
 
   async function loadCustomerContext() {
+    const adminTrackingRequest = isAdminTrackingRequest();
     try {
       const authResult = await api('/api/auth/me');
       state.currentUser = authResult.user || null;
-      if (state.currentUser && String(state.currentUser.role || '').toLowerCase() === 'admin') {
+      if (state.currentUser && String(state.currentUser.role || '').toLowerCase() === 'admin' && !adminTrackingRequest) {
     window.location.replace('/merch/admin/index.html');
     return;
 }
@@ -3801,7 +4605,15 @@
       state.currentUser = null;
     }
 
-    if (state.currentUser) {
+    if (state.currentUser && adminTrackingRequest) {
+      await loadAdminTrackingOrder(getTrackingOrderIdFromHash());
+      state.merchProfile = null;
+      state.merchAddresses = [];
+      state.merchWishlistItems = [];
+      state.merchCartItems = [];
+      state.merchCouponHistory = [];
+      state.influencerDashboard = null;
+    } else if (state.currentUser) {
       try {
         const profileResult = await api('/api/merch/profile');
         state.merchProfile = profileResult.profile || null;
@@ -3823,13 +4635,19 @@
       state.merchProfile = null;
       state.merchOrders = [];
       state.merchAddresses = [];
-      state.merchWishlistItems = [];
+      try {
+        const savedWishlist = localStorage.getItem('merch_wishlist_guest');
+        state.merchWishlistItems = savedWishlist ? JSON.parse(savedWishlist) : [];
+      } catch {
+        state.merchWishlistItems = [];
+      }
       state.merchCartItems = [];
       state.merchCouponHistory = [];
       state.influencerDashboard = null;
     }
 
     state.authResolved = true;
+    renderWishlistBadge();
     setBodyAuthLoading(false);
     renderAccountTrigger();
 
@@ -3837,6 +4655,7 @@
       const trackingOrderId = getTrackingOrderIdFromHash();
       if (trackingOrderId) showOrderTracking(trackingOrderId);
     }
+    if (state.accountDrawerOpen) renderAccountDrawer();
   }
 
   // â”€â”€â”€ Initialize â”€â”€â”€
@@ -3849,6 +4668,7 @@
     setBodyAuthLoading(true);
     renderAccountTrigger();
     loadMerchProducts();
+    loadTrendingProducts();
     loadCustomerContext();
   }
 

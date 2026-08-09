@@ -358,6 +358,13 @@ const elements = {
   authResendOtpBtn: document.getElementById('authResendOtpBtn'),
   authResendOtpHint: document.getElementById('authResendOtpHint'),
   authSubmitBtn: document.getElementById('authSubmitBtn'),
+  mobileAuthSection: document.getElementById('mobileAuthSection'),
+  mobileAuthCountry: document.getElementById('mobileAuthCountry'),
+  mobileAuthNumber: document.getElementById('mobileAuthNumber'),
+  sendWhatsappOtpBtn: document.getElementById('sendWhatsappOtpBtn'),
+  mobileAuthOtpWrap: document.getElementById('mobileAuthOtpWrap'),
+  mobileAuthOtp: document.getElementById('mobileAuthOtp'),
+  verifyWhatsappOtpBtn: document.getElementById('verifyWhatsappOtpBtn'),
   authDivider: document.getElementById('authDivider'),
   googleAuthBtn: document.getElementById('googleAuthBtn'),
   authError: document.getElementById('authError'),
@@ -794,6 +801,7 @@ let pendingForgotEmail = '';
 let signupOtpResendAvailableAt = 0;
 let forgotOtpResendAvailableAt = 0;
 let authOtpResendTicker = 0;
+let whatsappOtpSent = false;
 let profilePreviewObjectUrl = '';
 let availabilityRequestId = 0;
 let adminCustomerRefreshTimer = 0;
@@ -828,6 +836,9 @@ function openAuthFromLanding(choice = '') {
   forgotOtpResendAvailableAt = 0;
   elements.authOtp.value = '';
   elements.authPassword.value = '';
+  elements.mobileAuthNumber.value = '';
+  elements.mobileAuthOtp.value = '';
+  whatsappOtpSent = false;
   renderAuthMode();
   render();
   requestAnimationFrame(() => {
@@ -1069,6 +1080,51 @@ function attachEvents() {
 
   elements.authResendOtpBtn?.addEventListener('click', async () => {
     await resendAuthOtp();
+  });
+
+  elements.sendWhatsappOtpBtn?.addEventListener('click', async () => {
+    const mobile = `${elements.mobileAuthCountry?.value || '+91'}${elements.mobileAuthNumber.value.replace(/\D/g, '')}`;
+    elements.authError.textContent = '';
+    elements.sendWhatsappOtpBtn.disabled = true;
+    try {
+      const result = await api('/api/auth/send-whatsapp-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobile }),
+      });
+      whatsappOtpSent = true;
+      elements.mobileAuthOtp.value = '';
+      elements.mobileAuthOtpWrap.hidden = false;
+      elements.verifyWhatsappOtpBtn.hidden = false;
+      elements.authError.textContent = result.message || 'WhatsApp OTP sent.';
+      elements.mobileAuthOtp.focus();
+    } catch (error) {
+      elements.authError.textContent = error.message || 'Unable to send WhatsApp OTP.';
+    } finally {
+      elements.sendWhatsappOtpBtn.disabled = false;
+    }
+  });
+
+  elements.verifyWhatsappOtpBtn?.addEventListener('click', async () => {
+    if (!whatsappOtpSent) return;
+    const mobile = `${elements.mobileAuthCountry?.value || '+91'}${elements.mobileAuthNumber.value.replace(/\D/g, '')}`;
+    const otp = elements.mobileAuthOtp.value.trim();
+    elements.authError.textContent = '';
+    elements.verifyWhatsappOtpBtn.disabled = true;
+    try {
+      const result = await api('/api/auth/verify-whatsapp-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobile, otp }),
+      });
+      elements.authForm.reset();
+      whatsappOtpSent = false;
+      await finishAuthSuccess(result);
+    } catch (error) {
+      elements.authError.textContent = error.message || 'Unable to verify WhatsApp OTP.';
+    } finally {
+      elements.verifyWhatsappOtpBtn.disabled = false;
+    }
   });
 
   function closeNoticeDialog() {
@@ -2262,6 +2318,14 @@ function renderAuthMode(preserveMessage = false) {
   }
   if (elements.authDivider) {
     elements.authDivider.hidden = true;
+  }
+  if (elements.mobileAuthSection) {
+    elements.mobileAuthSection.hidden = !isLoginStep;
+  }
+  if (!isLoginStep) {
+    whatsappOtpSent = false;
+    if (elements.mobileAuthOtpWrap) elements.mobileAuthOtpWrap.hidden = true;
+    if (elements.verifyWhatsappOtpBtn) elements.verifyWhatsappOtpBtn.hidden = true;
   }
 
   updateAuthOtpResendUI();

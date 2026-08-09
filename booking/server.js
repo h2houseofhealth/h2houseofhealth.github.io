@@ -62,6 +62,10 @@ const MAX_BOOKINGS_PER_SLOT_IV = 1;
 const MAX_HYDROGEN_SESSIONS_PER_DAY_PER_USER = 4;
 const IV_REBOOK_COOLDOWN_DAYS = 14;
 const OTP_TTL_MINUTES = 10;
+const WHATSAPP_OTP_TTL_MINUTES = 5;
+const WHATSAPP_TOKEN = normalizeEnvValue(process.env.WHATSAPP_TOKEN);
+const WHATSAPP_PHONE_NUMBER_ID = normalizeEnvValue(process.env.WHATSAPP_PHONE_NUMBER_ID);
+const WHATSAPP_API_VERSION = normalizeEnvValue(process.env.WHATSAPP_API_VERSION);
 const OTP_RESEND_COOLDOWN_SECONDS = (() => {
   const candidate = Number(process.env.OTP_RESEND_COOLDOWN_SECONDS || 30);
   if (!Number.isFinite(candidate)) return 30;
@@ -799,6 +803,21 @@ app.use('/booking', express.static(path.join(__dirname)));
 app.use('/merch', express.static(path.join(WEBSITE_ROOT, 'merch')));
 app.use('/uploads', express.static(uploadsDir));
 
+const merchImageUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname || '').toLowerCase();
+      cb(null, `merch_${Date.now()}_${crypto.randomBytes(6).toString('hex')}${ext}`);
+    },
+  }),
+  limits: { fileSize: AVATAR_MAX_SIZE_BYTES },
+  fileFilter: (_req, file, cb) => {
+    const ok = ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype);
+    cb(ok ? null : new Error('Only JPG, PNG, or WEBP images are allowed'), ok);
+  },
+});
+
 // Mount Merch API routes
 const mountMerchApi = require('./merch-api');
 mountMerchApi(app, {
@@ -808,6 +827,7 @@ mountMerchApi(app, {
   RAZORPAY_KEY_SECRET,
   JWT_SECRET,
   jwt,
+  merchImageUpload,
   sendMerchEmail: ({ to, subject, text, html }) => sendConfiguredEmail({
     to,
     from: MAIL_FROM,
@@ -1159,6 +1179,106 @@ app.post('/api/auth/login', (req, res) => {
     console.error('Login route error:', String(error?.message || error));
     return res.status(500).json({ message: 'Login failed due to a server configuration error. Check server logs.' });
   }
+});
+
+app.post('/api/auth/send-whatsapp-otp', async (req, res) => {
+  const mobile = normalizeWhatsAppMobile(req.body?.mobile);
+  if (!mobile) {
+    return res.status(400).json({ success: false, message: 'Enter a valid mobile number with country code.' });
+  }
+
+  const mobileDigits = mobile.replace(/^\+/, '');
+  const user = db
+    .prepare('SELECT id, role FROM users WHERE mobile IN (?, ?, ?) ORDER BY id DESC LIMIT 1')
+    .get(mobile, mobileDigits, mobile.slice(3));
+  if (!user || String(user.role || 'user').toLowerCase() === 'admin') {
+    return res.status(404).json({ success: false, message: 'Account not found' });
+  }
+
+  const otp = generateOtp();
+  const expiresAt = new Date(Date.now() + WHATSAPP_OTP_TTL_MINUTES * 60 * 1000).toISOString();
+  db.prepare(
+    `INSERT INTO login_otps (mobile, otp, expires_at, verified, created_at)
+     VALUES (?, ?, ?, 0, ?)`
+  ).run(mobile, otp, expiresAt, new Date().toISOString());
+
+  const whatsappResult = await sendWhatsAppText(
+    mobile,
+    `Your H2 House of Health login OTP is ${otp}. It expires in ${WHATSAPP_OTP_TTL_MINUTES} minutes.`
+  );
+  if (!whatsappResult.ok) {
+    console.error('Failed to send WhatsApp login OTP:', whatsappResult.message);
+    return res.status(whatsappResult.statusCode || 502).json({
+      success: false,
+      message: 'Unable to send WhatsApp OTP. Please try again.',
+    });
+  }
+
+  return res.json({ success: true });
+});
+
+app.post('/api/auth/verify-whatsapp-otp', (req, res) => {
+  const mobile = normalizeWhatsAppMobile(req.body?.mobile);
+  const otp = String(req.body?.otp || '').trim();
+  if (!mobile || !/^\d{6}$/.test(otp)) {
+    return res.status(400).json({ message: 'Valid mobile number and 6-digit OTP are required.' });
+  }
+
+  const latestOtp = db
+    .prepare(
+      `SELECT id, otp, expires_at AS expiresAt, verified
+       FROM login_otps
+       WHERE mobile = ?
+       ORDER BY id DESC
+       LIMIT 1`
+    )
+    .get(mobile);
+  if (!latestOtp) {
+    return res.status(400).json({ message: 'OTP not found. Please request a new OTP.' });
+  }
+  if (Number(latestOtp.verified) === 1) {
+    return res.status(400).json({ message: 'OTP has already been used. Please request a new OTP.' });
+  }
+  if (new Date(latestOtp.expiresAt).getTime() < Date.now()) {
+    return res.status(400).json({ message: 'OTP expired. Please request a new OTP.' });
+  }
+  if (String(latestOtp.otp) !== otp) {
+    return res.status(401).json({ message: 'Invalid OTP.' });
+  }
+
+  const userRow = db
+    .prepare('SELECT id FROM users WHERE mobile IN (?, ?, ?) ORDER BY id DESC LIMIT 1')
+    .get(mobile, mobile.replace(/^\+/, ''), mobile.slice(3));
+  if (!userRow) {
+    return res.status(404).json({ message: 'Account not found' });
+  }
+
+  db.prepare('UPDATE login_otps SET verified = 1 WHERE id = ?').run(latestOtp.id);
+  const syncedUser = syncMembershipForUser({ userId: Number(userRow.id) }) || getUserProfileById(Number(userRow.id));
+  if (!syncedUser || String(syncedUser.role || 'user').toLowerCase() === 'admin') {
+    return res.status(404).json({ message: 'Account not found' });
+  }
+
+  app.locals.merchGuestOrderSync?.(syncedUser);
+  transferGuestBookingsToUserByEmail(syncedUser.email, Number(syncedUser.id));
+  const authUser = {
+    id: Number(syncedUser.id),
+    name: String(syncedUser.name),
+    email: String(syncedUser.email),
+    role: String(syncedUser.role || 'user'),
+    age: syncedUser.age ?? null,
+    gender: syncedUser.gender || '',
+    mobile: syncedUser.mobile || '',
+    avatarUrl: syncedUser.avatarUrl || '',
+    membershipStatus: syncedUser.membershipStatus || 'inactive',
+    membershipPlan: syncedUser.membershipPlan || '',
+    membershipStartedAt: syncedUser.membershipStartedAt || null,
+    membershipExpiresAt: syncedUser.membershipExpiresAt || null,
+    membershipPeopleCount: syncedUser.membershipPeopleCount ?? null,
+    membershipSubscriptionId: syncedUser.membershipSubscriptionId || null,
+  };
+  const token = setAuthCookie(req, res, authUser);
+  return res.json({ user: authUser, token });
 });
 
 app.post('/api/auth/login/verify', (req, res) => {
@@ -2371,8 +2491,31 @@ app.get('/api/membership-orders/:orderId/invoice-link', requireAuth, (req, res) 
   });
 });
 
-app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
-  app.locals.merchGuestOrderSync?.(req.user);
+app.get('/api/merch/orders/:id/invoice-link', (req, res) => {
+  let authUser = null;
+  const authorizationHeader = String(req.headers.authorization || '').trim();
+  const bearerToken = authorizationHeader.toLowerCase().startsWith('bearer ')
+    ? authorizationHeader.slice(7).trim()
+    : '';
+  const tokens = [req.cookies[TOKEN_COOKIE], bearerToken]
+    .map((token) => String(token || '').trim())
+    .filter(Boolean);
+  for (const tokenValue of tokens) {
+    try {
+      const payload = jwt.verify(tokenValue, JWT_SECRET);
+      const user = getUserProfileById(Number(payload.sub));
+      if (user) {
+        authUser = user;
+        break;
+      }
+    } catch {
+      // Guest invoice access is checked against the order below.
+    }
+  }
+
+  if (authUser) {
+    app.locals.merchGuestOrderSync?.(authUser);
+  }
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId) || orderId <= 0) {
     return res.status(400).json({ message: 'order id is required' });
@@ -2382,6 +2525,9 @@ app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
     .prepare(
       `SELECT id,
               order_number AS orderNumber,
+              customer_email AS customerEmail,
+              guest_email AS guestEmail,
+              is_guest AS isGuest,
               customer_user_id AS customerUserId,
               customer_id AS customerId,
               payment_status AS paymentStatus
@@ -2393,16 +2539,36 @@ app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
     return res.status(404).json({ message: 'merch order not found' });
   }
 
-  const isAdmin = String(req.user?.role || '').trim().toLowerCase() === 'admin';
+  if (!authUser) {
+    const guestEmail = String(req.query?.guestEmail || req.query?.email || '').trim().toLowerCase();
+    const orderEmail = String(order.guestEmail || order.customerEmail || '').trim().toLowerCase();
+    const isGuestOrder = Number(order.isGuest || 0) === 1 && !Number(order.customerUserId || 0);
+    if (!isGuestOrder || !guestEmail || guestEmail !== orderEmail) {
+      return res.status(401).json({ message: 'unauthorized' });
+    }
+
+    const token = createInvoiceAccessToken({
+      scope: 'merch_invoice',
+      orderId: order.id,
+      isGuest: true,
+    });
+    const invoiceUrl = `${getRequestOrigin(req)}/invoice/merch?token=${encodeURIComponent(token)}`;
+    return res.json({
+      invoiceUrl,
+      invoiceDownloadUrl: `${invoiceUrl}&format=pdf&download=1`,
+    });
+  }
+
+  const isAdmin = String(authUser?.role || '').trim().toLowerCase() === 'admin';
   let invoiceUserId = Number(order.customerUserId || 0) || 0;
-  let ownsOrder = invoiceUserId === Number(req.user.id);
+  let ownsOrder = invoiceUserId === Number(authUser.id);
   if (!ownsOrder && Number(order.customerId || 0) > 0) {
     const profile = db
       .prepare('SELECT id, user_id AS userId FROM merch_customer_profiles WHERE id = ?')
       .get(Number(order.customerId));
     if (profile) {
       invoiceUserId = Number(profile.userId || invoiceUserId || 0);
-      ownsOrder = Number(profile.userId || 0) === Number(req.user.id);
+      ownsOrder = Number(profile.userId || 0) === Number(authUser.id);
     }
   }
 
@@ -2411,7 +2577,7 @@ app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
   }
   if (!Number.isInteger(invoiceUserId) || invoiceUserId <= 0) {
     if (isAdmin) {
-      invoiceUserId = Number(req.user.id);
+      invoiceUserId = Number(authUser.id);
     } else {
       return res.status(409).json({ message: 'invoice is available only for linked customer accounts' });
     }
@@ -2616,6 +2782,7 @@ app.get('/api/admin/coupons', requireAuth, requireAdmin, (req, res) => {
               c.discount_type AS discountType,
               c.discount_value AS discountValue,
               c.commission_per_order_paise AS commissionPerOrderPaise,
+              c.commission_by_product_json AS commissionByProductJson,
               c.applies_to AS appliesTo,
               c.max_redemptions AS maxRedemptions,
               c.per_user_limit AS perUserLimit,
@@ -2813,6 +2980,7 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   const discountType = 'flat';
   const discountValue = Number(req.body?.discountValue || 0);
   const commissionPerOrderPaise = Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
+  const commissionByProductJson = normalizeCommissionByProduct(req.body?.commissionByProduct);
   const appliesToRaw = String(req.body?.appliesTo || 'all').trim().toLowerCase();
   const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
   const productIds = productAppliesTo
@@ -2916,15 +3084,16 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
 
   db.prepare(
     `INSERT INTO coupons (
-      code, description, discount_type, discount_value, commission_per_order_paise, applies_to, max_redemptions, per_user_limit, expires_at, active,
+      code, description, discount_type, discount_value, commission_per_order_paise, commission_by_product_json, applies_to, max_redemptions, per_user_limit, expires_at, active,
       coupon_type, assigned_user_email, used_by, is_active, valid_from, valid_till,
       recipient_email, recipient_name, festival_name, emailed_at, email_status, email_error, portal, influencer_id, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(code) DO UPDATE SET
       description = excluded.description,
       discount_type = excluded.discount_type,
       discount_value = excluded.discount_value,
       commission_per_order_paise = excluded.commission_per_order_paise,
+      commission_by_product_json = excluded.commission_by_product_json,
       applies_to = excluded.applies_to,
       max_redemptions = excluded.max_redemptions,
       per_user_limit = excluded.per_user_limit,
@@ -2947,6 +3116,7 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     discountType,
     discountValue,
     commissionPerOrderPaise,
+    commissionByProductJson,
     appliesTo,
     maxRedemptions,
     perUserLimit,
@@ -3020,6 +3190,7 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   const discountType = String(req.body?.discountType || existing.discountType || 'flat').trim().toLowerCase() || 'flat';
   const discountValue = Number(req.body?.discountValue ?? existing.discountValue ?? 0);
   const commissionPerOrderPaise = Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? existing.commissionPerOrderPaise ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
+  const commissionByProductJson = normalizeCommissionByProduct(req.body?.commissionByProduct, existing.commissionByProduct);
   const appliesToRaw = String(req.body?.appliesTo || existing.appliesTo || 'all').trim().toLowerCase();
   const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
   const productIds = productAppliesTo
@@ -3116,6 +3287,7 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
         discount_type = ?,
         discount_value = ?,
         commission_per_order_paise = ?,
+        commission_by_product_json = ?,
         applies_to = ?,
         max_redemptions = ?,
         coupon_type = ?,
@@ -3138,6 +3310,7 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
       discountType || 'flat',
       discountValue,
       commissionPerOrderPaise,
+      commissionByProductJson,
       appliesTo,
       maxRedemptions,
       couponType,
@@ -8013,7 +8186,7 @@ function buildMerchOrderInfoHtml(order) {
 app.get('/invoice/merch', async (req, res) => {
   const access = verifyInvoiceAccessToken(req.query?.token);
   const orderId = Number(access?.orderId);
-  if (!access || access.scope !== 'merch_invoice' || !Number.isInteger(orderId) || !Number.isInteger(access.userId)) {
+  if (!access || access.scope !== 'merch_invoice' || !Number.isInteger(orderId) || (!access.isGuest && !Number.isInteger(access.userId))) {
     return res.status(400).send('Invalid or expired invoice link');
   }
 
@@ -8024,6 +8197,7 @@ app.get('/invoice/merch', async (req, res) => {
               customer_name AS customerName,
               customer_email AS customerEmail,
               customer_phone AS customerPhone,
+              is_guest AS isGuest,
               customer_user_id AS customerUserId,
               customer_id AS customerId,
               status,
@@ -8045,8 +8219,13 @@ app.get('/invoice/merch', async (req, res) => {
     return res.status(404).send('Invoice not found');
   }
 
-  let ownsOrder = Number(order.customerUserId || 0) === Number(access.userId);
-  if (!ownsOrder && Number(order.customerId || 0) > 0) {
+  // Admin invoice links are intentionally scoped to the admin token created by
+  // /api/merch/orders/:id/invoice-link. They do not belong to the admin's
+  // customer account, so the normal customer ownership check must be bypassed.
+  let ownsOrder = Boolean(access.isAdmin) || (access.isGuest
+    ? Number(order.isGuest || 0) === 1 && !Number(order.customerUserId || 0)
+    : Number(order.customerUserId || 0) === Number(access.userId));
+  if (!ownsOrder && !access.isAdmin && Number(order.customerId || 0) > 0) {
     const profile = db
       .prepare('SELECT id FROM merch_customer_profiles WHERE id = ? AND user_id = ?')
       .get(Number(order.customerId), Number(access.userId));
@@ -10291,6 +10470,7 @@ function mapCouponRow(row) {
     discountType: row.discountType || 'flat',
     discountValue: Number(row.discountValue || 0),
     commissionPerOrderPaise: Math.max(0, Number(row.commissionPerOrderPaise || 0)),
+    commissionByProduct: parseCommissionByProduct(row.commissionByProductJson),
     appliesTo: row.appliesTo || 'all',
     maxRedemptions: row.maxRedemptions == null ? null : Number(row.maxRedemptions),
     perUserLimit: Number(row.perUserLimit || 1),
@@ -10325,6 +10505,19 @@ function mapCouponRow(row) {
   };
 }
 
+function parseCommissionByProduct(value) {
+  if (!value) return {};
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).map(([id, amount]) => [id, Math.max(0, Math.round(Number(amount) || 0))]));
+  } catch { return {}; }
+}
+
+function normalizeCommissionByProduct(value, fallback = {}) {
+  return JSON.stringify(parseCommissionByProduct(value == null ? fallback : value));
+}
+
 function getCouponByCode(code) {
   const normalizedCode = normalizeCouponCode(code);
   if (!normalizedCode) return null;
@@ -10336,6 +10529,7 @@ function getCouponByCode(code) {
               c.discount_type AS discountType,
               c.discount_value AS discountValue,
               c.commission_per_order_paise AS commissionPerOrderPaise,
+              c.commission_by_product_json AS commissionByProductJson,
               c.applies_to AS appliesTo,
               c.max_redemptions AS maxRedemptions,
               c.per_user_limit AS perUserLimit,
@@ -10378,6 +10572,8 @@ function getCouponById(couponId) {
               c.description,
               c.discount_type AS discountType,
               c.discount_value AS discountValue,
+              c.commission_per_order_paise AS commissionPerOrderPaise,
+              c.commission_by_product_json AS commissionByProductJson,
               c.applies_to AS appliesTo,
               c.max_redemptions AS maxRedemptions,
               c.per_user_limit AS perUserLimit,
@@ -10814,6 +11010,7 @@ function createInvoiceAccessToken(payload) {
       userId: payload?.userId != null ? Number(payload.userId) : undefined,
       orderId: payload?.orderId != null ? String(payload.orderId) : undefined,
       isAdmin: payload?.isAdmin === true,
+      isGuest: payload?.isGuest === true,
     },
     JWT_SECRET,
     { expiresIn: '30d' }
@@ -10831,6 +11028,7 @@ function verifyInvoiceAccessToken(token) {
       userId: payload?.userId != null ? Number(payload.userId) : null,
       orderId: payload?.orderId != null ? String(payload.orderId) : '',
       isAdmin: payload?.isAdmin === true,
+      isGuest: payload?.isGuest === true,
     };
   } catch {
     return null;
@@ -11290,6 +11488,14 @@ function createSingleBookingResponse(req, res, { targetUser, defaultNotes = '', 
        WHERE b.id = ?`
     )
     .get(result.lastInsertRowid);
+
+  void sendWhatsAppBookingConfirmation(booking).then((whatsappResult) => {
+    if (!whatsappResult.ok) {
+      console.error('Booking WhatsApp confirmation was not sent:', whatsappResult.message);
+    }
+  }).catch((error) => {
+    console.error('Booking WhatsApp confirmation failed:', String(error?.message || error));
+  });
 
   if (!includeAdminMeta) {
     return res.status(201).json({ booking });
@@ -13652,6 +13858,298 @@ function hashOtp(otp) {
   return crypto.createHash('sha256').update(String(otp)).digest('hex');
 }
 
+function normalizeWhatsAppMobile(value) {
+  const raw = String(value || '').trim();
+  const digits = raw.replace(/\D/g, '');
+  if (/^\+91[6-9]\d{9}$/.test(raw)) return raw;
+  if (/^91[6-9]\d{9}$/.test(digits)) return `+${digits}`;
+  if (/^[6-9]\d{9}$/.test(digits)) return `+91${digits}`;
+  return '';
+}
+
+function sendWhatsAppMessage(to, templateName, parameters = []) {
+  const recipient = normalizeWhatsAppMobile(to);
+  const normalizedTemplateName = String(templateName || '').trim();
+  if (!recipient || !normalizedTemplateName) {
+    return Promise.resolve({ ok: false, statusCode: 400, message: 'Valid WhatsApp recipient and template are required.' });
+  }
+  if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_NUMBER_ID || !WHATSAPP_API_VERSION) {
+    return Promise.resolve({
+      ok: false,
+      statusCode: 503,
+      message: 'WhatsApp Cloud API is not configured. Set WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, and WHATSAPP_API_VERSION.',
+    });
+  }
+  console.log('==============================');
+  console.log('WhatsApp recipient:', recipient);
+  console.log('Template:', normalizedTemplateName);
+  console.log('==============================');
+
+  const bodyParameters = (Array.isArray(parameters) ? parameters : [parameters]).map((parameter) => ({
+    type: 'text',
+    text: String(parameter ?? ''),
+  }));
+  const payload = JSON.stringify({
+    messaging_product: 'whatsapp',
+    to: recipient,
+    type: 'template',
+    template: {
+      name: normalizedTemplateName,
+      language: { code: 'en_US' },
+      components: bodyParameters.length ? [{ type: 'body', parameters: bodyParameters }] : undefined,
+    },
+  });
+  const apiVersion = WHATSAPP_API_VERSION.startsWith('v') ? WHATSAPP_API_VERSION : `v${WHATSAPP_API_VERSION}`;
+
+  return new Promise((resolve) => {
+    const request = https.request(
+      {
+        hostname: 'graph.facebook.com',
+        path: `/${apiVersion}/${encodeURIComponent(WHATSAPP_PHONE_NUMBER_ID)}/messages`,
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      },
+      (response) => {
+        let responseBody = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => { responseBody += chunk; });
+        response.on('end', () => {
+          let parsed = null;
+          try { parsed = responseBody ? JSON.parse(responseBody) : null; } catch { parsed = null; }
+          const statusCode = Number(response.statusCode || 500);
+          if (statusCode >= 200 && statusCode < 300) {
+            return resolve({ ok: true, statusCode, messageId: parsed?.messages?.[0]?.id || '' });
+          }
+          resolve({ ok: false, statusCode, message: parsed?.error?.message || 'WhatsApp message could not be sent.' });
+        });
+      }
+    );
+    request.on('error', (error) => resolve({ ok: false, statusCode: 502, message: error.message }));
+    request.write(payload);
+    request.end();
+  });
+}
+
+function sendWhatsAppText(to, message) {
+  const recipient = normalizeWhatsAppMobile(to);
+  const text = String(message || '').trim();
+  if (!recipient || !text) {
+    return Promise.resolve({ ok: false, statusCode: 400, message: 'Valid WhatsApp recipient and message are required.' });
+  }
+  if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_NUMBER_ID || !WHATSAPP_API_VERSION) {
+    return Promise.resolve({
+      ok: false,
+      statusCode: 503,
+      message: 'WhatsApp Cloud API is not configured. Set WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, and WHATSAPP_API_VERSION.',
+    });
+  }
+
+  const payload = JSON.stringify({
+    messaging_product: 'whatsapp',
+    to: recipient,
+    type: 'text',
+    text: {
+      preview_url: false,
+      body: text,
+    },
+  });
+  const apiVersion = WHATSAPP_API_VERSION.startsWith('v') ? WHATSAPP_API_VERSION : `v${WHATSAPP_API_VERSION}`;
+
+  return new Promise((resolve) => {
+    const request = https.request(
+      {
+        hostname: 'graph.facebook.com',
+        path: `/${apiVersion}/${encodeURIComponent(WHATSAPP_PHONE_NUMBER_ID)}/messages`,
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      },
+      (response) => {
+        let responseBody = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => { responseBody += chunk; });
+        response.on('end', () => {
+          let parsed = null;
+          try { parsed = responseBody ? JSON.parse(responseBody) : null; } catch { parsed = null; }
+          const statusCode = Number(response.statusCode || 500);
+          if (statusCode >= 200 && statusCode < 300) {
+            return resolve({ ok: true, statusCode, messageId: parsed?.messages?.[0]?.id || '' });
+          }
+          resolve({ ok: false, statusCode, message: parsed?.error?.message || 'WhatsApp message could not be sent.' });
+        });
+      }
+    );
+    request.on('error', (error) => resolve({ ok: false, statusCode: 502, message: error.message }));
+    request.write(payload);
+    request.end();
+  });
+}
+
+function sendWhatsAppBookingConfirmation(booking) {
+  return sendWhatsAppMessage(booking?.clientPhone || booking?.clientMobile, 'booking_confirmation', [
+    booking?.clientName || '',
+    booking?.bookingDate || '',
+    booking?.bookingTime || '',
+    booking?.serviceName || '',
+    'House of Health',
+  ]);
+}
+
+function normalizeWhatsAppMobile(value) {
+  const raw = String(value || '').trim();
+  const digits = raw.replace(/\D/g, '');
+  if (/^\+91[6-9]\d{9}$/.test(raw)) return raw;
+  if (/^91[6-9]\d{9}$/.test(digits)) return `+${digits}`;
+  if (/^[6-9]\d{9}$/.test(digits)) return `+91${digits}`;
+  return '';
+}
+
+function sendWhatsAppMessage(to, templateName, parameters = []) {
+  const recipient = normalizeWhatsAppMobile(to);
+  const normalizedTemplateName = String(templateName || '').trim();
+  if (!recipient || !normalizedTemplateName) {
+    return Promise.resolve({ ok: false, statusCode: 400, message: 'Valid WhatsApp recipient and template are required.' });
+  }
+  if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_NUMBER_ID || !WHATSAPP_API_VERSION) {
+    return Promise.resolve({
+      ok: false,
+      statusCode: 503,
+      message: 'WhatsApp Cloud API is not configured. Set WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, and WHATSAPP_API_VERSION.',
+    });
+  }
+  console.log('==============================');
+  console.log('WhatsApp recipient:', recipient);
+  console.log('Template:', normalizedTemplateName);
+  console.log('==============================');
+
+  const bodyParameters = (Array.isArray(parameters) ? parameters : [parameters]).map((parameter) => ({
+    type: 'text',
+    text: String(parameter ?? ''),
+  }));
+  const payload = JSON.stringify({
+    messaging_product: 'whatsapp',
+    to: recipient,
+    type: 'template',
+    template: {
+      name: normalizedTemplateName,
+      language: { code: 'en_US' },
+      components: bodyParameters.length ? [{ type: 'body', parameters: bodyParameters }] : undefined,
+    },
+  });
+  const apiVersion = WHATSAPP_API_VERSION.startsWith('v') ? WHATSAPP_API_VERSION : `v${WHATSAPP_API_VERSION}`;
+
+  return new Promise((resolve) => {
+    const request = https.request(
+      {
+        hostname: 'graph.facebook.com',
+        path: `/${apiVersion}/${encodeURIComponent(WHATSAPP_PHONE_NUMBER_ID)}/messages`,
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      },
+      (response) => {
+        let responseBody = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => { responseBody += chunk; });
+        response.on('end', () => {
+          let parsed = null;
+          try { parsed = responseBody ? JSON.parse(responseBody) : null; } catch { parsed = null; }
+          const statusCode = Number(response.statusCode || 500);
+          if (statusCode >= 200 && statusCode < 300) {
+            return resolve({ ok: true, statusCode, messageId: parsed?.messages?.[0]?.id || '' });
+          }
+          resolve({ ok: false, statusCode, message: parsed?.error?.message || 'WhatsApp message could not be sent.' });
+        });
+      }
+    );
+    request.on('error', (error) => resolve({ ok: false, statusCode: 502, message: error.message }));
+    request.write(payload);
+    request.end();
+  });
+}
+
+function sendWhatsAppText(to, message) {
+  const recipient = normalizeWhatsAppMobile(to);
+  const text = String(message || '').trim();
+  if (!recipient || !text) {
+    return Promise.resolve({ ok: false, statusCode: 400, message: 'Valid WhatsApp recipient and message are required.' });
+  }
+  if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_NUMBER_ID || !WHATSAPP_API_VERSION) {
+    return Promise.resolve({
+      ok: false,
+      statusCode: 503,
+      message: 'WhatsApp Cloud API is not configured. Set WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, and WHATSAPP_API_VERSION.',
+    });
+  }
+  console.log('==============================');
+  console.log('WhatsApp recipient:', recipient);
+  console.log('Message:', text);
+  console.log('==============================');
+  const payload = JSON.stringify({
+    messaging_product: 'whatsapp',
+    to: recipient,
+    type: 'text',
+    text: {
+      preview_url: false,
+      body: text,
+    },
+  });
+  const apiVersion = WHATSAPP_API_VERSION.startsWith('v') ? WHATSAPP_API_VERSION : `v${WHATSAPP_API_VERSION}`;
+
+  return new Promise((resolve) => {
+    const request = https.request(
+      {
+        hostname: 'graph.facebook.com',
+        path: `/${apiVersion}/${encodeURIComponent(WHATSAPP_PHONE_NUMBER_ID)}/messages`,
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      },
+      (response) => {
+        let responseBody = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => { responseBody += chunk; });
+        response.on('end', () => {
+          let parsed = null;
+          try { parsed = responseBody ? JSON.parse(responseBody) : null; } catch { parsed = null; }
+          console.log('WhatsApp API Status:', response.statusCode);
+          console.log('WhatsApp API Response:', responseBody);
+          const statusCode = Number(response.statusCode || 500);
+          if (statusCode >= 200 && statusCode < 300) {
+            return resolve({ ok: true, statusCode, messageId: parsed?.messages?.[0]?.id || '' });
+          }
+          resolve({ ok: false, statusCode, message: parsed?.error?.message || 'WhatsApp message could not be sent.' });
+        });
+      }
+    );
+    request.on('error', (error) => resolve({ ok: false, statusCode: 502, message: error.message }));
+    request.write(payload);
+    request.end();
+  });
+}
+
+function sendWhatsAppBookingConfirmation(booking) {
+  return sendWhatsAppMessage(booking?.clientPhone || booking?.clientMobile, 'booking_confirmation', [
+    booking?.clientName || '',
+    booking?.bookingDate || '',
+    booking?.bookingTime || '',
+    booking?.serviceName || '',
+    'House of Health',
+  ]);
+}
 function getTransporter() {
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT || 587);
@@ -14402,6 +14900,15 @@ function migrate() {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS login_otps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      mobile TEXT NOT NULL,
+      otp TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      verified INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS pending_password_resets (
       email TEXT PRIMARY KEY,
       otp_hash TEXT NOT NULL,
@@ -14472,6 +14979,7 @@ function migrate() {
       discount_type TEXT NOT NULL,
       discount_value REAL NOT NULL,
       commission_per_order_paise INTEGER NOT NULL DEFAULT 0,
+      commission_by_product_json TEXT NOT NULL DEFAULT '{}',
       applies_to TEXT NOT NULL DEFAULT 'all',
       max_redemptions INTEGER,
       per_user_limit INTEGER NOT NULL DEFAULT 1,
@@ -14647,6 +15155,9 @@ function migrate() {
   }
   if (hasTable('coupons') && !hasColumn('coupons', 'commission_per_order_paise')) {
     db.exec('ALTER TABLE coupons ADD COLUMN commission_per_order_paise INTEGER NOT NULL DEFAULT 0');
+  }
+  if (hasTable('coupons') && !hasColumn('coupons', 'commission_by_product_json')) {
+    db.exec("ALTER TABLE coupons ADD COLUMN commission_by_product_json TEXT NOT NULL DEFAULT '{}'");
   }
   if (hasTable('coupons') && !hasColumn('coupons', 'coupon_type')) {
     db.exec("ALTER TABLE coupons ADD COLUMN coupon_type TEXT NOT NULL DEFAULT 'public'");
