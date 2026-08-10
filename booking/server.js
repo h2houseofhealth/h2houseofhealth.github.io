@@ -1637,6 +1637,26 @@ app.get('/webhooks/test', (req, res) => {
     time: new Date().toISOString()
   });
 });
+app.get('/webhooks/whatsapp', (req, res) => {
+  console.log('Query:', req.query);
+  console.log('Mode:', req.query['hub.mode']);
+  console.log('Token from Meta:', req.query['hub.verify_token']);
+  console.log('Token from ENV:', WHATSAPP_VERIFY_TOKEN);
+
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  if (
+    mode === 'subscribe' &&
+    token === WHATSAPP_VERIFY_TOKEN
+  ) {
+    console.log('WhatsApp webhook verified');
+    return res.status(200).send(challenge);
+  }
+
+  return res.sendStatus(403);
+});
 app.post('/api/admin/ses/verify-recipient', requireAuth, requireAdmin, async (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
   if (!isValidEmail(email)) {
