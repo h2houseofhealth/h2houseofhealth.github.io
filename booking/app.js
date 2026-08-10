@@ -5463,6 +5463,7 @@ async function upsertBooking() {
   const id = elements.bookingId.value;
   const isNewBooking = !id;
   
+  
   try {
     const result = await api(id ? `/api/bookings/${id}` : (isAdmin ? '/api/admin/bookings' : '/api/bookings'), {
       method: id ? 'PUT' : 'POST',
