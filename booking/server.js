@@ -66,6 +66,7 @@ const WHATSAPP_OTP_TTL_MINUTES = 5;
 const WHATSAPP_TOKEN = normalizeEnvValue(process.env.WHATSAPP_TOKEN);
 const WHATSAPP_PHONE_NUMBER_ID = normalizeEnvValue(process.env.WHATSAPP_PHONE_NUMBER_ID);
 const WHATSAPP_API_VERSION = normalizeEnvValue(process.env.WHATSAPP_API_VERSION);
+const WHATSAPP_VERIFY_TOKEN = normalizeEnvValue(process.env.WHATSAPP_VERIFY_TOKEN);
 const OTP_RESEND_COOLDOWN_SECONDS = (() => {
   const candidate = Number(process.env.OTP_RESEND_COOLDOWN_SECONDS || 30);
   if (!Number.isFinite(candidate)) return 30;
@@ -1605,6 +1606,37 @@ app.post('/api/profile/avatar', requireAuth, (req, res) => {
   });
 });
 
+app.get('/webhooks/whatsapp', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  if (
+    mode === 'subscribe' &&
+    token === WHATSAPP_VERIFY_TOKEN
+  ) {
+    console.log('WhatsApp webhook verified');
+    return res.status(200).send(challenge);
+  }
+
+  return res.sendStatus(403);
+});
+
+app.post('/webhooks/whatsapp', (req, res) => {
+  console.log(
+    'WhatsApp Webhook:',
+    JSON.stringify(req.body, null, 2)
+  );
+
+  res.sendStatus(200);
+});
+app.get('/webhooks/test', (req, res) => {
+  res.json({
+    ok: true,
+    message: 'Webhook routes are deployed',
+    time: new Date().toISOString()
+  });
+});
 app.post('/api/admin/ses/verify-recipient', requireAuth, requireAdmin, async (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
   if (!isValidEmail(email)) {
