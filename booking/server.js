@@ -1607,19 +1607,28 @@ app.post('/api/profile/avatar', requireAuth, (req, res) => {
 });
 
 app.get('/webhooks/whatsapp', (req, res) => {
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
+  const mode = String(req.query['hub.mode'] || '').trim();
+  const token = String(req.query['hub.verify_token'] || '').trim();
+  const challenge = String(req.query['hub.challenge'] || '').trim();
 
-  if (
-    mode === 'subscribe' &&
-    token === WHATSAPP_VERIFY_TOKEN
-  ) {
-    console.log('WhatsApp webhook verified');
-    return res.status(200).send(challenge);
+  console.log('========================');
+  console.log('Mode:', mode);
+  console.log('Token:', token);
+  console.log('Expected:', WHATSAPP_VERIFY_TOKEN);
+  console.log('Challenge:', challenge);
+  console.log('========================');
+
+  if (mode !== 'subscribe') {
+    return res.status(400).send(`Wrong mode: ${mode}`);
   }
 
-  return res.sendStatus(403);
+  if (token !== WHATSAPP_VERIFY_TOKEN) {
+    return res.status(400).send(
+      `Token mismatch. Received="${token}" Expected="${WHATSAPP_VERIFY_TOKEN}"`
+    );
+  }
+
+  return res.status(200).send(challenge);
 });
 
 app.post('/webhooks/whatsapp', (req, res) => {
@@ -1638,23 +1647,22 @@ app.get('/webhooks/test', (req, res) => {
   });
 });
 app.get('/webhooks/whatsapp', (req, res) => {
-  console.log('Query:', req.query);
-  console.log('Mode:', req.query['hub.mode']);
-  console.log('Token from Meta:', req.query['hub.verify_token']);
-  console.log('Token from ENV:', WHATSAPP_VERIFY_TOKEN);
+  console.log("========== WEBHOOK VERIFY ==========");
+  console.log("Query:", req.query);
+  console.log("Mode:", req.query["hub.mode"]);
+  console.log("Token from Meta:", req.query["hub.verify_token"]);
+  console.log("Token from ENV:", WHATSAPP_VERIFY_TOKEN);
 
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
 
-  if (
-    mode === 'subscribe' &&
-    token === WHATSAPP_VERIFY_TOKEN
-  ) {
-    console.log('WhatsApp webhook verified');
+  if (mode === "subscribe" && token === WHATSAPP_VERIFY_TOKEN) {
+    console.log("Webhook VERIFIED");
     return res.status(200).send(challenge);
   }
 
+  console.log("Webhook FAILED");
   return res.sendStatus(403);
 });
 app.post('/api/admin/ses/verify-recipient', requireAuth, requireAdmin, async (req, res) => {
