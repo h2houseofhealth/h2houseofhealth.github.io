@@ -4370,7 +4370,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   function bindEvents() {
     // Hero shop button
     els.heroShopBtn.addEventListener('click', () => {
-      document.getElementById('shopSection').scrollIntoView({ behavior: 'smooth' });
+      document.querySelector('.merch-categories')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
     // Category cards
