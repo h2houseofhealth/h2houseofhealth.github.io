@@ -4501,7 +4501,7 @@ body.is-auth-loading .merch-auth-cta {
   z-index: 2;
   min-width: 0;
   max-width: var(--hero-content-max-width);
-  margin-left: 90px; 
+  margin-left: 90px;
 
 }
 
@@ -4524,7 +4524,7 @@ body.is-auth-loading .merch-auth-cta {
   line-height: .95;
   letter-spacing: -.035em;
   color: #221d1a;
-  white-space: nowrap; 
+  text-wrap: balance;
 }
 .merch-hero__title .text-accent {
   color: var(--hero-rust);
@@ -4587,7 +4587,7 @@ body.is-auth-loading .merch-auth-cta {
 
 .merch-hero__image--composition {
   position: absolute;
-  right: 4;
+  right: 4px;
   bottom: 0;
   left: auto;
   width: auto;
@@ -4641,28 +4641,71 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
   background: linear-gradient(145deg, #fff7ed 0%, #ffd0a8 100%);
 }
 @media (max-width: 900px) {
-  .merch-page-container {
+  .merch-hero {
     --hero-columns: 42% 58%;
     --hero-gap: 24px;
     --hero-title-size: clamp(38px, 6vw, 58px);
+    --hero-padding: 42px 24px;
+  }
+
+  .merch-hero__content {
+    margin-left: 0;
   }
 }
 
 @media (max-width: 640px) {
-  .merch-page-container {
+  .merch-hero {
     --hero-display: block;
     --hero-min-height: 0;
-    --hero-padding: 42px 0 18px;
-    --hero-art-min-height: 270px;
-    --hero-title-size: clamp(40px, 12vw, 54px);
+    --hero-padding: 34px 18px 20px;
+    --hero-art-min-height: clamp(240px, 72vw, 330px);
+    --hero-title-size: clamp(38px, 11vw, 50px);
     --hero-content-max-width: 100%;
-    --hero-subtitle-margin: 0 0 24px;
-    --hero-art-margin-top: 20px;
+    --hero-subtitle-margin: 0 auto 22px;
+    --hero-art-margin-top: 18px;
+    text-align: center;
+  }
+
+  .merch-hero__content {
+    margin: 0 auto;
+  }
+
+  .merch-hero__eyebrow {
+    margin-bottom: 14px;
+  }
+
+  .merch-hero__title {
+    margin-bottom: 16px;
+    line-height: 1;
+  }
+
+  .merch-hero__subtitle {
+    max-width: 34rem;
+    font-size: 15px;
+    line-height: 1.65;
+  }
+
+  .merch-hero__art {
+    overflow: hidden;
+  }
+
+  .merch-hero__image--composition {
+    left: 50%;
+    right: auto;
+    width: min(112%, 420px);
+    height: 100%;
+    max-width: none;
+    transform: translateX(-50%);
+  }
+
+  .merch-hero__image--composition:hover {
+    transform: translateX(-50%) translateY(-4px);
   }
 }
 .merch-categories {
   width: 100%;
   max-width: none;
+  scroll-margin-top: 84px;
   padding: clamp(34px, 5vw, 62px) 24px clamp(58px, 7vw, 92px);
 }
 
