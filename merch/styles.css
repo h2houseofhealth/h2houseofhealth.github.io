@@ -874,7 +874,18 @@ body.is-auth-loading .merch-auth-cta {
   display: grid;
   gap: 6px;
 }
+.account-list__item {
+    grid-template-columns: 64px 1fr;
+    align-items: center;
+}
 
+.account-list__image {
+    width: 64px;
+    height: 64px;
+    object-fit: cover;
+    border-radius: 6px;
+    grid-row: 1 / span 2;
+}
 .account-order-card {
   padding: 17px 16px 17px;
   gap: 6px;
