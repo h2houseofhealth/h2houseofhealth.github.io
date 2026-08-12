@@ -843,9 +843,77 @@
   }
 
   function getWishlistProductLabel(item) {
-    const product = state.products.find((entry) => Number(entry.id) === Number(item.productId));
-    return product?.name || item.productName || `Saved item #${item.productId || item.id || ''}`.trim();
-  }
+    const product = state.products.find(
+        (entry) => Number(entry.id) === Number(item.productId)
+    );
+
+    return (
+        product?.name ||
+        item.productName ||
+        `Saved item #${item.productId || item.id || ''}`
+    ).trim();
+}
+
+function getWishlistProductVariant(item) {
+    const product = state.products.find(
+        (entry) => Number(entry.id) === Number(item.productId)
+    );
+
+    const variants = Array.isArray(product?.variants)
+        ? product.variants
+        : [];
+
+    const variant = variants.find(
+        (entry) => Number(entry.id) === Number(item.variantId)
+    );
+
+    if (!variant) return '';
+
+    const details = [
+        variant.size,
+        variant.color
+    ].filter(Boolean);
+
+    return details.join(' / ');
+}
+
+function getWishlistProductPrice(item) {
+    const product = state.products.find(
+        (entry) => Number(entry.id) === Number(item.productId)
+    );
+
+    const variants = Array.isArray(product?.variants)
+        ? product.variants
+        : [];
+
+    const variant = variants.find(
+        (entry) => Number(entry.id) === Number(item.variantId)
+    );
+
+    const price = Number(
+        variant?.price ??
+        product?.price ??
+        product?.basePrice ??
+        product?.base_price ??
+        0
+    );
+
+    if (!price) return '';
+
+    return `₹${price.toLocaleString('en-IN')}`;
+}
+
+  function getWishlistProductImage(item) {
+  const product = state.products.find(
+    (entry) => Number(entry.id) === Number(item.productId)
+  );
+
+  return (
+    product?.images?.[0] ||
+    product?.imageUrl ||
+    (product ? getProductFallbackImage(product) : '')
+  );
+}
 
   async function addToWishlist(product, variant) {
     if (!state.authResolved) {
@@ -2528,9 +2596,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           <div class="account-list">
             ${wishlistItems.map((item) => `
               <article class="account-list__item account-list__item--stacked">
+                            <img
+                class="account-list__image"
+                src="${escapeHtml(getWishlistProductImage(item))}"
+                alt="${escapeHtml(getWishlistProductLabel(item))}"
+              />
                 <div class="account-list__row">
                   <strong>${escapeHtml(getWishlistProductLabel(item))}</strong>
-                  <span>Saved</span>
+                  <span>${escapeHtml(getWishlistProductVariant(item))} · ${escapeHtml(getWishlistProductPrice(item))}</span>
                 </div>
                 <div class="account-item-actions account-item-actions--inline">
                   <button type="button" data-account-action="wishlist-move" data-wishlist-id="${escapeHtml(String(item.id || ''))}">Move to Cart</button>
