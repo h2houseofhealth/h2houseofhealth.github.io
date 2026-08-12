@@ -893,6 +893,9 @@ body.is-auth-loading .merch-auth-cta {
   border-radius: 8px;
   background: #fbf7f4;
   box-shadow: 0 2px 10px rgba(33, 24, 18, 0.04);
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  min-width: 0;
 }
 
 .account-order-card > .account-list__row > strong {
@@ -901,6 +904,8 @@ body.is-auth-loading .merch-auth-cta {
   font-weight: 700;
   letter-spacing: 0;
   line-height: 1.2;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .account-order-card > p {
@@ -968,6 +973,7 @@ body.is-auth-loading .merch-auth-cta {
   gap: 12px;
   padding-top: 4px;
   align-items: stretch;
+  width: 100%;
 }
 
 .account-item-actions--inline button {
@@ -1024,12 +1030,11 @@ body.is-auth-loading .merch-auth-cta {
 }
 
 .account-order-action__icon {
-  position: absolute;
-  left: 34px;
-  top: 50%;
+  position: static;
+  flex: 0 0 22px;
   width: 22px;
   height: 22px;
-  transform: translateY(-50%);
+  transform: none;
   stroke: currentColor;
 }
 
@@ -1040,7 +1045,9 @@ body.is-auth-loading .merch-auth-cta {
   letter-spacing: inherit;
   text-align: center;
   text-transform: inherit;
-  white-space: nowrap;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .account-item-actions.account-order-actions button[data-account-action="download-invoice"] {
@@ -5602,6 +5609,48 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
     flex: 1 1 auto;
   }
 
+  .account-order-card {
+    padding: 16px 12px;
+    gap: 10px;
+  }
+
+  .account-list__item--stacked .account-list__row {
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .account-order-card > .account-list__row > strong {
+    font-size: 16px;
+    max-width: 55%;
+  }
+
+  .account-order-card > p {
+    font-size: 13px;
+  }
+
+  .order-status-group {
+    max-width: 45%;
+  }
+
+  .account-item-actions.account-order-actions {
+    gap: 10px;
+  }
+
+  .account-item-actions.account-order-actions button {
+    min-height: 44px;
+    height: auto;
+    padding: 9px 8px;
+    gap: 5px;
+    font-size: 9px;
+    line-height: 1.15;
+  }
+
+  .account-order-action__icon {
+    width: 18px;
+    height: 18px;
+    flex-basis: 18px;
+  }
+
   .account-form__actions .account-action-btn {
     flex: 1 1 auto;
   }
@@ -5681,6 +5730,25 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
   .influencer-details > *:not(summary) {
     padding-left: 14px;
     padding-right: 14px;
+  }
+}
+
+@media (max-width: 380px) {
+  .account-order-card > .account-list__row > strong,
+  .order-status-group {
+    max-width: none;
+  }
+
+  .account-list__item--stacked .account-list__row {
+    flex-direction: column;
+  }
+
+  .order-status-group {
+    align-items: flex-start;
+  }
+
+  .account-item-actions--inline {
+    grid-template-columns: 1fr;
   }
 }
 
