@@ -2955,9 +2955,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
                       <h1 class="hero-title" style="margin:0;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:50px;line-height:58px;font-weight:700;letter-spacing:0;">Thank You!</h1>
                       <h2 class="hero-subtitle" style="margin:2px 0 0;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:27px;line-height:34px;font-weight:700;letter-spacing:0;">Your order is confirmed.</h2>
                     </td>
-                    <td class="mobile-stack mobile-center" valign="middle" align="right" style="width:32%;">
-                      <img class="hero-image" src="${escapeHtml(links.hero)}" width="150" alt="H2 House of Health wellness hero image" style="display:block;border:0;width:150px;max-width:100%;height:auto;border-radius:6px;">
-                    </td>
+                    
                   </tr>
                 </table>
               </td>

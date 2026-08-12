@@ -179,7 +179,57 @@ async function sendMailgunEmail({ to, from, subject, text, html }) {
     html,
   });
 }
+async function sendSesEmail({ to, from, subject, text, html, replyTo = [] }) {
+  const normalizedTo = String(to || '').trim().toLowerCase();
+  const normalizedFrom = String(from || MAIL_FROM).trim();
 
+  if (!isValidEmail(normalizedTo)) {
+    throw new Error('Valid recipient email is required.');
+  }
+
+  if (!isValidEmail(normalizedFrom)) {
+    throw new Error('Valid sender email is required.');
+  }
+
+  if (!hasSesApiCredentials()) {
+    throw new Error('SES is not configured');
+  }
+
+  const payload = {
+    FromEmailAddress: normalizedFrom,
+    Destination: {
+      ToAddresses: [normalizedTo],
+    },
+    Content: {
+      Simple: {
+        Subject: { Data: subject },
+        Body: {
+          Text: { Data: text || '' },
+          Html: { Data: html || '' },
+        },
+      },
+    },
+  };
+
+  if (replyTo && replyTo.length) {
+    payload.ReplyToAddresses = replyTo;
+  }
+
+  const result = await sesApiRequest(
+    'POST',
+    '/v2/email/outbound-emails',
+    payload
+  );
+
+  if (!result.ok) {
+    throw new Error(result.message || 'SES send failed');
+  }
+
+  return {
+    delivery: 'ses',
+    statusCode: result.statusCode || 200,
+  };
+}
 async function sendConfiguredEmail({ to, from, subject, text, html }) {
   const normalizedTo = String(to || '').trim().toLowerCase();
   const normalizedFrom = String(from || '').trim();
@@ -189,7 +239,15 @@ async function sendConfiguredEmail({ to, from, subject, text, html }) {
   if (!normalizedFrom) {
     throw new Error('Sender email is required');
   }
-
+  if (hasSesApiCredentials()) {
+    return await sendSesEmail({
+     to: normalizedTo,
+     from: normalizedFrom,
+     subject,
+     text,
+     html,
+    });
+  }
   if (mg) {
     await sendMailgunEmail({ to: normalizedTo, from: normalizedFrom, subject, text, html });
     return { delivery: 'mailgun' };
@@ -10308,7 +10366,7 @@ app.post('/api/contact', async (req, res) => {
   // Try Mailgun first, then SES API, then SMTP
   try {
     if (mg) {
-      await sendMailgunEmail({ to: CONTACT_TO_EMAIL, from: CONTACT_FROM_EMAIL, subject, text, html });
+      await sendConfiguredEmail({ to: CONTACT_TO_EMAIL, from: CONTACT_FROM_EMAIL, subject, text, html });
     } else if (hasSesApiCredentials()) {
       const sesResult = await sesApiRequest('POST', '/v2/email/outbound-emails', {
         FromEmailAddress: CONTACT_FROM_EMAIL,
@@ -14521,7 +14579,7 @@ async function sendCouponEmail({ toEmail, recipientName, code, discountValue, ap
       from: MAIL_FROM,
       subject,
   });
-    await sendMailgunEmail({
+    await sendConfiguredEmail({
       to: normalizedToEmail,
       from: MAIL_FROM,
       subject,
@@ -14663,7 +14721,7 @@ async function sendBookingPaymentLinkEmail({
   `;
 
   try {
-    await sendMailgunEmail({
+    await sendConfiguredEmail({
       to: normalizedToEmail,
       from: MAIL_FROM || 'noreply@h2houseofhealth.com',
       subject,
