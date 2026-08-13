@@ -2932,10 +2932,25 @@ app.get('/api/admin/coupons', requireAuth, requireAdmin, (req, res) => {
     .all(portal)
     .map((row) => {
       const stats = getCouponRedemptionStats(row.id, -1);
+      const merchDiscountStats = portal === 'merch'
+        ? db.prepare(`
+            SELECT COUNT(*) AS orderRedemptions,
+                   COALESCE(SUM(discount_amount), 0) AS totalDiscountAmount
+            FROM merch_orders
+            WHERE coupon_id = ?
+              AND discount_amount > 0
+              AND (
+                payment_status IN ('paid', 'cod_pending', 'refunded')
+                OR status IN ('processing', 'shipped', 'delivered', 'cancelled', 'returned')
+              )
+          `).get(row.id)
+        : null;
       const coupon = mapCouponRow(row);
       return {
         ...coupon,
         totalRedemptions: Number(stats.total || 0),
+        orderRedemptions: Number(merchDiscountStats?.orderRedemptions || 0),
+        totalDiscountAmount: Number(merchDiscountStats?.totalDiscountAmount || 0),
       };
     });
 
