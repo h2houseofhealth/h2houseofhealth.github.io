@@ -2911,6 +2911,15 @@ body.is-auth-loading .merch-auth-cta {
   stroke-width: 1.75;
 }
 
+.product-card__wishlist.is-selected {
+  color: #AE5431;
+}
+
+.product-card__wishlist.is-selected svg {
+  fill: #AE5431;
+  stroke: #AE5431;
+}
+
 .product-card__annotation {
   position: absolute;
   left: 16px;
@@ -4916,6 +4925,11 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
   min-width: 0;
 }
 
+/* Keep the first product row visually separated from the filter toolbar. */
+.product-filter-bar {
+  margin-bottom: 24px;
+}
+
 .filter-button {
   display: inline-flex;
   align-items: center;
@@ -5970,6 +5984,10 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
 }
 
 @media (max-width: 640px) {
+  .product-filter-bar {
+    margin-bottom: 18px;
+  }
+
   .smart-merch-sidebar {
     display: grid;
     grid-template-columns: 1fr;

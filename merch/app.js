@@ -985,6 +985,50 @@ function getWishlistProductPrice(item) {
   );
 }
 
+  function getWishlistItem(product, variant) {
+    const productId = Number(product?.id || 0);
+    const variantId = Number(variant?.id || 0);
+    return state.merchWishlistItems.find((item) => (
+      Number(item.productId || 0) === productId
+      && Number(item.variantId || 0) === variantId
+    )) || null;
+  }
+
+  function isProductWishlisted(product, variant) {
+    return Boolean(getWishlistItem(product, variant));
+  }
+
+  function syncWishlistControls() {
+    document.querySelectorAll('.product-card__wishlist').forEach((button) => {
+      const product = state.products.find((item) => Number(item.id) === Number(button.closest('.product-card')?.dataset.productId));
+      const variant = product ? getDefaultPurchasableVariant(product) : null;
+      const selected = product && variant ? isProductWishlisted(product, variant) : false;
+      button.classList.toggle('is-selected', selected);
+      button.setAttribute('aria-pressed', String(selected));
+      button.setAttribute('aria-label', `${selected ? 'Remove' : 'Add'} ${product?.name || 'product'} ${selected ? 'from' : 'to'} wishlist`);
+    });
+
+    const detailButton = document.getElementById('addToWishlistBtn');
+    if (detailButton && state.selectedProduct && state.selectedVariant) {
+      const selected = isProductWishlisted(state.selectedProduct, state.selectedVariant);
+      detailButton.classList.toggle('is-selected', selected);
+      detailButton.setAttribute('aria-pressed', String(selected));
+      detailButton.textContent = selected ? '♥ Wishlisted' : '♡ Wishlist';
+    }
+  }
+
+  async function handleWishlistAction(button, product, variant) {
+    if (!product || !variant || button?.dataset.wishlistPending === 'true') return;
+    if (button) button.dataset.wishlistPending = 'true';
+    try {
+      await addToWishlist(product, variant);
+      syncWishlistControls();
+      if (state.accountDrawerOpen) renderAccountDrawer();
+    } finally {
+      if (button) delete button.dataset.wishlistPending;
+    }
+  }
+
   async function addToWishlist(product, variant) {
     if (!state.authResolved) {
       await loadCustomerContext();
@@ -993,12 +1037,14 @@ function getWishlistProductPrice(item) {
     const variantId = Number(variant?.id || 0) || null;
     if (!productId && !variantId) return;
 
-    const alreadySaved = state.merchWishlistItems.some((item) => (
+    const alreadySaved = state.merchWishlistItems.find((item) => (
       Number(item.productId || 0) === Number(productId || 0)
       && Number(item.variantId || 0) === Number(variantId || 0)
     ));
     if (alreadySaved) {
-      showCheckoutNotice('Wishlist', `${product.name} is already in your wishlist.`);
+      await removeWishlistItem(alreadySaved);
+      renderWishlistBadge();
+      showCheckoutNotice('Wishlist', `${product.name} was removed from your wishlist.`);
       return;
     }
 
@@ -1018,6 +1064,7 @@ function getWishlistProductPrice(item) {
 
       renderWishlistBadge();
       showCheckoutNotice('Wishlist', `${product.name} was added to your wishlist.`);
+      syncWishlistControls();
     } catch (error) {
       showCheckoutNotice('Wishlist unavailable', error?.message || 'Please try again.', { variant: 'error' });
     }
@@ -1389,6 +1436,7 @@ function getWishlistProductPrice(item) {
     if (!state.currentUser) {
       localStorage.setItem('merch_wishlist_guest', JSON.stringify(state.merchWishlistItems));
     }
+    syncWishlistControls();
     return true;
   }
 
@@ -3477,7 +3525,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             ${hypeLabel ? `<span class="product-card__badge product-card__badge--hype">${escapeHtml(hypeLabel)}</span>` : ''}
             ${isSoldOut ? '<span class="product-card__badge product-card__badge--sold-out">Sold out</span>' : ''}
           </div>
-          <button class="product-card__wishlist" type="button" aria-label="Add ${escapeHtml(product.name)} to wishlist" title="Wishlist">
+          <button class="product-card__wishlist${isProductWishlisted(product, defaultVariant) ? ' is-selected' : ''}" type="button" aria-label="${isProductWishlisted(product, defaultVariant) ? 'Remove' : 'Add'} ${escapeHtml(product.name)} ${isProductWishlisted(product, defaultVariant) ? 'from' : 'to'} wishlist" title="Wishlist" aria-pressed="${isProductWishlisted(product, defaultVariant)}">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 8.8c0 5.2-8.8 10.1-8.8 10.1S3.2 14 3.2 8.8A4.7 4.7 0 0 1 12 6.2a4.7 4.7 0 0 1 8.8 2.6Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
           </button>
           <div class="product-card__annotation" aria-hidden="true">
@@ -3536,11 +3584,12 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     });
 
     container.querySelectorAll('.product-card__wishlist').forEach((button) => {
-      button.addEventListener('click', (event) => {
+      button.addEventListener('click', async (event) => {
         event.preventDefault();
         event.stopPropagation();
-        button.classList.toggle('is-selected');
-        button.setAttribute('aria-pressed', String(button.classList.contains('is-selected')));
+        const product = state.products.find((item) => Number(item.id) === Number(button.closest('.product-card')?.dataset.productId));
+        const variant = product ? getDefaultPurchasableVariant(product) : null;
+        await handleWishlistAction(button, product, variant);
       });
     });
   }
@@ -3749,7 +3798,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         <button id="buyNowBtn" class="btn btn-secondary btn-lg" type="button" ${variant.stock <= 0 ? 'disabled' : ''}>
           ${variant.stock <= 0 ? 'Unavailable' : 'Buy Now'}
         </button>
-        <button id="addToWishlistBtn" class="btn btn-outline btn-lg" type="button">♡ Wishlist</button>
+        <button id="addToWishlistBtn" class="btn btn-outline btn-lg${isProductWishlisted(product, variant) ? ' is-selected' : ''}" type="button" aria-pressed="${isProductWishlisted(product, variant)}">${isProductWishlisted(product, variant) ? '♥ Wishlisted' : '♡ Wishlist'}</button>
       </div>
 
     `;
@@ -3832,9 +3881,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       }
     });
 
-    document.getElementById('addToWishlistBtn')?.addEventListener('click', () => {
-      addToWishlist(product, state.selectedVariant);
+    document.getElementById('addToWishlistBtn')?.addEventListener('click', (event) => {
+      handleWishlistAction(event.currentTarget, product, state.selectedVariant);
     });
+    syncWishlistControls();
   }
 
   // â”€â”€â”€ Search â”€â”€â”€
@@ -4830,6 +4880,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
     state.authResolved = true;
     renderWishlistBadge();
+    syncWishlistControls();
     setBodyAuthLoading(false);
     renderAccountTrigger();
 
