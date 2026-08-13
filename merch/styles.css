@@ -6088,6 +6088,207 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
   }
 }
 
+@media (max-width: 480px) {
+  .shopify-checkout {
+    padding: 18px 12px 24px;
+    overflow-x: hidden;
+  }
+
+  .shopify-checkout__inner,
+  .shopify-checkout-form,
+  .shopify-summary {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .shopify-section {
+    margin-bottom: 18px;
+  }
+
+  .shopify-section h1,
+  .shopify-section h2,
+  .shopify-summary h2 {
+    font-size: 18px;
+  }
+
+  .shopify-section__head p,
+  .shopify-check,
+  .shopify-shipping-box p,
+  .shopify-payment-option span,
+  .shopify-price-row,
+  .shopify-total p {
+    font-size: 13px;
+  }
+
+  .shopify-field-grid {
+    gap: 9px;
+  }
+
+  .shopify-field input,
+  .shopify-field select {
+    height: 52px;
+    padding: 20px 40px 8px 13px;
+    font-size: 13px;
+  }
+
+  .shopify-field span:first-child {
+    left: 13px;
+    top: 7px;
+    font-size: 11px;
+  }
+
+  .shopify-field__icon {
+    right: 12px;
+    top: 17px !important;
+    width: 18px;
+    height: 18px;
+  }
+
+  .checkout-phone-control {
+    grid-template-columns: minmax(104px, 0.42fr) minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .checkout-phone-control select {
+    padding-right: 28px;
+  }
+
+  .shopify-field select {
+    background-position: calc(100% - 18px) 29px, calc(100% - 13px) 29px;
+    background-size: 5px 5px, 5px 5px;
+  }
+
+  .shopify-shipping-box,
+  .shopify-payment-option {
+    gap: 10px;
+    min-height: 52px;
+    padding: 10px 12px;
+  }
+
+  .shopify-payment-option strong {
+    font-size: 12px;
+  }
+
+  .shopify-pay-button {
+    height: 52px;
+    gap: 10px;
+    font-size: 12px;
+    white-space: normal;
+  }
+
+  .shopify-summary {
+    padding: 18px 14px;
+    border-radius: 12px;
+  }
+
+  .shopify-summary h2 {
+    margin-bottom: 18px;
+  }
+
+  .shopify-summary-products {
+    gap: 14px;
+    padding-bottom: 20px;
+  }
+
+  .shopify-summary-product {
+    grid-template-columns: 62px minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .shopify-summary-product__image,
+  .shopify-summary-product__image img {
+    width: 62px;
+    height: 62px;
+  }
+
+  .shopify-summary-product__copy strong {
+    margin-bottom: 5px;
+    font-size: 13px;
+    white-space: normal;
+  }
+
+  .shopify-summary-product__copy small,
+  .shopify-summary-product__price {
+    font-size: 12px;
+  }
+
+  .shopify-summary-product__price {
+    grid-column: 2;
+  }
+
+  .shopify-coupon {
+    gap: 10px;
+    padding: 18px 0;
+  }
+
+  .shopify-coupon__field,
+  .shopify-coupon__apply {
+    height: 46px;
+  }
+
+  .shopify-pricing {
+    gap: 14px;
+    padding: 18px 0;
+  }
+
+  .shopify-total {
+    gap: 8px;
+    padding: 18px 0 28px;
+  }
+
+  .shopify-total span {
+    font-size: 18px;
+  }
+
+  .shopify-total strong {
+    font-size: 22px;
+  }
+
+  .shopify-trust {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    padding-top: 20px;
+  }
+
+  .shopify-trust span {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+@media (max-width: 360px) {
+  .shopify-checkout {
+    padding-inline: 8px;
+  }
+
+  .checkout-phone-control {
+    grid-template-columns: 1fr;
+  }
+
+  .shopify-payment-option {
+    flex-wrap: wrap;
+  }
+
+  .shopify-payment-option strong {
+    width: 100%;
+    padding-left: 28px;
+  }
+
+  .shopify-price-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .shopify-price-row strong {
+    text-align: left;
+  }
+
+  .shopify-total strong {
+    white-space: normal;
+  }
+}
+
 @media (max-width: 600px) {
   .account-drawer--influencer .account-drawer__header { padding: 18px 16px; }
   .account-drawer--influencer .account-drawer__header h2 { font-size: 25px; }
