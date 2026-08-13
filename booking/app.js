@@ -15300,7 +15300,16 @@ async function setAdminCouponActive(couponId, active) {
   render();
 }
 
+let adminCouponSaveInFlight = false;
+
+function createAdminCouponRequestId() {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `coupon-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 async function saveAdminCoupon({ sendEmail = true } = {}) {
+  if (adminCouponSaveInFlight) return;
   const selectedType = String(elements.adminCouponType?.value || 'public').trim().toLowerCase();
   const couponType = selectedType === 'private' ? 'private' : 'public';
   const recipientEmail = String(elements.adminCouponRecipientEmail?.value || '').trim();
@@ -15359,6 +15368,8 @@ async function saveAdminCoupon({ sendEmail = true } = {}) {
     }
   }
 
+  adminCouponSaveInFlight = true;
+
   const originalLabel = elements.adminCouponSubmitBtn?.textContent || 'Generate & Send';
   const saveOnlyLabel = elements.adminCouponSaveOnlyBtn?.textContent || 'Save Only';
   if (elements.adminCouponSubmitBtn) {
@@ -15373,7 +15384,7 @@ async function saveAdminCoupon({ sendEmail = true } = {}) {
   try {
     const result = await api('/api/admin/coupons', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Request-ID': createAdminCouponRequestId() },
       body: JSON.stringify({
         code,
         description,
@@ -15413,6 +15424,7 @@ async function saveAdminCoupon({ sendEmail = true } = {}) {
       showNotice({ title: 'Email sent', body: `Coupon ${sentCode} sent to ${recipientEmail}.` });
     }
   } finally {
+    adminCouponSaveInFlight = false;
     if (elements.adminCouponSubmitBtn) {
       elements.adminCouponSubmitBtn.disabled = false;
       elements.adminCouponSubmitBtn.textContent = originalLabel;
@@ -15437,7 +15449,7 @@ async function resendAdminCoupon(couponId) {
   if (!ok) return;
   await api(`/api/admin/coupons/${encodeURIComponent(couponId)}/resend`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Request-ID': createAdminCouponRequestId() },
     body: JSON.stringify({}),
   });
   await loadDashboardData();
