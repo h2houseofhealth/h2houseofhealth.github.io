@@ -13545,9 +13545,10 @@ function buildUserBookingRows(bookings, allBookings = bookings) {
         sortedEntries[0];
       const comboHydrogenEntries = comboEntries.filter((entry) => getBookingCategory(entry.serviceName) === 'HYDROGEN SESSION');
       const comboNonHydrogenEntries = comboEntries.filter((entry) => getBookingCategory(entry.serviceName) !== 'HYDROGEN SESSION');
-      const comboAmountInr = comboEntries.reduce((sum, entry) => sum + Number(getBookingDisplayAmountInr(entry) || 0), 0);
+      const comboCatalogAmountInr = comboEntries.reduce((sum, entry) => sum + Number(getBookingDisplayAmountInr(entry) || 0), 0);
+      const comboAmountInr = getBookingEntriesDisplayAmountInr(comboEntries, comboCatalogAmountInr);
       const comboItemLines = comboEntries.map((entry) => {
-        const entryAmount = Number(getBookingDisplayAmountInr(entry) || 0);
+        const entryAmount = Number((getBookingPaidAmountInr(entry) ?? getBookingDisplayAmountInr(entry)) || 0);
         const entryLabel = getBookingCategoryLabel(entry.serviceName);
         const entryDateTime = formatDateTime(entry.bookingDate, entry.bookingTime);
         return `${entryLabel}: ${getServiceDisplayName(entry.serviceName)}${entryDateTime !== '-' ? ` • ${entryDateTime}` : ''}${entryAmount > 0 ? ` • Rs. ${entryAmount.toLocaleString('en-IN')}` : ''}`;
@@ -13614,7 +13615,7 @@ function buildUserBookingRows(bookings, allBookings = bookings) {
         isGroupedHydrogen: false,
         status: getDerivedBookingStatus(booking),
         paymentStatus: booking.paymentStatus || 'unpaid',
-        amountInr: getBookingDisplayAmountInr(booking),
+        amountInr: getBookingEntriesDisplayAmountInr([booking], getBookingDisplayAmountInr(booking)),
         serviceTitle: getServiceDisplayName(booking.serviceName),
         serviceMetaLines: [
           getBookingCategoryLabel(booking.serviceName),
@@ -13656,6 +13657,10 @@ function buildUserBookingRows(bookings, allBookings = bookings) {
       (entry) => entry.status !== 'cancelled' && String(entry.paymentStatus || 'unpaid').toLowerCase() !== 'paid'
     );
     const breakdown = getHydrogenGroupBreakdown(pricingHydrogenEntries, pricingAddOnEntries);
+    const displayAmountInr = getBookingEntriesDisplayAmountInr(
+      [...pricingHydrogenEntries, ...pricingAddOnEntries],
+      Number(breakdown.totalAmountInr || 0)
+    );
     const payableBreakdown = getHydrogenGroupBreakdown(payableHydrogenEntries, payableAddOnEntries);
     const addOnDetails = displayAddOnEntries.map((entry) => {
       const linkedHydrogen = groupHydrogenEntries.find(
@@ -13709,7 +13714,7 @@ function buildUserBookingRows(bookings, allBookings = bookings) {
       isGroupedHydrogen: true,
       status: summarizeGroupStatus(includedEntries),
       paymentStatus: summarizeGroupPaymentStatus(includedEntries),
-      amountInr: Number(breakdown.totalAmountInr || 0),
+      amountInr: displayAmountInr,
       serviceTitle: 'Hydrogen Package Booking',
       serviceMetaLines: [
         displayPackageName,
@@ -13722,12 +13727,12 @@ function buildUserBookingRows(bookings, allBookings = bookings) {
         { title: 'Hydrogen Sessions', lines: slotLines },
         ...rescheduleSections,
         ...(addOnDetails.length ? [{ title: 'Add-on', lines: addOnDetails }] : []),
-        ...(breakdown.totalAmountInr > 0
+        ...(displayAmountInr > 0
         ? [
               {
                 title: 'Payment',
                 lines: [
-                  `Total: Rs. ${Number(payableBreakdown.totalAmountInr || breakdown.totalAmountInr || 0).toLocaleString('en-IN')} (inclusive of all taxes)`,
+                  `Total: Rs. ${Number(payableBreakdown.totalAmountInr || displayAmountInr || 0).toLocaleString('en-IN')} (inclusive of all taxes)`,
                   ...(payableBreakdown.totalAmountInr > 0
                     ? [`Payable now: Rs. ${Number(payableBreakdown.totalAmountInr).toLocaleString('en-IN')}`]
                     : []),
@@ -15720,6 +15725,28 @@ function getBookingDisplayAmountInr(booking) {
     return getHydrogenSingleSessionPriceInr();
   }
   return getDisplayedServicePriceInr(booking?.serviceName || '');
+}
+
+function getBookingPaidAmountInr(booking) {
+  const paymentStatus = String(booking?.paymentStatus || '').trim().toLowerCase();
+  if (paymentStatus !== 'paid') return null;
+  const rawAmount = booking?.paidAmountPaise;
+  if (rawAmount === null || rawAmount === undefined || rawAmount === '') return null;
+  const amountPaise = Number(rawAmount);
+  if (!Number.isFinite(amountPaise) || amountPaise < 0) return null;
+  return Math.round(amountPaise / 100);
+}
+
+function getBookingEntriesDisplayAmountInr(entries, fallbackAmountInr = 0) {
+  const activeEntries = (Array.isArray(entries) ? entries : []).filter(
+    (entry) => String(entry?.status || '').trim().toLowerCase() !== 'cancelled'
+  );
+  if (!activeEntries.length) return Number(fallbackAmountInr || 0);
+  const paidAmounts = activeEntries.map(getBookingPaidAmountInr);
+  if (paidAmounts.every((amount) => amount !== null)) {
+    return paidAmounts.reduce((sum, amount) => sum + Number(amount || 0), 0);
+  }
+  return Number(fallbackAmountInr || 0);
 }
 
 function canShowBookingInvoice(booking) {
