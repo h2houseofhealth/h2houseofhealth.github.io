@@ -5548,40 +5548,84 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+ function preserveInputFocus(target, renderFn) {
+    const wasFocused = document.activeElement === target;
+
+    if (!wasFocused) {
+        renderFn();
+        return;
+    }
+
+    const selectionStart = target.selectionStart;
+    const selectionEnd = target.selectionEnd;
+    const inputKey = target.dataset.input;
+
+    renderFn();
+
+    const nextInput = document.querySelector(
+        `[data-input="${inputKey}"]`
+    );
+
+    if (nextInput) {
+        nextInput.focus();
+
+        if (selectionStart !== null && selectionEnd !== null) {
+            nextInput.setSelectionRange(selectionStart, selectionEnd);
+        }
+    }
+} 
   function handleInput(target) {
     const inputKey = target.dataset.input;
     if (!inputKey) return;
     state[inputKey] = target.type === 'checkbox' ? (target.checked ? 'line' : 'bar') : target.value;
     if (inputKey === 'productsSearch' || inputKey === 'productsCategory' || inputKey === 'productsStatus' || inputKey === 'productsSort') {
       state.productsPage = 1;
-      renderProducts();
+      preserveInputFocus(target, renderProducts);
       return;
     }
     if (inputKey === 'ordersSearch' || inputKey === 'ordersStatus') {
       state.ordersPage = 1;
-      renderOrders();
+      preserveInputFocus(target, renderOrders);
       return;
     }
     if (inputKey === 'ordersDateFrom' || inputKey === 'ordersDateTo') {
       return;
     }
     if (inputKey === 'customersSearch') {
-      renderCustomers();
+      preserveInputFocus(target, renderCustomers);
       return;
     }
     if (inputKey === 'customersDateFrom' || inputKey === 'customersDateTo') {
       return;
     }
     if (inputKey === 'couponsSearch' || inputKey === 'couponsStatus' || inputKey === 'couponsType') {
-      renderCoupons();
-      return;
+    const isCouponSearch = inputKey === 'couponsSearch';
+    const wasFocused = isCouponSearch && document.activeElement === target;
+    const selectionStart = isCouponSearch ? target.selectionStart : null;
+    const selectionEnd = isCouponSearch ? target.selectionEnd : null;
+
+    renderCoupons();
+
+    if (wasFocused) {
+        const nextSearchInput = document.querySelector('[data-input="couponsSearch"]');
+
+        if (nextSearchInput) {
+            nextSearchInput.focus();
+
+            if (selectionStart !== null && selectionEnd !== null) {
+                nextSearchInput.setSelectionRange(selectionStart, selectionEnd);
+            }
+        }
     }
+
+    return;
+}
     if (inputKey === 'couponsDatePeriod' || inputKey === 'couponsDateFrom' || inputKey === 'couponsDateTo') {
       renderCoupons();
       return;
     }
     if (inputKey === 'influencersSearch' || inputKey === 'influencerDetailsFilter') {
-      renderInfluencers();
+     preserveInputFocus(target, renderInfluencers);
       return;
     }
     if (inputKey === 'influencersDatePeriod' || inputKey === 'influencersDateFrom' || inputKey === 'influencersDateTo') {
