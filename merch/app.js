@@ -3904,6 +3904,22 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     { value: '+91', label: 'India (+91)' },
     { value: '+1', label: 'United States (+1)' },
   ];
+  const CHECKOUT_COUNTRIES = ['India', 'United States'];
+  const CHECKOUT_REGIONS_BY_COUNTRY = {
+    India: ['Telangana', 'Andhra Pradesh', 'Karnataka', 'Maharashtra', 'Tamil Nadu', 'Delhi', 'Kerala', 'Gujarat', 'Rajasthan', 'Uttar Pradesh', 'West Bengal'],
+    'United States': ['Alabama', 'Alaska', 'Arizona', 'California', 'Colorado', 'Florida', 'Georgia', 'Illinois', 'New Jersey', 'New York', 'North Carolina', 'Ohio', 'Pennsylvania', 'Texas', 'Virginia', 'Washington'],
+  };
+
+  function normalizeCheckoutCountry(value = '') {
+    const normalized = String(value || '').trim();
+    if (/^(us|usa|u\.s\.a\.|united states|united states of america)$/i.test(normalized)) return 'United States';
+    if (/^(in|india)$/i.test(normalized)) return 'India';
+    return CHECKOUT_COUNTRIES.includes(normalized) ? normalized : 'India';
+  }
+
+  function getCheckoutRegionOptions(country = 'India') {
+    return CHECKOUT_REGIONS_BY_COUNTRY[normalizeCheckoutCountry(country)] || CHECKOUT_REGIONS_BY_COUNTRY.India;
+  }
 
   function parseCheckoutPhone(value = '') {
     const raw = String(value || '').trim();
@@ -3936,7 +3952,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       phoneCountryCode: phone.countryCode,
       firstName,
       lastName,
-      country: String(address?.country || 'India').trim() || 'India',
+      country: normalizeCheckoutCountry(address?.country || 'India'),
       line1: String(address?.line1 || address?.full || '').trim(),
       line2: String(address?.line2 || '').trim(),
       city: String(address?.city || '').trim(),
@@ -3982,7 +3998,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         city: String(draft.city || '').trim(),
         state: String(draft.state || '').trim(),
         postalCode: String(draft.postalCode || '').trim(),
-        country: String(draft.country || 'India').trim() || 'India',
+        country: normalizeCheckoutCountry(draft.country || 'India'),
         isDefault: Boolean(draft.saveInformation),
         full: [draft.line1, draft.line2, draft.city, draft.state, draft.postalCode, draft.country].filter(Boolean).join(', '),
       },
@@ -4002,8 +4018,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     if (!draft.line1) errors.line1 = 'Address is required.';
     if (!draft.city) errors.city = 'City is required.';
     if (!draft.state) errors.state = 'State is required.';
-    if (!draft.postalCode) errors.postalCode = 'PIN code is required.';
-    else if (digitsOnly(draft.postalCode).length !== 6) errors.postalCode = 'Enter a 6-digit PIN code.';
+    if (!draft.postalCode) errors.postalCode = normalizeCheckoutCountry(draft.country) === 'United States' ? 'ZIP code is required.' : 'PIN code is required.';
+    else if (normalizeCheckoutCountry(draft.country) === 'United States' && !/^\d{5}(-\d{4})?$/.test(String(draft.postalCode).trim())) errors.postalCode = 'Enter a valid ZIP code.';
+    else if (normalizeCheckoutCountry(draft.country) !== 'United States' && digitsOnly(draft.postalCode).length !== 6) errors.postalCode = 'Enter a 6-digit PIN code.';
     if (!draft.phone) errors.phone = 'Phone is required.';
     else if (digitsOnly(draft.phone).length !== 10) {
       const countryLabel = draft.phoneCountryCode === '+1' ? 'United States' : 'India';
@@ -4132,6 +4149,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const draft = state.checkoutDraft || buildCheckoutDraft(getAuthenticatedCheckoutCustomer(), serializeAddress(getDefaultAddress()));
     state.checkoutDraft = draft;
     const shippingReady = Boolean(draft.line1 && draft.city && draft.state && draft.postalCode);
+    const country = normalizeCheckoutCountry(draft.country || 'India');
+    const regionOptions = getCheckoutRegionOptions(country);
+    const regionLabel = country === 'United States' ? 'State' : 'State';
+    const postalLabel = country === 'United States' ? 'ZIP code' : 'PIN code';
     const mailIcon = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.6 2.6 0 1 1 4.2 2c-.9.6-1.7 1.2-1.7 2.5"/><path d="M12 17h.01"/></svg>';
     const searchIcon = '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>';
 
@@ -4150,14 +4171,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           <section class="shopify-section">
             <h2>Delivery</h2>
             <div class="shopify-field-grid">
-              ${renderCheckoutSelect({ name: 'country', label: 'Country/Region', value: draft.country || 'India', options: ['India'], wide: true })}
+              ${renderCheckoutSelect({ name: 'country', label: 'Country/Region', value: country, options: CHECKOUT_COUNTRIES, wide: true })}
               ${renderCheckoutField({ name: 'firstName', label: 'First name', value: draft.firstName, placeholder: 'First name', autocomplete: 'given-name' })}
               ${renderCheckoutField({ name: 'lastName', label: 'Last name', value: draft.lastName, placeholder: 'Last name', autocomplete: 'family-name' })}
               ${renderCheckoutField({ name: 'line1', label: 'Address', value: draft.line1, placeholder: 'House number and street name', autocomplete: 'address-line1', wide: true, icon: searchIcon })}
               ${renderCheckoutField({ name: 'line2', label: 'Apartment, suite, etc. (optional)', value: draft.line2, placeholder: 'Apartment, suite, building, floor, etc.', autocomplete: 'address-line2', wide: true, required: false })}
               ${renderCheckoutField({ name: 'city', label: 'City', value: draft.city, placeholder: 'City', autocomplete: 'address-level2' })}
-              ${renderCheckoutSelect({ name: 'state', label: 'State', value: draft.state || 'Telangana', options: ['Telangana', 'Andhra Pradesh', 'Karnataka', 'Maharashtra', 'Tamil Nadu', 'Delhi', 'Kerala', 'Gujarat', 'Rajasthan', 'Uttar Pradesh', 'West Bengal'] })}
-              ${renderCheckoutField({ name: 'postalCode', label: 'PIN code', value: draft.postalCode, placeholder: 'PIN code', autocomplete: 'postal-code', inputmode: 'numeric' })}
+              ${renderCheckoutSelect({ name: 'state', label: regionLabel, value: draft.state || regionOptions[0], options: regionOptions })}
+              ${renderCheckoutField({ name: 'postalCode', label: postalLabel, value: draft.postalCode, placeholder: postalLabel, autocomplete: 'postal-code', inputmode: 'numeric' })}
               ${renderCheckoutPhoneField(draft)}
             </div>
             <label class="shopify-check"><input name="saveInformation" type="checkbox" ${draft.saveInformation ? 'checked' : ''} /><span>Save this information for next time</span></label>
@@ -4376,7 +4397,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           </label>
           <label class="account-field">
             <span>Country</span>
-            <input name="country" type="text" value="India" autocomplete="country-name" />
+            <select name="country" autocomplete="country-name">
+              ${CHECKOUT_COUNTRIES.map((country) => `<option value="${escapeHtml(country)}">${escapeHtml(country)}</option>`).join('')}
+            </select>
           </label>
         </div>
         <label class="account-check">
