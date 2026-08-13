@@ -179,9 +179,10 @@ async function sendMailgunEmail({ to, from, subject, text, html }) {
     html,
   });
 }
-async function sendSesEmail({ to, from, subject, text, html, replyTo = [] }) {
+async function sendSesEmail({ to, from, subject, text, html, replyTo = [], traceId = '' }) {
   const normalizedTo = String(to || '').trim().toLowerCase();
   const normalizedFrom = String(from || MAIL_FROM).trim();
+  const startedAt = Date.now();
 
   if (!isValidEmail(normalizedTo)) {
     throw new Error('Valid recipient email is required.');
@@ -222,15 +223,27 @@ async function sendSesEmail({ to, from, subject, text, html, replyTo = [] }) {
   );
   console.log('[SES] Full response:', JSON.stringify(result, null, 2));
   if (!result.ok) {
+    console.error('[EMAIL][SES] rejected', { traceId, to: normalizedTo, subject, statusCode: result.statusCode || 500, elapsedMs: Date.now() - startedAt, message: result.message || '' });
     throw new Error(result.message || 'SES send failed');
   }
+
+  const messageId = String(result.data?.MessageId || result.data?.messageId || '').trim();
+  console.log('[EMAIL][SES] accepted', {
+    traceId,
+    to: normalizedTo,
+    subject,
+    statusCode: result.statusCode || 200,
+    messageId,
+    elapsedMs: Date.now() - startedAt,
+  });
 
   return {
     delivery: 'ses',
     statusCode: result.statusCode || 200,
+    messageId,
   };
 }
-async function sendConfiguredEmail({ to, from, subject, text, html }) {
+async function sendConfiguredEmail({ to, from, subject, text, html, traceId = '' }) {
   const normalizedTo = String(to || '').trim().toLowerCase();
   const normalizedFrom = String(from || '').trim();
   if (!normalizedTo) {
@@ -246,6 +259,7 @@ async function sendConfiguredEmail({ to, from, subject, text, html }) {
      subject,
      text,
      html,
+     traceId,
     });
   }
   if (mg) {
@@ -3107,6 +3121,7 @@ app.get('/api/coupons/general', requireAuth, (req, res) => {
 });
 
 app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
+  const requestId = String(req.headers['x-request-id'] || '').trim() || crypto.randomUUID();
   let code = normalizeCouponCode(req.body?.code);
   const description = String(req.body?.description || '').trim();
   const festivalName = String(req.body?.festivalName || '').trim();
@@ -3269,6 +3284,15 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0 ? influencerId : null
   );
 
+  console.log('[COUPON][CREATE] persisted before email', {
+    requestId,
+    code,
+    recipientEmail: assignedUserEmail || '',
+    sendEmail,
+    emailStatus: initialEmailStatus,
+    createdAt: new Date().toISOString(),
+  });
+
   let emailStatus = initialEmailStatus;
   let emailMessage = '';
   if (sendEmail && assignedUserEmail) {
@@ -3279,6 +3303,14 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
       discountValue,
       appliesTo,
       expiresAt: validTill,
+      traceId: requestId,
+    });
+    console.log('[COUPON][CREATE] send completed', {
+      requestId,
+      code,
+      ok: Boolean(emailResult.ok),
+      delivery: emailResult.delivery || '',
+      messageId: emailResult.messageId || '',
     });
     if (!emailResult.ok) {
       emailStatus = 'failed';
@@ -3303,6 +3335,7 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     code,
     emailStatus,
     emailMessage,
+    requestId,
   });
 });
 
@@ -3486,6 +3519,7 @@ app.delete('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
 });
 
 app.post('/api/admin/coupons/:id/resend', requireAuth, requireAdmin, async (req, res) => {
+  const requestId = String(req.headers['x-request-id'] || '').trim() || crypto.randomUUID();
   const couponId = Number(req.params.id);
   if (!Number.isInteger(couponId)) {
     return res.status(400).json({ message: 'Invalid coupon id.' });
@@ -3513,6 +3547,16 @@ app.post('/api/admin/coupons/:id/resend', requireAuth, requireAdmin, async (req,
     discountValue: coupon.discountValue,
     appliesTo: coupon.appliesTo,
     expiresAt: coupon.expiresAt,
+    traceId: requestId,
+  });
+
+  console.log('[COUPON][RESEND] send completed', {
+    requestId,
+    couponId,
+    code: coupon.code,
+    ok: Boolean(emailResult.ok),
+    delivery: emailResult.delivery || '',
+    messageId: emailResult.messageId || '',
   });
 
   if (!emailResult.ok) {
@@ -3531,7 +3575,7 @@ app.post('/api/admin/coupons/:id/resend', requireAuth, requireAdmin, async (req,
      WHERE id = ?`
   ).run(recipientEmail, recipientEmail, recipientName || null, 'sent', couponId);
 
-  res.json({ message: 'Coupon emailed.', emailStatus: 'sent' });
+  res.json({ message: 'Coupon emailed.', emailStatus: 'sent', requestId, messageId: emailResult.messageId || '' });
 });
 
 app.patch('/api/admin/doctors/:id/approval', requireAuth, requireAdmin, (req, res) => {
@@ -14556,7 +14600,7 @@ async function sendSignupConfirmationEmail(toEmail, name) {
   }
 }
 
-async function sendCouponEmail({ toEmail, recipientName, code, discountValue, appliesTo, expiresAt }) {
+async function sendCouponEmail({ toEmail, recipientName, code, discountValue, appliesTo, expiresAt, traceId = '' }) {
   const normalizedToEmail = String(toEmail || '').trim().toLowerCase();
   if (!normalizedToEmail) {
     return { ok: false, statusCode: 400, message: 'Recipient email is required.' };
@@ -14574,27 +14618,32 @@ async function sendCouponEmail({ toEmail, recipientName, code, discountValue, ap
     `Expiry: ${expiryLabel}\n\n` +
     `Use this code at checkout. It can be redeemed only once.\n\n` +
     `If you did not expect this email, please ignore it.`;
+  // Keep the coupon body intentionally close to the OTP body. This avoids
+  // promotional markup/CSS affecting first-time Gmail delivery while keeping
+  // the complete plain-text alternative for mail clients that prefer it.
   const html = `
-    <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #1f2937;">
-      <p style="margin: 0 0 12px;">${escapeHtml(greeting)}</p>
-      <p style="margin: 0 0 12px;">Here is your single-use coupon code:</p>
-      <div style="display: inline-block; padding: 10px 14px; border-radius: 8px; background: #f3f4f6; font-size: 20px; font-weight: 700; letter-spacing: 1px;">
-        ${escapeHtml(String(code || '').trim())}
-      </div>
-      <p style="margin: 12px 0 0;">Discount: ${escapeHtml(discountLabel)} (${escapeHtml(appliesLabel)})</p>
-      <p style="margin: 6px 0 0;">Expiry: ${escapeHtml(expiryLabel)}</p>
-      <p style="margin: 12px 0 0;">Use this code at checkout. It can be redeemed only once.</p>
-      <p style="margin: 12px 0 0; color: #6b7280;">If you did not expect this email, please ignore it.</p>
-    </div>
+    <p>${escapeHtml(greeting)}</p>
+    <p>Here is your single-use coupon code:</p>
+    <p><strong>${escapeHtml(String(code || '').trim())}</strong></p>
+    <p>Discount: ${escapeHtml(discountLabel)} (${escapeHtml(appliesLabel)})</p>
+    <p>Expiry: ${escapeHtml(expiryLabel)}</p>
+    <p>Use this code at checkout. It can be redeemed only once.</p>
+    <p>If you did not expect this email, please ignore it.</p>
   `;
 
   try {
-    console.log('Coupon email about to send',{
+    console.log('[COUPON][EMAIL] about to send', {
+      traceId,
       to: normalizedToEmail,
       from: MAIL_FROM,
       subject,
-  });
+      code,
+      textBytes: Buffer.byteLength(text, 'utf8'),
+      htmlBytes: Buffer.byteLength(html, 'utf8'),
+      time: new Date().toISOString(),
+    });
     console.log('[COUPON] About to send coupon email', {
+      traceId,
       to: normalizedToEmail,
       code,
       subject,
@@ -14606,11 +14655,24 @@ async function sendCouponEmail({ toEmail, recipientName, code, discountValue, ap
       subject,
       text,
       html,
+      traceId,
     });
-    console.log('[COUPON] sendConfiguredEmail result:', emailResult);
-    return { ok: true };
+    console.log('[COUPON][EMAIL] sendConfiguredEmail completed', {
+      traceId,
+      to: normalizedToEmail,
+      code,
+      delivery: emailResult.delivery || '',
+      statusCode: emailResult.statusCode || 200,
+      messageId: emailResult.messageId || '',
+    });
+    return { ok: true, ...emailResult };
   } catch (error) {
-    console.error('Failed to send coupon email via Mailgun:', error);
+    console.error('[COUPON][EMAIL] send failed', {
+      traceId,
+      to: normalizedToEmail,
+      code,
+      error: error?.message || String(error),
+    });
     return {
       ok: false,
       statusCode: 500,
@@ -14888,27 +14950,26 @@ async function sendOtpEmail(toEmail, otp, purpose = 'signup') {
   }
 
   try {
-    const sesResult = await sesApiRequest('POST', '/v2/email/outbound-emails', {
-      FromEmailAddress: MAIL_FROM,
-      Destination: { ToAddresses: [normalizedToEmail] },
-      Content: {
-        Simple: {
-          Subject: { Data: subject },
-          Body: {
-            Text: { Data: text },
-            Html: { Data: html },
-          },
-        },
-      },
+    const traceId = `otp-${crypto.randomUUID()}`;
+    const emailResult = await sendConfiguredEmail({
+      to: normalizedToEmail,
+      from: MAIL_FROM,
+      subject,
+      text,
+      html,
+      traceId,
     });
-
-    if (!sesResult.ok) {
-      throw new Error(sesResult.message || 'SES send failed');
-    }
-
+    console.log('[OTP][EMAIL] content accepted', {
+      traceId,
+      to: normalizedToEmail,
+      subject,
+      textBytes: Buffer.byteLength(text, 'utf8'),
+      htmlBytes: Buffer.byteLength(html, 'utf8'),
+      messageId: emailResult.messageId || '',
+    });
     return {
       ok: true,
-      delivery: 'ses',
+      ...emailResult,
       message: `${isBookingReschedule ? 'Booking reschedule' : isPasswordReset ? 'Password reset' : 'Signup'} OTP sent to ${normalizedToEmail}. It expires in ${OTP_TTL_MINUTES} minutes.`,
     };
   } catch (error) {
