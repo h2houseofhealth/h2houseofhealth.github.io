@@ -115,6 +115,8 @@
     merchCouponPreview: null,
     merchCouponError: '',
     merchCouponLoading: false,
+    merchBundleCode: '',
+    merchBundlePreview: null,
     latestConfirmation: null,
   };
 
@@ -434,11 +436,16 @@
       .filter((entry) => entry.product);
     const bundles = MERCH_SIDEBAR_DEMO_DATA.bundles.map((bundle) => {
       const products = bundle.keys.map((key, index) => findSidebarProduct(key, index)).filter(Boolean);
-      const basePrice = products.reduce((total, product) => total + Number(product.variants?.[0]?.price || product.basePrice || 0), 0);
+      const basePrice = products.reduce((total, product) => total + Number(getDefaultPurchasableVariant(product)?.price || product.basePrice || 0), 0);
       return {
         ...bundle,
         products,
+        label: products.map((product) => product.name).join(' + ') || bundle.label,
         price: basePrice * Number(bundle.discount || 1),
+        available: products.length === bundle.keys.length && products.every((product) => {
+          const variant = getDefaultPurchasableVariant(product);
+          return Boolean(variant && Number(variant.stock || 0) > 0);
+        }),
       };
     }).filter((bundle) => bundle.products.length);
     return {
@@ -494,7 +501,7 @@
             <strong>${escapeHtml(bundle.label)}</strong>
             <span class="smart-merch-bundle__savings">${escapeHtml(bundle.savings)}</span>
             <strong class="smart-merch-bundle__price">${escapeHtml(formatPrice(bundle.price))}</strong>
-            <button type="button" class="btn btn-primary smart-merch-sidebar__cta" data-sidebar-action="shop-bundle">Shop Bundle</button>
+            <button type="button" class="btn btn-primary smart-merch-sidebar__cta" data-sidebar-action="shop-bundle" ${bundle.available ? '' : 'disabled'}>${bundle.available ? 'Shop Bundle' : 'Currently Unavailable'}</button>
             </div>
           `).join('')}
         </div>
@@ -532,16 +539,79 @@
     els.smartMerchSidebar.querySelectorAll('[data-sidebar-product-id]').forEach((button) => {
       button.addEventListener('click', () => showProductDetail(Number(button.dataset.sidebarProductId)));
     });
-    els.smartMerchSidebar.querySelectorAll('[data-sidebar-action="view-all"], [data-sidebar-action="shop-bundle"], [data-sidebar-action="shop-offer"]').forEach((button) => {
-      button.addEventListener('click', () => {
-        els.shopSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
+    els.smartMerchSidebar.querySelectorAll('[data-sidebar-action="view-all"], [data-sidebar-action="shop-offer"]').forEach((button) => {
+      button.addEventListener('click', () => els.shopSection?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    });
+    els.smartMerchSidebar.querySelectorAll('[data-sidebar-action="shop-bundle"]').forEach((button) => {
+      button.addEventListener('click', () => addMerchBundleToCart());
     });
   }
 
   function getDefaultPurchasableVariant(product) {
     const variants = Array.isArray(product?.variants) ? product.variants : [];
     return variants.find((variant) => Number(variant?.stock || 0) > 0) || variants[0] || null;
+  }
+
+  function getMerchBundleDefinition() {
+    const bundle = MERCH_SIDEBAR_DEMO_DATA.bundles[0];
+    const products = bundle.keys.map((key, index) => findSidebarProduct(key, index)).filter(Boolean);
+    return {
+      ...bundle,
+      products,
+      available: products.length === bundle.keys.length && products.every((product) => {
+        const variant = getDefaultPurchasableVariant(product);
+        return Boolean(variant && Number(variant.stock || 0) > 0);
+      }),
+    };
+  }
+
+  function getMerchBundleDiscountAmount() {
+    if (state.merchBundleCode !== 'H2BUNDLE15') return 0;
+    const bundleItems = getMerchBundleDefinition().products.map((product) => ({
+      product,
+      cartItem: state.cart.find((item) => Number(item.productId) === Number(product.id)),
+    }));
+    if (bundleItems.length !== 2 || bundleItems.some((item) => !item.cartItem)) {
+      clearMerchBundleDiscount();
+      return 0;
+    }
+    return Math.max(0, Math.round(bundleItems.reduce((sum, item) => sum + Number(item.cartItem.price || 0), 0) * 0.15));
+  }
+
+  function getMerchBundleCartItems() {
+    const bundle = getMerchBundleDefinition();
+    if (!bundle.available) return [];
+    return bundle.products.map((product) => ({
+      product,
+      variant: getDefaultPurchasableVariant(product),
+    }));
+  }
+
+  function clearMerchBundleDiscount() {
+    state.merchBundleCode = '';
+    state.merchBundlePreview = null;
+    localStorage.removeItem('merch_bundle_code');
+  }
+
+  async function addMerchBundleToCart() {
+    const bundleItems = getMerchBundleCartItems();
+    if (bundleItems.length !== 2) {
+      showCheckoutNotice('Bundle unavailable', 'The H2 Hydrogen Bottle and H2 Hydrogen Mist Spray must both be in stock.', { variant: 'error' });
+      renderSmartMerchSidebar();
+      return;
+    }
+
+    bundleItems.forEach(({ product, variant }) => addToCart(variant.id, 1, product, { openDrawerAfterAdd: false }));
+    state.merchBundleCode = 'H2BUNDLE15';
+    localStorage.setItem('merch_bundle_code', state.merchBundleCode);
+    state.merchBundlePreview = {
+      code: state.merchBundleCode,
+      description: 'Bundle & Save — 15% off Bottle + Mist',
+      discountAmountInr: Math.round(bundleItems.reduce((sum, item) => sum + Number(item.variant.price || 0), 0) * 0.15),
+    };
+    renderCart();
+    showCheckoutNotice('Added to Cart', 'H2 Hydrogen Bottle and H2 Hydrogen Mist Spray were added with 15% bundle savings.');
+    openCart();
   }
 
   function getVariantLabel(variant) {
@@ -1231,8 +1301,10 @@ function getWishlistProductPrice(item) {
     try {
       const saved = localStorage.getItem('merch_cart');
       state.cart = saved ? JSON.parse(saved) : [];
+      state.merchBundleCode = localStorage.getItem('merch_bundle_code') || '';
     } catch {
       state.cart = [];
+      state.merchBundleCode = '';
     }
   }
 
@@ -1301,6 +1373,7 @@ function getWishlistProductPrice(item) {
 
   function removeFromCart(variantId) {
     state.cart = state.cart.filter(item => item.variantId !== variantId);
+    getMerchBundleDiscountAmount();
     saveCart();
     renderCart();
   }
@@ -1371,7 +1444,7 @@ function getWishlistProductPrice(item) {
   }
 
   function getCheckoutDiscountAmount() {
-    return Math.max(0, Number(state.merchCouponPreview?.discountAmountInr || 0));
+    return Math.max(0, Number(state.merchCouponPreview?.discountAmountInr || 0)) + getMerchBundleDiscountAmount();
   }
 
   function getCheckoutTotals() {
@@ -1427,6 +1500,7 @@ function getWishlistProductPrice(item) {
     if (!code) {
       state.merchCouponPreview = null;
       renderMerchCouponPreview();
+      renderCart();
       return;
     }
 
@@ -1455,7 +1529,7 @@ function getWishlistProductPrice(item) {
       showCheckoutNotice('Coupon error', state.merchCouponError, { variant: 'error' });
     } finally {
       state.merchCouponLoading = false;
-      renderMerchCouponPreview();
+      renderCart();
     }
   }
 
@@ -1513,7 +1587,18 @@ function getWishlistProductPrice(item) {
       </div>
     `).join('');
 
-    els.cartSubtotal.textContent = formatPrice(getCartTotal());
+    const subtotal = getCartTotal();
+    const bundleDiscount = getMerchBundleDiscountAmount();
+    const shipping = getMerchShippingCharge(Math.max(0, subtotal - bundleDiscount));
+    const payable = getCheckoutTotals().total;
+    els.cartSubtotal.textContent = formatPrice(subtotal);
+    const bundleDiscountRow = document.getElementById('cartBundleDiscountRow');
+    const cartPayable = document.getElementById('cartPayable');
+    if (bundleDiscountRow) {
+      bundleDiscountRow.hidden = bundleDiscount <= 0;
+      bundleDiscountRow.querySelector('span:last-child').textContent = `- ${formatPrice(bundleDiscount)}`;
+    }
+    if (cartPayable) cartPayable.textContent = formatPrice(payable);
 
     // Bind remove buttons
     els.cartItems.querySelectorAll('.cart-item__remove').forEach(btn => {
@@ -4572,14 +4657,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   async function startRazorpayCheckout(customer, address) {
     const items = state.cart.map(item => ({ variantId: item.variantId, quantity: item.quantity }));
-    const couponCode = normalizeCouponCode(state.merchCouponCode || els.cartCouponCode?.value || '');
+      const couponCode = normalizeCouponCode(state.merchCouponCode || els.cartCouponCode?.value || '');
 
     try {
       const res = await fetch(buildApiUrl('/api/merch/checkout'), {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items, customer, address, couponCode }),
+        body: JSON.stringify({ items, customer, address, couponCode, bundleCode: state.merchBundleCode }),
       });
 
       if (!res.ok) {
@@ -4635,9 +4720,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             });
             saveConfirmation(confirmation);
             state.cart = [];
-            state.merchCouponCode = '';
-            state.merchCouponPreview = null;
-            state.merchCouponError = '';
+      state.merchCouponCode = '';
+      state.merchCouponPreview = null;
+      state.merchCouponError = '';
+      clearMerchBundleDiscount();
             saveCart();
             renderCart();
             closeCart();

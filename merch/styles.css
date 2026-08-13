@@ -2089,6 +2089,21 @@ body.is-auth-loading .merch-auth-cta {
   background: var(--smart-merch-accent);
 }
 
+.smart-merch-sidebar__cta:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.cart-total-row--discount span:last-child {
+  color: #ae5431;
+}
+
+.cart-total-row--payable {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(60, 42, 33, 0.12);
+}
+
 .smart-merch-offer {
   display: grid;
   gap: 7px;

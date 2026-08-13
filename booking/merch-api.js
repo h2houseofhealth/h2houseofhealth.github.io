@@ -3461,6 +3461,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return { total, byProduct: lineCommissions };
   }
 
+  function getMerchBundleDiscountPaise(bundleCode, items = []) {
+    if (String(bundleCode || '').trim().toUpperCase() !== 'H2BUNDLE15') return 0;
+    const bottle = items.find((item) => /bottle/i.test(String(item.productName || '')) && Number(item.quantity || 0) > 0);
+    const mist = items.find((item) => /(mist|spray)/i.test(String(item.productName || '')) && Number(item.quantity || 0) > 0);
+    if (!bottle || !mist) return 0;
+    const bottleUnitPrice = Math.round(Number(bottle.lineTotal || 0) / Math.max(1, Number(bottle.quantity || 1)));
+    const mistUnitPrice = Math.round(Number(mist.lineTotal || 0) / Math.max(1, Number(mist.quantity || 1)));
+    return Math.max(0, Math.round((bottleUnitPrice + mistUnitPrice) * 0.15));
+  }
+
   function recordMerchCouponRedemption(payload) {
     if (typeof recordCouponRedemption !== 'function') return;
     recordCouponRedemption(payload);
@@ -3599,6 +3609,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const authUser = getMerchAuthUser(req);
     const merchProfile = authUser ? ensureMerchCustomerProfileForUser(authUser) : null;
     const couponCode = normalizeMerchCouponCode(req.body?.couponCode);
+    const bundleCode = String(req.body?.bundleCode || '').trim().toUpperCase();
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Cart is empty' });
     }
@@ -3655,7 +3666,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     // Product prices are GST-inclusive; derive included GST for reporting only.
     const gstAmount = Math.max(0, subtotal - Math.round(subtotal / 1.18));
     const shippingCharge = subtotal >= 99900 ? 0 : 9900; // Free above ₹999
-    const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
+    const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
+      + getMerchBundleDiscountPaise(bundleCode, validatedItems);
     const influencerId = Number(couponResult.coupon?.influencerId || 0) > 0 ? Number(couponResult.coupon.influencerId) : null;
     const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems);
     const totalAmount = Math.max(100, subtotal + shippingCharge - discountAmount);
@@ -3672,7 +3684,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       amount: totalAmount,
       currency: 'INR',
       receipt: orderNumber,
-      notes: { customerEmail: resolvedCustomer.email, orderNumber, couponCode: String(couponResult.couponCode || couponCode || '') },
+      notes: { customerEmail: resolvedCustomer.email, orderNumber, couponCode: String(couponResult.couponCode || couponCode || ''), bundleCode },
     }).then(rpOrder => {
       // Save order to DB
       const insertOrder = db.prepare(`
@@ -3778,6 +3790,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const authUser = getMerchAuthUser(req);
     const merchProfile = authUser ? ensureMerchCustomerProfileForUser(authUser) : null;
     const couponCode = normalizeMerchCouponCode(req.body?.couponCode);
+    const bundleCode = String(req.body?.bundleCode || '').trim().toUpperCase();
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Cart is empty' });
     }
@@ -3819,7 +3832,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const gstAmount = Math.max(0, subtotal - Math.round(subtotal / 1.18));
     const shippingCharge = subtotal >= 99900 ? 0 : 9900;
     const codSurcharge = 5000; // ₹50
-    const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
+    const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
+      + getMerchBundleDiscountPaise(bundleCode, validatedItems);
     const influencerId = Number(couponResult.coupon?.influencerId || 0) > 0 ? Number(couponResult.coupon.influencerId) : null;
     const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems);
     const totalAmount = Math.max(100, subtotal + shippingCharge + codSurcharge - discountAmount);
