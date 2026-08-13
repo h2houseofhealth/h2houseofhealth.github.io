@@ -214,13 +214,13 @@ async function sendSesEmail({ to, from, subject, text, html, replyTo = [] }) {
   if (replyTo && replyTo.length) {
     payload.ReplyToAddresses = replyTo;
   }
-
+  console.log('[SES PAYLOAD]', JSON.stringify(payload, null, 2));
   const result = await sesApiRequest(
     'POST',
     '/v2/email/outbound-emails',
     payload
   );
-
+  console.log('[SES] Full response:', JSON.stringify(result, null, 2));
   if (!result.ok) {
     throw new Error(result.message || 'SES send failed');
   }
@@ -2932,10 +2932,25 @@ app.get('/api/admin/coupons', requireAuth, requireAdmin, (req, res) => {
     .all(portal)
     .map((row) => {
       const stats = getCouponRedemptionStats(row.id, -1);
+      const merchDiscountStats = portal === 'merch'
+        ? db.prepare(`
+            SELECT COUNT(*) AS orderRedemptions,
+                   COALESCE(SUM(discount_amount), 0) AS totalDiscountAmount
+            FROM merch_orders
+            WHERE coupon_id = ?
+              AND discount_amount > 0
+              AND (
+                payment_status IN ('paid', 'cod_pending', 'refunded')
+                OR status IN ('processing', 'shipped', 'delivered', 'cancelled', 'returned')
+              )
+          `).get(row.id)
+        : null;
       const coupon = mapCouponRow(row);
       return {
         ...coupon,
         totalRedemptions: Number(stats.total || 0),
+        orderRedemptions: Number(merchDiscountStats?.orderRedemptions || 0),
+        totalDiscountAmount: Number(merchDiscountStats?.totalDiscountAmount || 0),
       };
     });
 
@@ -14574,18 +14589,25 @@ async function sendCouponEmail({ toEmail, recipientName, code, discountValue, ap
   `;
 
   try {
-    console.log('Coupon email about to use Mailgun', {
+    console.log('Coupon email about to send',{
       to: normalizedToEmail,
       from: MAIL_FROM,
       subject,
   });
-    await sendConfiguredEmail({
+    console.log('[COUPON] About to send coupon email', {
+      to: normalizedToEmail,
+      code,
+      subject,
+      time: new Date().toISOString(),
+    });
+    const emailResult = await sendConfiguredEmail({
       to: normalizedToEmail,
       from: MAIL_FROM,
       subject,
       text,
       html,
     });
+    console.log('[COUPON] sendConfiguredEmail result:', emailResult);
     return { ok: true };
   } catch (error) {
     console.error('Failed to send coupon email via Mailgun:', error);

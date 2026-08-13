@@ -115,6 +115,8 @@
     merchCouponPreview: null,
     merchCouponError: '',
     merchCouponLoading: false,
+    merchBundleCode: '',
+    merchBundlePreview: null,
     latestConfirmation: null,
   };
 
@@ -434,11 +436,16 @@
       .filter((entry) => entry.product);
     const bundles = MERCH_SIDEBAR_DEMO_DATA.bundles.map((bundle) => {
       const products = bundle.keys.map((key, index) => findSidebarProduct(key, index)).filter(Boolean);
-      const basePrice = products.reduce((total, product) => total + Number(product.variants?.[0]?.price || product.basePrice || 0), 0);
+      const basePrice = products.reduce((total, product) => total + Number(getDefaultPurchasableVariant(product)?.price || product.basePrice || 0), 0);
       return {
         ...bundle,
         products,
+        label: products.map((product) => product.name).join(' + ') || bundle.label,
         price: basePrice * Number(bundle.discount || 1),
+        available: products.length === bundle.keys.length && products.every((product) => {
+          const variant = getDefaultPurchasableVariant(product);
+          return Boolean(variant && Number(variant.stock || 0) > 0);
+        }),
       };
     }).filter((bundle) => bundle.products.length);
     return {
@@ -494,7 +501,7 @@
             <strong>${escapeHtml(bundle.label)}</strong>
             <span class="smart-merch-bundle__savings">${escapeHtml(bundle.savings)}</span>
             <strong class="smart-merch-bundle__price">${escapeHtml(formatPrice(bundle.price))}</strong>
-            <button type="button" class="btn btn-primary smart-merch-sidebar__cta" data-sidebar-action="shop-bundle">Shop Bundle</button>
+            <button type="button" class="btn btn-primary smart-merch-sidebar__cta" data-sidebar-action="shop-bundle" ${bundle.available ? '' : 'disabled'}>${bundle.available ? 'Shop Bundle' : 'Currently Unavailable'}</button>
             </div>
           `).join('')}
         </div>
@@ -532,16 +539,79 @@
     els.smartMerchSidebar.querySelectorAll('[data-sidebar-product-id]').forEach((button) => {
       button.addEventListener('click', () => showProductDetail(Number(button.dataset.sidebarProductId)));
     });
-    els.smartMerchSidebar.querySelectorAll('[data-sidebar-action="view-all"], [data-sidebar-action="shop-bundle"], [data-sidebar-action="shop-offer"]').forEach((button) => {
-      button.addEventListener('click', () => {
-        els.shopSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
+    els.smartMerchSidebar.querySelectorAll('[data-sidebar-action="view-all"], [data-sidebar-action="shop-offer"]').forEach((button) => {
+      button.addEventListener('click', () => els.shopSection?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    });
+    els.smartMerchSidebar.querySelectorAll('[data-sidebar-action="shop-bundle"]').forEach((button) => {
+      button.addEventListener('click', () => addMerchBundleToCart());
     });
   }
 
   function getDefaultPurchasableVariant(product) {
     const variants = Array.isArray(product?.variants) ? product.variants : [];
     return variants.find((variant) => Number(variant?.stock || 0) > 0) || variants[0] || null;
+  }
+
+  function getMerchBundleDefinition() {
+    const bundle = MERCH_SIDEBAR_DEMO_DATA.bundles[0];
+    const products = bundle.keys.map((key, index) => findSidebarProduct(key, index)).filter(Boolean);
+    return {
+      ...bundle,
+      products,
+      available: products.length === bundle.keys.length && products.every((product) => {
+        const variant = getDefaultPurchasableVariant(product);
+        return Boolean(variant && Number(variant.stock || 0) > 0);
+      }),
+    };
+  }
+
+  function getMerchBundleDiscountAmount() {
+    if (state.merchBundleCode !== 'H2BUNDLE15') return 0;
+    const bundleItems = getMerchBundleDefinition().products.map((product) => ({
+      product,
+      cartItem: state.cart.find((item) => Number(item.productId) === Number(product.id)),
+    }));
+    if (bundleItems.length !== 2 || bundleItems.some((item) => !item.cartItem)) {
+      clearMerchBundleDiscount();
+      return 0;
+    }
+    return Math.max(0, Math.round(bundleItems.reduce((sum, item) => sum + Number(item.cartItem.price || 0), 0) * 0.15));
+  }
+
+  function getMerchBundleCartItems() {
+    const bundle = getMerchBundleDefinition();
+    if (!bundle.available) return [];
+    return bundle.products.map((product) => ({
+      product,
+      variant: getDefaultPurchasableVariant(product),
+    }));
+  }
+
+  function clearMerchBundleDiscount() {
+    state.merchBundleCode = '';
+    state.merchBundlePreview = null;
+    localStorage.removeItem('merch_bundle_code');
+  }
+
+  async function addMerchBundleToCart() {
+    const bundleItems = getMerchBundleCartItems();
+    if (bundleItems.length !== 2) {
+      showCheckoutNotice('Bundle unavailable', 'The H2 Hydrogen Bottle and H2 Hydrogen Mist Spray must both be in stock.', { variant: 'error' });
+      renderSmartMerchSidebar();
+      return;
+    }
+
+    bundleItems.forEach(({ product, variant }) => addToCart(variant.id, 1, product, { openDrawerAfterAdd: false }));
+    state.merchBundleCode = 'H2BUNDLE15';
+    localStorage.setItem('merch_bundle_code', state.merchBundleCode);
+    state.merchBundlePreview = {
+      code: state.merchBundleCode,
+      description: 'Bundle & Save — 15% off Bottle + Mist',
+      discountAmountInr: Math.round(bundleItems.reduce((sum, item) => sum + Number(item.variant.price || 0), 0) * 0.15),
+    };
+    renderCart();
+    showCheckoutNotice('Added to Cart', 'H2 Hydrogen Bottle and H2 Hydrogen Mist Spray were added with 15% bundle savings.');
+    openCart();
   }
 
   function getVariantLabel(variant) {
@@ -1231,8 +1301,10 @@ function getWishlistProductPrice(item) {
     try {
       const saved = localStorage.getItem('merch_cart');
       state.cart = saved ? JSON.parse(saved) : [];
+      state.merchBundleCode = localStorage.getItem('merch_bundle_code') || '';
     } catch {
       state.cart = [];
+      state.merchBundleCode = '';
     }
   }
 
@@ -1301,6 +1373,7 @@ function getWishlistProductPrice(item) {
 
   function removeFromCart(variantId) {
     state.cart = state.cart.filter(item => item.variantId !== variantId);
+    getMerchBundleDiscountAmount();
     saveCart();
     renderCart();
   }
@@ -1371,7 +1444,7 @@ function getWishlistProductPrice(item) {
   }
 
   function getCheckoutDiscountAmount() {
-    return Math.max(0, Number(state.merchCouponPreview?.discountAmountInr || 0));
+    return Math.max(0, Number(state.merchCouponPreview?.discountAmountInr || 0)) + getMerchBundleDiscountAmount();
   }
 
   function getCheckoutTotals() {
@@ -1427,6 +1500,7 @@ function getWishlistProductPrice(item) {
     if (!code) {
       state.merchCouponPreview = null;
       renderMerchCouponPreview();
+      renderCart();
       return;
     }
 
@@ -1455,7 +1529,7 @@ function getWishlistProductPrice(item) {
       showCheckoutNotice('Coupon error', state.merchCouponError, { variant: 'error' });
     } finally {
       state.merchCouponLoading = false;
-      renderMerchCouponPreview();
+      renderCart();
     }
   }
 
@@ -1513,7 +1587,18 @@ function getWishlistProductPrice(item) {
       </div>
     `).join('');
 
-    els.cartSubtotal.textContent = formatPrice(getCartTotal());
+    const subtotal = getCartTotal();
+    const bundleDiscount = getMerchBundleDiscountAmount();
+    const shipping = getMerchShippingCharge(Math.max(0, subtotal - bundleDiscount));
+    const payable = getCheckoutTotals().total;
+    els.cartSubtotal.textContent = formatPrice(subtotal);
+    const bundleDiscountRow = document.getElementById('cartBundleDiscountRow');
+    const cartPayable = document.getElementById('cartPayable');
+    if (bundleDiscountRow) {
+      bundleDiscountRow.hidden = bundleDiscount <= 0;
+      bundleDiscountRow.querySelector('span:last-child').textContent = `- ${formatPrice(bundleDiscount)}`;
+    }
+    if (cartPayable) cartPayable.textContent = formatPrice(payable);
 
     // Bind remove buttons
     els.cartItems.querySelectorAll('.cart-item__remove').forEach(btn => {
@@ -3904,6 +3989,22 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     { value: '+91', label: 'India (+91)' },
     { value: '+1', label: 'United States (+1)' },
   ];
+  const CHECKOUT_COUNTRIES = ['India', 'United States'];
+  const CHECKOUT_REGIONS_BY_COUNTRY = {
+    India: ['Telangana', 'Andhra Pradesh', 'Karnataka', 'Maharashtra', 'Tamil Nadu', 'Delhi', 'Kerala', 'Gujarat', 'Rajasthan', 'Uttar Pradesh', 'West Bengal'],
+    'United States': ['Alabama', 'Alaska', 'Arizona', 'California', 'Colorado', 'Florida', 'Georgia', 'Illinois', 'New Jersey', 'New York', 'North Carolina', 'Ohio', 'Pennsylvania', 'Texas', 'Virginia', 'Washington'],
+  };
+
+  function normalizeCheckoutCountry(value = '') {
+    const normalized = String(value || '').trim();
+    if (/^(us|usa|u\.s\.a\.|united states|united states of america)$/i.test(normalized)) return 'United States';
+    if (/^(in|india)$/i.test(normalized)) return 'India';
+    return CHECKOUT_COUNTRIES.includes(normalized) ? normalized : 'India';
+  }
+
+  function getCheckoutRegionOptions(country = 'India') {
+    return CHECKOUT_REGIONS_BY_COUNTRY[normalizeCheckoutCountry(country)] || CHECKOUT_REGIONS_BY_COUNTRY.India;
+  }
 
   function parseCheckoutPhone(value = '') {
     const raw = String(value || '').trim();
@@ -3936,7 +4037,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       phoneCountryCode: phone.countryCode,
       firstName,
       lastName,
-      country: String(address?.country || 'India').trim() || 'India',
+      country: normalizeCheckoutCountry(address?.country || 'India'),
       line1: String(address?.line1 || address?.full || '').trim(),
       line2: String(address?.line2 || '').trim(),
       city: String(address?.city || '').trim(),
@@ -3982,7 +4083,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         city: String(draft.city || '').trim(),
         state: String(draft.state || '').trim(),
         postalCode: String(draft.postalCode || '').trim(),
-        country: String(draft.country || 'India').trim() || 'India',
+        country: normalizeCheckoutCountry(draft.country || 'India'),
         isDefault: Boolean(draft.saveInformation),
         full: [draft.line1, draft.line2, draft.city, draft.state, draft.postalCode, draft.country].filter(Boolean).join(', '),
       },
@@ -4002,8 +4103,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     if (!draft.line1) errors.line1 = 'Address is required.';
     if (!draft.city) errors.city = 'City is required.';
     if (!draft.state) errors.state = 'State is required.';
-    if (!draft.postalCode) errors.postalCode = 'PIN code is required.';
-    else if (digitsOnly(draft.postalCode).length !== 6) errors.postalCode = 'Enter a 6-digit PIN code.';
+    if (!draft.postalCode) errors.postalCode = normalizeCheckoutCountry(draft.country) === 'United States' ? 'ZIP code is required.' : 'PIN code is required.';
+    else if (normalizeCheckoutCountry(draft.country) === 'United States' && !/^\d{5}(-\d{4})?$/.test(String(draft.postalCode).trim())) errors.postalCode = 'Enter a valid ZIP code.';
+    else if (normalizeCheckoutCountry(draft.country) !== 'United States' && digitsOnly(draft.postalCode).length !== 6) errors.postalCode = 'Enter a 6-digit PIN code.';
     if (!draft.phone) errors.phone = 'Phone is required.';
     else if (digitsOnly(draft.phone).length !== 10) {
       const countryLabel = draft.phoneCountryCode === '+1' ? 'United States' : 'India';
@@ -4132,6 +4234,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const draft = state.checkoutDraft || buildCheckoutDraft(getAuthenticatedCheckoutCustomer(), serializeAddress(getDefaultAddress()));
     state.checkoutDraft = draft;
     const shippingReady = Boolean(draft.line1 && draft.city && draft.state && draft.postalCode);
+    const country = normalizeCheckoutCountry(draft.country || 'India');
+    const regionOptions = getCheckoutRegionOptions(country);
+    const regionLabel = country === 'United States' ? 'State' : 'State';
+    const postalLabel = country === 'United States' ? 'ZIP code' : 'PIN code';
     const mailIcon = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.6 2.6 0 1 1 4.2 2c-.9.6-1.7 1.2-1.7 2.5"/><path d="M12 17h.01"/></svg>';
     const searchIcon = '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>';
 
@@ -4150,14 +4256,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           <section class="shopify-section">
             <h2>Delivery</h2>
             <div class="shopify-field-grid">
-              ${renderCheckoutSelect({ name: 'country', label: 'Country/Region', value: draft.country || 'India', options: ['India'], wide: true })}
+              ${renderCheckoutSelect({ name: 'country', label: 'Country/Region', value: country, options: CHECKOUT_COUNTRIES, wide: true })}
               ${renderCheckoutField({ name: 'firstName', label: 'First name', value: draft.firstName, placeholder: 'First name', autocomplete: 'given-name' })}
               ${renderCheckoutField({ name: 'lastName', label: 'Last name', value: draft.lastName, placeholder: 'Last name', autocomplete: 'family-name' })}
               ${renderCheckoutField({ name: 'line1', label: 'Address', value: draft.line1, placeholder: 'House number and street name', autocomplete: 'address-line1', wide: true, icon: searchIcon })}
               ${renderCheckoutField({ name: 'line2', label: 'Apartment, suite, etc. (optional)', value: draft.line2, placeholder: 'Apartment, suite, building, floor, etc.', autocomplete: 'address-line2', wide: true, required: false })}
               ${renderCheckoutField({ name: 'city', label: 'City', value: draft.city, placeholder: 'City', autocomplete: 'address-level2' })}
-              ${renderCheckoutSelect({ name: 'state', label: 'State', value: draft.state || 'Telangana', options: ['Telangana', 'Andhra Pradesh', 'Karnataka', 'Maharashtra', 'Tamil Nadu', 'Delhi', 'Kerala', 'Gujarat', 'Rajasthan', 'Uttar Pradesh', 'West Bengal'] })}
-              ${renderCheckoutField({ name: 'postalCode', label: 'PIN code', value: draft.postalCode, placeholder: 'PIN code', autocomplete: 'postal-code', inputmode: 'numeric' })}
+              ${renderCheckoutSelect({ name: 'state', label: regionLabel, value: draft.state || regionOptions[0], options: regionOptions })}
+              ${renderCheckoutField({ name: 'postalCode', label: postalLabel, value: draft.postalCode, placeholder: postalLabel, autocomplete: 'postal-code', inputmode: 'numeric' })}
               ${renderCheckoutPhoneField(draft)}
             </div>
             <label class="shopify-check"><input name="saveInformation" type="checkbox" ${draft.saveInformation ? 'checked' : ''} /><span>Save this information for next time</span></label>
@@ -4376,7 +4482,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           </label>
           <label class="account-field">
             <span>Country</span>
-            <input name="country" type="text" value="India" autocomplete="country-name" />
+            <select name="country" autocomplete="country-name">
+              ${CHECKOUT_COUNTRIES.map((country) => `<option value="${escapeHtml(country)}">${escapeHtml(country)}</option>`).join('')}
+            </select>
           </label>
         </div>
         <label class="account-check">
@@ -4549,14 +4657,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   async function startRazorpayCheckout(customer, address) {
     const items = state.cart.map(item => ({ variantId: item.variantId, quantity: item.quantity }));
-    const couponCode = normalizeCouponCode(state.merchCouponCode || els.cartCouponCode?.value || '');
+      const couponCode = normalizeCouponCode(state.merchCouponCode || els.cartCouponCode?.value || '');
 
     try {
       const res = await fetch(buildApiUrl('/api/merch/checkout'), {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items, customer, address, couponCode }),
+        body: JSON.stringify({ items, customer, address, couponCode, bundleCode: state.merchBundleCode }),
       });
 
       if (!res.ok) {
@@ -4612,9 +4720,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             });
             saveConfirmation(confirmation);
             state.cart = [];
-            state.merchCouponCode = '';
-            state.merchCouponPreview = null;
-            state.merchCouponError = '';
+      state.merchCouponCode = '';
+      state.merchCouponPreview = null;
+      state.merchCouponError = '';
+      clearMerchBundleDiscount();
             saveCart();
             renderCart();
             closeCart();

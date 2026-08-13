@@ -31,6 +31,7 @@
 
   const today = getAppToday();
   const LOW_STOCK_THRESHOLD = 15;
+  const NOTIFICATION_STATE_STORAGE_KEY = 'merch_admin_notification_state_v1';
   // Earthy chart palette based on the House of Health visual language.
   // Keep the terracotta accent first so the revenue chart and line mode lead
   // with the same color used throughout the admin UI.
@@ -495,9 +496,35 @@
     return type.includes('percent') || type === '%' ? `${value}% off` : `₹${value.toLocaleString('en-IN')} off`;
   }
 
+  function getCouponRedemptionCount(coupon) {
+    return Number(coupon?.totalRedemptions || coupon?.orderRedemptions || coupon?.redemptions || coupon?.usageCount || 0);
+  }
+
+  function getCouponActualDiscountAmount(coupon) {
+    const explicitAmount = Number(coupon?.totalDiscountAmount || coupon?.discountTotal || coupon?.discountAmount || 0);
+    if (explicitAmount > 0) return explicitAmount;
+
+    const couponId = Number(coupon?.id || 0);
+    const couponCode = String(coupon?.code || '').trim().toUpperCase();
+    const orderTotal = (Array.isArray(state?.orders) ? state.orders : []).reduce((sum, order) => {
+      const orderCouponId = Number(order?.couponId || 0);
+      const orderCouponCode = String(order?.couponCode || '').trim().toUpperCase();
+      if ((couponId && orderCouponId === couponId) || (couponCode && orderCouponCode === couponCode)) {
+        return sum + Math.max(0, Number(order?.discountAmount || 0));
+      }
+      return sum;
+    }, 0);
+    if (orderTotal > 0) return orderTotal;
+
+    const type = String(coupon?.discountType || coupon?.discount_type || '').toLowerCase();
+    const discountValue = Number(coupon?.discountValue || coupon?.discount || 0);
+    if (type.includes('percent') || type === '%') return 0;
+    return getCouponRedemptionCount(coupon) * Math.max(0, Math.round(discountValue * 100));
+  }
+
   function getInfluencerDiscountApplied(influencer) {
     return getInfluencerCouponRecords(influencer).reduce((sum, coupon) => {
-      return sum + Number(coupon.usageCount || coupon.totalRedemptions || 0) * Number(coupon.discountValue || coupon.discount || 0);
+      return sum + getCouponActualDiscountAmount(coupon);
     }, 0);
   }
 
@@ -1495,6 +1522,53 @@
     window.setTimeout(() => node.remove(), 3400);
   }
 
+  function readStoredNotificationState() {
+    try {
+      const raw = localStorage.getItem(NOTIFICATION_STATE_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function writeStoredNotificationState(entries) {
+    try {
+      const trimmedEntries = Object.entries(entries || {})
+        .sort((left, right) => String(right[1]?.updatedAt || '').localeCompare(String(left[1]?.updatedAt || '')))
+        .slice(0, 250);
+      localStorage.setItem(NOTIFICATION_STATE_STORAGE_KEY, JSON.stringify(Object.fromEntries(trimmedEntries)));
+    } catch {
+      // Notification state is a convenience only; ignore private-mode/quota failures.
+    }
+  }
+
+  function rememberNotificationState(notification) {
+    const id = String(notification?.id || '');
+    if (!id) return;
+    const stored = readStoredNotificationState();
+    stored[id] = {
+      read: Boolean(notification.read),
+      dismissedAt: notification.dismissedAt || null,
+      updatedAt: new Date().toISOString(),
+    };
+    writeStoredNotificationState(stored);
+  }
+
+  function mergeNotificationState(notifications) {
+    const stored = readStoredNotificationState();
+    return (Array.isArray(notifications) ? notifications : []).map((notification) => {
+      const id = String(notification?.id || '');
+      const saved = id ? stored[id] : null;
+      if (!saved) return notification;
+      return {
+        ...notification,
+        read: Boolean(notification.read || saved.read || saved.dismissedAt),
+        dismissedAt: saved.dismissedAt || notification.dismissedAt || null,
+      };
+    });
+  }
+
   function setSidebarOpen(isOpen) {
     state.sidebarOpen = Boolean(isOpen);
     document.body.classList.toggle('admin-sidebar-open', state.sidebarOpen);
@@ -1768,13 +1842,9 @@
       const expiry = String(coupon.validTill || coupon.expiresAt || coupon.expiry || '').trim();
       return Boolean(expiry) && new Date(expiry).getTime() < Date.now();
     };
-    const redemptionsFor = (coupon) => Number(coupon.totalRedemptions || coupon.redemptions || coupon.usageCount || 0);
+    const redemptionsFor = getCouponRedemptionCount;
     const totalRedemptions = coupons.reduce((sum, coupon) => sum + redemptionsFor(coupon), 0);
-    const totalDiscountAmount = coupons.reduce((sum, coupon) => {
-      const explicitAmount = Number(coupon.totalDiscountAmount || coupon.discountAmount || 0);
-      const discountValue = Number(coupon.discountValue || coupon.discount || 0);
-      return sum + (explicitAmount || redemptionsFor(coupon) * discountValue);
-    }, 0);
+    const totalDiscountAmount = coupons.reduce((sum, coupon) => sum + getCouponActualDiscountAmount(coupon), 0);
     const topCoupon = [...coupons].sort((left, right) => redemptionsFor(right) - redemptionsFor(left))[0];
 
     return {
@@ -2824,12 +2894,8 @@
       const expiry = String(coupon.validTill || coupon.expiresAt || coupon.expiry || '').trim();
       return Boolean(expiry) && new Date(expiry).getTime() < Date.now();
     }).length;
-    const redeemedCoupons = filteredCoupons.reduce((sum, coupon) => sum + Number(coupon.totalRedemptions || coupon.usageCount || 0), 0);
-    const discountGiven = filteredCoupons.reduce((sum, coupon) => {
-      const usage = Number(coupon.totalRedemptions || coupon.usageCount || 0);
-      const discountValue = Number(coupon.discountValue || 0);
-      return sum + Math.max(0, usage * discountValue);
-    }, 0);
+    const redeemedCoupons = filteredCoupons.reduce((sum, coupon) => sum + getCouponRedemptionCount(coupon), 0);
+    const discountGiven = filteredCoupons.reduce((sum, coupon) => sum + getCouponActualDiscountAmount(coupon), 0);
     const activeInfluencerCoupons = filteredCoupons.filter((coupon) => getCouponTypeValue(coupon) === 'influencer' && Number(coupon.active ?? coupon.isActive ?? 0) === 1).length;
 
     const selectedCoupon = state.selectedCouponId == null
@@ -2842,7 +2908,7 @@
       { label: 'Active Coupons', value: activeCoupons, note: 'Currently usable' },
       { label: 'Expired Coupons', value: expiredCoupons, note: 'Needs review' },
       { label: 'Coupons Usage', value: redeemedCoupons, note: 'Lifetime redemptions' },
-      { label: 'Discount Given', value: `Rs. ${discountGiven.toLocaleString('en-IN')}`, note: 'Approx. total discount' },
+      { label: 'Discount Given', value: money(discountGiven), note: 'Actual total discount' },
       { label: 'Active Influencer Coupons', value: activeInfluencerCoupons, note: 'Assigned creator codes' },
     ];
 
@@ -4291,7 +4357,7 @@
     try {
       const result = await apiRequest('/api/merch/admin/stats');
       state.dashboardStats = result || null;
-      state.notifications = Array.isArray(result?.notifications) ? result.notifications : [];
+      state.notifications = mergeNotificationState(result?.notifications);
     } catch (error) {
       state.dashboardStats = null;
       state.notifications = [];
@@ -4725,6 +4791,7 @@
         if (!notification) return;
         notification.read = true;
         notification.dismissedAt = new Date().toISOString();
+        rememberNotificationState(notification);
         renderDashboard();
         return;
       }
@@ -5548,40 +5615,84 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+ function preserveInputFocus(target, renderFn) {
+    const wasFocused = document.activeElement === target;
+
+    if (!wasFocused) {
+        renderFn();
+        return;
+    }
+
+    const selectionStart = target.selectionStart;
+    const selectionEnd = target.selectionEnd;
+    const inputKey = target.dataset.input;
+
+    renderFn();
+
+    const nextInput = document.querySelector(
+        `[data-input="${inputKey}"]`
+    );
+
+    if (nextInput) {
+        nextInput.focus();
+
+        if (selectionStart !== null && selectionEnd !== null) {
+            nextInput.setSelectionRange(selectionStart, selectionEnd);
+        }
+    }
+} 
   function handleInput(target) {
     const inputKey = target.dataset.input;
     if (!inputKey) return;
     state[inputKey] = target.type === 'checkbox' ? (target.checked ? 'line' : 'bar') : target.value;
     if (inputKey === 'productsSearch' || inputKey === 'productsCategory' || inputKey === 'productsStatus' || inputKey === 'productsSort') {
       state.productsPage = 1;
-      renderProducts();
+      preserveInputFocus(target, renderProducts);
       return;
     }
     if (inputKey === 'ordersSearch' || inputKey === 'ordersStatus') {
       state.ordersPage = 1;
-      renderOrders();
+      preserveInputFocus(target, renderOrders);
       return;
     }
     if (inputKey === 'ordersDateFrom' || inputKey === 'ordersDateTo') {
       return;
     }
     if (inputKey === 'customersSearch') {
-      renderCustomers();
+      preserveInputFocus(target, renderCustomers);
       return;
     }
     if (inputKey === 'customersDateFrom' || inputKey === 'customersDateTo') {
       return;
     }
     if (inputKey === 'couponsSearch' || inputKey === 'couponsStatus' || inputKey === 'couponsType') {
-      renderCoupons();
-      return;
+    const isCouponSearch = inputKey === 'couponsSearch';
+    const wasFocused = isCouponSearch && document.activeElement === target;
+    const selectionStart = isCouponSearch ? target.selectionStart : null;
+    const selectionEnd = isCouponSearch ? target.selectionEnd : null;
+
+    renderCoupons();
+
+    if (wasFocused) {
+        const nextSearchInput = document.querySelector('[data-input="couponsSearch"]');
+
+        if (nextSearchInput) {
+            nextSearchInput.focus();
+
+            if (selectionStart !== null && selectionEnd !== null) {
+                nextSearchInput.setSelectionRange(selectionStart, selectionEnd);
+            }
+        }
     }
+
+    return;
+}
     if (inputKey === 'couponsDatePeriod' || inputKey === 'couponsDateFrom' || inputKey === 'couponsDateTo') {
       renderCoupons();
       return;
     }
     if (inputKey === 'influencersSearch' || inputKey === 'influencerDetailsFilter') {
-      renderInfluencers();
+     preserveInputFocus(target, renderInfluencers);
       return;
     }
     if (inputKey === 'influencersDatePeriod' || inputKey === 'influencersDateFrom' || inputKey === 'influencersDateTo') {
