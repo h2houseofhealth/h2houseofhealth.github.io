@@ -875,10 +875,19 @@ body.is-auth-loading .merch-auth-cta {
   gap: 6px;
 }
 .account-list__item {
-    grid-template-columns: 1fr;
+    grid-template-columns: 64px 1fr;
     align-items: center;
+    }
+#account-wishlist .account-list__item {
+    grid-template-columns: 82px minmax(0, 1fr);
+    align-items: center;
+    gap: 14px;
 }
-
+#account-addresses .account-list__item {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+}
 .account-list__image {
     width: 64px;
     height: 64px;
@@ -1048,16 +1057,6 @@ body.is-auth-loading .merch-auth-cta {
   min-width: 0;
   white-space: normal;
   overflow-wrap: anywhere;
-}
-
-.account-item-actions.account-order-actions button[data-account-action="download-invoice"] {
-  gap: 12px;
-}
-
-.account-item-actions.account-order-actions button[data-account-action="download-invoice"] .account-order-action__icon {
-  position: static;
-  flex: 0 0 22px;
-  transform: none;
 }
 
 .account-item-actions.account-order-actions button:hover,

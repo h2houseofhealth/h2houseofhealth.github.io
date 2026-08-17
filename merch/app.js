@@ -1097,13 +1097,14 @@ function getWishlistProductPrice(item) {
     };
   }
 
-  function getAuthenticatedCheckoutCustomer() {
-    const profile = getMerchantProfile();
+  function getAuthenticatedCheckoutCustomer(address = null) {
+    const profile = state.merchProfile || {};
+    const user = state.currentUser || {};
     return {
       // Guest checkout must start empty; only signed-in users get profile autofill.
-      name: state.currentUser ? profile.fullName : '',
-      email: state.currentUser ? profile.email : '',
-      phone: state.currentUser ? profile.mobile : '',
+      name: state.currentUser ? String(profile.fullName || user.name || address?.recipientName || '').trim() : '',
+      email: state.currentUser ? String(profile.email || user.email || '').trim() : '',
+      phone: state.currentUser ? String(profile.mobile || user.mobile || address?.phone || '').trim() : '',
     };
   }
 
@@ -2491,8 +2492,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const icons = {
       eye: '<svg class="account-order-action__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.8"/></svg>',
       truck: '<svg class="account-order-action__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 7h11v9H3V7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 10h4l3 3v3h-7v-6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM18 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" stroke="currentColor" stroke-width="1.8"/></svg>',
-      document: '<svg class="account-order-action__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3h7l4 4v14H7V3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3v5h4M10 12h5M10 16h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
-      download: '<svg class="account-order-action__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12M7.5 10.5 12 15l4.5-4.5M5 21h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+      document: '<svg class="account-order-action__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3h7l4 4v14H7V3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3v5h4M10 12h5M10 16h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'
     };
     return icons[name] || '';
   }
@@ -2661,7 +2661,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
                   <button type="button" data-account-action="view-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="View details for ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('eye')}<span>View Details</span></button>
                   <button type="button" data-account-action="track-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Track ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('truck')}<span>Track Order</span></button>
                   <button type="button" data-account-action="invoice-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Open invoice for ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('document')}<span>Invoice</span></button>
-                  <button type="button" data-account-action="download-invoice" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Download invoice for ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('download')}<span>Download Invoice</span></button>
                   ${canCancelMerchOrder(order) ? `<button type="button" data-account-action="cancel-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Cancel ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">Cancel Order</button>` : ''}
                 </div>
               </article>
@@ -3070,11 +3069,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       return;
     }
 
-    if (action === 'download-invoice') {
-      await downloadMerchInvoice(button.dataset.orderId);
-      return;
-    }
-
     if (action === 'email-invoice') {
       await emailMerchInvoice(button.dataset.orderId);
       return;
@@ -3171,19 +3165,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     }
   }
 
-  function getInvoiceFilename(headerValue, orderId) {
-    const header = String(headerValue || '');
-    const utfMatch = header.match(/filename\*=UTF-8''([^;]+)/i);
-    if (utfMatch) {
-      try {
-        return decodeURIComponent(utfMatch[1]);
-      } catch {}
-    }
-    const match = header.match(/filename="?([^";]+)"?/i);
-    if (match?.[1]) return match[1];
-    return `Invoice-Merch-${String(orderId || 'Order').replace(/[^a-z0-9_-]+/gi, '-')}.pdf`;
-  }
-
   async function openMerchInvoice(orderId) {
     try {
       const data = await fetchMerchInvoiceLink(orderId);
@@ -3201,29 +3182,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       openMerchDocument(data.invoiceUrl);
     } catch (error) {
       showCheckoutNotice('Invoice unavailable', error.message || 'Unable to open the invoice. Please try again.', { variant: 'error' });
-    }
-  }
-
-  async function downloadMerchInvoice(orderId) {
-    try {
-      const data = await fetchMerchInvoiceLink(orderId);
-      const downloadUrl = data.invoiceDownloadUrl || data.invoiceUrl;
-      if (!downloadUrl) throw new Error('Invoice download link missing.');
-      const response = await fetch(buildApiUrl(downloadUrl), { credentials: 'include' });
-      if (!response.ok || !(response.headers.get('content-type') || '').includes('application/pdf')) {
-        throw new Error('Unable to generate the invoice PDF.');
-      }
-      const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = objectUrl;
-      link.download = getInvoiceFilename(response.headers.get('content-disposition'), orderId);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(objectUrl);
-    } catch (error) {
-      showCheckoutNotice('Download unavailable', error.message || 'Unable to download the invoice. Please try again.', { variant: 'error' });
     }
   }
 
@@ -4456,7 +4414,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       return;
     }
 
-    const customer = getAuthenticatedCheckoutCustomer();
+    const customer = getAuthenticatedCheckoutCustomer(defaultAddress);
     const modal = showMerchModal({
       title: 'Choose shipping address',
       body: `
@@ -4490,12 +4448,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         return;
       }
       closeMerchModal();
-      showCheckoutPage(customer, serializeAddress(selected));
+      showCheckoutPage(getAuthenticatedCheckoutCustomer(selected), serializeAddress(selected));
     });
   }
 
   function renderCheckoutAddressForm(options = {}) {
     const profile = options.profile || getMerchantProfile();
+    const fullName = String(profile.fullName || profile.name || '').trim();
+    const mobile = String(profile.mobile || profile.phone || '').trim();
     const helpText = options.helpText || 'Fill in your name, address, phone, and pincode to continue checkout.';
 
     return `
@@ -4510,11 +4470,11 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           </label>
           <label class="account-field">
             <span>Full Name</span>
-            <input name="recipientName" type="text" value="${escapeHtml(profile.fullName)}" autocomplete="name" placeholder="Enter full name" required />
+            <input name="recipientName" type="text" value="${escapeHtml(fullName)}" autocomplete="name" placeholder="Enter full name" required />
           </label>
           <label class="account-field">
             <span>Phone Number</span>
-            <input name="phone" type="tel" value="${escapeHtml(profile.mobile)}" autocomplete="tel" placeholder="Enter phone number" required />
+            <input name="phone" type="tel" value="${escapeHtml(mobile)}" autocomplete="tel" placeholder="Enter phone number" required />
           </label>
           <label class="account-field account-field--wide">
             <span>Address</span>
@@ -4695,7 +4655,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     }
 
     if (state.currentUser) {
-      const customer = getAuthenticatedCheckoutCustomer();
+      const defaultAddress = getDefaultAddress();
+      const customer = getAuthenticatedCheckoutCustomer(defaultAddress);
       if (!customer.name || !customer.email || !customer.phone) {
         openCheckoutAddAddressModal({
           title: 'Complete your details',
