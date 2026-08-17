@@ -8433,6 +8433,7 @@ app.get('/invoice/merch', async (req, res) => {
   const gstAmountInr = merchPaiseToInr(order.gstAmount);
   const amountInr = merchPaiseToInr(order.totalAmount);
   const invoiceNo = `MR-${order.orderNumber || order.id}`;
+  const invoiceDownloadUrl = `/invoice/merch?token=${encodeURIComponent(String(req.query.token || ''))}&format=pdf&download=1`;
   const invoiceDateLabel = formatInvoiceDateTime(order.updatedAt || order.createdAt || new Date()) || formatInvoiceDateTime(new Date());
   const orderSummaryHtml = buildMerchOrderSummaryHtml(items);
   const orderInfoHtml = buildMerchOrderInfoHtml(order);
@@ -8457,6 +8458,36 @@ app.get('/invoice/merch', async (req, res) => {
       background:#f3f3f7;
       -webkit-print-color-adjust:exact;
       print-color-adjust:exact;
+    }
+    .invoice-toolbar{
+      position:fixed;
+      top:18px;
+      right:18px;
+      z-index:10;
+      display:flex;
+      justify-content:flex-end;
+      pointer-events:none;
+    }
+    .invoice-download-btn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-height:42px;
+      padding:0 18px;
+      border-radius:6px;
+      background:#AE5431;
+      color:#fff;
+      text-decoration:none;
+      font-size:13px;
+      font-weight:800;
+      text-transform:uppercase;
+      letter-spacing:.04em;
+      box-shadow:0 8px 18px rgba(174,84,49,.22);
+      pointer-events:auto;
+    }
+    .invoice-download-btn:hover,
+    .invoice-download-btn:focus-visible{
+      background:#963f22;
     }
     .page{
       position:relative;
@@ -8661,6 +8692,8 @@ app.get('/invoice/merch', async (req, res) => {
     @media screen and (max-width:700px){
       html,body{height:auto;min-height:100%}
       body{background:#fff}
+      .invoice-toolbar{left:12px;right:12px;top:10px}
+      .invoice-download-btn{width:100%;box-shadow:0 8px 18px rgba(174,84,49,.18)}
       .page{
         width:100%;
         margin:0;
@@ -8702,6 +8735,7 @@ app.get('/invoice/merch', async (req, res) => {
     }
     @media print{
       body{background:#fff}
+      .invoice-toolbar{display:none}
       .page{
         width:240mm;
         margin:0;
@@ -8717,6 +8751,9 @@ app.get('/invoice/merch', async (req, res) => {
   </style>
 </head>
 <body>
+  <div class="invoice-toolbar">
+    <a class="invoice-download-btn" href="${escapeHtml(invoiceDownloadUrl)}" download>Download Invoice</a>
+  </div>
   <div class="page">
     <div class="row invoice-header">
       <div>

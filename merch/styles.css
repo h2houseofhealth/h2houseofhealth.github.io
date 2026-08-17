@@ -1059,16 +1059,6 @@ body.is-auth-loading .merch-auth-cta {
   overflow-wrap: anywhere;
 }
 
-.account-item-actions.account-order-actions button[data-account-action="download-invoice"] {
-  gap: 12px;
-}
-
-.account-item-actions.account-order-actions button[data-account-action="download-invoice"] .account-order-action__icon {
-  position: static;
-  flex: 0 0 22px;
-  transform: none;
-}
-
 .account-item-actions.account-order-actions button:hover,
 .account-item-actions.account-order-actions button:focus-visible {
   border-color: #df4b1b;
