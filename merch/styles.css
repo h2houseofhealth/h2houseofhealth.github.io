@@ -875,7 +875,7 @@ body.is-auth-loading .merch-auth-cta {
   gap: 6px;
 }
 .account-list__item {
-    grid-template-columns: 64px 1fr;
+    grid-template-columns: 1fr;
     align-items: center;
 }
 
