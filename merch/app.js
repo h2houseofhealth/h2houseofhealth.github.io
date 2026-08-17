@@ -1097,13 +1097,14 @@ function getWishlistProductPrice(item) {
     };
   }
 
-  function getAuthenticatedCheckoutCustomer() {
-    const profile = getMerchantProfile();
+  function getAuthenticatedCheckoutCustomer(address = null) {
+    const profile = state.merchProfile || {};
+    const user = state.currentUser || {};
     return {
       // Guest checkout must start empty; only signed-in users get profile autofill.
-      name: state.currentUser ? profile.fullName : '',
-      email: state.currentUser ? profile.email : '',
-      phone: state.currentUser ? profile.mobile : '',
+      name: state.currentUser ? String(profile.fullName || user.name || address?.recipientName || '').trim() : '',
+      email: state.currentUser ? String(profile.email || user.email || '').trim() : '',
+      phone: state.currentUser ? String(profile.mobile || user.mobile || address?.phone || '').trim() : '',
     };
   }
 
@@ -4456,7 +4457,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       return;
     }
 
-    const customer = getAuthenticatedCheckoutCustomer();
+    const customer = getAuthenticatedCheckoutCustomer(defaultAddress);
     const modal = showMerchModal({
       title: 'Choose shipping address',
       body: `
@@ -4490,12 +4491,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         return;
       }
       closeMerchModal();
-      showCheckoutPage(customer, serializeAddress(selected));
+      showCheckoutPage(getAuthenticatedCheckoutCustomer(selected), serializeAddress(selected));
     });
   }
 
   function renderCheckoutAddressForm(options = {}) {
     const profile = options.profile || getMerchantProfile();
+    const fullName = String(profile.fullName || profile.name || '').trim();
+    const mobile = String(profile.mobile || profile.phone || '').trim();
     const helpText = options.helpText || 'Fill in your name, address, phone, and pincode to continue checkout.';
 
     return `
@@ -4510,11 +4513,11 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           </label>
           <label class="account-field">
             <span>Full Name</span>
-            <input name="recipientName" type="text" value="${escapeHtml(profile.fullName)}" autocomplete="name" placeholder="Enter full name" required />
+            <input name="recipientName" type="text" value="${escapeHtml(fullName)}" autocomplete="name" placeholder="Enter full name" required />
           </label>
           <label class="account-field">
             <span>Phone Number</span>
-            <input name="phone" type="tel" value="${escapeHtml(profile.mobile)}" autocomplete="tel" placeholder="Enter phone number" required />
+            <input name="phone" type="tel" value="${escapeHtml(mobile)}" autocomplete="tel" placeholder="Enter phone number" required />
           </label>
           <label class="account-field account-field--wide">
             <span>Address</span>
@@ -4695,7 +4698,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     }
 
     if (state.currentUser) {
-      const customer = getAuthenticatedCheckoutCustomer();
+      const defaultAddress = getDefaultAddress();
+      const customer = getAuthenticatedCheckoutCustomer(defaultAddress);
       if (!customer.name || !customer.email || !customer.phone) {
         openCheckoutAddAddressModal({
           title: 'Complete your details',
