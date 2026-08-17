@@ -2690,6 +2690,24 @@ function syncBookingModalCustomerGate() {
   setBookingCustomerInlineMessage('');
 }
 
+function getCurrentUserBookingContactFallback(bookingId = '') {
+  const booking = String(bookingId || '').trim()
+    ? (state.bookings || []).find((entry) => String(entry?.id || '') === String(bookingId || '').trim())
+    : null;
+  return {
+    name: String(state.user?.name || booking?.clientName || booking?.customerName || '').trim(),
+    email: String(state.user?.email || booking?.clientEmail || booking?.customerEmail || '').trim(),
+    phone: normalizeTenDigitMobile(
+      state.user?.mobile ||
+        state.user?.phone ||
+        booking?.clientPhone ||
+        booking?.customerPhone ||
+        booking?.mobile ||
+        ''
+    ),
+  };
+}
+
 function syncAdminCustomerFromBookingModal() {
   const prevName = String(state.adminCustomerForm?.name || '').trim();
   const prevEmail = String(state.adminCustomerForm?.email || '').trim();
@@ -5436,13 +5454,14 @@ async function upsertBooking() {
     payload.customerPhone = state.adminCustomerForm.phone;
   }
 
-  // For non-admin users require at least one contact (email or phone)
+  // For non-admin users phone is required; email remains optional.
   if (!isAdmin) {
-    const email = String(elements.bookingCustomerEmail?.value || '').trim();
-    const phone = normalizeTenDigitMobile(String(elements.bookingCustomerPhone?.value || ''));
-    if (!email && !phone) {
-      showNotice({ title: 'Missing contact', body: 'Please provide an email or contact number to confirm booking.' });
-      if (elements.bookingCustomerEmail) elements.bookingCustomerEmail.focus();
+    const contactFallback = getCurrentUserBookingContactFallback(elements.bookingId?.value || '');
+    const email = String(elements.bookingCustomerEmail?.value || '').trim() || contactFallback.email;
+    const phone = normalizeTenDigitMobile(String(elements.bookingCustomerPhone?.value || '')) || contactFallback.phone;
+    if (!phone) {
+      showNotice({ title: 'Missing phone', body: 'Please provide a contact number to confirm booking.' });
+      elements.bookingCustomerPhone?.focus();
       return;
     }
     if (email && !isValidEmail(email)) {
@@ -5450,12 +5469,12 @@ async function upsertBooking() {
       elements.bookingCustomerEmail?.focus();
       return;
     }
-    if (phone && phone.length !== 10) {
+    if (phone.length !== 10) {
       showNotice({ title: 'Invalid phone', body: 'Please enter a valid 10-digit contact number.' });
       elements.bookingCustomerPhone?.focus();
       return;
     }
-    payload.customerName = String(elements.bookingCustomerName?.value || '').trim();
+    payload.customerName = String(elements.bookingCustomerName?.value || '').trim() || contactFallback.name;
     payload.customerEmail = email;
     payload.customerPhone = phone;
   }
@@ -7719,6 +7738,20 @@ function getAdminRescheduleViewMode() {
   return ['rescheduled', 'schedule_later'].includes(view) ? view : 'queue';
 }
 
+function getAdminRescheduleFilterSlot(booking, view = getAdminRescheduleViewMode()) {
+  const history = getAdminRescheduleHistory(booking);
+  if (view === 'rescheduled') {
+    return {
+      bookingDate: history.rescheduledDate || booking?.bookingDate || '',
+      bookingTime: history.rescheduledTime || booking?.bookingTime || '',
+    };
+  }
+  return {
+    bookingDate: booking?.bookingDate || '',
+    bookingTime: booking?.bookingTime || '',
+  };
+}
+
 function getFilteredAdminRescheduleBookings(bookings = state.bookings) {
   const query = String(state.adminRescheduleSearch || '').trim().toLowerCase();
   const selectedDate = String(state.adminRescheduleDateFilter || '').trim();
@@ -7739,15 +7772,11 @@ function getFilteredAdminRescheduleBookings(bookings = state.bookings) {
     })
     .filter((booking) => {
       if (!selectedDate) return true;
-      const history = getAdminRescheduleHistory(booking);
-      const dateToCompare = view === 'rescheduled' ? history.originalDate || booking.bookingDate : booking.bookingDate;
-      return String(dateToCompare || '').trim() === selectedDate;
+      return String(getAdminRescheduleFilterSlot(booking, view).bookingDate || '').trim() === selectedDate;
     })
     .filter((booking) => {
       if (!selectedSlot) return true;
-      const history = getAdminRescheduleHistory(booking);
-      const slotToCompare = view === 'rescheduled' ? history.originalTime || booking.bookingTime : booking.bookingTime;
-      return normalizeSlotStartTime(slotToCompare) === selectedSlot;
+      return normalizeSlotStartTime(getAdminRescheduleFilterSlot(booking, view).bookingTime) === selectedSlot;
     })
     .sort((a, b) => {
       if (view === 'rescheduled') {
@@ -7844,15 +7873,11 @@ async function openAdminRescheduleForBooking(booking) {
   if (!booking?.id) return;
   const alreadyRescheduled = isAdminRescheduledBooking(booking);
   const isScheduleLater = String(booking?.status || '').trim().toLowerCase() === 'schedule_later';
-  const history = getAdminRescheduleHistory(booking);
+  const filterSlot = getAdminRescheduleFilterSlot(booking, alreadyRescheduled ? 'rescheduled' : state.adminRescheduleView);
   state.adminActiveTab = 'rescheduled';
   state.adminRescheduleView = isScheduleLater ? 'schedule_later' : alreadyRescheduled ? 'rescheduled' : 'queue';
-  state.adminRescheduleDateFilter = String(
-    alreadyRescheduled ? history.originalDate || booking.bookingDate : booking.bookingDate || ''
-  ).trim();
-  state.adminRescheduleSlotFilter = normalizeSlotStartTime(
-    alreadyRescheduled ? history.originalTime || booking.bookingTime : booking.bookingTime || ''
-  );
+  state.adminRescheduleDateFilter = String(filterSlot.bookingDate || '').trim();
+  state.adminRescheduleSlotFilter = normalizeSlotStartTime(filterSlot.bookingTime);
   state.adminRescheduleSearch = String(booking.clientMobile || booking.clientEmail || booking.clientName || booking.id || '')
     .trim()
     .toLowerCase();
@@ -7889,14 +7914,11 @@ function renderAdminRescheduleSlotFilters() {
     })
     .filter((booking) => {
       if (!selectedDate) return true;
-      const history = getAdminRescheduleHistory(booking);
-      const dateToCompare = view === 'rescheduled' ? history.originalDate || booking.bookingDate : booking.bookingDate;
-      return String(dateToCompare || '').trim() === selectedDate;
+      return String(getAdminRescheduleFilterSlot(booking, view).bookingDate || '').trim() === selectedDate;
     });
   const counts = new Map(SLOT_OPTIONS.map((slot) => [slot.value, 0]));
   for (const booking of source) {
-    const history = getAdminRescheduleHistory(booking);
-    const slotValue = normalizeSlotStartTime(view === 'rescheduled' ? history.originalTime || booking.bookingTime : booking.bookingTime);
+    const slotValue = normalizeSlotStartTime(getAdminRescheduleFilterSlot(booking, view).bookingTime);
     if (counts.has(slotValue)) counts.set(slotValue, Number(counts.get(slotValue) || 0) + 1);
   }
 
