@@ -4698,9 +4698,15 @@
 
   function openInvoiceDocument(url) {
     const targetUrl = buildApiUrl(url);
-    const opened = window.open(targetUrl, '_blank', 'noopener,noreferrer');
+    const opened = window.open(targetUrl, '_blank');
     if (!opened) {
       toast('Invoice unavailable', 'The invoice could not open. Please allow popups and try again.', 'warning');
+      return;
+    }
+    try {
+      opened.opener = null;
+    } catch {
+      // Some browsers restrict access to the opened window; the invoice tab still opened.
     }
   }
 
