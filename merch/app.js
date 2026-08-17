@@ -3159,9 +3159,15 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   function openMerchDocument(url) {
     const targetUrl = buildApiUrl(url);
-    const opened = window.open(targetUrl, '_blank', 'noopener,noreferrer');
+    const opened = window.open(targetUrl, '_blank');
     if (!opened) {
       showCheckoutNotice('Invoice', 'The invoice could not open. Please allow popups and try again.', { variant: 'error' });
+      return;
+    }
+    try {
+      opened.opener = null;
+    } catch {
+      // Some browsers restrict access to the opened window; the invoice tab still opened.
     }
   }
 
