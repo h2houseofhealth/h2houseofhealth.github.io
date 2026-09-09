@@ -4,6 +4,7 @@
   const SECTION_TITLES = {
     dashboard: 'Dashboard',
     products: 'Products',
+    trash: 'Trash',
     categories: 'Categories',
     orders: 'Orders',
     customers: 'Customers',
@@ -1376,6 +1377,9 @@
     productsSort: 'newest',
     productsStatus: 'all',
     productsPage: 1,
+    trashProductsPage: 1,
+    selectedTrashProductIds: [],
+    selectedTrashVariantIds: [],
     ordersLoading: false,
     ordersSearch: '',
     ordersStatus: 'all',
@@ -1426,6 +1430,7 @@
   const state = {
     ...initialState,
     products: expandProductVariants(productsList),
+    trashProducts: [],
     categories: categoryList,
     orders: ordersList,
     customers: customersList,
@@ -1441,6 +1446,7 @@
     hypes: [],
     hypesLoading: false,
     reports: null,
+    trashLoading: false,
   };
 
   const els = {
@@ -1451,6 +1457,7 @@
     pageTitle: document.getElementById('pageTitle'),
     dashboardView: document.getElementById('dashboardView'),
     productsView: document.getElementById('productsView'),
+    trashView: document.getElementById('trashView'),
     categoriesView: document.getElementById('categoriesView'),
     ordersView: document.getElementById('ordersView'),
     customersView: document.getElementById('customersView'),
@@ -2301,6 +2308,77 @@
               <button class="admin-btn admin-btn--ghost" type="button" data-action="products-next" ${state.productsPage >= totalPages ? 'disabled' : ''}>Next</button>
             </div>
           </div>
+        </div>
+      </section>
+    `;
+  }
+
+  function renderTrash() {
+    const trashItems = state.trashProducts.flatMap((product) => [
+      ...(product.isDeleted ? [{ ...product, trashType: 'product', trashId: Number(product.id) }] : []),
+      ...(product.variants || []).filter((variant) => variant.deletedAt).map((variant) => ({
+        ...product,
+        ...variant,
+        trashType: 'variant',
+        trashId: Number(variant.id),
+        parentProductId: Number(product.id),
+        productName: product.name,
+        image: product.image || product.imageUrl,
+        deletedBy: variant.deletedBy,
+        deletedAt: variant.deletedAt,
+      })),
+    ]);
+    const pageSize = 5;
+    const totalPages = Math.max(1, Math.ceil(trashItems.length / pageSize));
+    if (state.trashProductsPage > totalPages) state.trashProductsPage = totalPages;
+    const start = (state.trashProductsPage - 1) * pageSize;
+    const pageItems = trashItems.slice(start, start + pageSize);
+    const selectedCount = state.selectedTrashProductIds.length + state.selectedTrashVariantIds.length;
+    const isSelected = (item) => item.trashType === 'variant'
+      ? state.selectedTrashVariantIds.includes(item.trashId)
+      : state.selectedTrashProductIds.includes(item.trashId);
+    const pageSelected = pageItems.length > 0 && pageItems.every(isSelected);
+
+    els.trashView.innerHTML = `
+      <section class="admin-section">
+        <div class="admin-section__head">
+          <div>
+            <h2 class="admin-section__title">Deleted Products</h2>
+            <p class="admin-section__desc">Deleted products remain recoverable here with their original IDs, variants, prices, inventory, and image references.</p>
+          </div>
+          <span class="admin-chip">${trashItems.length} in Trash</span>
+        </div>
+        <div class="admin-section__body">
+          <div class="admin-toolbar">
+            <span class="admin-table__muted">${selectedCount ? `${selectedCount} selected` : 'Select deleted products to restore or permanently delete'}</span>
+            <div class="admin-toolbar__group">
+              <button class="admin-btn admin-btn--soft" type="button" data-action="bulk-restore-trash" ${selectedCount ? '' : 'disabled'}>Restore Selected</button>
+              <button class="admin-btn admin-btn--danger" type="button" data-action="bulk-permanent-delete-trash" ${selectedCount ? '' : 'disabled'}>Delete Permanently</button>
+            </div>
+          </div>
+          ${state.trashLoading ? '<p class="admin-table__muted">Loading Trash...</p>' : pageItems.length ? `
+            <div class="admin-table-wrap">
+              <table class="admin-table">
+                <thead><tr>
+                  <th><input type="checkbox" data-action="toggle-trash-page-selection" ${pageSelected ? 'checked' : ''} aria-label="Select all Trash items on this page" /></th>
+                  <th>Image</th><th>Product</th><th>Variants</th><th>Price</th><th>Deleted By</th><th>Deleted Date</th><th>Actions</th>
+                </tr></thead>
+                <tbody>${pageItems.map((product) => `
+                  <tr>
+                    <td><input type="checkbox" data-action="toggle-trash-selection" data-id="${product.trashId}" data-trash-type="${product.trashType}" ${isSelected(product) ? 'checked' : ''} aria-label="Select ${escapeHtml(product.name)}" /></td>
+                    <td><img class="admin-thumb" src="${escapeHtml(normalizeAdminImageUrl(product.imageUrl || product.image, getProductFallbackImage(product)))}" alt="${escapeHtml(product.name)}" /></td>
+                    <td><strong>${escapeHtml(product.trashType === 'variant' ? `${product.name} · ${product.variantLabel || [product.size, product.color].filter(Boolean).join(' / ') || 'Variant'}` : product.name)}</strong><br><span class="admin-table__muted">${product.trashType === 'variant' ? `Variant ID ${escapeHtml(product.trashId)} · Product ID ${escapeHtml(product.parentProductId)}` : `Product ID ${escapeHtml(product.id)} · ${escapeHtml(product.slug)}`}</span></td>
+                    <td>${product.trashType === 'variant' ? escapeHtml(product.sku || '-') : `${escapeHtml(product.variantCount || 0)}<br><span class="admin-table__muted">${escapeHtml((product.variants || []).slice(0, 3).map((variant) => variant.sku).filter(Boolean).join(', '))}${(product.variants || []).length > 3 ? '…' : ''}</span>`}</td>
+                    <td>${escapeHtml(product.priceLabel || catalogPrice(product.price))}</td>
+                    <td>${escapeHtml(product.deletedBy || 'Admin')}</td>
+                    <td>${escapeHtml(dateLabel(product.deletedAt))}</td>
+                    <td><div class="admin-actions"><button class="admin-action-link" type="button" data-action="restore-trash-${product.trashType}" data-id="${product.trashId}">Restore</button><button class="admin-action-link admin-action-link--danger" type="button" data-action="permanent-delete-trash-${product.trashType}" data-id="${product.trashId}">Delete permanently</button></div></td>
+                  </tr>
+                `).join('')}</tbody>
+              </table>
+            </div>
+            <div class="admin-toolbar" style="margin-top:16px;"><span class="admin-table__muted">Page ${state.trashProductsPage} of ${totalPages}</span><div class="admin-toolbar__group"><button class="admin-btn admin-btn--ghost" type="button" data-action="trash-prev" ${state.trashProductsPage <= 1 ? 'disabled' : ''}>Previous</button><button class="admin-btn admin-btn--ghost" type="button" data-action="trash-next" ${state.trashProductsPage >= totalPages ? 'disabled' : ''}>Next</button></div></div>
+          ` : '<p class="admin-table__muted">Trash is empty.</p>'}
         </div>
       </section>
     `;
@@ -4444,6 +4522,26 @@
     }
   }
 
+  async function loadTrashData() {
+    state.trashLoading = true;
+    try {
+      const result = await apiRequest('/api/merch/admin/products/trash');
+      state.trashProducts = Array.isArray(result) ? result : [];
+      const validProductIds = new Set(state.trashProducts.filter((product) => product.isDeleted).map((product) => Number(product.id)));
+      const validVariantIds = new Set(state.trashProducts.flatMap((product) => (product.variants || []).filter((variant) => variant.deletedAt).map((variant) => Number(variant.id))));
+      state.selectedTrashProductIds = state.selectedTrashProductIds.filter((id) => validProductIds.has(Number(id)));
+      state.selectedTrashVariantIds = state.selectedTrashVariantIds.filter((id) => validVariantIds.has(Number(id)));
+      const totalPages = Math.max(1, Math.ceil((state.trashProducts.reduce((count, product) => count + (product.isDeleted ? 1 : 0) + (product.variants || []).filter((variant) => variant.deletedAt).length, 0)) / 5));
+      state.trashProductsPage = Math.min(state.trashProductsPage, totalPages);
+    } catch (error) {
+      state.trashProducts = [];
+      toast('Trash unavailable', error.message || 'Unable to load deleted products.', 'warning');
+    } finally {
+      state.trashLoading = false;
+      renderTrash();
+    }
+  }
+
   async function loadOrderData() {
     state.ordersLoading = true;
     renderOrders();
@@ -4636,23 +4734,110 @@
   }
 
   async function deleteMerchProduct(productId) {
-    try {
-      await apiRequest(`/api/merch/admin/products/${encodeURIComponent(productId)}`, { method: 'DELETE' });
-      return { deleted: true, archived: false };
-    } catch (error) {
-      // Some older API deployments reject hard deletion when order history
-      // references a product. Archiving is the safe storefront-equivalent
-      // fallback and keeps those historical records intact.
-      if (error?.status === 404 || error?.status === 405 || error?.status >= 500) {
-        await apiRequest(`/api/merch/admin/products/${encodeURIComponent(productId)}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'archived', archived: true }),
-        });
-        return { deleted: false, archived: true };
-      }
-      throw error;
+    await apiRequest(`/api/merch/admin/products/${encodeURIComponent(productId)}`, { method: 'DELETE' });
+    return { deleted: false, trashed: true };
+  }
+
+  async function deleteMerchVariant(variantId) {
+    await apiRequest('/api/merch/admin/variants/trash', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ productIds: [Number(variantId)] }),
+    });
+    return { deleted: false, trashed: true };
+  }
+
+  async function restoreTrashProducts(productIds) {
+    const ids = [...new Set((Array.isArray(productIds) ? productIds : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+    if (!ids.length) {
+      toast('Select deleted products', 'Choose at least one Trash item to restore.', 'warning');
+      return;
     }
+    try {
+      await apiRequest('/api/merch/admin/products/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productIds: ids }),
+      });
+      state.selectedTrashProductIds = state.selectedTrashProductIds.filter((id) => !ids.includes(Number(id)));
+      await loadProductData();
+      await loadTrashData();
+      toast('Products restored', `${ids.length} product${ids.length === 1 ? '' : 's'} restored with the original IDs and variants.`, 'success');
+      renderAll();
+    } catch (error) {
+      toast('Restore failed', error.message || 'Unable to restore the selected products.', 'warning');
+    }
+  }
+
+  async function restoreTrashVariants(variantIds) {
+    const ids = [...new Set((Array.isArray(variantIds) ? variantIds : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+    if (!ids.length) {
+      toast('Select deleted variants', 'Choose at least one variant in Trash to restore.', 'warning');
+      return;
+    }
+    try {
+      await apiRequest('/api/merch/admin/variants/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productIds: ids }),
+      });
+      state.selectedTrashVariantIds = state.selectedTrashVariantIds.filter((id) => !ids.includes(Number(id)));
+      await loadProductData();
+      await loadTrashData();
+      toast('Variants restored', `${ids.length} variant${ids.length === 1 ? '' : 's'} restored with the original IDs and inventory.`, 'success');
+      renderAll();
+    } catch (error) {
+      toast('Restore failed', error.message || 'Unable to restore the selected variants.', 'warning');
+    }
+  }
+
+  function openPermanentDeleteModal(productIds, variantIds = []) {
+    const ids = [...new Set((Array.isArray(productIds) ? productIds : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+    const variantIdList = [...new Set((Array.isArray(variantIds) ? variantIds : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+    if (!ids.length && !variantIdList.length) {
+      toast('Select deleted products', 'Choose at least one Trash item to permanently delete.', 'warning');
+      return;
+    }
+    const names = ids.map((id) => state.trashProducts.find((product) => Number(product.id) === id)?.name).filter(Boolean);
+    openModal({
+      title: 'Permanently delete products',
+      subtitle: 'Irreversible action',
+      body: `<p style="margin:0 0 14px;color:var(--admin-danger);font-weight:700;line-height:1.6;">This permanently removes the selected Trash records and their non-order relationships. Existing order history is preserved. This cannot be undone.</p><p style="margin:0 0 14px;color:var(--admin-muted);line-height:1.6;">Selected: ${escapeHtml(names.join(', ') || `${ids.length} product${ids.length === 1 ? '' : 's'}`)}</p><label class="admin-field"><span>Type PERMANENTLY DELETE to continue</span><input class="admin-input" data-permanent-delete-confirm autocomplete="off" /></label><p class="admin-table__muted" data-permanent-delete-error hidden>Confirmation text does not match.</p>`,
+      footer: '<button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button><button class="admin-btn admin-btn--danger" type="button" data-permanent-delete-submit>Delete permanently</button>',
+      size: 'md',
+    });
+    const dialog = els.adminModalDialog;
+    dialog.querySelector('[data-permanent-delete-submit]')?.addEventListener('click', async () => {
+      const confirmation = String(dialog.querySelector('[data-permanent-delete-confirm]')?.value || '').trim();
+      const error = dialog.querySelector('[data-permanent-delete-error]');
+      if (confirmation !== 'PERMANENTLY DELETE') {
+        if (error) error.hidden = false;
+        return;
+      }
+      try {
+        const requests = [];
+        if (ids.length) requests.push(apiRequest('/api/merch/admin/products/permanent-delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ productIds: ids, confirmation }),
+        }));
+        if (variantIdList.length) requests.push(apiRequest('/api/merch/admin/variants/permanent-delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ productIds: variantIdList, confirmation }),
+        }));
+        await Promise.all(requests);
+        closeModal();
+        state.selectedTrashProductIds = state.selectedTrashProductIds.filter((id) => !ids.includes(Number(id)));
+        state.selectedTrashVariantIds = state.selectedTrashVariantIds.filter((id) => !variantIdList.includes(Number(id)));
+        await loadTrashData();
+        const deletedCount = ids.length + variantIdList.length;
+        toast('Trash items permanently deleted', `${deletedCount} item${deletedCount === 1 ? '' : 's'} permanently deleted.`, 'danger');
+        renderAll();
+      } catch (requestError) {
+        toast('Permanent delete failed', requestError.message || 'Unable to permanently delete the selected products.', 'warning');
+      }
+    });
   }
 
   function renderAll() {
@@ -4669,6 +4854,7 @@
 
     renderDashboard();
     renderProducts();
+    renderTrash();
     renderCategories();
     renderOrders();
     renderCustomers();
@@ -4997,16 +5183,21 @@
             return;
           }
           const productId = Number(product.parentProductId || product.productId || product.id);
+          const variantId = Number(product.variantId || product.id);
+          const deleteProduct = Boolean(product.isCombo);
           openConfirmModal({
-            title: 'Delete product',
-            message: `Remove ${product.name} from the customer storefront? Existing order history will be preserved.`,
+            title: deleteProduct ? 'Delete product' : 'Delete variant',
+            message: deleteProduct
+              ? `Remove ${product.name} from the customer storefront? Existing order history will be preserved.`
+              : `Remove only the ${product.variantLabel || [product.size, product.color].filter(Boolean).join(' / ') || 'selected'} variant of ${product.name}? Other variants will remain active.`,
             confirmLabel: 'Delete',
             onConfirm: async () => {
               try {
-                const result = await deleteMerchProduct(productId);
+                const result = deleteProduct ? await deleteMerchProduct(productId) : await deleteMerchVariant(variantId);
                 state.selectedProductIds = state.selectedProductIds.filter((itemId) => itemId !== id);
                 await loadProductData();
-                toast(result.archived ? 'Product hidden' : 'Product deleted', `${product.name} has been removed from the storefront.`, 'danger');
+                await loadTrashData();
+                toast(result.trashed ? (deleteProduct ? 'Product moved to Trash' : 'Variant moved to Trash') : 'Product deleted', `${product.name} remains recoverable in Trash.`, 'warning');
                 renderAll();
               } catch (error) {
                 toast('Delete failed', error.message || 'Unable to remove the product.', 'warning');
@@ -5098,38 +5289,125 @@
         return;
       }
       case 'bulk-delete':
+        {
+        const selectedAtConfirmation = selectedProductsOnPage();
+        const selectedParentIdsAtConfirmation = [...new Set(selectedAtConfirmation
+          .filter((item) => !item.isLocalDuplicate)
+          .filter((item) => item.isCombo)
+          .map((item) => Number(item.parentProductId || item.productId || item.id))
+          .filter((itemId) => Number.isInteger(itemId) && itemId > 0))];
+        const selectedVariantIdsAtConfirmation = [...new Set(selectedAtConfirmation
+          .filter((item) => !item.isLocalDuplicate && !item.isCombo)
+          .map((item) => Number(item.variantId || item.id))
+          .filter((itemId) => Number.isInteger(itemId) && itemId > 0))];
         openConfirmModal({
           title: 'Delete selected products',
-          message: 'Remove all selected products from the customer storefront? Existing order history will be preserved.',
+          message: `Move ${selectedParentIdsAtConfirmation.length + selectedVariantIdsAtConfirmation.length} selected item${selectedParentIdsAtConfirmation.length + selectedVariantIdsAtConfirmation.length === 1 ? '' : 's'} to Trash? Only the selected variant rows will be affected; other variants remain active.`,
           confirmLabel: 'Delete',
           onConfirm: async () => {
-            const selected = selectedProductsOnPage();
+            const selected = selectedAtConfirmation;
             const localDuplicateIds = new Set(selected.filter((item) => item.isLocalDuplicate).map((item) => Number(item.id)));
-            const ids = [...new Set(selected
-              .filter((item) => !item.isLocalDuplicate)
-              .map((item) => Number(item.parentProductId || item.productId || item.id))
-              .filter((itemId) => Number.isInteger(itemId) && itemId > 0))];
+            const ids = selectedParentIdsAtConfirmation;
             try {
               const results = [];
-              for (const productId of ids) results.push(await deleteMerchProduct(productId));
+              if (ids.length) results.push(await apiRequest('/api/merch/admin/products/trash', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ productIds: ids }),
+                }));
+              if (selectedVariantIdsAtConfirmation.length) results.push(await apiRequest('/api/merch/admin/variants/trash', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ productIds: selectedVariantIdsAtConfirmation }),
+              }));
               if (localDuplicateIds.size) {
                 state.products = state.products.filter((item) => !localDuplicateIds.has(Number(item.id)));
               }
               state.selectedProductIds = [];
-              if (ids.length) await loadProductData();
-              const archivedCount = results.filter((item) => item.archived).length;
+              if (ids.length || selectedVariantIdsAtConfirmation.length) {
+                await loadProductData();
+                await loadTrashData();
+              }
+              const trashedCount = results.reduce((count, result) => count + Number(result?.trashedCount || 0), 0);
               const removedCount = localDuplicateIds.size;
               const summary = [
-                ids.length ? `${ids.length - archivedCount} deleted${archivedCount ? `, ${archivedCount} hidden to preserve order history` : ''}` : '',
+                trashedCount ? `${trashedCount} moved to Trash` : '',
                 removedCount ? `${removedCount} duplicate${removedCount === 1 ? '' : 's'} removed` : '',
               ].filter(Boolean).join('; ');
-              toast('Bulk delete complete', `${summary}.`, 'danger');
+              toast('Products moved to Trash', `${summary || 'Selected products moved to Trash'}.`, 'warning');
               renderAll();
             } catch (error) {
               toast('Bulk delete failed', error.message || 'Unable to remove the selected products.', 'warning');
             }
           },
         });
+        return;
+        }
+      case 'restore-trash-product':
+        await restoreTrashProducts([id]);
+        return;
+      case 'restore-trash-variant':
+        await restoreTrashVariants([id]);
+        return;
+      case 'bulk-restore-trash':
+        if (state.selectedTrashProductIds.length) await restoreTrashProducts(state.selectedTrashProductIds);
+        if (state.selectedTrashVariantIds.length) await restoreTrashVariants(state.selectedTrashVariantIds);
+        return;
+      case 'permanent-delete-trash-product':
+        openPermanentDeleteModal([id]);
+        return;
+      case 'permanent-delete-trash-variant':
+        openPermanentDeleteModal([], [id]);
+        return;
+      case 'bulk-permanent-delete-trash':
+        openPermanentDeleteModal(state.selectedTrashProductIds, state.selectedTrashVariantIds);
+        return;
+      case 'toggle-trash-selection':
+        if (target.dataset.trashType === 'variant') {
+          if (target.checked) {
+            if (!state.selectedTrashVariantIds.includes(id)) state.selectedTrashVariantIds.push(id);
+          } else {
+            state.selectedTrashVariantIds = state.selectedTrashVariantIds.filter((itemId) => itemId !== id);
+          }
+        } else {
+          if (target.checked) {
+            if (!state.selectedTrashProductIds.includes(id)) state.selectedTrashProductIds.push(id);
+          } else {
+            state.selectedTrashProductIds = state.selectedTrashProductIds.filter((itemId) => itemId !== id);
+          }
+        }
+        renderTrash();
+        return;
+      case 'toggle-trash-page-selection': {
+        const visible = state.trashProducts.flatMap((product) => [
+          ...(product.isDeleted ? [{ trashType: 'product', trashId: Number(product.id) }] : []),
+          ...(product.variants || []).filter((variant) => variant.deletedAt).map((variant) => ({ trashType: 'variant', trashId: Number(variant.id) })),
+        ]).slice((state.trashProductsPage - 1) * 5, (state.trashProductsPage - 1) * 5 + 5);
+        const isSelected = (item) => item.trashType === 'variant'
+          ? state.selectedTrashVariantIds.includes(item.trashId)
+          : state.selectedTrashProductIds.includes(item.trashId);
+        const allSelected = visible.length > 0 && visible.every(isSelected);
+        if (allSelected) {
+          const productIds = new Set(visible.filter((item) => item.trashType === 'product').map((item) => item.trashId));
+          const variantIds = new Set(visible.filter((item) => item.trashType === 'variant').map((item) => item.trashId));
+          state.selectedTrashProductIds = state.selectedTrashProductIds.filter((id) => !productIds.has(id));
+          state.selectedTrashVariantIds = state.selectedTrashVariantIds.filter((id) => !variantIds.has(id));
+        } else {
+          visible.forEach((item) => {
+            const selectedIds = item.trashType === 'variant' ? state.selectedTrashVariantIds : state.selectedTrashProductIds;
+            if (!selectedIds.includes(item.trashId)) selectedIds.push(item.trashId);
+          });
+        }
+        renderTrash();
+        return;
+      }
+      case 'trash-prev':
+        state.trashProductsPage = Math.max(1, state.trashProductsPage - 1);
+        renderTrash();
+        return;
+      case 'trash-next':
+        state.trashProductsPage += 1;
+        renderTrash();
         return;
       case 'toggle-product-selection':
         if (target.checked) {
@@ -6115,6 +6393,7 @@
     loadDashboardStats();
     loadHypeData();
     loadProductData();
+    loadTrashData();
     loadOrderData();
     loadCustomerData();
     loadInfluencerData();
