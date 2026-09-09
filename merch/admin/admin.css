@@ -74,6 +74,9 @@ a {
   top: 0;
   height: 100vh;
   padding: 18px 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(14px);
   border-right: 1px solid var(--admin-panel-border);
@@ -2224,3 +2227,221 @@ body.merch-admin-page {
 .admin-combo-item span { display: grid; gap: 2px; }
 .admin-combo-item small { color: var(--admin-muted); }
 .admin-combo-item .admin-input { width: 110px; margin-left: auto; }
+
+/* Keep the admin shell inside the viewport on narrow portrait screens. */
+@media (max-width: 720px) {
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .admin-shell,
+  .admin-main,
+  .admin-content,
+  .admin-view {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .admin-shell {
+    display: block;
+  }
+
+  .admin-main {
+    overflow-x: hidden;
+  }
+
+  .admin-topbar {
+    width: 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 14px 12px;
+  }
+
+  .admin-topbar__left,
+  .admin-topbar__right {
+    width: 100%;
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+
+  .admin-topbar__left > div,
+  .admin-profile__meta {
+    min-width: 0;
+  }
+
+  .admin-topbar h1,
+  .admin-profile__meta strong,
+  .admin-profile__meta small {
+    overflow-wrap: anywhere;
+  }
+
+  .admin-profile {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .admin-profile__meta {
+    overflow: hidden;
+  }
+
+  .admin-content {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .admin-card,
+  .admin-section,
+  .admin-grid,
+  .admin-grid > *,
+  .admin-card-grid,
+  .admin-card-grid > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .admin-table-wrap,
+  .admin-influencer-table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
+
+/* This sits after the visual-system overrides so phone layouts remain stacked. */
+@media (max-width: 980px) {
+  .admin-card-grid--2,
+  .admin-card-grid--3,
+  .admin-grid--two,
+  .admin-grid--three,
+  .admin-report-grid,
+  .admin-form__grid,
+  .admin-view__split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-topbar { padding: 16px; }
+  .admin-profile { min-width: 0; }
+}
+
+@media (max-width: 720px) {
+  :root { --admin-radius: 14px; }
+
+  .admin-content { gap: 12px; padding: 0 10px 20px; }
+  .admin-view, .admin-grid, .admin-card-grid { gap: 12px; }
+  .admin-section__head { padding: 16px 16px 0; gap: 12px; }
+  .admin-section__title { font-size: 20px; }
+  .admin-section__desc, .admin-card__sub { font-size: 12px; line-height: 1.45; }
+  .admin-section__body, .admin-card__body { padding: 16px; }
+  .admin-card__head, .admin-card__foot { padding: 16px; }
+  .admin-card__title { font-size: 16px; }
+
+  .admin-card__head--with-filter,
+  .admin-card__head--with-actions,
+  .admin-toolbar,
+  .admin-orders-filter-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-toolbar__group,
+  .admin-toolbar__group[style],
+  .admin-date-filter,
+  .admin-revenue-controls,
+  .admin-status-filter,
+  .admin-revenue-filter {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+
+  /* Inline desktop search widths become vertical flex heights after stacking. */
+  .admin-toolbar__group[style] {
+    flex: 0 1 auto !important;
+  }
+
+  .admin-toolbar {
+    justify-content: flex-start;
+    margin-bottom: 12px;
+  }
+
+  .admin-orders-date-range {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .admin-orders-date-range > .admin-btn,
+  .admin-orders-date-range > label { width: 100%; min-width: 0; }
+
+  .admin-revenue-card .admin-card__body { min-height: 0; }
+  .admin-revenue-chart__plot { height: 190px; padding-left: 2px; padding-right: 2px; }
+  .admin-revenue-chart__grid, .admin-revenue-chart__svg { left: 2px; right: 2px; width: calc(100% - 4px); }
+  .admin-revenue-chart__bar-wrap strong { font-size: 8px; }
+  .admin-revenue-chart__labels { padding-left: 2px; padding-right: 2px; }
+  .admin-revenue-chart__labels span { font-size: 9px; }
+  .admin-chart-ring { width: min(218px, 100%); margin-inline: auto; }
+
+  .admin-coupon-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-coupon-overview__item--wide { grid-column: 1 / -1; }
+
+  .admin-customer-table { min-width: 0; }
+  .admin-customer-table thead { display: none; }
+  .admin-customer-table,
+  .admin-customer-table tbody,
+  .admin-customer-table tr,
+  .admin-customer-table td { display: block; width: 100%; }
+
+  .admin-customer-table tr {
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  }
+
+  .admin-customer-table td {
+    display: grid;
+    grid-template-columns: minmax(92px, 38%) minmax(0, 1fr);
+    gap: 10px;
+    padding: 5px 0;
+    border: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .admin-customer-table td::before {
+    content: attr(data-label);
+    color: var(--admin-subtle);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+}
+
+@media (max-width: 400px) {
+  .admin-topbar {
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .admin-topbar__left {
+    width: auto;
+    flex: 1 1 auto;
+  }
+
+  .admin-topbar__right {
+    width: auto;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+
+  .admin-topbar h1 { font-size: 26px; }
+  .admin-pill { min-width: 58px; padding: 11px 12px; font-size: 16px; }
+  .admin-profile { width: auto; padding: 7px 9px; }
+  .admin-profile__avatar { width: 40px; height: 40px; }
+  .admin-profile__meta strong { font-size: 13px; }
+  .admin-profile__meta small { font-size: 11px; }
+}
