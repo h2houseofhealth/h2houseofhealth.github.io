@@ -2815,7 +2815,7 @@
                 <p class="admin-card__sub">${filtered.length} customer(s) matched</p>
               </div>
               <div class="admin-card__body admin-table-wrap">
-                <table class="admin-table">
+                <table class="admin-table admin-customer-table">
                   <thead>
                     <tr>
                       <th>Name</th>
@@ -2831,14 +2831,14 @@
                   <tbody>
                     ${filtered.map((customer) => `
                       <tr data-action="select-customer" data-id="${customer.id}" style="cursor:pointer;">
-                        <td><strong>${escapeHtml(customer.name)}</strong></td>
-                        <td>${escapeHtml(customer.email)}</td>
-                        <td>${escapeHtml(customer.phone)}</td>
-                        <td>${escapeHtml(formatCount(customer.merchandiseOrders))}</td>
-                        <td>${customer.lastOrder?.couponCode ? `${escapeHtml(customer.lastOrder.couponCode)}<br><span class="admin-table__muted">${escapeHtml(money(customer.lastOrder.discountAmount))}</span>` : '—'}</td>
-                        <td>${escapeHtml(customer.lastOrder?.orderNumber ? `${customer.lastOrder.orderNumber}${customer.lastOrder.createdAt ? ` - ${dateLabel(customer.lastOrder.createdAt)}` : ''}` : customer.lastOrderLabel || 'No orders yet')}</td>
-                        <td>${escapeHtml(customer.addressSummary || 'No saved addresses')}</td>
-                        <td>${escapeHtml(dateLabel(customer.registrationDate || customer.registeredAt))}</td>
+                        <td data-label="Name"><strong>${escapeHtml(customer.name)}</strong></td>
+                        <td data-label="Email">${escapeHtml(customer.email)}</td>
+                        <td data-label="Phone">${escapeHtml(customer.phone)}</td>
+                        <td data-label="Merchandise orders">${escapeHtml(formatCount(customer.merchandiseOrders))}</td>
+                        <td data-label="Coupon / discount">${customer.lastOrder?.couponCode ? `${escapeHtml(customer.lastOrder.couponCode)}<br><span class="admin-table__muted">${escapeHtml(money(customer.lastOrder.discountAmount))}</span>` : '—'}</td>
+                        <td data-label="Last order">${escapeHtml(customer.lastOrder?.orderNumber ? `${customer.lastOrder.orderNumber}${customer.lastOrder.createdAt ? ` - ${dateLabel(customer.lastOrder.createdAt)}` : ''}` : customer.lastOrderLabel || 'No orders yet')}</td>
+                        <td data-label="Addresses">${escapeHtml(customer.addressSummary || 'No saved addresses')}</td>
+                        <td data-label="Registration date">${escapeHtml(dateLabel(customer.registrationDate || customer.registeredAt))}</td>
                       </tr>
                     `).join('')}
                   </tbody>
@@ -4618,6 +4618,23 @@
     return state.products.filter((item) => state.selectedProductIds.includes(item.id));
   }
 
+  function createLocalProductDuplicate(product) {
+    const duplicateId = Date.now() + Math.floor(Math.random() * 1000);
+    return {
+      ...product,
+      id: duplicateId,
+      productId: duplicateId,
+      parentProductId: duplicateId,
+      variantId: duplicateId,
+      sourceProductId: Number(product.parentProductId || product.productId || product.id),
+      isLocalDuplicate: true,
+      name: `${product.name} Copy`,
+      slug: `${product.slug || product.name || 'product'}-copy-${duplicateId}`,
+      sku: `${product.sku}-COPY-${duplicateId}`,
+      createdAt: toISODate(today),
+    };
+  }
+
   async function deleteMerchProduct(productId) {
     try {
       await apiRequest(`/api/merch/admin/products/${encodeURIComponent(productId)}`, { method: 'DELETE' });
@@ -4955,7 +4972,7 @@
       }
       case 'duplicate-product':
         if (product) {
-          const duplicate = { ...product, id: Date.now(), name: `${product.name} Copy`, sku: `${product.sku}-COPY`, createdAt: toISODate(today) };
+          const duplicate = createLocalProductDuplicate(product);
           state.products.unshift(duplicate);
           state.selectedProductIds = [];
           toast('Product duplicated', `${product.name} was copied to the catalog.`, 'success');
@@ -4972,6 +4989,13 @@
         return;
       case 'delete-product':
         if (product) {
+          if (product.isLocalDuplicate) {
+            state.products = state.products.filter((item) => Number(item.id) !== Number(product.id));
+            state.selectedProductIds = state.selectedProductIds.filter((itemId) => Number(itemId) !== Number(product.id));
+            toast('Duplicate removed', `${product.name} was removed.`, 'success');
+            renderProducts();
+            return;
+          }
           const productId = Number(product.parentProductId || product.productId || product.id);
           openConfirmModal({
             title: 'Delete product',
@@ -4993,7 +5017,7 @@
         return;
       case 'bulk-duplicate':
         selectedProductsOnPage().forEach((item) => {
-          state.products.unshift({ ...item, id: Date.now() + Math.floor(Math.random() * 1000), name: `${item.name} Copy`, sku: `${item.sku}-COPY`, createdAt: toISODate(today) });
+          state.products.unshift(createLocalProductDuplicate(item));
         });
         state.selectedProductIds = [];
         toast('Bulk duplicate complete', 'Selected products were copied.', 'success');
@@ -5079,17 +5103,27 @@
           message: 'Remove all selected products from the customer storefront? Existing order history will be preserved.',
           confirmLabel: 'Delete',
           onConfirm: async () => {
-            const ids = [...new Set(state.products
-              .filter((item) => state.selectedProductIds.includes(item.id))
+            const selected = selectedProductsOnPage();
+            const localDuplicateIds = new Set(selected.filter((item) => item.isLocalDuplicate).map((item) => Number(item.id)));
+            const ids = [...new Set(selected
+              .filter((item) => !item.isLocalDuplicate)
               .map((item) => Number(item.parentProductId || item.productId || item.id))
               .filter((itemId) => Number.isInteger(itemId) && itemId > 0))];
             try {
               const results = [];
               for (const productId of ids) results.push(await deleteMerchProduct(productId));
+              if (localDuplicateIds.size) {
+                state.products = state.products.filter((item) => !localDuplicateIds.has(Number(item.id)));
+              }
               state.selectedProductIds = [];
-              await loadProductData();
+              if (ids.length) await loadProductData();
               const archivedCount = results.filter((item) => item.archived).length;
-              toast('Bulk delete complete', `${ids.length - archivedCount} deleted${archivedCount ? `, ${archivedCount} hidden to preserve order history` : ''}.`, 'danger');
+              const removedCount = localDuplicateIds.size;
+              const summary = [
+                ids.length ? `${ids.length - archivedCount} deleted${archivedCount ? `, ${archivedCount} hidden to preserve order history` : ''}` : '',
+                removedCount ? `${removedCount} duplicate${removedCount === 1 ? '' : 's'} removed` : '',
+              ].filter(Boolean).join('; ');
+              toast('Bulk delete complete', `${summary}.`, 'danger');
               renderAll();
             } catch (error) {
               toast('Bulk delete failed', error.message || 'Unable to remove the selected products.', 'warning');
