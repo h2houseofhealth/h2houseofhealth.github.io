@@ -183,6 +183,38 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   // previous admin delete flow. Existing stock values are preserved.
   const bundledProductRestores = [
     {
+      name: 'Zenith Hoodie - Black',
+      slug: 'zenith-hoodie-black',
+      description: 'Heavyweight 450 GSM organic cotton blend hoodie with structured premium silhouette.',
+      category: 'hoodies',
+      basePrice: 349900,
+      image: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146&width=600',
+      weight: 650,
+      variants: [
+        ['HM-HOD-BLK-S', 'S', 'Black', 349900, 35],
+        ['HM-HOD-BLK-M', 'M', 'Black', 349900, 35],
+        ['HM-HOD-BLK-L', 'L', 'Black', 349900, 35],
+        ['HM-HOD-BLK-XL', 'XL', 'Black', 349900, 35],
+        ['HM-HOD-BLK-XXL', 'XXL', 'Black', 349900, 35],
+      ],
+    },
+    {
+      name: 'Zenith Hoodie - Sand',
+      slug: 'zenith-hoodie-sand',
+      description: 'Same Zenith frame in earthy sand colourway. 450 GSM organic cotton blend.',
+      category: 'hoodies',
+      basePrice: 349900,
+      image: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146&width=600',
+      weight: 650,
+      variants: [
+        ['HM-HOD-SND-S', 'S', 'Sand', 349900, 35],
+        ['HM-HOD-SND-M', 'M', 'Sand', 349900, 35],
+        ['HM-HOD-SND-L', 'L', 'Sand', 349900, 35],
+        ['HM-HOD-SND-XL', 'XL', 'Sand', 349900, 35],
+        ['HM-HOD-SND-XXL', 'XXL', 'Sand', 349900, 35],
+      ],
+    },
+    {
       name: 'H2 Molecular Hydrogen Water Bottle',
       slug: 'h2-water-bottle',
       description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 3 minutes. BPA-free, USB-C rechargeable.',
