@@ -3055,11 +3055,13 @@ body.is-auth-loading .merch-auth-cta {
 }
 
 .gallery-main {
+  position: relative;
   width: 100%;
   aspect-ratio: 1;
   border-radius: var(--radius);
   overflow: hidden;
   background: #f5f0eb;
+  cursor: zoom-in;
 }
 
 .gallery-main img {
@@ -3068,6 +3070,54 @@ body.is-auth-loading .merch-auth-cta {
   object-fit: contain;
   padding: 16px;
 }
+
+.gallery-magnifier {
+  position: absolute;
+  z-index: 2;
+  width: clamp(112px, 24%, 164px);
+  aspect-ratio: 1;
+  pointer-events: none;
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  border-radius: 50%;
+  box-shadow: 0 8px 22px rgba(31, 21, 14, 0.24);
+  background-color: #f5f0eb;
+  background-repeat: no-repeat;
+  background-size: 260%;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.9);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.gallery-magnifier.is-visible {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.gallery-nav {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(48, 30, 18, 0.16);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition: background var(--transition), color var(--transition), transform var(--transition);
+}
+
+.gallery-nav:hover,
+.gallery-nav:focus-visible {
+  background: var(--primary);
+  color: #fff;
+}
+
+.gallery-nav--previous { left: 12px; }
+.gallery-nav--next { right: 12px; }
 
 .gallery-thumbs {
   display: flex;
@@ -3093,6 +3143,11 @@ body.is-auth-loading .merch-auth-cta {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .gallery-main { cursor: default; }
+  .gallery-magnifier { display: none; }
 }
 
 .detail-kicker {
