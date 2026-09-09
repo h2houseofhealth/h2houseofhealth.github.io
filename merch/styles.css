@@ -5292,10 +5292,11 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
   }
 
   .category-card {
-    min-height: 420px;
+    min-height: 540px;
     padding: 24px;
     border-radius: 24px;
     scroll-snap-align: unset;
+    overflow: hidden;
   }
 
   .category-card__copy {
@@ -5309,13 +5310,27 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
 
   .category-card__image {
     right: 18px;
-    bottom: 20px;
-    width: 70%;
-    height: 48%;
+    bottom: 28px;
+    width: 64%;
+    height: 54%;
+    overflow: visible;
+  }
+
+  /* The larger mobile image zone lets contain do the primary sizing. These
+     values only compensate for the source PNGs' different visible bounds. */
+  .category-card__image .category-card__product--mist {
+    --category-product-scale: .96;
+    --category-product-offset: -25%;
+  }
+
+  .category-card__image .category-card__product--bottle {
+    --category-product-scale: .85;
+    --category-product-offset: -25%;
   }
 
   .category-card__image .category-card__product--hoodie {
-    max-width: 112%;
+    --category-product-scale: 1.20;
+    --category-product-offset: 0;
   }
 }
 
