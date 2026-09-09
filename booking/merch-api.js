@@ -90,6 +90,18 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   if (!hasColumn('merch_products', 'is_combo')) {
     db.exec('ALTER TABLE merch_products ADD COLUMN is_combo INTEGER NOT NULL DEFAULT 0');
   }
+  if (!hasColumn('merch_products', 'deleted_at')) {
+    db.exec('ALTER TABLE merch_products ADD COLUMN deleted_at TEXT');
+  }
+  if (!hasColumn('merch_products', 'deleted_by')) {
+    db.exec('ALTER TABLE merch_products ADD COLUMN deleted_by TEXT');
+  }
+  if (!hasColumn('merch_products', 'deletion_reason')) {
+    db.exec('ALTER TABLE merch_products ADD COLUMN deletion_reason TEXT');
+  }
+  if (!hasColumn('merch_products', 'deleted_previous_is_active')) {
+    db.exec('ALTER TABLE merch_products ADD COLUMN deleted_previous_is_active INTEGER NOT NULL DEFAULT 1');
+  }
   // combo_purchase was the old flag-only implementation. Real combo cards
   // are represented by is_combo products and their component rows below.
   db.prepare('UPDATE merch_products SET combo_purchase = 0 WHERE is_combo = 0').run();
@@ -133,6 +145,18 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+  if (!hasColumn('merch_variants', 'deleted_at')) {
+    db.exec('ALTER TABLE merch_variants ADD COLUMN deleted_at TEXT');
+  }
+  if (!hasColumn('merch_variants', 'deleted_by')) {
+    db.exec('ALTER TABLE merch_variants ADD COLUMN deleted_by TEXT');
+  }
+  if (!hasColumn('merch_variants', 'deletion_reason')) {
+    db.exec('ALTER TABLE merch_variants ADD COLUMN deletion_reason TEXT');
+  }
+  if (!hasColumn('merch_variants', 'deleted_previous_is_active')) {
+    db.exec('ALTER TABLE merch_variants ADD COLUMN deleted_previous_is_active INTEGER NOT NULL DEFAULT 1');
+  }
 
   // Restore the bundled hoodie catalog if it was removed by the previous
   // soft-delete implementation. Only restore products whose entire variant
@@ -144,6 +168,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       FROM merch_products p
       WHERE p.slug = ?
         AND p.is_active = 0
+        AND p.deleted_at IS NULL
         AND EXISTS (SELECT 1 FROM merch_variants v WHERE v.product_id = p.id)
         AND NOT EXISTS (SELECT 1 FROM merch_variants v WHERE v.product_id = p.id AND v.is_active = 1)
     `).get(slug);
@@ -157,6 +182,38 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   // Restore the other bundled merch products if they were removed by the
   // previous admin delete flow. Existing stock values are preserved.
   const bundledProductRestores = [
+    {
+      name: 'Zenith Hoodie - Black',
+      slug: 'zenith-hoodie-black',
+      description: 'Heavyweight 450 GSM organic cotton blend hoodie with structured premium silhouette.',
+      category: 'hoodies',
+      basePrice: 349900,
+      image: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146&width=600',
+      weight: 650,
+      variants: [
+        ['HM-HOD-BLK-S', 'S', 'Black', 349900, 35],
+        ['HM-HOD-BLK-M', 'M', 'Black', 349900, 35],
+        ['HM-HOD-BLK-L', 'L', 'Black', 349900, 35],
+        ['HM-HOD-BLK-XL', 'XL', 'Black', 349900, 35],
+        ['HM-HOD-BLK-XXL', 'XXL', 'Black', 349900, 35],
+      ],
+    },
+    {
+      name: 'Zenith Hoodie - Sand',
+      slug: 'zenith-hoodie-sand',
+      description: 'Same Zenith frame in earthy sand colourway. 450 GSM organic cotton blend.',
+      category: 'hoodies',
+      basePrice: 349900,
+      image: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146&width=600',
+      weight: 650,
+      variants: [
+        ['HM-HOD-SND-S', 'S', 'Sand', 349900, 35],
+        ['HM-HOD-SND-M', 'M', 'Sand', 349900, 35],
+        ['HM-HOD-SND-L', 'L', 'Sand', 349900, 35],
+        ['HM-HOD-SND-XL', 'XL', 'Sand', 349900, 35],
+        ['HM-HOD-SND-XXL', 'XXL', 'Sand', 349900, 35],
+      ],
+    },
     {
       name: 'H2 Molecular Hydrogen Water Bottle',
       slug: 'h2-water-bottle',
@@ -189,7 +246,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     },
   ];
   const restoreProduct = db.transaction((product) => {
-    let row = db.prepare('SELECT id FROM merch_products WHERE slug = ?').get(product.slug);
+    let row = db.prepare('SELECT id, deleted_at AS deletedAt FROM merch_products WHERE slug = ?').get(product.slug);
+    // A deleted bundled product is an intentional Trash record. Do not
+    // recreate it under the same unique slug or silently restore it here.
+    if (row?.deletedAt) return;
     if (!row) {
       const result = db.prepare(`
         INSERT INTO merch_products (name, slug, description, category, base_price, image_url, gst_rate, weight_grams, is_active)
@@ -197,7 +257,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       `).run(product.name, product.slug, product.description, product.category, product.basePrice, product.image, product.weight);
       row = { id: Number(result.lastInsertRowid) };
     } else {
-      db.prepare("UPDATE merch_products SET is_active = 1, updated_at = datetime('now') WHERE id = ?").run(row.id);
+      db.prepare("UPDATE merch_products SET is_active = 1, updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL").run(row.id);
     }
     const insertVariant = db.prepare('INSERT OR IGNORE INTO merch_variants (product_id, sku, size, color, price, stock) VALUES (?, ?, ?, ?, ?, ?)');
     const activateVariant = db.prepare('UPDATE merch_variants SET is_active = 1 WHERE product_id = ? AND sku = ?');
@@ -469,7 +529,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
              p.is_active AS productActive
       FROM merch_product_hypes h
       JOIN merch_products p ON p.id = h.product_id
-      ${includeInactive ? '' : 'WHERE p.is_active = 1'}
+      ${includeInactive ? '' : 'WHERE p.is_active = 1 AND p.deleted_at IS NULL'}
       ORDER BY h.id ASC
     `).all().map((row) => ({ ...row, effectiveLabel: getMerchHypeLabel(row) }));
   }
@@ -1416,7 +1476,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       </html>`;
   }
 
-  function getMerchProductVariants(productIds = [], { includeInactive = false } = {}) {
+  function getMerchProductVariants(productIds = [], { includeInactive = false, includeDeleted = false } = {}) {
     const ids = Array.isArray(productIds)
       ? productIds.map((value) => Number(value)).filter((value) => Number.isInteger(value))
       : [];
@@ -1428,9 +1488,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       params.push(...ids);
     }
     if (!includeInactive) clauses.push('is_active = 1');
+    if (!includeDeleted) clauses.push('deleted_at IS NULL');
 
     let sql = `
-      SELECT id, product_id AS productId, sku, size, color, price, stock, is_active AS isActive, created_at AS createdAt
+      SELECT id, product_id AS productId, sku, size, color, price, stock, is_active AS isActive, created_at AS createdAt,
+             deleted_at AS deletedAt, deleted_by AS deletedBy, deletion_reason AS deletionReason,
+             deleted_previous_is_active AS deletedPreviousIsActive
       FROM merch_variants
     `;
     if (clauses.length) sql += ` WHERE ${clauses.join(' AND ')}`;
@@ -1574,6 +1637,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         stock: Number(variant.stock || 0),
         isActive: Number(variant.isActive ?? 1),
         createdAt: variant.createdAt || null,
+        deletedAt: variant.deletedAt || null,
+        deletedBy: variant.deletedBy || null,
+        deletionReason: variant.deletionReason || null,
       })),
       variantCount: activeVariants.length,
       primarySku: String(primaryVariant?.sku || ''),
@@ -1603,19 +1669,24 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       weightGrams: Number(product.weight_grams || 0),
       createdAt: product.created_at || null,
       updatedAt: product.updated_at || null,
+      deletedAt: product.deleted_at || null,
+      deletedBy: product.deleted_by || null,
+      deletionReason: product.deletion_reason || null,
+      isDeleted: Boolean(product.deleted_at),
       lowStockThreshold: LOW_STOCK_THRESHOLD,
     };
   }
 
-  function loadMerchProductCatalog({ includeInactive = false } = {}) {
+  function loadMerchProductCatalog({ includeInactive = false, includeDeleted = false } = {}) {
     const productRows = db.prepare(`
-      SELECT id, name, slug, description, specifications_json, category, base_price, image_url, images_json, is_active, gst_rate, weight_grams, combo_purchase, is_combo, created_at, updated_at
+      SELECT id, name, slug, description, specifications_json, category, base_price, image_url, images_json, is_active, gst_rate, weight_grams, combo_purchase, is_combo, created_at, updated_at, deleted_at, deleted_by, deletion_reason, deleted_previous_is_active
       FROM merch_products
-      ${includeInactive ? '' : 'WHERE is_active = 1'}
+      WHERE ${includeDeleted ? '1 = 1' : 'deleted_at IS NULL'}
+        ${includeInactive ? '' : 'AND is_active = 1'}
       ORDER BY datetime(created_at) DESC, id DESC
     `).all();
     const productIds = productRows.map((product) => Number(product.id));
-    const variantRows = getMerchProductVariants(productIds, { includeInactive });
+    const variantRows = getMerchProductVariants(productIds, { includeInactive, includeDeleted });
     const salesMap = getMerchProductSalesMap();
     const variantsByProductId = new Map();
 
@@ -3525,7 +3596,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       SELECT v.*, p.name AS product_name, p.gst_rate, p.is_combo
       FROM merch_variants v
       JOIN merch_products p ON p.id = v.product_id
-      WHERE v.id = ? AND v.is_active = 1 AND p.is_active = 1
+      WHERE v.id = ? AND v.is_active = 1 AND p.is_active = 1 AND p.deleted_at IS NULL
     `).get(Number(variantId));
     if (!variant) return null;
     const components = Number(variant.is_combo || 0) === 1
@@ -3534,7 +3605,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
                  v.sku, v.size, v.color, p.name AS productName
           FROM merch_combo_items ci
           JOIN merch_variants v ON v.id = ci.component_variant_id AND v.is_active = 1
-          JOIN merch_products p ON p.id = ci.component_product_id AND p.is_active = 1
+          JOIN merch_products p ON p.id = ci.component_product_id AND p.is_active = 1 AND p.deleted_at IS NULL
           WHERE ci.combo_product_id = ?
           ORDER BY ci.id ASC
         `).all(Number(variant.product_id))
@@ -5063,7 +5134,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       if (label === 'Custom Label' && (!customLabel || customLabel.length > 60)) {
         return res.status(400).json({ message: 'Custom labels must be between 1 and 60 characters.' });
       }
-      const product = db.prepare('SELECT id FROM merch_products WHERE id = ? AND is_active = 1').get(productId);
+      const product = db.prepare('SELECT id FROM merch_products WHERE id = ? AND is_active = 1 AND deleted_at IS NULL').get(productId);
       if (!product) return res.status(400).json({ message: 'One or more selected products are unavailable.' });
       seenProductIds.add(productId);
       hypes.push({ productId, label, customLabel: label === 'Custom Label' ? customLabel : null });
@@ -5089,6 +5160,190 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const products = loadMerchProductCatalog({ includeInactive: true })
       .filter((product) => Array.isArray(product.variants) && product.variants.some((variant) => Number(variant.isActive ?? 1) === 1));
     res.json(products);
+  });
+
+  // ─── ADMIN: Deleted products / recycle bin ───
+  app.get('/api/merch/admin/products/trash', requireAdmin, (req, res) => {
+    const products = loadMerchProductCatalog({ includeInactive: true, includeDeleted: true })
+      .filter((product) => product.isDeleted || product.variants?.some((variant) => variant.deletedAt))
+      .map((product) => ({
+        ...product,
+        variantCount: Array.isArray(product.variants) ? product.variants.length : 0,
+        deletedVariantCount: Array.isArray(product.variants) ? product.variants.filter((variant) => variant.deletedAt).length : 0,
+      }));
+    res.json(products);
+  });
+
+  function parseExplicitProductIds(body) {
+    if (!Array.isArray(body?.productIds)) return null;
+    return [...new Set(body.productIds
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value > 0))];
+  }
+
+  app.post('/api/merch/admin/products/trash', requireAdmin, (req, res) => {
+    const productIds = parseExplicitProductIds(req.body);
+    if (!productIds?.length) {
+      return res.status(400).json({ message: 'Select at least one product to move to Trash.' });
+    }
+    const placeholders = productIds.map(() => '?').join(', ');
+    const products = db.prepare(`SELECT id FROM merch_products WHERE id IN (${placeholders}) AND deleted_at IS NULL`).all(...productIds);
+    if (products.length !== productIds.length) {
+      return res.status(400).json({ message: 'Every selected product must be active and not already in Trash.' });
+    }
+    db.prepare(`
+      UPDATE merch_products
+      SET deleted_previous_is_active = is_active,
+          is_active = 0,
+          deleted_at = datetime('now'),
+          deleted_by = ?,
+          deletion_reason = ?,
+          updated_at = datetime('now')
+      WHERE id IN (${placeholders}) AND deleted_at IS NULL
+    `).run(String(req.user?.email || req.user?.id || 'admin'), String(req.body?.reason || '').trim() || null, ...productIds);
+    res.json({ trashedIds: productIds, trashedCount: productIds.length });
+  });
+
+  app.post('/api/merch/admin/variants/trash', requireAdmin, (req, res) => {
+    const variantIds = parseExplicitProductIds(req.body);
+    if (!variantIds?.length) {
+      return res.status(400).json({ message: 'Select at least one variant to move to Trash.' });
+    }
+    const placeholders = variantIds.map(() => '?').join(', ');
+    const variants = db.prepare(`
+      SELECT v.id
+      FROM merch_variants v
+      JOIN merch_products p ON p.id = v.product_id
+      WHERE v.id IN (${placeholders}) AND v.deleted_at IS NULL AND p.deleted_at IS NULL
+    `).all(...variantIds);
+    if (variants.length !== variantIds.length) {
+      return res.status(400).json({ message: 'Every selected variant must be active and not already in Trash.' });
+    }
+    db.prepare(`
+      UPDATE merch_variants
+      SET deleted_previous_is_active = is_active,
+          is_active = 0,
+          deleted_at = datetime('now'),
+          deleted_by = ?,
+          deletion_reason = ?
+      WHERE id IN (${placeholders}) AND deleted_at IS NULL
+    `).run(String(req.user?.email || req.user?.id || 'admin'), String(req.body?.reason || '').trim() || null, ...variantIds);
+    res.json({ trashedIds: variantIds, trashedCount: variantIds.length });
+  });
+
+  app.post('/api/merch/admin/products/restore', requireAdmin, (req, res) => {
+    const productIds = parseExplicitProductIds(req.body);
+    if (!productIds?.length) {
+      return res.status(400).json({ message: 'Select at least one deleted product to restore.' });
+    }
+    const placeholders = productIds.map(() => '?').join(', ');
+    const deletedRows = db.prepare(`SELECT id FROM merch_products WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).all(...productIds);
+    if (deletedRows.length !== productIds.length) {
+      return res.status(400).json({ message: 'Every selected product must be in Trash.' });
+    }
+    db.prepare(`
+      UPDATE merch_products
+      SET is_active = COALESCE(deleted_previous_is_active, 1),
+          deleted_at = NULL,
+          deleted_by = NULL,
+          deletion_reason = NULL,
+          updated_at = datetime('now')
+      WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL
+    `).run(...productIds);
+    res.json({ restoredIds: productIds });
+  });
+
+  app.post('/api/merch/admin/variants/restore', requireAdmin, (req, res) => {
+    const variantIds = parseExplicitProductIds(req.body);
+    if (!variantIds?.length) {
+      return res.status(400).json({ message: 'Select at least one deleted variant to restore.' });
+    }
+    const placeholders = variantIds.map(() => '?').join(', ');
+    const deletedRows = db.prepare(`
+      SELECT v.id
+      FROM merch_variants v
+      JOIN merch_products p ON p.id = v.product_id
+      WHERE v.id IN (${placeholders}) AND v.deleted_at IS NOT NULL AND p.deleted_at IS NULL
+    `).all(...variantIds);
+    if (deletedRows.length !== variantIds.length) {
+      return res.status(400).json({ message: 'Every selected variant must be in Trash under an active product.' });
+    }
+    db.prepare(`
+      UPDATE merch_variants
+      SET is_active = COALESCE(deleted_previous_is_active, 1),
+          deleted_at = NULL,
+          deleted_by = NULL,
+          deletion_reason = NULL
+      WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL
+    `).run(...variantIds);
+    res.json({ restoredIds: variantIds });
+  });
+
+  app.post('/api/merch/admin/products/permanent-delete', requireAdmin, (req, res) => {
+    const productIds = parseExplicitProductIds(req.body);
+    if (!productIds?.length) {
+      return res.status(400).json({ message: 'Select at least one Trash product to permanently delete.' });
+    }
+    if (String(req.body?.confirmation || '').trim() !== 'PERMANENTLY DELETE') {
+      return res.status(400).json({ message: 'Type PERMANENTLY DELETE to confirm this irreversible action.' });
+    }
+    const placeholders = productIds.map(() => '?').join(', ');
+    const deletedRows = db.prepare(`SELECT id FROM merch_products WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).all(...productIds);
+    if (deletedRows.length !== productIds.length) {
+      return res.status(400).json({ message: 'Every selected product must already be in Trash.' });
+    }
+    const variantRowsForOrders = db.prepare(`SELECT id FROM merch_variants WHERE product_id IN (${placeholders})`).all(...productIds);
+    const variantIdsForOrders = variantRowsForOrders.map((row) => Number(row.id));
+    if (variantIdsForOrders.length) {
+      const variantPlaceholders = variantIdsForOrders.map(() => '?').join(', ');
+      const orderReference = db.prepare(`SELECT 1 FROM merch_order_items WHERE variant_id IN (${variantPlaceholders}) LIMIT 1`).get(...variantIdsForOrders);
+      if (orderReference) {
+        return res.status(409).json({ message: 'This product is referenced by order history and cannot be permanently deleted.' });
+      }
+    }
+    const permanentDelete = db.transaction(() => {
+      const variantRows = db.prepare(`SELECT id FROM merch_variants WHERE product_id IN (${placeholders})`).all(...productIds);
+      const variantIds = variantRows.map((row) => Number(row.id));
+      if (variantIds.length) {
+        const variantPlaceholders = variantIds.map(() => '?').join(', ');
+        db.prepare(`DELETE FROM merch_customer_cart_items WHERE variant_id IN (${variantPlaceholders})`).run(...variantIds);
+        db.prepare(`DELETE FROM merch_customer_wishlist_items WHERE variant_id IN (${variantPlaceholders})`).run(...variantIds);
+      }
+      db.prepare(`DELETE FROM merch_customer_wishlist_items WHERE product_id IN (${placeholders})`).run(...productIds);
+      db.prepare(`DELETE FROM merch_combo_items WHERE combo_product_id IN (${placeholders}) OR component_product_id IN (${placeholders})`).run(...productIds, ...productIds);
+      db.prepare(`DELETE FROM merch_product_hypes WHERE product_id IN (${placeholders})`).run(...productIds);
+      db.prepare(`DELETE FROM merch_variants WHERE product_id IN (${placeholders})`).run(...productIds);
+      db.prepare(`DELETE FROM merch_products WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).run(...productIds);
+    });
+    permanentDelete();
+    res.json({ permanentlyDeletedIds: productIds });
+  });
+
+  app.post('/api/merch/admin/variants/permanent-delete', requireAdmin, (req, res) => {
+    const variantIds = parseExplicitProductIds(req.body);
+    if (!variantIds?.length) {
+      return res.status(400).json({ message: 'Select at least one Trash variant to permanently delete.' });
+    }
+    if (String(req.body?.confirmation || '').trim() !== 'PERMANENTLY DELETE') {
+      return res.status(400).json({ message: 'Type PERMANENTLY DELETE to confirm this irreversible action.' });
+    }
+    const placeholders = variantIds.map(() => '?').join(', ');
+    const deletedRows = db.prepare(`SELECT id FROM merch_variants WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).all(...variantIds);
+    if (deletedRows.length !== variantIds.length) {
+      return res.status(400).json({ message: 'Every selected variant must already be in Trash.' });
+    }
+    const orderReference = db.prepare(`SELECT 1 FROM merch_order_items WHERE variant_id IN (${placeholders}) LIMIT 1`).get(...variantIds);
+    if (orderReference) {
+      return res.status(409).json({ message: 'A selected variant is referenced by order history and cannot be permanently deleted.' });
+    }
+    const permanentDelete = db.transaction(() => {
+      db.prepare(`DELETE FROM merch_customer_cart_items WHERE variant_id IN (${placeholders})`).run(...variantIds);
+      db.prepare(`DELETE FROM merch_customer_wishlist_items WHERE variant_id IN (${placeholders})`).run(...variantIds);
+      db.prepare(`DELETE FROM merch_combo_items WHERE component_variant_id IN (${placeholders})`).run(...variantIds);
+      db.prepare(`DELETE FROM merch_variants WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).run(...variantIds);
+    });
+    permanentDelete();
+    res.json({ permanentlyDeletedIds: variantIds });
   });
 
   // ADMIN: Store merch imagery in the server uploads directory and return the
@@ -5325,7 +5580,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   app.patch('/api/merch/admin/products/:id', requireAdmin, (req, res) => {
     const productId = Number(req.params.id);
     const body = req.body || {};
-    const product = db.prepare('SELECT * FROM merch_products WHERE id = ?').get(productId);
+    const product = db.prepare('SELECT * FROM merch_products WHERE id = ? AND deleted_at IS NULL').get(productId);
     if (!product) return res.status(404).json({ message: 'Product not found.' });
 
     const variantId = Number(body.variantId || 0);
@@ -5385,27 +5640,34 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   });
 
   // ADMIN: Remove a product from the storefront without breaking historical orders.
+  // Keep the catalog row as a reversible tombstone. Hard deletion loses the
+  // original product IDs, images, prices, and inventory needed for recovery.
   app.delete('/api/merch/admin/products/:id', requireAdmin, (req, res) => {
     const productId = Number(req.params.id);
     if (!Number.isInteger(productId) || productId <= 0) {
       return res.status(400).json({ message: 'A valid product id is required.' });
     }
     const product = db.prepare(`
-      SELECT p.id, p.name
+      SELECT p.id, p.name, p.is_active
       FROM merch_products p
       WHERE p.id = ?
-         OR p.id = (SELECT product_id FROM merch_variants WHERE id = ?)
+        AND p.deleted_at IS NULL
       LIMIT 1
-    `).get(productId, productId);
+    `).get(productId);
     if (!product) return res.status(404).json({ message: 'Product not found.' });
     db.transaction(() => {
-      // Order items retain a snapshot of product details and do not foreign-key
-      // the variant, so removing the catalog rows does not break order history.
-      db.prepare('DELETE FROM merch_combo_items WHERE combo_product_id = ? OR component_product_id = ?').run(Number(product.id), Number(product.id));
-      db.prepare('DELETE FROM merch_variants WHERE product_id = ?').run(Number(product.id));
-      db.prepare('DELETE FROM merch_products WHERE id = ?').run(Number(product.id));
+      db.prepare(`
+        UPDATE merch_products
+        SET deleted_previous_is_active = is_active,
+            is_active = 0,
+            deleted_at = datetime('now'),
+            deleted_by = ?,
+            deletion_reason = ?,
+            updated_at = datetime('now')
+        WHERE id = ? AND deleted_at IS NULL
+      `).run(String(req.user?.email || req.user?.id || 'admin'), String(req.body?.reason || '').trim() || null, Number(product.id));
     })();
-    res.json({ message: 'Product permanently removed from the catalog.', id: Number(product.id), name: product.name });
+    res.json({ message: 'Product moved to Trash.', id: Number(product.id), name: product.name, deleted: true });
   });
 
   // ─── ADMIN: Get inventory ───
@@ -5414,7 +5676,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       SELECT v.id, v.product_id AS productId, v.sku, v.size, v.color, v.price, v.stock, v.is_active AS isActive,
              v.created_at AS createdAt, p.name AS productName, p.category
       FROM merch_variants v
-      JOIN merch_products p ON p.id = v.product_id
+      JOIN merch_products p ON p.id = v.product_id AND p.deleted_at IS NULL
       ORDER BY v.stock ASC, v.id ASC
     `).all();
     res.json(variants);

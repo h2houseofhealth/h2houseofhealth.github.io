@@ -121,8 +121,20 @@
   };
 
   const FALLBACK_PRODUCT_IMAGE = '/booking/assets/service-hydrogen-session.jpg';
-  const BOTTLE_DETAIL_FEATURE_IMAGE = '/cdn/shop/files/h2-bottle-product-features.png';
-  const MIST_DETAIL_FEATURE_IMAGE = '/cdn/shop/files/h2-mist-product-features.png';
+  const BOTTLE_DETAIL_FEATURE_IMAGE = '/cdn/shop/files/h2-bottle-product-features-front.png';
+  const BOTTLE_DETAIL_FEATURE_SLIDES = [
+    { src: '/cdn/shop/files/h2-bottle-product-features-front.png', label: 'Hydrogen water bottle front view' },
+    { src: '/cdn/shop/files/h2-bottle-product-features-frontwithbag.png', label: 'Hydrogen water bottle with bag' },
+    { src: '/cdn/shop/files/h2-bottle-product-features-bottom.png', label: 'Hydrogen water bottle bottom view' },
+    { src: '/cdn/shop/files/h2-bottle-product-features-top.png', label: 'Hydrogen water bottle top view' },
+  ];
+  const MIST_DETAIL_FEATURE_IMAGE = '/cdn/shop/files/h2-mist-product-features-front.png';
+  const MIST_DETAIL_FEATURE_SLIDES = [
+    { src: '/cdn/shop/files/h2-mist-product-features-front.png', label: 'Hydrogen mist sprayer front view' },
+    { src: '/cdn/shop/files/h2-mist-product-features-top.png', label: 'Hydrogen mist sprayer tank view' },
+    { src: '/cdn/shop/files/h2-mist-product-features-chargeport.png', label: 'Hydrogen mist sprayer charge port view' },
+    { src: '/cdn/shop/files/h2-mist-product-features-side.png', label: 'Hydrogen mist sprayer side view' },
+  ];
   const HOODIE_DETAIL_FEATURE_IMAGE = '/cdn/shop/files/h2-hoodie-product-features.png';
 
 
@@ -384,6 +396,34 @@
     }
 
     return getGalleryVariantForIndex(product, index);
+  }
+
+  function isMistProduct(product) {
+    const category = String(product?.category || '').trim().toLowerCase();
+    const name = String(product?.name || '').trim().toLowerCase();
+    return category === 'sprays' || category.includes('mist') || name.includes('mist') || name.includes('spray');
+  }
+
+  function isBottleProduct(product) {
+    const category = String(product?.category || '').trim().toLowerCase();
+    const name = String(product?.name || '').trim().toLowerCase();
+    const slug = String(product?.slug || '').trim().toLowerCase();
+    return slug === 'molecular-hydrogen-water-bottle' || category === 'bottles' || category.includes('bottle') || name.includes('water bottle');
+  }
+
+  function getProductGallerySlides(product) {
+    const productImages = (product.images || []).filter(Boolean);
+    if (isMistProduct(product)) {
+      return MIST_DETAIL_FEATURE_SLIDES.map((slide) => ({ ...slide, productImageIndex: null }));
+    }
+    if (isBottleProduct(product)) {
+      return BOTTLE_DETAIL_FEATURE_SLIDES.map((slide) => ({ ...slide, productImageIndex: null }));
+    }
+    return productImages.map((src, productImageIndex) => ({
+      src,
+      label: `${product.name} view ${productImageIndex + 1}`,
+      productImageIndex,
+    }));
   }
 
   // â”€â”€â”€ Utility â”€â”€â”€
@@ -3627,38 +3667,74 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   function renderProductGallery(product) {
-    const mainImage = getProductDetailMainImage(product);
+    const slides = getProductGallerySlides(product);
+    const mainImage = slides[0]?.src || getProductDetailMainImage(product);
     els.productGallery.innerHTML = `
-      <div class="gallery-main">
+      <div class="gallery-main" tabindex="0" aria-label="${escapeHtml(product.name)} image gallery">
         <img id="galleryMainImg" src="${escapeHtml(mainImage)}" alt="${escapeHtml(product.name)}" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
+        <div class="gallery-magnifier" id="galleryMagnifier" aria-hidden="true"></div>
+        ${slides.length > 1 ? `
+          <button class="gallery-nav gallery-nav--previous" type="button" data-gallery-direction="previous" aria-label="Previous product image">&#8592;</button>
+          <button class="gallery-nav gallery-nav--next" type="button" data-gallery-direction="next" aria-label="Next product image">&#8594;</button>
+        ` : ''}
       </div>
-      ${(product.images || []).length > 1 ? `
+      ${slides.length > 1 ? `
         <div class="gallery-thumbs">
-          ${(product.images || []).map((img, i) => `
-            <button class="gallery-thumb ${i === 0 ? 'is-active' : ''}" data-index="${i}" type="button" aria-label="View image ${i + 1}${getGalleryVariantPrice(product, i) ? `, ${formatPrice(getGalleryVariantPrice(product, i))}` : ''}">
-              <img src="${img}" alt="Image ${i + 1}" />
+          ${slides.map((slide, i) => `
+            <button class="gallery-thumb ${i === 0 ? 'is-active' : ''}" data-index="${i}" type="button" aria-label="View ${escapeHtml(slide.label)}">
+              <img src="${escapeHtml(slide.src)}" alt="" />
             </button>
           `).join('')}
         </div>
       ` : ''}
     `;
 
-    // Thumb click handlers
-    els.productGallery.querySelectorAll('.gallery-thumb').forEach(thumb => {
-      thumb.addEventListener('click', () => {
-        const idx = Number(thumb.dataset.index);
-        document.getElementById('galleryMainImg').src = product.images?.[idx] || product.imageUrl || FALLBACK_PRODUCT_IMAGE;
-        els.productGallery.querySelectorAll('.gallery-thumb').forEach(t => t.classList.remove('is-active'));
-        thumb.classList.add('is-active');
-
-        const galleryVariant = getGalleryVariantFromThumb(product, idx);
+    let activeIndex = 0;
+    const main = els.productGallery.querySelector('.gallery-main');
+    const mainImageElement = document.getElementById('galleryMainImg');
+    const magnifier = document.getElementById('galleryMagnifier');
+    const setActiveSlide = (nextIndex) => {
+      activeIndex = (nextIndex + slides.length) % slides.length;
+      const slide = slides[activeIndex];
+      mainImageElement.src = slide.src;
+      mainImageElement.alt = slide.label;
+      magnifier.style.backgroundImage = `url("${slide.src}")`;
+      els.productGallery.querySelectorAll('.gallery-thumb').forEach((thumb, index) => {
+        thumb.classList.toggle('is-active', index === activeIndex);
+      });
+      if (Number.isInteger(slide.productImageIndex)) {
+        const galleryVariant = getGalleryVariantFromThumb(product, slide.productImageIndex);
         if (galleryVariant) {
           state.selectedVariant = galleryVariant;
           state.quantity = 1;
           renderProductInfo(product);
         }
-      });
+      }
+    };
+
+    els.productGallery.querySelectorAll('.gallery-thumb').forEach(thumb => {
+      thumb.addEventListener('click', () => setActiveSlide(Number(thumb.dataset.index)));
     });
+
+    els.productGallery.querySelectorAll('[data-gallery-direction]').forEach((button) => {
+      button.addEventListener('click', () => setActiveSlide(activeIndex + (button.dataset.galleryDirection === 'next' ? 1 : -1)));
+    });
+    main.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowRight') setActiveSlide(activeIndex + 1);
+      if (event.key === 'ArrowLeft') setActiveSlide(activeIndex - 1);
+    });
+    main.addEventListener('pointermove', (event) => {
+      if (event.pointerType === 'touch') return;
+      const rect = main.getBoundingClientRect();
+      const x = Math.min(Math.max(((event.clientX - rect.left) / rect.width) * 100, 0), 100);
+      const y = Math.min(Math.max(((event.clientY - rect.top) / rect.height) * 100, 0), 100);
+      magnifier.style.left = `${x}%`;
+      magnifier.style.top = `${y}%`;
+      magnifier.style.backgroundPosition = `${x}% ${y}%`;
+      magnifier.classList.add('is-visible');
+    });
+    main.addEventListener('pointerleave', () => magnifier.classList.remove('is-visible'));
+    magnifier.style.backgroundImage = `url("${mainImage}")`;
   }
 
   function getProductDetailMainImage(product) {
