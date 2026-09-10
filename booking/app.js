@@ -343,17 +343,23 @@ const elements = {
   authSwitchText: document.getElementById('authSwitchText'),
   authSwitchBtn: document.getElementById('authSwitchBtn'),
   authForm: document.getElementById('authForm'),
+  signupIdentityChooser: document.getElementById('signupIdentityChooser'),
+  signupEmailOption: document.getElementById('signupEmailOption'),
+  signupMobileOption: document.getElementById('signupMobileOption'),
   authNameWrap: document.getElementById('authNameWrap'),
   authName: document.getElementById('authName'),
+  authMobileWrap: document.getElementById('authMobileWrap'),
+  authMobile: document.getElementById('authMobile'),
   authRoleWrap: document.getElementById('authRoleWrap'),
   authRole: document.getElementById('authRole'),
   authEmail: document.getElementById('authEmail'),
+  authEmailWrap: document.getElementById('authEmailWrap'),
   authPassword: document.getElementById('authPassword'),
   authPasswordToggleBtn: document.getElementById('authPasswordToggleBtn'),
   authOtpWrap: document.getElementById('authOtpWrap'),
   authOtp: document.getElementById('authOtp'),
-  authDevOtp: document.getElementById('authDevOtp'),
-  authDevOtpValue: document.getElementById('authDevOtpValue'),
+  authWhatsappOtpWrap: document.getElementById('authWhatsappOtpWrap'),
+  authWhatsappOtp: document.getElementById('authWhatsappOtp'),
   authOtpActions: document.getElementById('authOtpActions'),
   authResendOtpBtn: document.getElementById('authResendOtpBtn'),
   authResendOtpHint: document.getElementById('authResendOtpHint'),
@@ -794,8 +800,10 @@ const elements = {
 let isRegisterMode = false;
 let isForgotPasswordMode = false;
 let signupStage = 'details';
+let signupMethod = 'email';
 let pendingSignupName = '';
 let pendingSignupEmail = '';
+let pendingSignupMobile = '';
 let forgotPasswordStage = 'email';
 let pendingForgotEmail = '';
 let signupOtpResendAvailableAt = 0;
@@ -828,9 +836,11 @@ function openAuthFromLanding(choice = '') {
   isRegisterMode = false;
   isForgotPasswordMode = false;
   signupStage = 'details';
+  signupMethod = 'email';
   forgotPasswordStage = 'email';
   pendingSignupName = '';
   pendingSignupEmail = '';
+  pendingSignupMobile = '';
   pendingForgotEmail = '';
   signupOtpResendAvailableAt = 0;
   forgotOtpResendAvailableAt = 0;
@@ -1015,8 +1025,10 @@ function attachEvents() {
     isRegisterMode = !isRegisterMode;
     isForgotPasswordMode = false;
     signupStage = 'details';
+    signupMethod = 'email';
     pendingSignupName = '';
     pendingSignupEmail = '';
+    pendingSignupMobile = '';
     forgotPasswordStage = 'email';
     pendingForgotEmail = '';
     signupOtpResendAvailableAt = 0;
@@ -1026,15 +1038,29 @@ function attachEvents() {
     renderAuthMode();
   });
 
+  const chooseSignupMethod = (method) => {
+    signupMethod = method === 'mobile' ? 'mobile' : 'email';
+    signupStage = 'details';
+    pendingSignupEmail = '';
+    pendingSignupMobile = '';
+    elements.authOtp.value = '';
+    elements.authWhatsappOtp.value = '';
+    renderAuthMode();
+  };
+  elements.signupEmailOption?.addEventListener('click', () => chooseSignupMethod('email'));
+  elements.signupMobileOption?.addEventListener('click', () => chooseSignupMethod('mobile'));
+
   elements.authBackToChoicesBtn?.addEventListener('click', () => {
     state.showAuthCard = false;
     state.pendingPreAuthChoice = '';
     isRegisterMode = false;
     isForgotPasswordMode = false;
     signupStage = 'details';
+    signupMethod = 'email';
     forgotPasswordStage = 'email';
     pendingSignupName = '';
     pendingSignupEmail = '';
+    pendingSignupMobile = '';
     pendingForgotEmail = '';
     signupOtpResendAvailableAt = 0;
     forgotOtpResendAvailableAt = 0;
@@ -1238,8 +1264,10 @@ function attachEvents() {
     state.isGuestUser = true;
     isForgotPasswordMode = false;
     signupStage = 'details';
+    signupMethod = 'email';
     pendingSignupName = '';
     pendingSignupEmail = '';
+    pendingSignupMobile = '';
     forgotPasswordStage = 'email';
     pendingForgotEmail = '';
     signupOtpResendAvailableAt = 0;
@@ -2267,19 +2295,30 @@ function renderAuthMode(preserveMessage = false) {
   const authPasswordWrap = elements.authPassword?.closest?.('label') || elements.authPassword.parentElement;
 
   elements.authNameWrap.hidden = !isSignupDetailsStep;
+  const isEmailSignup = isRegisterMode && signupMethod === 'email';
+  const isMobileSignup = isRegisterMode && signupMethod === 'mobile';
+  elements.signupIdentityChooser.hidden = !isSignupDetailsStep;
+  elements.signupEmailOption.classList.toggle('is-active', isEmailSignup);
+  elements.signupMobileOption.classList.toggle('is-active', isMobileSignup);
+  elements.authEmailWrap.hidden = !isLoginStep && !isEmailSignup && !isForgotEmailStep && !isForgotOtpStep && !isForgotPasswordStep;
+  elements.authMobileWrap.hidden = !isMobileSignup;
   elements.authRoleWrap.hidden = true;
   elements.authOtpWrap.hidden = !(isSignupOtpStep || isForgotOtpStep);
-  if (!(isSignupOtpStep || isForgotOtpStep)) showDevelopmentOtp('');
-  authPasswordWrap.hidden = !(isLoginStep || isSignupPasswordStep || isForgotPasswordStep);
+  elements.authWhatsappOtpWrap.hidden = !(isSignupOtpStep && isMobileSignup);
+  authPasswordWrap.hidden = !(isLoginStep || (isSignupPasswordStep && isEmailSignup) || isForgotPasswordStep);
 
   elements.authName.required = isSignupDetailsStep;
-  elements.authPassword.required = isLoginStep || isSignupPasswordStep || isForgotPasswordStep;
-  elements.authOtp.required = isSignupOtpStep || isForgotOtpStep;
-  elements.authEmail.readOnly = isSignupOtpStep || isSignupPasswordStep || isForgotOtpStep || isForgotPasswordStep;
+  elements.authMobile.required = isMobileSignup;
+  elements.authEmail.required = isLoginStep || isEmailSignup || isForgotEmailStep || isForgotOtpStep || isForgotPasswordStep;
+  elements.authPassword.required = isLoginStep || (isSignupPasswordStep && isEmailSignup) || isForgotPasswordStep;
+  elements.authOtp.required = (isSignupOtpStep && isEmailSignup) || isForgotOtpStep;
+  elements.authWhatsappOtp.required = isSignupOtpStep && isMobileSignup;
+  elements.authEmail.readOnly = (isEmailSignup && (isSignupOtpStep || isSignupPasswordStep)) || isForgotOtpStep || isForgotPasswordStep;
 
-  if ((isSignupOtpStep || isSignupPasswordStep) && pendingSignupEmail) {
+  if (isEmailSignup && (isSignupOtpStep || isSignupPasswordStep) && pendingSignupEmail) {
     elements.authEmail.value = pendingSignupEmail;
   }
+  if (isMobileSignup && pendingSignupMobile) elements.authMobile.value = pendingSignupMobile;
   if ((isForgotOtpStep || isForgotPasswordStep) && pendingForgotEmail) {
     elements.authEmail.value = pendingForgotEmail;
   }
@@ -2290,7 +2329,7 @@ function renderAuthMode(preserveMessage = false) {
   } else if (isSignupOtpStep) {
     elements.authTitle.textContent = 'Verify signup OTP';
     elements.authSubmitBtn.textContent = 'Verify OTP';
-  } else if (isSignupPasswordStep) {
+  } else if (isSignupPasswordStep && isEmailSignup) {
     elements.authTitle.textContent = 'Set password';
     elements.authSubmitBtn.textContent = 'Complete Signup';
   } else if (isForgotEmailStep) {
@@ -2329,13 +2368,6 @@ function renderAuthMode(preserveMessage = false) {
   }
 
   updateAuthOtpResendUI();
-}
-
-function showDevelopmentOtp(otp = '') {
-  if (!elements.authDevOtp || !elements.authDevOtpValue) return;
-  const value = String(otp || '').trim();
-  elements.authDevOtpValue.textContent = value;
-  elements.authDevOtp.hidden = !value;
 }
 
 function stopAuthOtpResendTicker() {
@@ -2435,16 +2467,26 @@ async function resendAuthOtp() {
 
   try {
     if (isSignupOtpStep) {
-      const email = pendingSignupEmail || elements.authEmail.value.trim();
       const name = pendingSignupName || elements.authName.value.trim() || 'User';
-      const result = await api('/api/auth/register/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email }),
-      });
-      pendingSignupEmail = email;
+      let result;
+      if (signupMethod === 'mobile') {
+        const mobile = pendingSignupMobile || elements.authMobile.value.trim();
+        result = await api('/api/auth/signup/send-whatsapp-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mobile }),
+        });
+        pendingSignupMobile = mobile;
+      } else {
+        const email = pendingSignupEmail || elements.authEmail.value.trim();
+        result = await api('/api/auth/register/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email }),
+        });
+        pendingSignupEmail = email;
+      }
       pendingSignupName = name;
-      showDevelopmentOtp(result.devOtp);
       elements.authError.textContent = result.message || 'Signup OTP resent.';
       applyAuthOtpResendCooldown({ isSignup: true });
       renderAuthMode(true);
@@ -2458,7 +2500,6 @@ async function resendAuthOtp() {
       body: JSON.stringify({ email }),
     });
     pendingForgotEmail = email;
-    showDevelopmentOtp(result.devOtp);
     elements.authError.textContent = result.message || 'Reset OTP resent.';
     applyAuthOtpResendCooldown({ isSignup: false });
     renderAuthMode(true);
@@ -2505,7 +2546,6 @@ async function submitAuth() {
         forgotPasswordStage = 'otp';
         applyAuthOtpResendCooldown({ isSignup: false });
         elements.authOtp.value = '';
-        showDevelopmentOtp(result.devOtp);
         elements.authError.textContent = result.message || 'Password reset OTP sent.';
         renderAuthMode(true);
         return;
@@ -2552,30 +2592,66 @@ async function submitAuth() {
 
     if (signupStage === 'details') {
       const name = elements.authName.value.trim();
-      const email = elements.authEmail.value.trim();
       if (!name) {
         elements.authError.textContent = 'Name is required.';
         return;
       }
-
-      const result = await api('/api/auth/register/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email }),
-      });
-
       pendingSignupName = name;
-      pendingSignupEmail = email;
+      let result;
+      if (signupMethod === 'mobile') {
+        const mobile = elements.authMobile.value.trim();
+        if (!mobile) {
+          elements.authError.textContent = 'Mobile number is required.';
+          return;
+        }
+        result = await api('/api/auth/signup/send-whatsapp-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mobile }),
+        });
+        pendingSignupMobile = mobile;
+      } else {
+        const email = elements.authEmail.value.trim();
+        if (!email) {
+          elements.authError.textContent = 'Email is required.';
+          return;
+        }
+        result = await api('/api/auth/register/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email }),
+        });
+        pendingSignupEmail = email;
+      }
       signupStage = 'otp';
       applyAuthOtpResendCooldown({ isSignup: true });
       elements.authOtp.value = '';
-      showDevelopmentOtp(result.devOtp);
+      elements.authWhatsappOtp.value = '';
       elements.authError.textContent = result.message || 'Signup OTP sent.';
       renderAuthMode(true);
       return;
     }
 
     if (signupStage === 'otp') {
+      if (signupMethod === 'mobile') {
+        const result = await api('/api/auth/signup/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: pendingSignupName || elements.authName.value.trim(),
+            mobile: pendingSignupMobile || elements.authMobile.value.trim(),
+            otp: elements.authWhatsappOtp.value.trim(),
+          }),
+        });
+        signupStage = 'details';
+        pendingSignupName = '';
+        pendingSignupMobile = '';
+        signupOtpResendAvailableAt = 0;
+        elements.authForm.reset();
+        await finishAuthSuccess(result);
+        return;
+      }
+
       const otp = elements.authOtp.value.trim();
       const result = await api('/api/auth/register/verify', {
         method: 'POST',
@@ -2606,6 +2682,8 @@ async function submitAuth() {
     signupStage = 'details';
     pendingSignupName = '';
     pendingSignupEmail = '';
+    pendingSignupMobile = '';
+    signupMethod = 'email';
     signupOtpResendAvailableAt = 0;
     elements.authForm.reset();
     await finishAuthSuccess(result);
