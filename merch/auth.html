@@ -82,9 +82,17 @@
           <h2 id="authTitle">Sign in to continue</h2>
           <p class="auth-lead">Book Hydrogen Sessions, Therapies, and Shots in one place.</p>
           <form id="authForm" class="auth-form">
+            <div id="signupIdentityChooser" class="signup-identity-chooser" hidden>
+              <button id="signupEmailOption" class="link-btn" type="button">Sign up with Email</button>
+              <button id="signupMobileOption" class="link-btn" type="button">Sign up with Mobile Number</button>
+            </div>
             <label id="authNameWrap" hidden>
               Full name
               <input id="authName" type="text" autocomplete="name" />
+            </label>
+            <label id="authMobileWrap" hidden>
+              Mobile number
+              <input id="authMobile" type="tel" inputmode="tel" autocomplete="tel" placeholder="+91 98765 43210" />
             </label>
             <label id="authRoleWrap" hidden>
               Register as
@@ -92,14 +100,14 @@
                 <option value="user">Patient/User</option>
               </select>
             </label>
-            <label>
+            <label id="authEmailWrap">
               Email
-              <input id="authEmail" type="email" autocomplete="email" required />
+              <input id="authEmail" type="email" autocomplete="email" />
             </label>
             <label>
               Password
               <div class="auth-password-field">
-                <input id="authPassword" type="password" autocomplete="current-password" required />
+                <input id="authPassword" type="password" autocomplete="current-password" />
                 <button
                   type="button"
                   id="authPasswordToggleBtn"
@@ -115,14 +123,40 @@
               OTP
               <input id="authOtp" type="text" inputmode="numeric" maxlength="6" placeholder="Enter 6-digit OTP" />
             </label>
-            <p id="authDevOtp" class="auth-dev-otp" role="status" hidden>
-              Development OTP: <strong id="authDevOtpValue"></strong>
-            </p>
+            <label id="authWhatsappOtpWrap" hidden>
+              WhatsApp OTP
+              <input id="authWhatsappOtp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="Enter WhatsApp OTP" />
+            </label>
             <div id="authOtpActions" class="auth-otp-actions" hidden>
               <button type="button" id="authResendOtpBtn" class="link-btn">Resend OTP</button>
               <span id="authResendOtpHint" class="auth-otp-hint" hidden></span>
             </div>
             <button id="authSubmitBtn" class="btn btn-primary" type="submit">Sign in</button>
+            <div id="mobileAuthSection" class="mobile-auth-section" hidden>
+              <div class="auth-divider"><span>OR</span></div>
+              <p class="mobile-auth-title">
+                <span class="mobile-auth-phone-icon" aria-hidden="true">&#9742;</span>
+                <span>Login with Mobile Number</span>
+              </p>
+              <div class="mobile-auth-field">
+                <span class="mobile-auth-field-label">Mobile Number</span>
+                <div class="mobile-auth-number-row">
+                  <select id="mobileAuthCountry" aria-label="Country code">
+                    <option value="+91">+91</option>
+                  </select>
+                  <input id="mobileAuthNumber" type="tel" inputmode="numeric" autocomplete="tel" maxlength="10" placeholder="98765 43210" aria-label="Mobile number" />
+                </div>
+              </div>
+              <button id="sendWhatsappOtpBtn" class="btn mobile-auth-send" type="button">
+                <span class="mobile-auth-whatsapp-icon" aria-hidden="true">&#9673;</span>
+                <span>Send WhatsApp OTP</span>
+              </button>
+              <label id="mobileAuthOtpWrap" hidden>
+                OTP
+                <input id="mobileAuthOtp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="_ _ _ _ _ _" />
+              </label>
+              <button id="verifyWhatsappOtpBtn" class="btn btn-primary" type="button" hidden>Verify &amp; Sign In</button>
+            </div>
           </form>
           <div id="authDivider" class="auth-divider" hidden><span>or</span></div>
           <a id="googleAuthBtn" class="btn auth-google-btn" href="/auth/google" hidden>Continue with Google</a>

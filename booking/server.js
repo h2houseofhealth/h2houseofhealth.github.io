@@ -62,7 +62,9 @@ const MAX_BOOKINGS_PER_SLOT_IV = 1;
 const MAX_HYDROGEN_SESSIONS_PER_DAY_PER_USER = 4;
 const IV_REBOOK_COOLDOWN_DAYS = 14;
 const OTP_TTL_MINUTES = 10;
-const WHATSAPP_OTP_TTL_MINUTES = 5;
+const WHATSAPP_OTP_TTL_MINUTES = 10;
+const SIGNUP_WHATSAPP_OTP_MAX_SENDS = 3;
+const SIGNUP_WHATSAPP_OTP_WINDOW_MINUTES = 10;
 const WHATSAPP_TOKEN = normalizeEnvValue(process.env.WHATSAPP_TOKEN);
 const WHATSAPP_PHONE_NUMBER_ID = normalizeEnvValue(process.env.WHATSAPP_PHONE_NUMBER_ID);
 const WHATSAPP_API_VERSION = normalizeEnvValue(process.env.WHATSAPP_API_VERSION);
@@ -964,6 +966,86 @@ app.get('/auth/google/callback', ensureGoogleOAuthConfigured, (req, res, next) =
 
 app.use('/api/auth', rateLimit({ windowMs: 60_000, max: 40 }));
 
+function getMobileVariants(mobile) {
+  return [mobile, mobile.replace(/^\+/, ''), mobile.slice(3)];
+}
+
+function getLatestSignupOtp(mobile) {
+  return db.prepare(
+    `SELECT id, otp, expires_at AS expiresAt, verified
+     FROM login_otps
+     WHERE mobile = ? AND purpose = 'signup'
+     ORDER BY id DESC
+     LIMIT 1`
+  ).get(mobile);
+}
+
+function expireSignupOtps(mobile) {
+  db.prepare(
+    `DELETE FROM login_otps
+     WHERE mobile = ? AND purpose = 'signup' AND expires_at < ?`
+  ).run(mobile, new Date().toISOString());
+}
+
+async function issueSignupWhatsAppOtp(mobile) {
+  expireSignupOtps(mobile);
+  const recentRows = db.prepare(
+    `SELECT created_at AS createdAt
+     FROM login_otps
+     WHERE mobile = ? AND purpose = 'signup'
+     ORDER BY id DESC
+     LIMIT ?`
+  ).all(mobile, SIGNUP_WHATSAPP_OTP_MAX_SENDS);
+  const windowStart = Date.now() - SIGNUP_WHATSAPP_OTP_WINDOW_MINUTES * 60 * 1000;
+  const recentCount = recentRows.filter((row) => new Date(row.createdAt).getTime() >= windowStart).length;
+  if (recentCount >= SIGNUP_WHATSAPP_OTP_MAX_SENDS) {
+    return {
+      ok: false,
+      statusCode: 429,
+      message: 'Too many OTP requests. Please try again later.',
+    };
+  }
+
+  const otp = generateOtp();
+  const expiresAt = new Date(Date.now() + WHATSAPP_OTP_TTL_MINUTES * 60 * 1000).toISOString();
+  const result = db.prepare(
+    `INSERT INTO login_otps (mobile, otp, expires_at, verified, purpose, created_at)
+     VALUES (?, ?, ?, 0, 'signup', ?)`
+  ).run(mobile, otp, expiresAt, new Date().toISOString());
+
+  const whatsappResult = await sendWhatsAppMessage(
+    mobile,
+    'login_otp',
+    [otp],
+    [{
+      type: 'button',
+      sub_type: 'url',
+      index: '0',
+      parameters: [{ type: 'text', text: otp }],
+    }]
+  );
+  if (!whatsappResult.ok) {
+    db.prepare('DELETE FROM login_otps WHERE id = ?').run(result.lastInsertRowid);
+    return whatsappResult;
+  }
+
+  return { ok: true, otp, statusCode: whatsappResult.statusCode, messageId: whatsappResult.messageId };
+}
+
+function verifySignupWhatsAppOtp(mobile, otp) {
+  const latestOtp = getLatestSignupOtp(mobile);
+  if (!latestOtp) return { ok: false, statusCode: 400, message: 'OTP not found. Please request a new OTP.' };
+  if (Number(latestOtp.verified) === 1) return { ok: false, statusCode: 400, message: 'OTP has already been used.' };
+  if (new Date(latestOtp.expiresAt).getTime() < Date.now()) {
+    db.prepare('DELETE FROM login_otps WHERE id = ?').run(latestOtp.id);
+    return { ok: false, statusCode: 400, message: 'OTP expired. Please request a new OTP.' };
+  }
+  if (String(latestOtp.otp) !== otp) return { ok: false, statusCode: 401, message: 'Invalid OTP.' };
+  db.prepare('UPDATE login_otps SET verified = 1 WHERE id = ?').run(latestOtp.id);
+  db.prepare('DELETE FROM login_otps WHERE mobile = ? AND purpose = \'signup\' AND id <> ?').run(mobile, latestOtp.id);
+  return { ok: true, otpId: latestOtp.id };
+}
+
 app.post('/api/auth/register/start', async (req, res) => {
   const name = String(req.body?.name || '').trim();
   const email = String(req.body?.email || '').trim().toLowerCase();
@@ -1016,7 +1098,6 @@ app.post('/api/auth/register/start', async (req, res) => {
   if (!mailResult.ok) {
     return res.status(mailResult.statusCode || 500).json({ message: mailResult.message });
   }
-
   const responsePayload = {
     message: mailResult.message || `Signup OTP sent to ${email}. It expires in ${OTP_TTL_MINUTES} minutes.`,
     otpRequired: true,
@@ -1026,6 +1107,54 @@ app.post('/api/auth/register/start', async (req, res) => {
     responsePayload.devOtp = otp;
   }
   return res.status(200).json(responsePayload);
+});
+
+app.post('/api/auth/signup/send-whatsapp-otp', async (req, res) => {
+  const mobile = normalizeWhatsAppMobile(req.body?.mobile);
+  if (!mobile) {
+    return res.status(400).json({ message: 'Enter a valid mobile number with country code.' });
+  }
+
+  const existingUser = db.prepare(
+    'SELECT id FROM users WHERE mobile IN (?, ?, ?) AND mobile_verified = 1 LIMIT 1'
+  ).get(...getMobileVariants(mobile));
+  if (existingUser) {
+    return res.status(409).json({ message: 'mobile number already registered' });
+  }
+
+  const result = await issueSignupWhatsAppOtp(mobile);
+  if (!result.ok) {
+    return res.status(result.statusCode || 502).json({ message: result.message });
+  }
+  const response = { success: true, message: 'WhatsApp signup OTP sent.' };
+  if (SHOW_DEV_OTP_IN_UI) response.devOtp = result.otp;
+  return res.json(response);
+});
+
+app.post('/api/auth/signup/verify', (req, res) => {
+  const mobile = normalizeWhatsAppMobile(req.body?.mobile);
+  const otp = String(req.body?.otp || '').trim();
+  const name = String(req.body?.name || '').trim();
+  if (!mobile || !/^\d{6}$/.test(otp) || !name) {
+    return res.status(400).json({ message: 'mobile, otp, and name are required' });
+  }
+  if (db.prepare('SELECT id FROM users WHERE mobile IN (?, ?, ?) AND mobile_verified = 1 LIMIT 1').get(...getMobileVariants(mobile))) {
+    return res.status(409).json({ message: 'mobile number already registered' });
+  }
+
+  const verification = verifySignupWhatsAppOtp(mobile, otp);
+  if (!verification.ok) return res.status(verification.statusCode).json({ message: verification.message });
+
+  const passwordHash = bcrypt.hashSync(crypto.randomBytes(24).toString('hex'), 10);
+  const result = db.transaction(() => db.prepare(
+    `INSERT INTO users (name, email, mobile, mobile_verified, password_hash, role, created_at)
+     VALUES (?, NULL, ?, 1, ?, 'user', datetime('now'))`
+  ).run(name, mobile, passwordHash))();
+  const userId = Number(result.lastInsertRowid);
+  const user = syncMembershipForUser({ userId }) || { id: userId, name, email: '', mobile, role: 'user' };
+  app.locals.merchGuestOrderSync?.(user);
+  const token = setAuthCookie(req, res, user);
+  return res.status(201).json({ id: userId, user, token });
 });
 
 app.post('/api/auth/register', async (_req, res) => {
@@ -1119,7 +1248,7 @@ app.post('/api/auth/register/complete', (req, res) => {
   }
 
   const pending = db.prepare(
-    `SELECT email, name, otp_verified AS otpVerified
+    `SELECT email, name, mobile, otp_verified AS otpVerified
      FROM pending_registrations
      WHERE email = ?`
   ).get(email);
@@ -1130,7 +1259,6 @@ app.post('/api/auth/register/complete', (req, res) => {
   if (Number(pending.otpVerified) !== 1) {
     return res.status(400).json({ message: 'Please verify signup OTP first.' });
   }
-
   const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
   if (existingUser) {
     db.prepare('DELETE FROM pending_registrations WHERE email = ?').run(email);
@@ -1140,8 +1268,8 @@ app.post('/api/auth/register/complete', (req, res) => {
   const passwordHash = bcrypt.hashSync(password, 10);
   const result = db
     .prepare(
-      `INSERT INTO users (name, email, password_hash, role, created_at)
-       VALUES (?, ?, ?, 'user', datetime('now'))`
+      `INSERT INTO users (name, email, mobile, mobile_verified, password_hash, role, created_at)
+       VALUES (?, ?, NULL, 0, ?, 'user', datetime('now'))`
     )
     .run(String(pending.name || '').trim() || 'User', email, passwordHash);
 
@@ -1271,13 +1399,20 @@ app.post('/api/auth/send-whatsapp-otp', async (req, res) => {
   const otp = generateOtp();
   const expiresAt = new Date(Date.now() + WHATSAPP_OTP_TTL_MINUTES * 60 * 1000).toISOString();
   db.prepare(
-    `INSERT INTO login_otps (mobile, otp, expires_at, verified, created_at)
-     VALUES (?, ?, ?, 0, ?)`
+    `INSERT INTO login_otps (mobile, otp, expires_at, verified, purpose, created_at)
+     VALUES (?, ?, ?, 0, 'login', ?)`
   ).run(mobile, otp, expiresAt, new Date().toISOString());
 
-  const whatsappResult = await sendWhatsAppText(
+  const whatsappResult = await sendWhatsAppMessage(
     mobile,
-    `Your H2 House of Health login OTP is ${otp}. It expires in ${WHATSAPP_OTP_TTL_MINUTES} minutes.`
+    'login_otp',
+    [otp],
+    [{
+      type: 'button',
+      sub_type: 'url',
+      index: '0',
+      parameters: [{ type: 'text', text: otp }],
+    }]
   );
   if (!whatsappResult.ok) {
     console.error('Failed to send WhatsApp login OTP:', whatsappResult.message);
@@ -1286,6 +1421,11 @@ app.post('/api/auth/send-whatsapp-otp', async (req, res) => {
       message: 'Unable to send WhatsApp OTP. Please try again.',
     });
   }
+  console.log('WhatsApp login OTP accepted by Meta:', {
+    recipient: mobile,
+    statusCode: whatsappResult.statusCode,
+    messageId: whatsappResult.messageId || '',
+  });
 
   return res.json({ success: true });
 });
@@ -1301,7 +1441,7 @@ app.post('/api/auth/verify-whatsapp-otp', (req, res) => {
     .prepare(
       `SELECT id, otp, expires_at AS expiresAt, verified
        FROM login_otps
-       WHERE mobile = ?
+       WHERE mobile = ? AND purpose = 'login'
        ORDER BY id DESC
        LIMIT 1`
     )
@@ -1313,6 +1453,7 @@ app.post('/api/auth/verify-whatsapp-otp', (req, res) => {
     return res.status(400).json({ message: 'OTP has already been used. Please request a new OTP.' });
   }
   if (new Date(latestOtp.expiresAt).getTime() < Date.now()) {
+    db.prepare('DELETE FROM login_otps WHERE id = ?').run(latestOtp.id);
     return res.status(400).json({ message: 'OTP expired. Please request a new OTP.' });
   }
   if (String(latestOtp.otp) !== otp) {
@@ -14057,6 +14198,57 @@ function hasColumn(tableName, columnName) {
   return columns.some((column) => column.name === columnName);
 }
 
+function makeUsersEmailNullable() {
+  const emailColumn = db.prepare('PRAGMA table_info(users)').all().find((column) => column.name === 'email');
+  if (!emailColumn || Number(emailColumn.notnull) !== 1) return;
+
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    db.exec('BEGIN');
+    db.exec(`
+      CREATE TABLE users_nullable_email (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE,
+        age INTEGER,
+        gender TEXT,
+        mobile TEXT,
+        google_id TEXT,
+        avatar_url TEXT,
+        membership_status TEXT NOT NULL DEFAULT 'inactive',
+        membership_plan TEXT,
+        membership_started_at TEXT,
+        membership_expires_at TEXT,
+        membership_people_count INTEGER,
+        password_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'user',
+        membership_subscription_id TEXT,
+        mobile_verified INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO users_nullable_email (
+        id, name, email, age, gender, mobile, google_id, avatar_url,
+        membership_status, membership_plan, membership_started_at, membership_expires_at,
+        membership_people_count, password_hash, created_at, role,
+        membership_subscription_id, mobile_verified
+      )
+      SELECT id, name, email, age, gender, mobile, google_id, avatar_url,
+        membership_status, membership_plan, membership_started_at, membership_expires_at,
+        membership_people_count, password_hash, created_at, role,
+        membership_subscription_id, mobile_verified
+      FROM users;
+      DROP TABLE users;
+      ALTER TABLE users_nullable_email RENAME TO users;
+    `);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    throw error;
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+}
+
 function hasTable(tableName) {
   const row = db
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
@@ -14081,7 +14273,7 @@ function normalizeWhatsAppMobile(value) {
   return '';
 }
 
-function sendWhatsAppMessage(to, templateName, parameters = []) {
+function sendWhatsAppMessage(to, templateName, parameters = [], extraComponents = []) {
   const recipient = normalizeWhatsAppMobile(to);
   const normalizedTemplateName = String(templateName || '').trim();
   if (!recipient || !normalizedTemplateName) {
@@ -14096,21 +14288,29 @@ function sendWhatsAppMessage(to, templateName, parameters = []) {
   }
   console.log('==============================');
   console.log('WhatsApp recipient:', recipient);
+  const apiRecipient = recipient.replace(/^\+/, '');
+  const languageCode = 'en';
+  console.log('WhatsApp API `to`:', apiRecipient);
   console.log('Template:', normalizedTemplateName);
+  console.log('WhatsApp template language:', languageCode);
   console.log('==============================');
 
   const bodyParameters = (Array.isArray(parameters) ? parameters : [parameters]).map((parameter) => ({
     type: 'text',
     text: String(parameter ?? ''),
   }));
+  const templateComponents = [
+    ...(bodyParameters.length ? [{ type: 'body', parameters: bodyParameters }] : []),
+    ...(Array.isArray(extraComponents) ? extraComponents : []),
+  ];
   const payload = JSON.stringify({
     messaging_product: 'whatsapp',
-    to: recipient,
+    to: apiRecipient,
     type: 'template',
     template: {
       name: normalizedTemplateName,
-      language: { code: 'en_US' },
-      components: bodyParameters.length ? [{ type: 'body', parameters: bodyParameters }] : undefined,
+      language: { code: languageCode },
+      components: templateComponents.length ? templateComponents : undefined,
     },
   });
   const apiVersion = WHATSAPP_API_VERSION.startsWith('v') ? WHATSAPP_API_VERSION : `v${WHATSAPP_API_VERSION}`;
@@ -14138,6 +14338,11 @@ function sendWhatsAppMessage(to, templateName, parameters = []) {
           if (statusCode >= 200 && statusCode < 300) {
             return resolve({ ok: true, statusCode, messageId: parsed?.messages?.[0]?.id || '' });
           }
+          console.error('WhatsApp API failure:', {
+            statusCode,
+            rawBody: responseBody,
+            error: parsed?.error || null,
+          });
           resolve({ ok: false, statusCode, message: parsed?.error?.message || 'WhatsApp message could not be sent.' });
         });
       }
@@ -14225,7 +14430,7 @@ function normalizeWhatsAppMobile(value) {
   return '';
 }
 
-function sendWhatsAppMessage(to, templateName, parameters = []) {
+function sendWhatsAppMessage(to, templateName, parameters = [], extraComponents = []) {
   const recipient = normalizeWhatsAppMobile(to);
   const normalizedTemplateName = String(templateName || '').trim();
   if (!recipient || !normalizedTemplateName) {
@@ -14240,21 +14445,29 @@ function sendWhatsAppMessage(to, templateName, parameters = []) {
   }
   console.log('==============================');
   console.log('WhatsApp recipient:', recipient);
+  const apiRecipient = recipient.replace(/^\+/, '');
+  const languageCode = 'en';
+  console.log('WhatsApp API `to`:', apiRecipient);
   console.log('Template:', normalizedTemplateName);
+  console.log('WhatsApp template language:', languageCode);
   console.log('==============================');
 
   const bodyParameters = (Array.isArray(parameters) ? parameters : [parameters]).map((parameter) => ({
     type: 'text',
     text: String(parameter ?? ''),
   }));
+  const templateComponents = [
+    ...(bodyParameters.length ? [{ type: 'body', parameters: bodyParameters }] : []),
+    ...(Array.isArray(extraComponents) ? extraComponents : []),
+  ];
   const payload = JSON.stringify({
     messaging_product: 'whatsapp',
-    to: recipient,
+    to: apiRecipient,
     type: 'template',
     template: {
       name: normalizedTemplateName,
-      language: { code: 'en_US' },
-      components: bodyParameters.length ? [{ type: 'body', parameters: bodyParameters }] : undefined,
+      language: { code: languageCode },
+      components: templateComponents.length ? templateComponents : undefined,
     },
   });
   const apiVersion = WHATSAPP_API_VERSION.startsWith('v') ? WHATSAPP_API_VERSION : `v${WHATSAPP_API_VERSION}`;
@@ -14282,6 +14495,11 @@ function sendWhatsAppMessage(to, templateName, parameters = []) {
           if (statusCode >= 200 && statusCode < 300) {
             return resolve({ ok: true, statusCode, messageId: parsed?.messages?.[0]?.id || '' });
           }
+          console.error('WhatsApp API failure:', {
+            statusCode,
+            rawBody: responseBody,
+            error: parsed?.error || null,
+          });
           resolve({ ok: false, statusCode, message: parsed?.error?.message || 'WhatsApp message could not be sent.' });
         });
       }
@@ -15036,7 +15254,7 @@ function migrate() {
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      email TEXT NOT NULL UNIQUE,
+      email TEXT UNIQUE,
       age INTEGER,
       gender TEXT,
       mobile TEXT,
@@ -15300,6 +15518,10 @@ function migrate() {
     db.exec('ALTER TABLE users ADD COLUMN mobile TEXT');
   }
 
+  if (!hasColumn('users', 'mobile_verified')) {
+    db.exec('ALTER TABLE users ADD COLUMN mobile_verified INTEGER NOT NULL DEFAULT 0');
+  }
+
   if (!hasColumn('users', 'google_id')) {
     db.exec('ALTER TABLE users ADD COLUMN google_id TEXT');
   }
@@ -15332,6 +15554,8 @@ function migrate() {
     db.exec('ALTER TABLE users ADD COLUMN membership_subscription_id TEXT');
   }
 
+  makeUsersEmailNullable();
+
   if (!hasColumn('bookings', 'doctor_id')) {
     db.exec('ALTER TABLE bookings ADD COLUMN doctor_id INTEGER REFERENCES doctors(id)');
   }
@@ -15358,6 +15582,14 @@ function migrate() {
 
   if (!hasColumn('pending_registrations', 'otp_verified')) {
     db.exec("ALTER TABLE pending_registrations ADD COLUMN otp_verified INTEGER NOT NULL DEFAULT 0");
+  }
+
+  if (!hasColumn('pending_registrations', 'mobile')) {
+    db.exec('ALTER TABLE pending_registrations ADD COLUMN mobile TEXT');
+  }
+
+  if (!hasColumn('login_otps', 'purpose')) {
+    db.exec("ALTER TABLE login_otps ADD COLUMN purpose TEXT NOT NULL DEFAULT 'login'");
   }
 
   if (!hasColumn('pending_password_resets', 'verified')) {

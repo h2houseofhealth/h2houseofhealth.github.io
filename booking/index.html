@@ -108,9 +108,17 @@
           <h2 id="authTitle">Sign in to continue</h2>
           <p class="auth-lead">Book Hydrogen Sessions, Therapies, and Shots in one place.</p>
           <form id="authForm" class="auth-form">
+            <div id="signupIdentityChooser" class="signup-identity-chooser" hidden>
+              <button id="signupEmailOption" class="link-btn" type="button">Sign up with Email</button>
+              <button id="signupMobileOption" class="link-btn" type="button">Sign up with Mobile Number</button>
+            </div>
             <label id="authNameWrap" hidden>
               Full name
               <input id="authName" type="text" autocomplete="name" />
+            </label>
+            <label id="authMobileWrap" hidden>
+              Mobile number
+              <input id="authMobile" type="tel" inputmode="tel" autocomplete="tel" placeholder="+91 98765 43210" />
             </label>
             <label id="authRoleWrap" hidden>
               Register as
@@ -118,14 +126,14 @@
                 <option value="user">Patient/User</option>
               </select>
             </label>
-            <label>
+            <label id="authEmailWrap">
               Email
-              <input id="authEmail" type="email" autocomplete="email" required />
+              <input id="authEmail" type="email" autocomplete="email" />
             </label>
             <label>
               Password
               <div class="auth-password-field">
-                <input id="authPassword" type="password" autocomplete="current-password" required />
+                <input id="authPassword" type="password" autocomplete="current-password" />
                 <button
                   type="button"
                   id="authPasswordToggleBtn"
@@ -141,9 +149,10 @@
               OTP
               <input id="authOtp" type="text" inputmode="numeric" maxlength="6" placeholder="Enter 6-digit OTP" />
             </label>
-            <p id="authDevOtp" class="auth-dev-otp" role="status" hidden>
-              Development OTP: <strong id="authDevOtpValue"></strong>
-            </p>
+            <label id="authWhatsappOtpWrap" hidden>
+              WhatsApp OTP
+              <input id="authWhatsappOtp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="Enter WhatsApp OTP" />
+            </label>
             <div id="authOtpActions" class="auth-otp-actions" hidden>
               <button type="button" id="authResendOtpBtn" class="link-btn">Resend OTP</button>
               <span id="authResendOtpHint" class="auth-otp-hint" hidden></span>

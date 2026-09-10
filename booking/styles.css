@@ -3340,6 +3340,33 @@ h1, h2, h3 {
   gap: 0.8rem;
 }
 
+.signup-identity-chooser {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.15rem 0 0.25rem;
+}
+
+.signup-identity-chooser .link-btn {
+  width: 100%;
+  min-height: 3rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(var(--ink-rgb), 0.18);
+  border-radius: 999px;
+  background: #fffdfb;
+  color: var(--brand-deep);
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.signup-identity-chooser .link-btn:hover,
+.signup-identity-chooser .link-btn.is-active {
+  border-color: var(--brand-primary);
+  background: var(--brand-primary);
+  color: #fff;
+}
+
 .auth-form input {
   height: 3rem;
   background: #fffdfb;
