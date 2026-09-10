@@ -237,7 +237,7 @@ function renderAuthMode(preserveMessage = false) {
   elements.authEmailWrap.hidden = !isLoginStep && !isEmailSignup && !isForgotEmailStep && !isForgotOtpStep && !isForgotPasswordStep;
   elements.authMobileWrap.hidden = !isMobileSignup;
   elements.authRoleWrap.hidden = true;
-  elements.authOtpWrap.hidden = !(isSignupOtpStep || isForgotOtpStep);
+  elements.authOtpWrap.hidden = !((isSignupOtpStep && isEmailSignup) || isForgotOtpStep);
   elements.authWhatsappOtpWrap.hidden = !(isSignupOtpStep && isMobileSignup);
   authPasswordWrap.hidden = !(isLoginStep || (isSignupPasswordStep && isEmailSignup) || isForgotPasswordStep);
 
@@ -267,7 +267,7 @@ function renderAuthMode(preserveMessage = false) {
     elements.authTitle.textContent = 'Create your account';
     elements.authSubmitBtn.textContent = 'Send Signup OTP';
   } else if (isSignupOtpStep) {
-    elements.authTitle.textContent = 'Verify signup OTP';
+    elements.authTitle.textContent = isMobileSignup ? 'Verify WhatsApp signup OTP' : 'Verify signup OTP';
     elements.authSubmitBtn.textContent = 'Verify OTP';
   } else if (isSignupPasswordStep && isEmailSignup) {
     elements.authTitle.textContent = 'Set password';
