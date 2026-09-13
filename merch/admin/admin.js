@@ -5,6 +5,7 @@
     dashboard: 'Dashboard',
     products: 'Products',
     trash: 'Trash',
+    offers: 'Offers',
     categories: 'Categories',
     orders: 'Orders',
     customers: 'Customers',
@@ -1261,8 +1262,8 @@
       primarySku: 'HM-BTL-300-SLV',
       categoryId: 2,
       category: 'Hydrogen Water Bottles',
-      price: 6499.00,
-      priceLabel: '₹6,499 - ₹8,499',
+      price: 25900.00,
+      priceLabel: '₹25,900',
       stock: 130,
       status: 'published',
       createdAt: '2026-03-15',
@@ -1273,10 +1274,10 @@
       image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113',
       description: 'Hydrogen-rich water bottle with 300ml and 500ml variants.',
       variants: [
-        { id: 11, size: '300ml', color: 'Silver', price: 6999, stock: 40, sku: 'HM-BTL-300-SLV' },
-        { id: 12, size: '500ml', color: 'Silver', price: 6499, stock: 35, sku: 'HM-BTL-500-SLV' },
-        { id: 13, size: '300ml', color: 'Black', price: 7499, stock: 30, sku: 'HM-BTL-300-BLK' },
-        { id: 14, size: '500ml', color: 'Black', price: 8499, stock: 25, sku: 'HM-BTL-500-BLK' },
+        { id: 'HM-BTL-460-SLV', size: '460ml', color: 'Silver', price: 25900, stock: 50, imageUrl: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113', sku: 'HM-BTL-460-SLV' },
+        { id: 'HM-BTL-460-BLK', size: '460ml', color: 'Black', price: 25900, stock: 50, imageUrl: '/cdn/shop/files/products/bottle-black.png', sku: 'HM-BTL-460-BLK' },
+        { id: 'HM-BTL-460-GLD', size: '460ml', color: 'Gold', price: 25900, stock: 50, imageUrl: '/cdn/shop/files/products/bottle-gold.png', sku: 'HM-BTL-460-GLD' },
+        { id: 'HM-BTL-460-BLU', size: '460ml', color: 'Blue', price: 25900, stock: 50, imageUrl: '/cdn/shop/files/products/bottle-blue.png', sku: 'HM-BTL-460-BLU' },
       ],
     },
     {
@@ -1286,8 +1287,8 @@
       primarySku: 'HM-SPR-050-WHT',
       categoryId: 3,
       category: 'Hydrogen Mists / Sprays',
-      price: 2499.00,
-      priceLabel: '₹2,499 - ₹3,799',
+      price: 11900.00,
+      priceLabel: '₹11,900',
       stock: 155,
       status: 'published',
       createdAt: '2026-04-01',
@@ -1298,10 +1299,8 @@
       image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138',
       description: 'Hydrogen mist and spray range with white and rose-gold variants.',
       variants: [
-        { id: 15, size: '50ml', color: 'White', price: 2499, stock: 50, sku: 'HM-SPR-050-WHT' },
-        { id: 16, size: '100ml', color: 'White', price: 3499, stock: 40, sku: 'HM-SPR-100-WHT' },
-        { id: 17, size: '50ml', color: 'Rose Gold', price: 2799, stock: 35, sku: 'HM-SPR-050-RSG' },
-        { id: 18, size: '100ml', color: 'Rose Gold', price: 3799, stock: 30, sku: 'HM-SPR-100-RSG' },
+        { id: 'HM-SPR-013-WHT', size: '13ml', color: 'White', price: 11900, stock: 50, imageUrl: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138', sku: 'HM-SPR-013-WHT' },
+        { id: 'HM-SPR-013-BLK', size: '13ml', color: 'Black', price: 11900, stock: 50, imageUrl: '/cdn/shop/files/products/mist-black.png', sku: 'HM-SPR-013-BLK' },
       ],
     },
   ];
@@ -1447,6 +1446,10 @@
     hypesLoading: false,
     reports: null,
     trashLoading: false,
+    offers: [],
+    offersLoading: false,
+    offerDraft: null,
+    offerError: '',
   };
 
   const els = {
@@ -1465,6 +1468,7 @@
     influencersView: document.getElementById('influencersView'),
     reportsView: document.getElementById('reportsView'),
     settingsView: document.getElementById('settingsView'),
+    offersView: document.getElementById('offersView'),
     notificationBadgeCount: document.getElementById('notificationBadgeCount'),
     adminModal: document.getElementById('adminModal'),
     adminModalDialog: document.getElementById('adminModalDialog'),
@@ -3389,6 +3393,343 @@
     `;
   }
 
+  // ─── Offers ───
+
+  async function loadOffers() {
+    state.offersLoading = true;
+    try {
+      const data = await apiRequest('/api/merch/admin/offers');
+      state.offers = Array.isArray(data.offers) ? data.offers : [];
+    } catch (err) {
+      console.error('[Admin] loadOffers error:', err);
+      state.offers = [];
+    }
+    state.offersLoading = false;
+    renderOffers();
+  }
+
+  function getOfferVariantOptions(productId, selectedVariantId) {
+    if (!productId) return '';
+    const product = state.products.find((p) => String(p.id) === String(productId));
+    const variants = Array.isArray(product?.variants) ? product.variants : [];
+    if (!variants.length) return '';
+    return [
+      `<option value="">— No specific variant —</option>`,
+      ...variants.map((v) => {
+        const label = [v.size, v.color].filter(Boolean).join(' / ') || v.sku || `Variant ${v.id}`;
+        const selected = String(v.id) === String(selectedVariantId || '') ? 'selected' : '';
+        return `<option value="${escapeHtml(String(v.id))}" ${selected}>${escapeHtml(label)}</option>`;
+      }),
+    ].join('');
+  }
+
+  function renderOffers() {
+    if (!els.offersView) return;
+    const draft = state.offerDraft;
+    const products = state.products;
+
+    const productOptions = [
+      '<option value="">— No specific product —</option>',
+      ...products.map((p) => {
+        const selected = draft && String(draft.productId) === String(p.id) ? 'selected' : '';
+        return `<option value="${escapeHtml(String(p.id))}" ${selected}>${escapeHtml(p.name)}</option>`;
+      }),
+    ].join('');
+
+    const isFlat = draft?.discountType === 'flat';
+    // Flat values stored in paise → display in rupees for editing.
+    const discountDisplayValue = draft
+      ? (isFlat ? (Number(draft.discountValue || 0) / 100).toFixed(2) : String(draft.discountValue ?? ''))
+      : '';
+
+    const variantOptionsHtml = draft?.productId
+      ? getOfferVariantOptions(draft.productId, draft.variantId)
+      : '';
+
+    els.offersView.innerHTML = `
+      <section class="admin-section">
+        <div class="admin-section__head">
+          <div>
+            <h2 class="admin-section__title">Offers</h2>
+            <p class="admin-section__desc">Create and manage promotional offers shown on the storefront under \"Shop Offers\". Only active offers are visible to customers.</p>
+          </div>
+          <div class="admin-section__actions">
+            <button class="admin-btn admin-btn--primary" type="button" data-action="new-offer">+ New Offer</button>
+          </div>
+        </div>
+        <div class="admin-section__body">
+          ${draft ? `
+            <div class="admin-offer-form" id="offerForm" style="background:var(--admin-bg-subtle,#faf7f4);border:1px solid var(--admin-border);border-radius:10px;padding:20px 22px;margin-bottom:24px;">
+              <h3 style="margin:0 0 4px;font-size:15px;font-weight:700;">${draft.id ? 'Edit Offer' : 'New Offer'}</h3>
+              ${state.offerError
+                ? `<p style="color:var(--admin-danger,#c0392b);font-size:13px;margin:8px 0 0;">${escapeHtml(state.offerError)}</p>`
+                : ''}
+              <div class="admin-form-grid" style="margin-top:16px;">
+                <label class="admin-field">
+                  <span>Offer Name <span aria-hidden="true" style="color:var(--admin-danger,#c0392b)">*</span></span>
+                  <input type="text" data-offer-input="name"
+                         value="${escapeHtml(draft.name || '')}"
+                         placeholder="e.g. Welcome Discount" />
+                </label>
+                <label class="admin-field">
+                  <span>Short Description</span>
+                  <input type="text" data-offer-input="shortDescription"
+                         value="${escapeHtml(draft.shortDescription || '')}"
+                         placeholder="Shown on the offer card" />
+                </label>
+                <label class="admin-field admin-field--wide">
+                  <span>Full Description</span>
+                  <textarea data-offer-input="fullDescription" rows="3"
+                            placeholder="Detail shown when customer expands the offer"
+                  >${escapeHtml(draft.fullDescription || '')}</textarea>
+                </label>
+                <label class="admin-field admin-field--wide">
+                  <span>Terms &amp; Conditions</span>
+                  <textarea data-offer-input="terms" rows="2"
+                            placeholder="e.g. Valid until 31 Dec 2026. One per customer."
+                  >${escapeHtml(draft.terms || '')}</textarea>
+                </label>
+                <label class="admin-field">
+                  <span>Applicable Product</span>
+                  <select data-offer-input="productId">${productOptions}</select>
+                </label>
+                ${variantOptionsHtml ? `
+                <label class="admin-field">
+                  <span>Specific Variant <span style="color:var(--admin-muted)">optional</span></span>
+                  <select data-offer-input="variantId">${variantOptionsHtml}</select>
+                </label>` : ''}
+                <label class="admin-field">
+                  <span>Discount Type</span>
+                  <select data-offer-input="discountType">
+                    <option value="percentage" ${!isFlat ? 'selected' : ''}>Percentage (%)</option>
+                    <option value="flat" ${isFlat ? 'selected' : ''}>Flat Amount (₹)</option>
+                  </select>
+                </label>
+                <label class="admin-field">
+                  <span>Discount Value <span style="color:var(--admin-muted);font-size:12px;">${isFlat ? 'in ₹ (rupees)' : '% off'}</span></span>
+                  <input type="number" min="0" step="${isFlat ? '0.01' : '1'}" data-offer-input="discountValue"
+                         value="${escapeHtml(discountDisplayValue)}"
+                         placeholder="${isFlat ? 'e.g. 500 for ₹500 off' : 'e.g. 10 for 10% off'}" />
+                </label>
+                <label class="admin-field">
+                  <span>Status</span>
+                  <select data-offer-input="isActive">
+                    <option value="1" ${draft.isActive !== 0 && draft.isActive !== false ? 'selected' : ''}>Active — shown on storefront</option>
+                    <option value="0" ${draft.isActive === 0 || draft.isActive === false ? 'selected' : ''}>Inactive — hidden</option>
+                  </select>
+                </label>
+              </div>
+              <div class="admin-toolbar" style="margin-top:18px;">
+                <button class="admin-btn admin-btn--primary" type="button" data-action="save-offer">
+                  ${draft.id ? 'Save Changes' : 'Create Offer'}
+                </button>
+                <button class="admin-btn admin-btn--ghost" type="button" data-action="cancel-offer">Cancel</button>
+              </div>
+            </div>
+          ` : ''}
+
+          ${state.offersLoading
+            ? '<p class="admin-table__muted">Loading offers…</p>'
+            : state.offers.length === 0
+              ? '<p class="admin-table__muted">No offers yet. Click + New Offer to create one.</p>'
+              : `
+            <div class="admin-table-wrap">
+              <table class="admin-table">
+                <thead><tr>
+                  <th>Offer</th>
+                  <th>Product / Variant</th>
+                  <th>Discount</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr></thead>
+                <tbody>
+                  ${state.offers.map((offer) => `
+                    <tr>
+                      <td>
+                        <strong>${escapeHtml(offer.name)}</strong><br>
+                        <span class="admin-table__muted">${escapeHtml(offer.shortDescription || '\u2014')}</span>
+                      </td>
+                      <td>${offer.productName
+                        ? `${escapeHtml(offer.productName)}${
+                            offer.variantSku
+                              ? `<br><span class="admin-table__muted">${escapeHtml([offer.variantSize, offer.variantColor].filter(Boolean).join(' / ') || offer.variantSku)}</span>`
+                              : ''}`
+                        : '<span class="admin-table__muted">\u2014</span>'}</td>
+                      <td>${offer.discountType === 'percentage'
+                        ? `${escapeHtml(String(offer.discountValue))}%`
+                        : `\u20b9${escapeHtml((Number(offer.discountValue) / 100).toFixed(2))}`}
+                      </td>
+                      <td>
+                        <span class="admin-badge ${offer.isActive ? 'admin-badge--active' : 'admin-badge--inactive'}">
+                          ${offer.isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td>
+                        <div class="admin-toolbar__group">
+                          <button class="admin-btn admin-btn--ghost" type="button"
+                                  data-action="edit-offer" data-offer-id="${escapeHtml(String(offer.id))}">Edit</button>
+                          <button class="admin-btn admin-btn--ghost admin-btn--danger" type="button"
+                                  data-action="delete-offer" data-offer-id="${escapeHtml(String(offer.id))}">Delete</button>
+                        </div>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `}
+        </div>
+      </section>
+    `;
+
+    // Wire all data-offer-input fields to draft state.
+    els.offersView.querySelectorAll('[data-offer-input]').forEach((input) => {
+      input.addEventListener('input', () => {
+        if (!state.offerDraft) return;
+        const key = input.dataset.offerInput;
+        if (key === 'productId') {
+          state.offerDraft.productId = input.value ? Number(input.value) : null;
+          // Clear variant when product changes.
+          state.offerDraft.variantId = null;
+          // Re-render to show/hide variant dropdown.
+          renderOffers();
+          return;
+        }
+        if (key === 'variantId') {
+          state.offerDraft.variantId = input.value ? Number(input.value) : null;
+          return;
+        }
+        if (key === 'discountType') {
+          state.offerDraft.discountType = input.value;
+          // Reset value and re-render to update placeholder/step.
+          state.offerDraft.discountValue = 0;
+          renderOffers();
+          return;
+        }
+        if (key === 'discountValue') {
+          // Store as entered — flat values will be converted to paise on save.
+          state.offerDraft.discountValue = Number(input.value) || 0;
+          return;
+        }
+        if (key === 'isActive') {
+          state.offerDraft.isActive = Number(input.value);
+          return;
+        }
+        state.offerDraft[key] = input.value;
+      });
+    });
+
+    // Wire action buttons.
+    els.offersView.querySelectorAll('[data-action]').forEach((btn) => {
+      btn.addEventListener('click', () => handleOfferAction(btn.dataset.action, btn.dataset));
+    });
+  }
+
+  async function handleOfferAction(action, dataset = {}) {
+    if (action === 'new-offer') {
+      state.offerDraft = {
+        name: '', shortDescription: '', fullDescription: '', terms: '',
+        productId: null, variantId: null,
+        discountType: 'percentage', discountValue: 0, isActive: 1,
+      };
+      state.offerError = '';
+      renderOffers();
+      els.offersView.querySelector('#offerForm')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+
+    if (action === 'cancel-offer') {
+      state.offerDraft = null;
+      state.offerError = '';
+      renderOffers();
+      return;
+    }
+
+    if (action === 'edit-offer') {
+      const offer = state.offers.find((o) => String(o.id) === String(dataset.offerId));
+      if (!offer) return;
+      // Flat values come from DB in paise; we keep them as paise in draft
+      // and divide by 100 when rendering the input (see discountDisplayValue above).
+      state.offerDraft = {
+        id: offer.id,
+        name: offer.name || '',
+        shortDescription: offer.shortDescription || '',
+        fullDescription: offer.fullDescription || '',
+        terms: offer.terms || '',
+        productId: offer.productId ?? null,
+        variantId: offer.variantId ?? null,
+        discountType: offer.discountType || 'percentage',
+        discountValue: Number(offer.discountValue || 0),
+        isActive: offer.isActive ? 1 : 0,
+      };
+      state.offerError = '';
+      renderOffers();
+      els.offersView.querySelector('#offerForm')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+
+    if (action === 'save-offer') {
+      const draft = state.offerDraft;
+      if (!String(draft.name || '').trim()) {
+        state.offerError = 'Offer name is required.';
+        renderOffers();
+        return;
+      }
+      // Convert flat discount from rupees (user input) to paise for storage.
+      const discountValuePaise = draft.discountType === 'flat'
+        ? Math.max(0, Math.round(Number(draft.discountValue || 0) * 100))
+        : Number(draft.discountValue || 0);
+      const payload = {
+        name: String(draft.name).trim(),
+        shortDescription: String(draft.shortDescription || '').trim(),
+        fullDescription: String(draft.fullDescription || '').trim(),
+        terms: String(draft.terms || '').trim(),
+        productId: draft.productId || null,
+        variantId: draft.variantId || null,
+        discountType: draft.discountType,
+        discountValue: discountValuePaise,
+        isActive: draft.isActive ? 1 : 0,
+      };
+      try {
+        if (draft.id) {
+          await apiRequest(`/api/merch/admin/offers/${encodeURIComponent(draft.id)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          toast('Offer updated', `\"${draft.name}\" has been saved.`);
+        } else {
+          await apiRequest('/api/merch/admin/offers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          toast('Offer created', `\"${draft.name}\" is now live.`);
+        }
+        state.offerDraft = null;
+        state.offerError = '';
+        await loadOffers();
+      } catch (err) {
+        state.offerError = err.message || 'Save failed.';
+        renderOffers();
+      }
+      return;
+    }
+
+    if (action === 'delete-offer') {
+      if (!window.confirm('Delete this offer? This cannot be undone.')) return;
+      try {
+        await apiRequest(`/api/merch/admin/offers/${encodeURIComponent(dataset.offerId)}`, {
+          method: 'DELETE',
+        });
+        toast('Offer deleted', 'The offer has been removed.');
+        await loadOffers();
+      } catch (err) {
+        toast('Delete failed', err.message || 'Unable to delete offer.', 'warning');
+      }
+    }
+  }
+
   function renderReports() {
     if (state.reportsLoading && !state.reports) {
       els.reportsView.innerHTML = `
@@ -4299,6 +4640,7 @@
       productId: existing?.productId || existing?.parentProductId || existing?.id,
       parentProductId: existing?.parentProductId || existing?.productId || existing?.id,
       variantId: existing?.variantId || existing?.id,
+      imageUrl: String(existing?.imageUrl || '').trim(),
       image: String(fd.get('image') || '').trim() || preservedImages[0] || '',
       images: preservedImages,
       description: String(fd.get('description') || '').trim(),
@@ -4509,6 +4851,8 @@
             ...variant,
             price: Number(variant.price || 0) / 100,
             stock: Number(variant.stock || 0),
+            imageUrl: variant.imageUrl || '',
+            images: Array.isArray(variant.images) ? variant.images.filter(Boolean) : [],
           })),
         };
       });
@@ -4855,6 +5199,7 @@
     renderDashboard();
     renderProducts();
     renderTrash();
+    renderOffers();
     renderCategories();
     renderOrders();
     renderCustomers();
@@ -6132,6 +6477,7 @@
               stock: entity.stock,
               size: entity.size,
               color: entity.color,
+              imageUrl: entity.imageUrl,
               status: entity.status,
               image: entity.image,
               images: entity.images,
@@ -6399,6 +6745,7 @@
     loadInfluencerData();
     loadCouponData();
     loadReportData();
+    loadOffers();
     setInterval(() => {
       if (document.hidden) return;
       loadDashboardStats();

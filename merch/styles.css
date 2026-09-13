@@ -2777,6 +2777,13 @@ body.is-auth-loading .merch-auth-cta {
   min-height: 39px;
 }
 
+.product-card__variant {
+  margin: -10px 0 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .product-card__price {
   font-size: 16px;
   font-weight: 700;
@@ -3127,6 +3134,7 @@ body.is-auth-loading .merch-auth-cta {
 .gallery-thumb {
   width: 60px;
   height: 60px;
+  padding: 0;
   border-radius: var(--radius-sm);
   overflow: hidden;
   border: 2px solid transparent;
@@ -3142,7 +3150,10 @@ body.is-auth-loading .merch-auth-cta {
 .gallery-thumb img {
   width: 100%;
   height: 100%;
+  display: block;
   object-fit: cover;
+  transform: scale(2.2);
+  transform-origin: center center;
 }
 
 @media (hover: none), (pointer: coarse) {
@@ -6440,5 +6451,156 @@ body.merch-page:not(.merch-admin-page) .product-card--bottle .product-card__imag
   .product-card--bottle .product-card__image img {
     width: 82%;
     margin-left: 18%;
+  }
+}
+
+/* ─── Shop Offers Section ─── */
+.merch-offers {
+  padding: 0 var(--page-padding, 24px) 56px;
+  max-width: var(--max-width);
+  margin: 0 auto;
+}
+
+.merch-offers .section-title {
+  margin-bottom: 20px;
+}
+
+.merch-offers__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--border);
+}
+
+.merch-offer-card {
+  background: var(--bg-card);
+  padding: 20px 24px;
+  display: grid;
+  gap: 0;
+  transition: background var(--transition);
+}
+
+.merch-offer-card__summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.merch-offer-card__meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.merch-offer-card__name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-dark);
+}
+
+.merch-offer-card__desc {
+  margin: 3px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.merch-offer-card__pricing {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.merch-offer-card__original {
+  font-size: 13px;
+  color: var(--text-light);
+  text-decoration: line-through;
+}
+
+.merch-offer-card__discounted {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.merch-offer-card__toggle {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: border-color var(--transition), color var(--transition);
+  white-space: nowrap;
+}
+
+.merch-offer-card__toggle:hover,
+.merch-offer-card__toggle:focus-visible {
+  border-color: var(--primary);
+  color: var(--text-dark);
+  outline: none;
+}
+
+.merch-offer-card--expanded {
+  background: #faf7f4;
+}
+
+.merch-offer-card__detail {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 10px;
+}
+
+.merch-offer-card__applies {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.merch-offer-card__full-desc {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-dark);
+  line-height: 1.6;
+}
+
+.merch-offer-card__terms {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-light);
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
+
+.merch-offer-card__shop-btn {
+  align-self: start;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.merch-offer-card__shop-btn:hover {
+  text-decoration: underline;
+}
+
+@media (min-width: 640px) {
+  .merch-offers__grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
   }
 }

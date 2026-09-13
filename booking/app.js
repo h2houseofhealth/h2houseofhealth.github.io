@@ -1,4 +1,4 @@
-﻿function resolveApiUrl() {
+function resolveApiUrl() {
   const configuredWindowValue =
     typeof window !== 'undefined' ? String(window.__API_URL__ || '').trim() : '';
   const configuredMetaValue =
@@ -28,6 +28,7 @@ function buildApiUrl(url = '') {
 
 const AUTH_TOKEN_STORAGE_KEY = 'booking_portal_auth_token';
 const GUEST_SESSION_STORAGE_KEY = 'h2_guest_session_token';
+const BOOKING_AUTH_RETURN_STATE_STORAGE_KEY = 'h2_booking_auth_return_state';
 
 function getStoredAuthToken() {
   try {
@@ -213,17 +214,10 @@ const state = {
     startDate: '',
     endDate: '',
   },
-  adminBookingEmailEventsByBooking: {},
-  adminBookingEmailAnalyticsByBooking: {},
-  adminBookingEmailTimelineLoading: false,
-  adminPaymentLinkAnalytics: null,
-  adminPaymentLinkAnalyticsRows: [],
-  adminEmailAnalyticsFilters: {
-    startDate: '',
-    endDate: '',
-  },
+
   adminCalendarDate: '',
   adminCalendarCategory: 'HYDROGEN SESSION',
+  pendingAuthReturnState: null,
   adminCalendarServiceName: '',
   adminCalendarAvailability: {},
   adminCalendarHoldCounts: {},
@@ -589,14 +583,7 @@ const elements = {
   confirmDialogCloseBtn: document.getElementById('confirmDialogCloseBtn'),
   confirmDialogCancelBtn: document.getElementById('confirmDialogCancelBtn'),
   confirmDialogOkBtn: document.getElementById('confirmDialogOkBtn'),
-  bookingEmailTimelineDialog: document.getElementById('bookingEmailTimelineDialog'),
-  bookingEmailTimelineCloseBtn: document.getElementById('bookingEmailTimelineCloseBtn'),
-  bookingEmailTimelineBookingId: document.getElementById('bookingEmailTimelineBookingId'),
-  bookingEmailTimelineMeta: document.getElementById('bookingEmailTimelineMeta'),
-  bookingEmailTimelineAnalytics: document.getElementById('bookingEmailTimelineAnalytics'),
-  bookingEmailTimelineList: document.getElementById('bookingEmailTimelineList'),
-  bookingEmailTimelineEmpty: document.getElementById('bookingEmailTimelineEmpty'),
-  bookingEmailTimelineResendBtn: document.getElementById('bookingEmailTimelineResendBtn'),
+
   servicesBackBtn: document.getElementById('servicesBackBtn'),
   servicesNextBtn: document.getElementById('servicesNextBtn'),
   bookingsBackBtn: document.getElementById('bookingsBackBtn'),
@@ -830,8 +817,158 @@ function getUserTabFromHash(hash) {
   return '';
 }
 
+function getSafeBookingReturnStateFromUrl(returnTo = '') {
+  const raw = String(returnTo || '').trim();
+  if (!raw) return null;
+
+  let url;
+  try {
+    url = new URL(raw, window.location.origin);
+  } catch {
+    return null;
+  }
+
+  if (url.origin !== window.location.origin || !url.pathname.startsWith('/booking')) {
+    return null;
+  }
+
+  const tabFromHash = getUserTabFromHash(url.hash);
+  const entryGuest = url.searchParams.get('entry') === 'guest';
+  return {
+    activeUserTab: tabFromHash || (entryGuest ? 'services' : ''),
+    postLoginChoice: entryGuest ? 'continue-non-member' : '',
+    hash: tabFromHash ? `#${tabFromHash}` : entryGuest ? '#services' : '',
+  };
+}
+
+function getIncomingAuthReturnState() {
+  const params = new URLSearchParams(window.location.search || '');
+  return getSafeBookingReturnStateFromUrl(params.get('returnTo') || '');
+}
+
+function getCurrentBookingReturnState(choice = '') {
+  const activeUserTab = getUserTabFromHash(window.location.hash) || state.activeUserTab || 'services';
+  return {
+    choice: String(choice || '').trim(),
+    activeUserTab,
+    postLoginChoice: state.postLoginChoice || '',
+    hash: activeUserTab ? `#${activeUserTab}` : '',
+    selectedServiceCategory: state.selectedServiceCategory || '',
+    selectedServiceDate: state.selectedServiceDate || '',
+    selectedSingleSessionServiceName: state.selectedSingleSessionServiceName || '',
+    selectedHydrogenServiceName: state.selectedHydrogenServiceName || '',
+    selectedHydrogenFlow: state.selectedHydrogenFlow || 'topup',
+    selectedHydrogenExtraSessions: Number(state.selectedHydrogenExtraSessions || 0),
+    selectedHydrogenSlots: Array.isArray(state.selectedHydrogenSlots) ? state.selectedHydrogenSlots : [],
+    selectedHydrogenAddOnServiceName: state.selectedHydrogenAddOnServiceName || '',
+    selectedHydrogenAddOnSessionIndex: Number(state.selectedHydrogenAddOnSessionIndex || 0),
+    serviceDetailSelections: state.serviceDetailSelections || {},
+    expandedServiceCategories: state.expandedServiceCategories || {},
+    ivSelections: state.ivSelections || {},
+    cart: state.isGuestUser && !state.user ? loadStoredGuestCart() : [],
+  };
+}
+
+function storePendingAuthReturnState(returnState) {
+  state.pendingAuthReturnState = returnState || null;
+  try {
+    if (returnState) {
+      window.sessionStorage?.setItem(BOOKING_AUTH_RETURN_STATE_STORAGE_KEY, JSON.stringify(returnState));
+    } else {
+      window.sessionStorage?.removeItem(BOOKING_AUTH_RETURN_STATE_STORAGE_KEY);
+    }
+  } catch {
+    // Return state is best-effort; auth still works without sessionStorage.
+  }
+}
+
+function loadPendingAuthReturnState() {
+  if (state.pendingAuthReturnState) return state.pendingAuthReturnState;
+  try {
+    const raw = window.sessionStorage?.getItem(BOOKING_AUTH_RETURN_STATE_STORAGE_KEY) || '';
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function restoreBookingReturnStateAfterAuth() {
+  const returnState = loadPendingAuthReturnState();
+  storePendingAuthReturnState(null);
+  if (!returnState || state.user?.role !== 'user') return false;
+
+  const activeUserTab = getUserTabFromHash(returnState.hash) || getUserTabFromHash(`#${returnState.activeUserTab}`) || 'services';
+  state.postLoginChoice =
+    returnState.postLoginChoice ||
+    (returnState.choice === 'join-member'
+      ? 'join-member'
+      : isCurrentUserMembershipActive()
+        ? 'continue-member'
+        : 'continue-non-member');
+  state.activeUserTab = activeUserTab;
+  state.selectedServiceCategory = String(returnState.selectedServiceCategory || '').trim() || state.selectedServiceCategory;
+  state.selectedServiceDate = String(returnState.selectedServiceDate || '').trim() || state.selectedServiceDate || getTodayIsoDate();
+  state.selectedSingleSessionServiceName = String(returnState.selectedSingleSessionServiceName || '').trim();
+  state.selectedHydrogenServiceName = String(returnState.selectedHydrogenServiceName || '').trim();
+  state.selectedHydrogenFlow = String(returnState.selectedHydrogenFlow || state.selectedHydrogenFlow || 'topup').trim();
+  state.selectedHydrogenExtraSessions = Number(returnState.selectedHydrogenExtraSessions || 0);
+  state.selectedHydrogenSlots = Array.isArray(returnState.selectedHydrogenSlots) ? returnState.selectedHydrogenSlots : [];
+  state.selectedHydrogenAddOnServiceName = String(returnState.selectedHydrogenAddOnServiceName || '').trim();
+  state.selectedHydrogenAddOnSessionIndex = Number(returnState.selectedHydrogenAddOnSessionIndex || 0);
+  state.serviceDetailSelections =
+    returnState.serviceDetailSelections && typeof returnState.serviceDetailSelections === 'object'
+      ? returnState.serviceDetailSelections
+      : state.serviceDetailSelections;
+  state.expandedServiceCategories =
+    returnState.expandedServiceCategories && typeof returnState.expandedServiceCategories === 'object'
+      ? returnState.expandedServiceCategories
+      : state.expandedServiceCategories;
+  state.ivSelections =
+    returnState.ivSelections && typeof returnState.ivSelections === 'object'
+      ? returnState.ivSelections
+      : state.ivSelections;
+  if (Array.isArray(returnState.cart) && returnState.cart.length) {
+    state.cart = normalizeGuestCartComboGroups(returnState.cart);
+    state.bookings = state.cart;
+    persistGuestCart();
+  }
+  window.location.hash = activeUserTab ? `#${activeUserTab}` : '#services';
+  return true;
+}
+
+async function promotePendingGuestCartAfterAuth() {
+  if (state.user?.role !== 'user') return;
+  const pendingCart = normalizeGuestCartComboGroups(
+    (Array.isArray(state.cart) && state.cart.length ? state.cart : loadStoredGuestCart()) || []
+  ).filter((booking) => booking?.serviceName && booking?.bookingDate && booking?.bookingTime);
+  if (!pendingCart.length) return;
+
+  const previousGuestMode = state.isGuestUser;
+  state.isGuestUser = false;
+  for (const booking of pendingCart) {
+    await api('/api/bookings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        serviceName: booking.serviceName,
+        bookingDate: booking.bookingDate,
+        bookingTime: booking.bookingTime,
+        notes: booking.notes || '',
+      }),
+    });
+  }
+  clearGuestCart();
+  state.isGuestUser = false;
+  if (previousGuestMode) {
+    state.guestSessionToken = null;
+  }
+}
+
 function openAuthFromLanding(choice = '') {
   state.pendingPreAuthChoice = String(choice || '').trim();
+  storePendingAuthReturnState(getCurrentBookingReturnState(choice));
   state.showAuthCard = true;
   isRegisterMode = false;
   isForgotPasswordMode = false;
@@ -873,31 +1010,42 @@ function resetServicesUiStateForUserSwitch() {
 
 
 function routeAfterAuthSuccess() {
+  if (restoreBookingReturnStateAfterAuth()) {
+    return true;
+  }
   ensurePostLoginDashboardChoice();
   if (state.user?.role === 'admin') {
     state.adminActiveTab = 'calendar';
-    return;
+    return false;
   }
   state.membershipBrowseVisible = false;
   state.activeUserTab = 'membership';
   window.location.hash = '#membership';
+  return false;
 }
 
 async function finishAuthSuccess(result) {
   resetMyBookingsViewState();
-  resetServicesUiStateForUserSwitch();
   state.user = result.user;
   storeAuthToken(result.token || result.authToken || '');
-  state.postLoginChoice = state.pendingPreAuthChoice || '';
+  const hasReturnState = Boolean(loadPendingAuthReturnState());
+  if (!hasReturnState) {
+    resetServicesUiStateForUserSwitch();
+  }
+  state.postLoginChoice = hasReturnState ? state.postLoginChoice : state.pendingPreAuthChoice || '';
   state.pendingPreAuthChoice = '';
   state.showAuthCard = false;
-  routeAfterAuthSuccess();
+  state.isGuestUser = false;
+  const restoredReturnState = routeAfterAuthSuccess();
   render();
 
   try {
     await loadProfile();
+    await promotePendingGuestCartAfterAuth();
     await loadDashboardData();
-    routeAfterAuthSuccess();
+    if (!restoredReturnState) {
+      routeAfterAuthSuccess();
+    }
   } catch (error) {
     if (Number(error?.status || 0) === 401) {
       console.warn('Dashboard data load was unauthorized after successful sign-in. Check server restart/auth cookie settings.');
@@ -915,6 +1063,14 @@ async function bootstrap() {
   consumeOAuthTokenFromHash();
   const params = new URLSearchParams(window.location.search);
   const launchGuestBooking = params.get('entry') === 'guest';
+  const requestedAuth = params.get('auth') === '1';
+  const incomingReturnState = getIncomingAuthReturnState();
+  if (incomingReturnState) {
+    storePendingAuthReturnState({
+      ...getCurrentBookingReturnState('incoming-return'),
+      ...incomingReturnState,
+    });
+  }
   if (initialTab) state.activeUserTab = initialTab;
   attachEvents()
   syncAdminRescheduleSearchPlaceholder();
@@ -943,13 +1099,24 @@ async function bootstrap() {
       state.activeUserTab = 'services';
       window.location.hash = '#services';
     }
+    if (launchGuestBooking && state.user.role === 'user') {
+      state.postLoginChoice = isCurrentUserMembershipActive() ? 'continue-member' : 'continue-non-member';
+      state.activeUserTab = 'services';
+      window.location.hash = '#services';
+    }
     if (state.user.role === 'user' && !initialTab) {
       state.membershipBrowseVisible = false;
-      state.activeUserTab = 'membership';
-      window.location.hash = '#membership';
+      if (!launchGuestBooking) {
+        state.activeUserTab = 'membership';
+        window.location.hash = '#membership';
+      }
     }
   } else {
-    if (shouldOpenGuestServices) {
+    if (requestedAuth) {
+      state.showAuthCard = true;
+      state.pendingPreAuthChoice = incomingReturnState?.postLoginChoice || '';
+      renderAuthMode();
+    } else if (shouldOpenGuestServices) {
       await enterGuestBookingMode({ scrollToServices: false });
     } else {
     const storedGuestToken = getStoredGuestSessionToken();
@@ -1713,9 +1880,9 @@ function attachEvents() {
 
   elements.checkoutWithEmailLogin?.addEventListener('click', () => {
     elements.checkoutOptionsDialog?.close();
-    state.showAuthCard = true;
-    state.auth = { mode: 'login' };
-    render();
+    state.activeUserTab = 'cart';
+    window.location.hash = '#cart';
+    openAuthFromLanding('booking-checkout');
   });
 
   elements.checkoutAsGuest?.addEventListener('click', () => {
@@ -2702,9 +2869,11 @@ async function loadCurrentUser() {
     const result = await api('/api/auth/me');
     state.user = result.user;
     syncPostLoginChoiceWithMembership();
-  } catch {
+  } catch (error) {
     state.user = null;
-    storeAuthToken('');
+    if (Number(error?.status || 0) === 401) {
+      storeAuthToken('');
+    }
   }
 }
 

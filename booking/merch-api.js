@@ -141,10 +141,33 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       color TEXT,
       price INTEGER NOT NULL,
       stock INTEGER NOT NULL DEFAULT 0,
+      image_url TEXT,
+      images_json TEXT,
       is_active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS merch_offers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      short_description TEXT NOT NULL DEFAULT '',
+      full_description TEXT NOT NULL DEFAULT '',
+      terms TEXT NOT NULL DEFAULT '',
+      product_id INTEGER REFERENCES merch_products(id) ON DELETE SET NULL,
+      variant_id INTEGER REFERENCES merch_variants(id) ON DELETE SET NULL,
+      discount_type TEXT NOT NULL DEFAULT 'percentage',
+      discount_value REAL NOT NULL DEFAULT 0,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
+  if (!hasColumn('merch_variants', 'image_url')) {
+    db.exec('ALTER TABLE merch_variants ADD COLUMN image_url TEXT');
+  }
+  if (!hasColumn('merch_variants', 'images_json')) {
+    db.exec('ALTER TABLE merch_variants ADD COLUMN images_json TEXT');
+  }
   if (!hasColumn('merch_variants', 'deleted_at')) {
     db.exec('ALTER TABLE merch_variants ADD COLUMN deleted_at TEXT');
   }
@@ -219,14 +242,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       slug: 'h2-water-bottle',
       description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 3 minutes. BPA-free, USB-C rechargeable.',
       category: 'bottles',
-      basePrice: 649900,
+      basePrice: 2590000,
       image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113',
       weight: 380,
       variants: [
-        ['HM-BTL-300-SLV', '300ml', 'Silver', 699900, 40],
-        ['HM-BTL-500-SLV', '500ml', 'Silver', 649900, 35],
-        ['HM-BTL-300-BLK', '300ml', 'Black', 749900, 30],
-        ['HM-BTL-500-BLK', '500ml', 'Black', 849900, 25],
+        ['HM-BTL-460-SLV', '460ml', 'Silver', 2590000, 50, '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113'],
+        ['HM-BTL-460-BLK', '460ml', 'Black', 2590000, 50, '/cdn/shop/files/products/bottle-black.png', ['/cdn/shop/files/products/bottle-black-interior.png', '/cdn/shop/files/products/bottle-black-portable.png', '/cdn/shop/files/products/bottle-black-cap.png']],
+        ['HM-BTL-460-GLD', '460ml', 'Gold', 2590000, 50, '/cdn/shop/files/products/bottle-gold.png', ['/cdn/shop/files/products/bottle-gold-interior.png', '/cdn/shop/files/products/bottle-gold-portable.png', '/cdn/shop/files/products/bottle-gold-cap.png']],
+        ['HM-BTL-460-BLU', '460ml', 'Blue', 2590000, 50, '/cdn/shop/files/products/bottle-blue.png', ['/cdn/shop/files/products/bottle-blue-interior.png', '/cdn/shop/files/products/bottle-blue-portable.png', '/cdn/shop/files/products/bottle-blue-cap.png']],
       ],
     },
     {
@@ -234,14 +257,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       slug: 'h2-mist-spray',
       description: 'Compact hydrogen mist spray for skin rejuvenation. Antioxidant-rich hydrogen water delivery.',
       category: 'sprays',
-      basePrice: 249900,
+      basePrice: 1190000,
       image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138',
       weight: 150,
       variants: [
-        ['HM-SPR-050-WHT', '50ml', 'White', 249900, 50],
-        ['HM-SPR-100-WHT', '100ml', 'White', 349900, 40],
-        ['HM-SPR-050-RSG', '50ml', 'Rose Gold', 279900, 35],
-        ['HM-SPR-100-RSG', '100ml', 'Rose Gold', 379900, 30],
+        ['HM-SPR-013-WHT', '13ml', 'White', 1190000, 50, '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138'],
+        ['HM-SPR-013-BLK', '13ml', 'Black', 1190000, 50, '/cdn/shop/files/products/mist-black.png'],
       ],
     },
   ];
@@ -259,14 +280,105 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     } else {
       db.prepare("UPDATE merch_products SET is_active = 1, updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL").run(row.id);
     }
-    const insertVariant = db.prepare('INSERT OR IGNORE INTO merch_variants (product_id, sku, size, color, price, stock) VALUES (?, ?, ?, ?, ?, ?)');
+    const insertVariant = db.prepare('INSERT OR IGNORE INTO merch_variants (product_id, sku, size, color, price, stock, image_url, images_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     const activateVariant = db.prepare('UPDATE merch_variants SET is_active = 1 WHERE product_id = ? AND sku = ?');
-    product.variants.forEach(([sku, size, color, price, stock]) => {
-      insertVariant.run(row.id, sku, size, color, price, stock);
+    product.variants.forEach(([sku, size, color, price, stock, imageUrl, images]) => {
+      insertVariant.run(row.id, sku, size, color, price, stock, imageUrl || null, JSON.stringify(images || []));
       activateVariant.run(row.id, sku);
     });
   });
   bundledProductRestores.forEach(restoreProduct);
+
+  // Correct the existing bottle and mist catalog without deleting historical
+  // variants. Old size-labelled variants remain stored but inactive; the new
+  // corrected variants intentionally start with zero stock.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS merch_catalog_migrations (
+      migration_key TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  const placeholderStockMigrationKey = 'hydrogen-variants-placeholder-stock-50-v1';
+  const placeholderStockMigrationApplied = Boolean(
+    db.prepare('SELECT migration_key FROM merch_catalog_migrations WHERE migration_key = ?')
+      .get(placeholderStockMigrationKey)
+  );
+
+  const correctHydrogenCatalog = db.transaction(() => {
+    const corrections = [
+      {
+        slug: 'h2-water-bottle',
+        price: 2590000,
+        oldSkus: ['HM-BTL-300-SLV', 'HM-BTL-500-SLV', 'HM-BTL-300-BLK', 'HM-BTL-500-BLK'],
+        specifications: {
+          'Product Name': 'Hydrogen-Rich Water Bottle',
+          Capacity: '460ml',
+          'Electrolytic Material': 'Platinum-Titanium',
+          'Membrane Electrode': 'PEM + SPE',
+          'Main Material': 'Glass',
+          'Shell Material': 'Stainless Steel',
+          'Battery Type': '700mAh Lithium Polymer',
+          'Working Time': '5 minutes per cycle (3,000+ ppb)',
+          Size: 'Ø7cm × 24cm',
+          'Colours Available': 'Black / Silver / Gold / Blue',
+        },
+        variants: [
+          ['HM-BTL-460-SLV', '460ml', 'Silver', '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113'],
+          ['HM-BTL-460-BLK', '460ml', 'Black', '/cdn/shop/files/products/bottle-black.png', ['/cdn/shop/files/products/bottle-black-interior.png', '/cdn/shop/files/products/bottle-black-portable.png', '/cdn/shop/files/products/bottle-black-cap.png']],
+          ['HM-BTL-460-GLD', '460ml', 'Gold', '/cdn/shop/files/products/bottle-gold.png', ['/cdn/shop/files/products/bottle-gold-interior.png', '/cdn/shop/files/products/bottle-gold-portable.png', '/cdn/shop/files/products/bottle-gold-cap.png']],
+          ['HM-BTL-460-BLU', '460ml', 'Blue', '/cdn/shop/files/products/bottle-blue.png', ['/cdn/shop/files/products/bottle-blue-interior.png', '/cdn/shop/files/products/bottle-blue-portable.png', '/cdn/shop/files/products/bottle-blue-cap.png']],
+        ],
+      },
+      {
+        slug: 'h2-mist-spray',
+        price: 1190000,
+        oldSkus: ['HM-SPR-050-WHT', 'HM-SPR-100-WHT', 'HM-SPR-050-RSG', 'HM-SPR-100-RSG'],
+        specifications: {
+          'Product Name': 'Hydrogen Mist Sprayer',
+          'Atomisation Amount': '0.8–1.2 ml/min',
+          'Hydrogen Concentration': '1000 ppb',
+          'Water Tank Capacity': '13ml',
+          'Main Material': 'PC (Polycarbonate)',
+          'Negative Potential': '< −300mV',
+          'Battery Capacity': '500mAh',
+          'Power Supply': 'DC 5V / Micro USB',
+          Weight: '60g',
+          Dimensions: '103mm × 40mm',
+          Charging: 'Rechargeable via USB',
+          'Colours Available': 'Black / White',
+        },
+        variants: [
+          ['HM-SPR-013-WHT', '13ml', 'White', '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138'],
+          ['HM-SPR-013-BLK', '13ml', 'Black', '/cdn/shop/files/products/mist-black.png'],
+        ],
+      },
+    ];
+
+    for (const correction of corrections) {
+      const product = db.prepare('SELECT id FROM merch_products WHERE slug = ? AND deleted_at IS NULL').get(correction.slug);
+      if (!product) continue;
+      db.prepare('UPDATE merch_products SET base_price = ?, specifications_json = ?, updated_at = datetime(\'now\') WHERE id = ?')
+        .run(correction.price, JSON.stringify(correction.specifications), product.id);
+      const oldPlaceholders = correction.oldSkus.map(() => '?').join(', ');
+      db.prepare(`UPDATE merch_variants SET is_active = 0 WHERE product_id = ? AND sku IN (${oldPlaceholders})`)
+        .run(product.id, ...correction.oldSkus);
+      const insert = db.prepare('INSERT OR IGNORE INTO merch_variants (product_id, sku, size, color, price, stock, image_url, images_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+      const update = db.prepare(`
+        UPDATE merch_variants
+        SET size = ?, color = ?, price = ?, image_url = ?, images_json = ?, is_active = 1
+            ${placeholderStockMigrationApplied ? '' : ', stock = 50'}
+        WHERE product_id = ? AND sku = ?
+      `);
+      for (const [sku, size, color, imageUrl, images] of correction.variants) {
+        insert.run(product.id, sku, size, color, correction.price, 50, imageUrl, JSON.stringify(images || []));
+        update.run(size, color, correction.price, imageUrl, JSON.stringify(images || []), product.id, sku);
+      }
+    }
+    if (!placeholderStockMigrationApplied) {
+      db.prepare('INSERT INTO merch_catalog_migrations (migration_key) VALUES (?)').run(placeholderStockMigrationKey);
+    }
+  });
+  correctHydrogenCatalog();
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS merch_combo_items (
@@ -630,17 +742,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
 
   const LOW_STOCK_THRESHOLD = 15;
-
-  function getMerchVariantPriceOverrides(slug) {
-    const normalizedSlug = String(slug || '').trim().toLowerCase();
-    if (normalizedSlug === 'h2-water-bottle' || normalizedSlug === 'molecular-hydrogen-water-bottle') {
-      return [699900, 649900, 749900];
-    }
-    if (normalizedSlug === 'h2-mist-spray' || normalizedSlug === 'hydrogen-mist-spray') {
-      return [249900, 349900, 279900];
-    }
-    return null;
-  }
 
   function normalizeInfluencerPayload(body = {}) {
     const commissionPerOrderPaise = Number(body.commissionPerOrderPaise ?? body.commission_per_order_paise ?? 0);
@@ -1491,7 +1592,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!includeDeleted) clauses.push('deleted_at IS NULL');
 
     let sql = `
-      SELECT id, product_id AS productId, sku, size, color, price, stock, is_active AS isActive, created_at AS createdAt,
+      SELECT id, product_id AS productId, sku, size, color, price, stock, image_url AS imageUrl, images_json AS imagesJson, is_active AS isActive, created_at AS createdAt,
              deleted_at AS deletedAt, deleted_by AS deletedBy, deletion_reason AS deletionReason,
              deleted_previous_is_active AS deletedPreviousIsActive
       FROM merch_variants
@@ -1576,13 +1677,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   function buildMerchProductRecord(product, variants = [], sales = null, { includeInactive = false } = {}) {
     const activeVariants = variants.filter((variant) => Number(variant.isActive ?? 1) === 1);
     const catalogVariants = includeInactive ? variants : activeVariants;
-    const priceOverrides = getMerchVariantPriceOverrides(product.slug);
-    const normalizedVariants = catalogVariants.map((variant, index) => {
-      const overridePrice = Array.isArray(priceOverrides) ? Number(priceOverrides[index]) : NaN;
-      return Number.isFinite(overridePrice) && overridePrice > 0
-        ? { ...variant, price: overridePrice }
-        : variant;
-    });
+    const normalizedVariants = catalogVariants;
     const priceValues = activeVariants.length
       ? normalizedVariants.map((variant) => Number(variant.price || 0)).filter((value) => Number.isFinite(value))
       : [Number(product.base_price || 0)];
@@ -1635,6 +1730,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         color: variant.color || null,
         price: Number(variant.price || 0),
         stock: Number(variant.stock || 0),
+        imageUrl: String(variant.imageUrl || ''),
+        images: parseMerchImages(variant.imagesJson),
         isActive: Number(variant.isActive ?? 1),
         createdAt: variant.createdAt || null,
         deletedAt: variant.deletedAt || null,
@@ -5620,6 +5717,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       if (body.color !== undefined) addVariantField('color', String(body.color || '').trim() || null);
       if (body.price !== undefined) addVariantField('price', Math.max(0, Math.round(Number(body.price || 0) * 100)));
       if (body.stock !== undefined) addVariantField('stock', Math.max(0, Math.floor(Number(body.stock || 0))));
+      if (body.imageUrl !== undefined) addVariantField('image_url', normalizeMerchImageInput(body.imageUrl));
+      if (body.images !== undefined || body.imageUrls !== undefined) {
+        const imageValues = Array.isArray(body.images) ? body.images : body.imageUrls;
+        const normalizedImages = [...new Set((Array.isArray(imageValues) ? imageValues : []).map(normalizeMerchImageInput).filter(Boolean))];
+        addVariantField('images_json', JSON.stringify(normalizedImages));
+        if (normalizedImages.length && body.imageUrl === undefined) addVariantField('image_url', normalizedImages[0]);
+      }
       if (variantUpdates.length) {
         variantParams.push(variantId, productId);
       }
@@ -5799,6 +5903,136 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
   });
 
+  // ─── Merch Offers ───
+  // Public: storefront fetches active offers (no auth required).
+  app.get('/api/merch/offers', (req, res) => {
+    try {
+      const rows = db.prepare(`
+        SELECT o.id, o.name, o.short_description AS shortDescription,
+               o.full_description AS fullDescription, o.terms,
+               o.discount_type AS discountType, o.discount_value AS discountValue,
+               o.product_id AS productId, o.variant_id AS variantId,
+               p.name AS productName, p.image_url AS productImageUrl,
+               v.sku AS variantSku, v.size AS variantSize, v.color AS variantColor,
+               v.price AS variantPrice, p.base_price AS productBasePrice
+        FROM merch_offers o
+        LEFT JOIN merch_products p ON p.id = o.product_id AND p.deleted_at IS NULL
+        LEFT JOIN merch_variants v ON v.id = o.variant_id AND v.deleted_at IS NULL
+        WHERE o.is_active = 1
+        ORDER BY o.id DESC
+      `).all();
+      return res.json({ offers: rows });
+    } catch (err) {
+      console.error('[Merch] GET /api/merch/offers error:', err);
+      return res.status(500).json({ message: 'Failed to load offers' });
+    }
+  });
+
+  // Admin: list all offers (active + inactive).
+  app.get('/api/merch/admin/offers', requireAdmin, (req, res) => {
+    try {
+      const rows = db.prepare(`
+        SELECT o.id, o.name, o.short_description AS shortDescription,
+               o.full_description AS fullDescription, o.terms,
+               o.discount_type AS discountType, o.discount_value AS discountValue,
+               o.product_id AS productId, o.variant_id AS variantId,
+               o.is_active AS isActive, o.created_at AS createdAt, o.updated_at AS updatedAt,
+               p.name AS productName, p.image_url AS productImageUrl,
+               v.sku AS variantSku, v.size AS variantSize, v.color AS variantColor,
+               v.price AS variantPrice
+        FROM merch_offers o
+        LEFT JOIN merch_products p ON p.id = o.product_id AND p.deleted_at IS NULL
+        LEFT JOIN merch_variants v ON v.id = o.variant_id AND v.deleted_at IS NULL
+        ORDER BY o.id DESC
+      `).all();
+      return res.json({ offers: rows });
+    } catch (err) {
+      console.error('[Merch] GET /api/merch/admin/offers error:', err);
+      return res.status(500).json({ message: 'Failed to load offers' });
+    }
+  });
+
+  // Admin: create offer.
+  // discountValue for flat offers arrives in paise (client converts rupees → paise before POST).
+  app.post('/api/merch/admin/offers', requireAdmin, (req, res) => {
+    const {
+      name, shortDescription = '', fullDescription = '', terms = '',
+      productId = null, variantId = null,
+      discountType = 'percentage', discountValue = 0, isActive = 1,
+    } = req.body || {};
+    if (!String(name || '').trim()) {
+      return res.status(400).json({ message: 'name is required' });
+    }
+    if (!['percentage', 'flat'].includes(discountType)) {
+      return res.status(400).json({ message: 'discountType must be percentage or flat' });
+    }
+    const value = Number(discountValue);
+    if (!Number.isFinite(value) || value < 0) {
+      return res.status(400).json({ message: 'discountValue must be a non-negative number' });
+    }
+    try {
+      const result = db.prepare(`
+        INSERT INTO merch_offers
+          (name, short_description, full_description, terms, product_id, variant_id,
+           discount_type, discount_value, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      `).run(
+        String(name).trim(), String(shortDescription).trim(), String(fullDescription).trim(),
+        String(terms).trim(),
+        productId ? Number(productId) : null,
+        variantId ? Number(variantId) : null,
+        discountType, value, isActive ? 1 : 0,
+      );
+      return res.json({ id: result.lastInsertRowid });
+    } catch (err) {
+      console.error('[Merch] POST /api/merch/admin/offers error:', err);
+      return res.status(500).json({ message: 'Failed to create offer' });
+    }
+  });
+
+  // Admin: update offer fields.
+  app.patch('/api/merch/admin/offers/:id', requireAdmin, (req, res) => {
+    const id = Number(req.params.id);
+    const offer = db.prepare('SELECT id FROM merch_offers WHERE id = ?').get(id);
+    if (!offer) return res.status(404).json({ message: 'Offer not found' });
+    const {
+      name, shortDescription, fullDescription, terms,
+      productId, variantId, discountType, discountValue, isActive,
+    } = req.body || {};
+    const fields = [];
+    const params = [];
+    if (name !== undefined)              { fields.push('name = ?');               params.push(String(name).trim()); }
+    if (shortDescription !== undefined)  { fields.push('short_description = ?');  params.push(String(shortDescription).trim()); }
+    if (fullDescription !== undefined)   { fields.push('full_description = ?');   params.push(String(fullDescription).trim()); }
+    if (terms !== undefined)             { fields.push('terms = ?');              params.push(String(terms).trim()); }
+    if (productId !== undefined)         { fields.push('product_id = ?');         params.push(productId ? Number(productId) : null); }
+    if (variantId !== undefined)         { fields.push('variant_id = ?');         params.push(variantId ? Number(variantId) : null); }
+    if (discountType !== undefined)      { fields.push('discount_type = ?');      params.push(discountType); }
+    if (discountValue !== undefined)     { fields.push('discount_value = ?');     params.push(Number(discountValue)); }
+    if (isActive !== undefined)          { fields.push('is_active = ?');          params.push(isActive ? 1 : 0); }
+    if (!fields.length) return res.status(400).json({ message: 'No fields to update' });
+    fields.push("updated_at = datetime('now')");
+    try {
+      db.prepare(`UPDATE merch_offers SET ${fields.join(', ')} WHERE id = ?`).run(...params, id);
+      return res.json({ ok: true });
+    } catch (err) {
+      console.error('[Merch] PATCH /api/merch/admin/offers error:', err);
+      return res.status(500).json({ message: 'Failed to update offer' });
+    }
+  });
+
+  // Admin: hard-delete offer (offers have no order references, no Trash needed).
+  app.delete('/api/merch/admin/offers/:id', requireAdmin, (req, res) => {
+    const id = Number(req.params.id);
+    try {
+      db.prepare('DELETE FROM merch_offers WHERE id = ?').run(id);
+      return res.json({ ok: true });
+    } catch (err) {
+      console.error('[Merch] DELETE /api/merch/admin/offers error:', err);
+      return res.status(500).json({ message: 'Failed to delete offer' });
+    }
+  });
+
   console.log('[Merch] API routes mounted at /api/merch/*');
 };
 
@@ -5807,8 +6041,8 @@ function seedMerchProducts(db) {
   const products = [
     { name: 'Zenith Hoodie – Black', slug: 'zenith-hoodie-black', description: 'Heavyweight 450 GSM organic cotton blend hoodie with structured premium silhouette.', specifications_json: { 'Product type': 'Premium pullover hoodie', 'Fabric': '450 GSM organic cotton blend', 'Colour': 'Black', 'Fit': 'Structured relaxed fit', 'Care': 'Machine wash cold; air dry' }, category: 'hoodies', base_price: 349900, image_url: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146&width=600', gst_rate: 18, weight_grams: 650 },
     { name: 'Zenith Hoodie – Sand', slug: 'zenith-hoodie-sand', description: 'Same Zenith frame in earthy sand colourway. 450 GSM organic cotton blend.', specifications_json: { 'Product type': 'Premium pullover hoodie', 'Fabric': '450 GSM organic cotton blend', 'Colour': 'Sand', 'Fit': 'Structured relaxed fit', 'Care': 'Machine wash cold; air dry' }, category: 'hoodies', base_price: 349900, image_url: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146&width=600', gst_rate: 18, weight_grams: 650 },
-    { name: 'H2 Molecular Hydrogen Water Bottle', slug: 'h2-water-bottle', description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 3 minutes. BPA-free, USB-C rechargeable.', specifications_json: { 'Product Name': 'Hydrogen-Rich Water Bottle', 'Capacity': '460ml', 'Electrolytic Material': 'Platinum-Titanium', 'Membrane Electrode': 'PEM + SPE', 'Main Material': 'Glass', 'Shell Material': 'Stainless Steel', 'Battery Type': '700mAh Lithium Polymer', 'Working Time': '5 minutes per cycle (3,000+ ppb)', 'Size': 'Ø7cm × 24cm', 'Colours Available': 'Blue / Black / Silver / Gold' }, category: 'bottles', base_price: 649900, image_url: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113', gst_rate: 18, weight_grams: 380 },
-    { name: 'H2 Hydrogen Mist Spray', slug: 'h2-mist-spray', description: 'Compact hydrogen mist spray for skin rejuvenation. Antioxidant-rich hydrogen water delivery.', specifications_json: { 'Product Name': 'Hydrogen Mist Sprayer', 'Atomisation Amount': '0.8–1.2 ml/min', 'Hydrogen Concentration': '1000 ppb', 'Water Tank Capacity': '13ml', 'Main Material': 'PC (Polycarbonate)', 'Negative Potential': '< −300mV', 'Battery Capacity': '500mAh', 'Power Supply': 'DC 5V / Micro USB' }, category: 'sprays', base_price: 249900, image_url: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138', gst_rate: 18, weight_grams: 150 },
+    { name: 'H2 Molecular Hydrogen Water Bottle', slug: 'h2-water-bottle', description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 3 minutes. BPA-free, USB-C rechargeable.', specifications_json: { 'Product Name': 'Hydrogen-Rich Water Bottle', 'Capacity': '460ml', 'Electrolytic Material': 'Platinum-Titanium', 'Membrane Electrode': 'PEM + SPE', 'Main Material': 'Glass', 'Shell Material': 'Stainless Steel', 'Battery Type': '700mAh Lithium Polymer', 'Working Time': '5 minutes per cycle (3,000+ ppb)', 'Size': 'Ø7cm × 24cm', 'Colours Available': 'Black / Silver / Gold / Blue' }, category: 'bottles', base_price: 2590000, image_url: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113', gst_rate: 18, weight_grams: 380 },
+    { name: 'H2 Hydrogen Mist Spray', slug: 'h2-mist-spray', description: 'Compact hydrogen mist spray for skin rejuvenation. Antioxidant-rich hydrogen water delivery.', specifications_json: { 'Product Name': 'Hydrogen Mist Sprayer', 'Atomisation Amount': '0.8–1.2 ml/min', 'Hydrogen Concentration': '1000 ppb', 'Water Tank Capacity': '13ml', 'Main Material': 'PC (Polycarbonate)', 'Negative Potential': '< −300mV', 'Battery Capacity': '500mAh', 'Power Supply': 'DC 5V / Micro USB', 'Weight': '60g', 'Dimensions': '103mm × 40mm', 'Charging': 'Rechargeable via USB', 'Colours Available': 'Black / White' }, category: 'sprays', base_price: 1190000, image_url: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138', gst_rate: 18, weight_grams: 60 },
   ];
 
   const insertProduct = db.prepare(`
@@ -5817,39 +6051,37 @@ function seedMerchProducts(db) {
   `);
 
   const insertVariant = db.prepare(`
-    INSERT INTO merch_variants (product_id, sku, size, color, price, stock)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO merch_variants (product_id, sku, size, color, price, stock, image_url, images_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   // Product 1: Zenith Hoodie Black
   let r = insertProduct.run(products[0].name, products[0].slug, products[0].description, JSON.stringify(products[0].specifications_json), products[0].category, products[0].base_price, products[0].image_url, products[0].gst_rate, products[0].weight_grams);
   let pid = r.lastInsertRowid;
   for (const size of ['S', 'M', 'L', 'XL', 'XXL']) {
-    insertVariant.run(pid, `HM-HOD-BLK-${size}`, size, 'Black', 349900, 35);
+    insertVariant.run(pid, `HM-HOD-BLK-${size}`, size, 'Black', 349900, 35, null, null);
   }
 
   // Product 2: Zenith Hoodie Sand
   r = insertProduct.run(products[1].name, products[1].slug, products[1].description, JSON.stringify(products[1].specifications_json), products[1].category, products[1].base_price, products[1].image_url, products[1].gst_rate, products[1].weight_grams);
   pid = r.lastInsertRowid;
   for (const size of ['S', 'M', 'L', 'XL', 'XXL']) {
-    insertVariant.run(pid, `HM-HOD-SND-${size}`, size, 'Sand', 349900, 35);
+    insertVariant.run(pid, `HM-HOD-SND-${size}`, size, 'Sand', 349900, 35, null, null);
   }
 
   // Product 3: Water Bottle
   r = insertProduct.run(products[2].name, products[2].slug, products[2].description, JSON.stringify(products[2].specifications_json), products[2].category, products[2].base_price, products[2].image_url, products[2].gst_rate, products[2].weight_grams);
   pid = r.lastInsertRowid;
-  insertVariant.run(pid, 'HM-BTL-300-SLV', '300ml', 'Silver', 699900, 40);
-  insertVariant.run(pid, 'HM-BTL-500-SLV', '500ml', 'Silver', 649900, 35);
-  insertVariant.run(pid, 'HM-BTL-300-BLK', '300ml', 'Black', 749900, 30);
-  insertVariant.run(pid, 'HM-BTL-500-BLK', '500ml', 'Black', 849900, 25);
+  insertVariant.run(pid, 'HM-BTL-460-SLV', '460ml', 'Silver', 2590000, 50, '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113', null);
+  insertVariant.run(pid, 'HM-BTL-460-BLK', '460ml', 'Black', 2590000, 50, '/cdn/shop/files/products/bottle-black.png', JSON.stringify(['/cdn/shop/files/products/bottle-black-interior.png', '/cdn/shop/files/products/bottle-black-portable.png', '/cdn/shop/files/products/bottle-black-cap.png']));
+  insertVariant.run(pid, 'HM-BTL-460-GLD', '460ml', 'Gold', 2590000, 50, '/cdn/shop/files/products/bottle-gold.png', JSON.stringify(['/cdn/shop/files/products/bottle-gold-interior.png', '/cdn/shop/files/products/bottle-gold-portable.png', '/cdn/shop/files/products/bottle-gold-cap.png']));
+  insertVariant.run(pid, 'HM-BTL-460-BLU', '460ml', 'Blue', 2590000, 50, '/cdn/shop/files/products/bottle-blue.png', JSON.stringify(['/cdn/shop/files/products/bottle-blue-interior.png', '/cdn/shop/files/products/bottle-blue-portable.png', '/cdn/shop/files/products/bottle-blue-cap.png']));
 
   // Product 4: Mist Spray
   r = insertProduct.run(products[3].name, products[3].slug, products[3].description, JSON.stringify(products[3].specifications_json), products[3].category, products[3].base_price, products[3].image_url, products[3].gst_rate, products[3].weight_grams);
   pid = r.lastInsertRowid;
-  insertVariant.run(pid, 'HM-SPR-050-WHT', '50ml', 'White', 249900, 50);
-  insertVariant.run(pid, 'HM-SPR-100-WHT', '100ml', 'White', 349900, 40);
-  insertVariant.run(pid, 'HM-SPR-050-RSG', '50ml', 'Rose Gold', 279900, 35);
-  insertVariant.run(pid, 'HM-SPR-100-RSG', '100ml', 'Rose Gold', 379900, 30);
+  insertVariant.run(pid, 'HM-SPR-013-WHT', '13ml', 'White', 1190000, 50, '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138', null);
+  insertVariant.run(pid, 'HM-SPR-013-BLK', '13ml', 'Black', 1190000, 50, '/cdn/shop/files/products/mist-black.png', null);
 
   console.log('[Merch] Seeded 4 products with variants');
 }
