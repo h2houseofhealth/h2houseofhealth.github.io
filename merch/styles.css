@@ -3183,6 +3183,96 @@ body.is-auth-loading .merch-auth-cta {
   margin: 0 0 20px;
 }
 
+.detail-offer-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding: 4px 12px 4px 6px;
+  border-radius: 999px;
+  background: rgba(174, 84, 49, 0.08);
+  border: 1px solid rgba(174, 84, 49, 0.2);
+}
+
+.detail-offer-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--primary-dark, #a84420);
+  color: #ffffff;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.detail-offer-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--primary-dark, #a84420);
+  text-transform: capitalize;
+}
+
+.detail-pricing-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0 0 18px;
+}
+
+.detail-price__original {
+  color: var(--text-muted, #9ca3af);
+  font-size: 18px;
+  text-decoration: line-through;
+  font-weight: 500;
+}
+
+.detail-price__discounted {
+  color: var(--primary-dark, #a84420);
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.detail-price__savings {
+  color: #15803d;
+  font-size: 13px;
+  font-weight: 700;
+  background: rgba(34, 197, 94, 0.12);
+  padding: 3px 9px;
+  border-radius: 6px;
+  letter-spacing: .02em;
+}
+
+.variant-option.has-offer {
+  border-color: rgba(174, 84, 49, 0.4);
+}
+
+.variant-offer-dot {
+  color: var(--primary-dark, #a84420);
+  font-weight: 900;
+  margin-left: 2px;
+}
+
+.product-card__badge--offer {
+  background: var(--primary-dark, #a84420) !important;
+  color: #ffffff !important;
+}
+
+.product-card__price-original {
+  color: var(--text-muted, #9ca3af);
+  font-size: 0.88em;
+  text-decoration: line-through;
+  margin-right: 6px;
+}
+
+.product-card__price-discounted {
+  color: var(--primary-dark, #a84420);
+  font-weight: 700;
+}
+
 .detail-description {
   font-size: 14px;
   color: var(--text-muted);
@@ -3984,6 +4074,53 @@ body.is-auth-loading .merch-auth-cta {
   color: var(--text-dark);
   font-size: 14px;
   line-height: 1.45;
+}
+
+.booking-update-icon--whatsapp {
+  background: rgba(37, 211, 102, 0.14) !important;
+  color: #128c7e !important;
+}
+
+.booking-update-badge.is-sent {
+  color: #2e7d32;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.booking-whatsapp-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(18, 140, 126, 0.35);
+  background: #f0fdf4;
+  color: #128c7e;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.booking-whatsapp-action-btn:hover {
+  background: #25d366;
+  color: #ffffff;
+  border-color: #25d366;
+  box-shadow: 0 4px 12px rgba(37, 211, 102, 0.25);
+}
+
+.booking-whatsapp-action-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.booking-whatsapp-action-btn.is-sent {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border-color: #a5d6a7;
 }
 
 .booking-details-card,

@@ -367,6 +367,82 @@
     return product || productPool[fallbackIndex % Math.max(1, productPool.length)] || null;
   }
 
+  function getActiveOfferForVariant(productId, variantId) {
+    if (!state.offers || !state.offers.length) return null;
+    const pId = Number(productId || 0);
+    const vId = Number(variantId || 0);
+    let offer = state.offers.find((o) => Number(o.variantId) === vId && Number(o.productId) === pId);
+    if (!offer && vId) {
+      offer = state.offers.find((o) => Number(o.variantId) === vId);
+    }
+    if (!offer && pId) {
+      offer = state.offers.find((o) => Number(o.productId) === pId && (!o.variantId || Number(o.variantId) === 0));
+    }
+    return offer || null;
+  }
+
+  function getVariantOfferDetails(variant, product = state.selectedProduct) {
+    if (!variant) return null;
+    if (variant.offer && variant.offer.offerPrice !== undefined) {
+      return variant.offer;
+    }
+    const productId = Number(product?.id || variant.productId || variant.product_id || 0);
+    const variantId = Number(variant.id || variant.variantId || 0);
+    const offer = getActiveOfferForVariant(productId, variantId);
+    if (!offer) return null;
+
+    const originalPrice = Number(variant.price || 0);
+    if (originalPrice <= 0) return null;
+
+    const discountValue = Number(offer.discountValue || 0);
+    const isPercentage = String(offer.discountType || '').toLowerCase() === 'percentage';
+    const discountAmount = isPercentage
+      ? Math.round(originalPrice * discountValue / 100)
+      : Math.round(discountValue / 100);
+    const offerPrice = Math.max(0, originalPrice - discountAmount);
+    const savings = Math.max(0, originalPrice - offerPrice);
+    const discountLabel = isPercentage
+      ? `${discountValue}% OFF`
+      : `${formatPrice(discountAmount)} OFF`;
+
+    return {
+      id: offer.id,
+      name: offer.name || '',
+      discountType: offer.discountType,
+      discountValue,
+      discountLabel,
+      originalPrice,
+      offerPrice,
+      savings,
+      shortDescription: offer.shortDescription || '',
+      terms: offer.terms || '',
+    };
+  }
+
+  function refreshCartPrices() {
+    if (!state.cart || !state.cart.length || !state.products || !state.products.length) return;
+    let changed = false;
+    state.cart.forEach((item) => {
+      const product = state.products.find((p) => Number(p.id) === Number(item.productId));
+      if (!product) return;
+      const variant = product.variants.find((v) => Number(v.id) === Number(item.variantId));
+      if (!variant) return;
+      const offerInfo = getVariantOfferDetails(variant, product);
+      const effectivePrice = offerInfo ? offerInfo.offerPrice : variant.price;
+      if (item.price !== effectivePrice) {
+        item.price = effectivePrice;
+        item.originalPrice = offerInfo ? offerInfo.originalPrice : null;
+        item.discountLabel = offerInfo ? offerInfo.discountLabel : null;
+        item.offerName = offerInfo ? offerInfo.name : null;
+        changed = true;
+      }
+    });
+    if (changed) {
+      saveCart();
+      renderCart();
+    }
+  }
+
   function getSmartSidebarData() {
     const trending = Array.isArray(state.trendingProducts)
       ? state.trendingProducts.map((product) => ({ product, hypeLabel: product.hypeLabel }))
@@ -1077,6 +1153,16 @@ function getWishlistProductPrice(item) {
     const normalizedVariants = variants.map((variant) => ({
       ...variant,
       price: normalizeCatalogAmount(variant?.price || 0),
+      offer: variant?.offer ? {
+        id: variant.offer.id,
+        name: variant.offer.name,
+        discountType: variant.offer.discountType,
+        discountValue: Number(variant.offer.discountValue || 0),
+        discountLabel: variant.offer.discountLabel,
+        originalPrice: normalizeCatalogAmount(variant.offer.originalPrice || variant.price),
+        offerPrice: normalizeCatalogAmount(variant.offer.offerPrice),
+        savings: normalizeCatalogAmount(variant.offer.savings),
+      } : null,
       imageUrl: normalizeProductImageUrl(variant?.imageUrl || variant?.image_url || ''),
       images: Array.isArray(variant?.images)
         ? variant.images.map(normalizeProductImageUrl).filter(Boolean)
@@ -1318,17 +1404,27 @@ function getWishlistProductPrice(item) {
     const variant = product.variants.find(v => v.id === variantId);
     if (!variant || variant.stock <= 0) return false;
 
+    const offerInfo = getVariantOfferDetails(variant, product);
+    const effectivePrice = offerInfo ? offerInfo.offerPrice : variant.price;
+
     const existing = state.cart.find(item => item.variantId === variantId);
     if (existing) {
       const newQty = Math.min(Math.max(1, quantity), variant.stock);
       existing.quantity = newQty;
+      existing.price = effectivePrice;
+      existing.originalPrice = offerInfo ? offerInfo.originalPrice : null;
+      existing.discountLabel = offerInfo ? offerInfo.discountLabel : null;
+      existing.offerName = offerInfo ? offerInfo.name : null;
     } else {
       state.cart.push({
         variantId,
         productId: product.id,
         productName: product.name,
         variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '),
-        price: variant.price,
+        price: effectivePrice,
+        originalPrice: offerInfo ? offerInfo.originalPrice : null,
+        discountLabel: offerInfo ? offerInfo.discountLabel : null,
+        offerName: offerInfo ? offerInfo.name : null,
         quantity: Math.min(quantity, variant.stock),
         image: getVariantImageUrl(variant, product),
         sku: variant.sku,
@@ -1619,7 +1715,15 @@ function getWishlistProductPrice(item) {
         <div class="cart-item__details">
           <p class="cart-item__name">${escapeHtml(item.productName)}</p>
           <p class="cart-item__variant">${escapeHtml(item.variantLabel)} × ${item.quantity}</p>
-          <p class="cart-item__price">${formatPrice(item.price * item.quantity)}</p>
+          <p class="cart-item__price">
+            ${item.originalPrice && item.originalPrice > item.price ? `
+              <span class="cart-item__original-price" style="text-decoration:line-through;color:var(--text-muted);font-size:0.85em;margin-right:6px;">${formatPrice(item.originalPrice * item.quantity)}</span>
+              <strong>${formatPrice(item.price * item.quantity)}</strong>
+              ${item.discountLabel ? `<span class="cart-item__offer-badge" style="display:inline-block;background:rgba(174,84,49,.12);color:var(--primary-dark);font-size:0.75em;padding:2px 6px;border-radius:4px;margin-left:6px;font-weight:700;">${escapeHtml(item.discountLabel)}</span>` : ''}
+            ` : `
+              ${formatPrice(item.price * item.quantity)}
+            `}
+          </p>
         </div>
         <button class="cart-item__remove" data-variant-id="${item.variantId}" aria-label="Remove">✕</button>
       </div>
@@ -1711,6 +1815,7 @@ function getWishlistProductPrice(item) {
       locationTitle: 'Delivery Location',
       location: getConfirmationLocation(address),
       email: String(customer?.email || order?.customer?.email || 'example@email.com').trim(),
+      phone: String(customer?.phone || order?.customer?.phone || address?.phone || '').trim(),
       customerName: String(customer?.name || order?.customer?.name || 'H2 Customer').trim(),
       totalAmount: Number(order?.amount || 0),
       items: items.map((item) => ({
@@ -1747,9 +1852,9 @@ function getWishlistProductPrice(item) {
           <span></span><span></span><span></span><span></span><span></span><span></span>
         </div>
         <div class="booking-success-icon">${confirmationIcon('check')}</div>
-        <h1 id="bookingConfirmationTitle">Booking Confirmed!</h1>
-        <p>Your booking has been confirmed successfully.</p>
-        <p>Your confirmation email will be available soon.</p>
+        <h1 id="bookingConfirmationTitle">Order Confirmed!</h1>
+        <p>Thank you for shopping with H2 House of Health.</p>
+        <p>Your order updates are detailed below.</p>
       </div>
     `;
   }
@@ -1757,34 +1862,46 @@ function getWishlistProductPrice(item) {
   function BookingIdCard(data) {
     return `
       <div class="booking-id-card">
-        <span>Booking ID</span>
+        <span>Order Number</span>
         <strong>${escapeHtml(data.bookingId)}</strong>
-        <button class="booking-copy-btn" type="button" data-confirmation-action="copy-id" aria-label="Copy booking ID">
+        <button class="booking-copy-btn" type="button" data-confirmation-action="copy-id" aria-label="Copy order number">
           ${confirmationIcon('copy')}
         </button>
       </div>
     `;
   }
 
-  function BookingUpdatesCard() {
+  function BookingUpdatesCard(data) {
+    const customerEmail = data?.email || '';
+    const customerPhone = data?.phone || '';
+    const digits = customerPhone.replace(/\D/g, '');
+    const phoneDisplay = digits.length >= 10 ? ` (+91 ${digits.slice(-10)})` : '';
+    const orderId = data?.orderId || '';
+
     return `
-      <section class="booking-updates-card" aria-label="Booking status updates">
-        <h2>We'll keep you updated</h2>
+      <section class="booking-updates-card" aria-label="Order status updates">
+        <h2>Order Confirmations & Updates</h2>
         <div class="booking-updates-grid">
           <article class="booking-update-item">
-            <div class="booking-update-icon">${confirmationIcon('mail')}</div>
-            <div>
+            <div class="booking-update-icon booking-update-icon--email">${confirmationIcon('mail')}</div>
+            <div class="booking-update-content">
               <h3>Email Confirmation</h3>
-              <strong>Preparing...</strong>
-              <p>We're preparing your confirmation email.</p>
+              <strong class="booking-update-badge is-sent">✓ Sent to ${escapeHtml(customerEmail || 'your email')}</strong>
+              <p>Check your inbox for order details and receipt.</p>
             </div>
           </article>
           <article class="booking-update-item">
-            <div class="booking-update-icon">${confirmationIcon('whatsapp')}</div>
-            <div>
-              <h3>WhatsApp Updates <span>Coming Soon</span></h3>
-              <strong>Coming Soon</strong>
-              <p>We'll notify you on WhatsApp when your order is shipped.</p>
+            <div class="booking-update-icon booking-update-icon--whatsapp">${confirmationIcon('whatsapp')}</div>
+            <div class="booking-update-content">
+              <h3>WhatsApp Confirmation</h3>
+              <strong class="booking-update-badge is-sent" id="merchWhatsAppBadge">✓ Sent to WhatsApp${escapeHtml(phoneDisplay)}</strong>
+              <p id="merchWhatsAppSubtext">Order summary and real-time delivery alerts are sent to your WhatsApp number.</p>
+              ${orderId ? `
+                <button class="booking-whatsapp-action-btn" type="button" data-confirmation-action="send-whatsapp" data-order-id="${escapeHtml(String(orderId))}">
+                  ${confirmationIcon('whatsapp')}
+                  <span>Resend to WhatsApp</span>
+                </button>
+              ` : ''}
             </div>
           </article>
         </div>
@@ -1906,6 +2023,43 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         }
         if (action === 'shop') {
           window.location.href = '/merch/';
+          return;
+        }
+        if (action === 'send-whatsapp') {
+          const orderId = button.dataset.orderId || data.orderId;
+          if (!orderId) {
+            showCheckoutNotice('WhatsApp Confirmation', 'Order details are not available yet.');
+            return;
+          }
+          const originalHtml = button.innerHTML;
+          button.disabled = true;
+          button.innerHTML = `<span>Sending...</span>`;
+          try {
+            const res = await fetch(buildApiUrl(`/api/merch/orders/${encodeURIComponent(orderId)}/send-whatsapp`), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+            });
+            const result = await res.json().catch(() => ({}));
+            if (res.ok && result.success) {
+              button.innerHTML = `${confirmationIcon('check')} <span>Sent!</span>`;
+              button.classList.add('is-sent');
+              const badge = els.bookingConfirmation.querySelector('#merchWhatsAppBadge');
+              if (badge) badge.textContent = '✓ Sent to WhatsApp';
+              setTimeout(() => {
+                button.disabled = false;
+                button.innerHTML = originalHtml;
+                button.classList.remove('is-sent');
+              }, 4000);
+            } else {
+              button.disabled = false;
+              button.innerHTML = originalHtml;
+              showCheckoutNotice('WhatsApp Status', result.message || 'Could not send WhatsApp message. Please try again.');
+            }
+          } catch (err) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+            showCheckoutNotice('WhatsApp Error', 'Network error while sending WhatsApp message.');
+          }
           return;
         }
         if (action === 'track') {
@@ -3466,6 +3620,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       const displayVariant = product.displayVariant || getDefaultPurchasableVariant(product);
       const isSoldOut = !displayVariant || Number(displayVariant.stock || 0) <= 0;
       const presentation = getProductCardPresentation(product);
+      const offerInfo = getVariantOfferDetails(displayVariant, product);
       const isHoodie = String(product.category || '').toLowerCase() === 'hoodies';
       const normalizedCategory = String(product.category || '').toLowerCase();
       const normalizedName = String(product.name || '').toLowerCase();
@@ -3490,7 +3645,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       <article class="product-card ${cardClasses}" data-product-id="${product.id}" data-variant-id="${escapeHtml(displayVariant?.id || '')}" tabindex="0" role="button" aria-label="View ${escapeHtml(product.name)} ${escapeHtml(displayVariant?.color || '')}">
         <div class="product-card__image">
           <div class="product-card__badges">
-            <span class="product-card__badge">${escapeHtml(presentation.badge)}</span>
+            ${offerInfo ? `<span class="product-card__badge product-card__badge--offer">${escapeHtml(offerInfo.discountLabel)}</span>` : `<span class="product-card__badge">${escapeHtml(presentation.badge)}</span>`}
             ${hypeLabel ? `<span class="product-card__badge product-card__badge--hype">${escapeHtml(hypeLabel)}</span>` : ''}
             ${isSoldOut ? '<span class="product-card__badge product-card__badge--sold-out">Sold out</span>' : ''}
           </div>
@@ -3512,7 +3667,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             <span>(${presentation.reviews})</span>
           </div>
           <p class="product-card__price">
-            ${product.displayVariant ? formatPrice(displayVariant.price) : `${product.variants.length > 1 ? '<span class="price-from">From </span>' : ''}${getPriceRange(product)}`}
+            ${offerInfo ? `
+              <span class="product-card__price-original" style="text-decoration:line-through;color:var(--text-muted);font-size:0.88em;margin-right:6px;">${formatPrice(offerInfo.originalPrice)}</span>
+              <strong class="product-card__price-discounted" style="color:var(--primary-dark);font-weight:700;">${formatPrice(offerInfo.offerPrice)}</strong>
+            ` : (product.displayVariant ? formatPrice(displayVariant.price) : `${product.variants.length > 1 ? '<span class="price-from">From </span>' : ''}${getPriceRange(product)}`)}
           </p>
           <div class="product-card__actions">
             <button class="btn btn-secondary product-card__action" type="button" data-product-action="add-to-cart" data-product-id="${product.id}" ${isSoldOut ? 'disabled' : ''}>
@@ -3600,8 +3758,16 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
     state.currentView = 'detail';
     state.selectedProduct = product;
-    state.selectedVariant = product.variants.find((variant) => String(variant.id) === String(variantId))
-      || getDefaultPurchasableVariant(product);
+    let targetVariant = null;
+    if (variantId) {
+      targetVariant = product.variants.find((variant) => String(variant.id) === String(variantId));
+    }
+    if (!targetVariant) {
+      targetVariant = product.variants.find((v) => getVariantOfferDetails(v, product) !== null && Number(v.stock || 0) > 0)
+        || product.variants.find((variant) => String(variant.id) === String(variantId))
+        || getDefaultPurchasableVariant(product);
+    }
+    state.selectedVariant = targetVariant;
     state.quantity = 1;
 
     // Hide shop, show detail
@@ -3749,6 +3915,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   function renderProductInfo(product) {
     const variant = state.selectedVariant;
+    const offerInfo = getVariantOfferDetails(variant, product);
 
     // Get unique sizes and colors
     const sizes = [...new Set(product.variants.map(v => v.size).filter(Boolean))];
@@ -3757,7 +3924,19 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     els.productInfo.innerHTML = `
       <p class="detail-kicker">${escapeHtml(getCategoryLabel(product.category))}</p>
       <h1 class="detail-title">${escapeHtml(product.name)}</h1>
-      <p class="detail-price">${formatPrice(variant.price)}</p>
+      ${offerInfo ? `
+        <div class="detail-offer-banner">
+          <span class="detail-offer-badge">${escapeHtml(offerInfo.discountLabel)}</span>
+          ${offerInfo.name ? `<span class="detail-offer-name">${escapeHtml(offerInfo.name)}</span>` : ''}
+        </div>
+        <div class="detail-pricing-row">
+          <span class="detail-price__original">${formatPrice(offerInfo.originalPrice)}</span>
+          <strong class="detail-price__discounted">${formatPrice(offerInfo.offerPrice)}</strong>
+          <span class="detail-price__savings">Save ${formatPrice(offerInfo.savings)}</span>
+        </div>
+      ` : `
+        <p class="detail-price">${formatPrice(variant.price)}</p>
+      `}
       <p class="detail-description">${escapeHtml(product.description)}</p>
       ${product.isCombo && Array.isArray(product.comboItems) && product.comboItems.length ? `
         <div class="combo-product-details">
@@ -3778,8 +3957,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
               const v = product.variants.find(x => x.size === size && x.color === (variant.color || colors[0]));
               const isSelected = variant.size === size;
               const isDisabled = v && v.stock <= 0;
-              return `<button class="variant-option ${isSelected ? 'is-selected' : ''} ${isDisabled ? 'is-disabled' : ''}" 
-                data-size="${escapeHtml(size)}" type="button" ${isDisabled ? 'disabled' : ''}>${escapeHtml(size)}</button>`;
+              const hasOffer = v && getVariantOfferDetails(v, product) !== null;
+              return `<button class="variant-option ${isSelected ? 'is-selected' : ''} ${isDisabled ? 'is-disabled' : ''} ${hasOffer ? 'has-offer' : ''}" 
+                data-size="${escapeHtml(size)}" type="button" ${isDisabled ? 'disabled' : ''}>${escapeHtml(size)}${hasOffer ? ' <span class="variant-offer-dot" title="Special offer">•</span>' : ''}</button>`;
             }).join('')}
           </div>
         </div>
@@ -3793,8 +3973,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
               const v = product.variants.find(x => x.color === color && x.size === (variant.size || sizes[0]));
               const isSelected = variant.color === color;
               const isDisabled = v && v.stock <= 0;
-              return `<button class="variant-option ${isSelected ? 'is-selected' : ''} ${isDisabled ? 'is-disabled' : ''}"
-                data-color="${escapeHtml(color)}" type="button" ${isDisabled ? 'disabled' : ''}>${escapeHtml(color)}</button>`;
+              const hasOffer = v && getVariantOfferDetails(v, product) !== null;
+              return `<button class="variant-option ${isSelected ? 'is-selected' : ''} ${isDisabled ? 'is-disabled' : ''} ${hasOffer ? 'has-offer' : ''}"
+                data-color="${escapeHtml(color)}" type="button" ${isDisabled ? 'disabled' : ''}>${escapeHtml(color)}${hasOffer ? ' <span class="variant-offer-dot" title="Special offer">•</span>' : ''}</button>`;
             }).join('')}
           </div>
         </div>
@@ -4930,6 +5111,11 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     }
     state.offersLoading = false;
     renderShopOffersSection();
+    renderProductGrid();
+    refreshCartPrices();
+    if (state.currentView === 'detail' && state.selectedProduct) {
+      renderProductInfo(state.selectedProduct);
+    }
   }
 
   function renderShopOffersSection() {
@@ -4979,7 +5165,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       const expiry = offer.expiryDate || offer.expiresAt || offer.expires_at || '';
 
       return `
-        <article class="merch-offer-card merch-offer-card--${escapeHtml(offerCategory || 'default')}" data-offer-id="${escapeHtml(String(offer.id))}">
+        <article class="merch-offer-card merch-offer-card--${escapeHtml(offerCategory || 'default')}" data-offer-id="${escapeHtml(String(offer.id))}" data-action="offer-shop" data-product-id="${escapeHtml(String(offer.productId))}" data-variant-id="${escapeHtml(String(offer.variantId || ''))}" style="cursor:pointer;" tabindex="0" role="button" aria-label="View offer for ${escapeHtml([offer.productName, variantLabel].filter(Boolean).join(' — '))}">
           <div class="merch-offer-card__image">
             ${isSoldOut ? '<span class="merch-offer-card__availability">SOLD OUT</span>' : ''}
             <img src="${escapeHtml(imageUrl)}"
@@ -5001,7 +5187,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             ` : ''}
             ${offer.shortDescription ? `<p class="merch-offer-card__desc">${escapeHtml(offer.shortDescription)}</p>` : ''}
             ${expiry ? `<p class="merch-offer-card__expiry">Expires ${escapeHtml(formatTrackingDateTime(expiry))}</p>` : ''}
-            ${offer.fullDescription ? `<details class="merch-offer-card__details"><summary>View details</summary><p>${escapeHtml(offer.fullDescription)}</p>${offer.terms ? `<p>${escapeHtml(offer.terms)}</p>` : ''}</details>` : ''}
+            ${offer.fullDescription ? `<details class="merch-offer-card__details" onclick="event.stopPropagation()"><summary>View details</summary><p>${escapeHtml(offer.fullDescription)}</p>${offer.terms ? `<p>${escapeHtml(offer.terms)}</p>` : ''}</details>` : ''}
             ${offer.productId ? `
               <button type="button" class="merch-offer-card__shop-btn${isSoldOut ? ' is-disabled' : ''}"
                       data-action="offer-shop"
@@ -5015,11 +5201,21 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       `;
     }).join('');
 
-    grid.querySelectorAll('[data-action="offer-shop"]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const productId = Number(btn.dataset.productId);
-        const variantId = btn.dataset.variantId ? Number(btn.dataset.variantId) : null;
-        showProductDetail(productId, variantId);
+    grid.querySelectorAll('[data-action="offer-shop"]').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        const target = el.closest('[data-product-id]');
+        const productId = Number(target?.dataset?.productId);
+        const variantId = target?.dataset?.variantId ? Number(target.dataset.variantId) : null;
+        if (productId) showProductDetail(productId, variantId);
+      });
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          const target = el.closest('[data-product-id]');
+          const productId = Number(target?.dataset?.productId);
+          const variantId = target?.dataset?.variantId ? Number(target.dataset.variantId) : null;
+          if (productId) showProductDetail(productId, variantId);
+        }
       });
     });
   }

@@ -1212,6 +1212,8 @@
       return variants.map((variant) => ({
         ...product,
         ...variant,
+        variantCount: variants.length,
+        hasMultipleVariants: variants.length > 1,
         id: variant.id,
         productId: product.id,
         parentProductId: product.id,
@@ -2221,7 +2223,7 @@
   function renderTrash() {
     const trashItems = state.trashProducts.flatMap((product) => [
       ...(product.isDeleted ? [{ ...product, trashType: 'product', trashId: Number(product.id) }] : []),
-      ...(product.variants || []).filter((variant) => variant.deletedAt).map((variant) => ({
+      ...(product.isDeleted ? [] : (product.variants || []).filter((variant) => variant.deletedAt).map((variant) => ({
         ...product,
         ...variant,
         trashType: 'variant',
@@ -2231,7 +2233,7 @@
         image: product.image || product.imageUrl,
         deletedBy: variant.deletedBy,
         deletedAt: variant.deletedAt,
-      })),
+      }))),
     ]);
     const pageSize = 5;
     const totalPages = Math.max(1, Math.ceil(trashItems.length / pageSize));
@@ -5646,7 +5648,7 @@
           }
           const productId = Number(product.parentProductId || product.productId || product.id);
           const variantId = Number(product.variantId || product.id);
-          const deleteProduct = Boolean(product.isCombo);
+          const deleteProduct = Boolean(product.isCombo) || !product.hasMultipleVariants || Number(product.variantCount || 0) <= 1;
           openConfirmModal({
             title: deleteProduct ? 'Delete product' : 'Delete variant',
             message: deleteProduct
@@ -5753,13 +5755,13 @@
       case 'bulk-delete':
         {
         const selectedAtConfirmation = selectedProductsOnPage();
-        const selectedParentIdsAtConfirmation = [...new Set(selectedAtConfirmation
-          .filter((item) => !item.isLocalDuplicate)
-          .filter((item) => item.isCombo)
+        const nonDuplicateItems = selectedAtConfirmation.filter((item) => !item.isLocalDuplicate);
+        const selectedParentIdsAtConfirmation = [...new Set(nonDuplicateItems
+          .filter((item) => item.isCombo || !item.hasMultipleVariants || Number(item.variantCount || 0) <= 1)
           .map((item) => Number(item.parentProductId || item.productId || item.id))
           .filter((itemId) => Number.isInteger(itemId) && itemId > 0))];
-        const selectedVariantIdsAtConfirmation = [...new Set(selectedAtConfirmation
-          .filter((item) => !item.isLocalDuplicate && !item.isCombo)
+        const selectedVariantIdsAtConfirmation = [...new Set(nonDuplicateItems
+          .filter((item) => !selectedParentIdsAtConfirmation.includes(Number(item.parentProductId || item.productId || item.id)))
           .map((item) => Number(item.variantId || item.id))
           .filter((itemId) => Number.isInteger(itemId) && itemId > 0))];
         openConfirmModal({
@@ -5843,7 +5845,7 @@
       case 'toggle-trash-page-selection': {
         const visible = state.trashProducts.flatMap((product) => [
           ...(product.isDeleted ? [{ trashType: 'product', trashId: Number(product.id) }] : []),
-          ...(product.variants || []).filter((variant) => variant.deletedAt).map((variant) => ({ trashType: 'variant', trashId: Number(variant.id) })),
+          ...(product.isDeleted ? [] : (product.variants || []).filter((variant) => variant.deletedAt).map((variant) => ({ trashType: 'variant', trashId: Number(variant.id) }))),
         ]).slice((state.trashProductsPage - 1) * 5, (state.trashProductsPage - 1) * 5 + 5);
         const isSelected = (item) => item.trashType === 'variant'
           ? state.selectedTrashVariantIds.includes(item.trashId)

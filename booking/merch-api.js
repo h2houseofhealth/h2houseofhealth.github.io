@@ -1725,6 +1725,22 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return stored;
   }
 
+  function getVariantActiveOffer(variantId, productId) {
+    try {
+      return db.prepare(`
+        SELECT id, name, short_description AS shortDescription, full_description AS fullDescription,
+               terms, discount_type AS discountType, discount_value AS discountValue
+        FROM merch_offers
+        WHERE is_active = 1
+          AND (variant_id = ? OR (variant_id IS NULL AND product_id = ?))
+        ORDER BY (variant_id IS NOT NULL) DESC, id DESC
+        LIMIT 1
+      `).get(Number(variantId || 0), Number(productId || 0));
+    } catch {
+      return null;
+    }
+  }
+
   function buildMerchProductRecord(product, variants = [], sales = null, { includeInactive = false } = {}) {
     const activeVariants = variants.filter((variant) => Number(variant.isActive ?? 1) === 1);
     const catalogVariants = includeInactive ? variants : activeVariants;
@@ -1734,7 +1750,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       : [Number(product.base_price || 0)];
     const minPrice = priceValues.length ? Math.min(...priceValues) : Number(product.base_price || 0);
     const maxPrice = priceValues.length ? Math.max(...priceValues) : Number(product.base_price || 0);
-    const primaryVariant = normalizedVariants[0] || activeVariants[0] || variants[0] || null;
+    const primaryVariant = activeVariants[0] || normalizedVariants[0] || null;
     const comboItems = Number(product.is_combo || 0) === 1
       ? db.prepare(`
           SELECT ci.component_variant_id AS variantId, ci.quantity,
@@ -1773,22 +1789,45 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       imageUrl: String(productImages[0] || getMerchProductImage(product) || ''),
       image: String(productImages[0] || getMerchProductImage(product) || ''),
       images: productImages,
-      variants: normalizedVariants.map((variant) => ({
-        id: Number(variant.id),
-        productId: Number(variant.productId),
-        sku: String(variant.sku || ''),
-        size: variant.size || null,
-        color: variant.color || null,
-        price: Number(variant.price || 0),
-        stock: Number(variant.stock || 0),
-        imageUrl: String(variant.imageUrl || ''),
-        images: parseMerchImages(variant.imagesJson),
-        isActive: Number(variant.isActive ?? 1),
-        createdAt: variant.createdAt || null,
-        deletedAt: variant.deletedAt || null,
-        deletedBy: variant.deletedBy || null,
-        deletionReason: variant.deletionReason || null,
-      })),
+      variants: normalizedVariants.map((variant) => {
+        const offer = getVariantActiveOffer(variant.id, product.id);
+        let offerDetails = null;
+        if (offer) {
+          const origPaise = Number(variant.price || 0);
+          const isPct = String(offer.discountType || '').toLowerCase() === 'percentage';
+          const discPaise = isPct
+            ? Math.round(origPaise * Number(offer.discountValue || 0) / 100)
+            : Math.round(Number(offer.discountValue || 0));
+          const offPricePaise = Math.max(0, origPaise - discPaise);
+          offerDetails = {
+            id: offer.id,
+            name: offer.name,
+            discountType: offer.discountType,
+            discountValue: Number(offer.discountValue || 0),
+            discountLabel: isPct ? `${offer.discountValue}% OFF` : `₹${Math.round(discPaise / 100)} OFF`,
+            originalPrice: origPaise,
+            offerPrice: offPricePaise,
+            savings: origPaise - offPricePaise,
+          };
+        }
+        return {
+          id: Number(variant.id),
+          productId: Number(variant.productId),
+          sku: String(variant.sku || ''),
+          size: variant.size || null,
+          color: variant.color || null,
+          price: Number(variant.price || 0),
+          stock: Number(variant.stock || 0),
+          imageUrl: String(variant.imageUrl || ''),
+          images: parseMerchImages(variant.imagesJson),
+          isActive: Number(variant.isActive ?? 1),
+          createdAt: variant.createdAt || null,
+          deletedAt: variant.deletedAt || null,
+          deletedBy: variant.deletedBy || null,
+          deletionReason: variant.deletionReason || null,
+          offer: offerDetails,
+        };
+      }),
       variantCount: activeVariants.length,
       primarySku: String(primaryVariant?.sku || ''),
       sku: String(primaryVariant?.sku || ''),
@@ -1854,15 +1893,25 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       { includeInactive }
     ));
 
+    const activeCatalog = catalog.filter((product) => {
+      if (includeInactive) return true;
+      if (product.isDeleted || product.deletedAt) return false;
+      if (Number(product.archived)) return false;
+      if (product.isCombo) {
+        return Array.isArray(product.comboItems) && product.comboItems.length > 0;
+      }
+      return Array.isArray(product.variants) && product.variants.some((v) => !v.deletedAt && Number(v.isActive ?? 1) === 1);
+    });
+
     const featuredIds = new Set(
-      [...catalog]
+      [...activeCatalog]
         .sort((left, right) => right.sales - left.sales || right.orderCount - left.orderCount || String(right.createdAt || '').localeCompare(String(left.createdAt || '')))
         .slice(0, 3)
         .filter((product) => product.sales > 0)
         .map((product) => Number(product.id))
     );
 
-    return catalog.map((product) => ({
+    return activeCatalog.map((product) => ({
       ...product,
       featured: featuredIds.has(Number(product.id)),
     }));
@@ -3331,14 +3380,28 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function getMerchWhatsAppConfig() {
     const enabledValue = String(process.env.WHATSAPP_ORDER_CONFIRMATION_ENABLED || '').trim().toLowerCase();
-    const token = String(process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_WHATSAPP_ACCESS_TOKEN || '').trim();
-    const phoneNumberId = String(process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.META_WHATSAPP_PHONE_NUMBER_ID || '').trim();
+    const token = String(
+      process.env.WHATSAPP_TOKEN ||
+      process.env.WHATSAPP_ACCESS_TOKEN ||
+      process.env.META_WHATSAPP_ACCESS_TOKEN ||
+      ''
+    ).trim();
+    const phoneNumberId = String(
+      process.env.WHATSAPP_PHONE_NUMBER_ID ||
+      process.env.META_WHATSAPP_PHONE_NUMBER_ID ||
+      ''
+    ).trim();
+    const orderTemplate = String(
+      process.env.WHATSAPP_MERCH_ORDER_TEMPLATE ||
+      process.env.WHATSAPP_ORDER_TEMPLATE ||
+      'merch_order_confirmation'
+    ).trim();
     return {
       enabled: enabledValue === 'true' || (!['false', '0', 'no', 'off'].includes(enabledValue) && Boolean(token && phoneNumberId)),
       token,
       phoneNumberId,
-      apiVersion: String(process.env.WHATSAPP_API_VERSION || 'v20.0').trim(),
-      actionTemplateName: String(process.env.WHATSAPP_ORDER_ACTION_TEMPLATE || '').trim(),
+      apiVersion: String(process.env.WHATSAPP_API_VERSION || 'v25.0').trim(),
+      orderTemplate,
       templateLanguage: String(process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'en').trim(),
     };
   }
@@ -3587,32 +3650,65 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   async function sendMerchWhatsAppOrderConfirmation(orderId, req) {
     const config = getMerchWhatsAppConfig();
-    if (!config.enabled) return;
+    if (!config.enabled) {
+      return { ok: false, message: 'Merch WhatsApp confirmation is disabled or unconfigured' };
+    }
     if (!config.token || !config.phoneNumberId) {
       console.warn('[Merch] WhatsApp confirmation skipped: WhatsApp credentials are not configured.');
-      return;
+      return { ok: false, message: 'WhatsApp credentials not configured' };
     }
 
     const data = getMerchOrderEmailData(orderId);
     const to = normalizeMerchWhatsAppPhone(data?.order?.customerPhone);
     if (!data || !to) {
       console.warn('[Merch] WhatsApp confirmation skipped: customer phone is missing.');
-      return;
+      return { ok: false, message: 'Customer phone number is missing' };
     }
 
-    const links = buildMerchEmailLinks(req, data.order.id);
-    const cardBuffer = await renderMerchWhatsAppCardImage({ order: data.order, items: data.items, req });
-    const mediaId = await submitWhatsAppMediaUpload({
-      config,
-      toUploadBuffer: cardBuffer,
-      filename: `h2-order-${String(data.order.orderNumber || data.order.id).replace(/[^a-z0-9_-]+/gi, '-')}.png`,
-    });
-    await sendWhatsAppGraphMessage(config, {
+    const customerName = String(data.order?.customerName || 'Valued Customer').trim();
+    const orderNumber = String(data.order?.orderNumber || `Order #${data.order?.id}`).trim();
+    const totalAmount = formatMerchWhatsAppCurrency(data.order?.totalAmount || 0);
+
+    const payload = {
       to,
-      type: 'image',
-      image: { id: mediaId },
+      type: 'template',
+      template: {
+        name: config.orderTemplate,
+        language: { code: config.templateLanguage },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: customerName },
+              { type: 'text', text: orderNumber },
+              { type: 'text', text: totalAmount },
+            ],
+          },
+        ],
+      },
+    };
+
+    console.log('[Merch] Sending WhatsApp order confirmation template:', {
+      to,
+      template: config.orderTemplate,
+      customerName,
+      orderNumber,
+      totalAmount,
     });
-    await sendMerchWhatsAppActionMessage({ config, to, order: data.order, links });
+
+    try {
+      const result = await sendWhatsAppGraphMessage(config, payload);
+      const messageId = result?.messages?.[0]?.id || '';
+      console.log('[Merch] WhatsApp order confirmation accepted by Meta:', {
+        orderId,
+        to,
+        messageId,
+      });
+      return { ok: true, messageId, to };
+    } catch (error) {
+      console.error('[Merch] Failed to send WhatsApp order confirmation:', error?.message || error);
+      return { ok: false, message: error?.message || 'Failed to send WhatsApp message' };
+    }
   }
 
   async function sendMerchOrderConfirmationEmail(orderId, req) {
@@ -3904,7 +4000,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       if (purchase.stock < quantity) {
         return res.status(409).json({ error: `Insufficient stock for ${variant.product_name} (available: ${purchase.stock})` });
       }
-      const lineTotal = variant.price * quantity;
+      const offer = getVariantActiveOffer(variant.id, variant.product_id);
+      let unitPrice = Number(variant.price || 0);
+      if (offer) {
+        const isPercentage = String(offer.discountType || '').toLowerCase() === 'percentage';
+        const discountPaise = isPercentage
+          ? Math.round(unitPrice * Number(offer.discountValue || 0) / 100)
+          : Math.round(Number(offer.discountValue || 0));
+        unitPrice = Math.max(0, unitPrice - discountPaise);
+      }
+      const lineTotal = unitPrice * quantity;
       subtotal += lineTotal;
       validatedItems.push({
         variantId: variant.id,
@@ -3912,7 +4017,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         productName: variant.product_name,
         variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '),
         sku: variant.sku,
-        unitPrice: variant.price,
+        unitPrice,
+        originalUnitPrice: Number(variant.price || 0),
+        offerName: offer ? offer.name : null,
         quantity,
         lineTotal,
       });
@@ -4052,6 +4159,34 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     res.json({ success: true, message: 'Payment verified, order confirmed', orderId: order.id });
   });
 
+  // ─── PUBLIC: Send/Resend WhatsApp order confirmation ───
+  app.post('/api/merch/orders/:id/send-whatsapp', async (req, res) => {
+    const orderId = Number(req.params.id);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid order ID' });
+    }
+
+    const order = db.prepare('SELECT id, customer_phone, order_number FROM merch_orders WHERE id = ?').get(orderId);
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    const result = await sendMerchWhatsAppOrderConfirmation(orderId, req);
+    if (!result.ok) {
+      return res.status(502).json({
+        success: false,
+        message: result.message || 'Failed to send WhatsApp confirmation',
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'WhatsApp order confirmation sent',
+      messageId: result.messageId || '',
+      phone: result.to || '',
+    });
+  });
+
   // ─── COD Checkout ───
   app.post('/api/merch/checkout-cod', (req, res) => {
     const { items, customer, address, billingAddress } = req.body || {};
@@ -4156,6 +4291,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         discountAmountPaise: discountAmount,
       });
     }
+
+    sendMerchOrderConfirmationEmail(orderId, req).catch((error) => {
+      console.error('[Merch] Failed to send COD order confirmation email:', error?.message || error);
+    });
 
     res.json({
       success: true,
@@ -5388,16 +5527,29 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (products.length !== productIds.length) {
       return res.status(400).json({ message: 'Every selected product must be active and not already in Trash.' });
     }
-    db.prepare(`
-      UPDATE merch_products
-      SET deleted_previous_is_active = is_active,
-          is_active = 0,
-          deleted_at = datetime('now'),
-          deleted_by = ?,
-          deletion_reason = ?,
-          updated_at = datetime('now')
-      WHERE id IN (${placeholders}) AND deleted_at IS NULL
-    `).run(String(req.user?.email || req.user?.id || 'admin'), String(req.body?.reason || '').trim() || null, ...productIds);
+    const deletedBy = String(req.user?.email || req.user?.id || 'admin');
+    const reason = String(req.body?.reason || '').trim() || null;
+    db.transaction(() => {
+      db.prepare(`
+        UPDATE merch_products
+        SET deleted_previous_is_active = is_active,
+            is_active = 0,
+            deleted_at = datetime('now'),
+            deleted_by = ?,
+            deletion_reason = ?,
+            updated_at = datetime('now')
+        WHERE id IN (${placeholders}) AND deleted_at IS NULL
+      `).run(deletedBy, reason, ...productIds);
+      db.prepare(`
+        UPDATE merch_variants
+        SET deleted_previous_is_active = is_active,
+            is_active = 0,
+            deleted_at = datetime('now'),
+            deleted_by = ?,
+            deletion_reason = ?
+        WHERE product_id IN (${placeholders}) AND deleted_at IS NULL
+      `).run(deletedBy, reason, ...productIds);
+    })();
     res.json({ trashedIds: productIds, trashedCount: productIds.length });
   });
 
@@ -5408,7 +5560,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
     const placeholders = variantIds.map(() => '?').join(', ');
     const variants = db.prepare(`
-      SELECT v.id
+      SELECT v.id, v.product_id
       FROM merch_variants v
       JOIN merch_products p ON p.id = v.product_id
       WHERE v.id IN (${placeholders}) AND v.deleted_at IS NULL AND p.deleted_at IS NULL
@@ -5416,15 +5568,36 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (variants.length !== variantIds.length) {
       return res.status(400).json({ message: 'Every selected variant must be active and not already in Trash.' });
     }
-    db.prepare(`
-      UPDATE merch_variants
-      SET deleted_previous_is_active = is_active,
-          is_active = 0,
-          deleted_at = datetime('now'),
-          deleted_by = ?,
-          deletion_reason = ?
-      WHERE id IN (${placeholders}) AND deleted_at IS NULL
-    `).run(String(req.user?.email || req.user?.id || 'admin'), String(req.body?.reason || '').trim() || null, ...variantIds);
+    const deletedBy = String(req.user?.email || req.user?.id || 'admin');
+    const reason = String(req.body?.reason || '').trim() || null;
+    db.transaction(() => {
+      db.prepare(`
+        UPDATE merch_variants
+        SET deleted_previous_is_active = is_active,
+            is_active = 0,
+            deleted_at = datetime('now'),
+            deleted_by = ?,
+            deletion_reason = ?
+        WHERE id IN (${placeholders}) AND deleted_at IS NULL
+      `).run(deletedBy, reason, ...variantIds);
+
+      const parentProductIds = [...new Set(variants.map((v) => Number(v.product_id)).filter(Boolean))];
+      for (const pid of parentProductIds) {
+        const activeRemaining = db.prepare('SELECT count(*) as count FROM merch_variants WHERE product_id = ? AND deleted_at IS NULL').get(pid);
+        if (Number(activeRemaining?.count || 0) === 0) {
+          db.prepare(`
+            UPDATE merch_products
+            SET deleted_previous_is_active = is_active,
+                is_active = 0,
+                deleted_at = datetime('now'),
+                deleted_by = ?,
+                deletion_reason = 'All variants moved to Trash',
+                updated_at = datetime('now')
+            WHERE id = ? AND deleted_at IS NULL
+          `).run(deletedBy, pid);
+        }
+      }
+    })();
     res.json({ trashedIds: variantIds, trashedCount: variantIds.length });
   });
 
@@ -5438,15 +5611,25 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (deletedRows.length !== productIds.length) {
       return res.status(400).json({ message: 'Every selected product must be in Trash.' });
     }
-    db.prepare(`
-      UPDATE merch_products
-      SET is_active = COALESCE(deleted_previous_is_active, 1),
-          deleted_at = NULL,
-          deleted_by = NULL,
-          deletion_reason = NULL,
-          updated_at = datetime('now')
-      WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL
-    `).run(...productIds);
+    db.transaction(() => {
+      db.prepare(`
+        UPDATE merch_products
+        SET is_active = COALESCE(deleted_previous_is_active, 1),
+            deleted_at = NULL,
+            deleted_by = NULL,
+            deletion_reason = NULL,
+            updated_at = datetime('now')
+        WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL
+      `).run(...productIds);
+      db.prepare(`
+        UPDATE merch_variants
+        SET is_active = COALESCE(deleted_previous_is_active, 1),
+            deleted_at = NULL,
+            deleted_by = NULL,
+            deletion_reason = NULL
+        WHERE product_id IN (${placeholders}) AND deleted_at IS NOT NULL
+      `).run(...productIds);
+    })();
     res.json({ restoredIds: productIds });
   });
 
@@ -5457,22 +5640,37 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
     const placeholders = variantIds.map(() => '?').join(', ');
     const deletedRows = db.prepare(`
-      SELECT v.id
+      SELECT v.id, v.product_id
       FROM merch_variants v
       JOIN merch_products p ON p.id = v.product_id
-      WHERE v.id IN (${placeholders}) AND v.deleted_at IS NOT NULL AND p.deleted_at IS NULL
+      WHERE v.id IN (${placeholders}) AND v.deleted_at IS NOT NULL
     `).all(...variantIds);
     if (deletedRows.length !== variantIds.length) {
-      return res.status(400).json({ message: 'Every selected variant must be in Trash under an active product.' });
+      return res.status(400).json({ message: 'Every selected variant must be in Trash.' });
     }
-    db.prepare(`
-      UPDATE merch_variants
-      SET is_active = COALESCE(deleted_previous_is_active, 1),
-          deleted_at = NULL,
-          deleted_by = NULL,
-          deletion_reason = NULL
-      WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL
-    `).run(...variantIds);
+    db.transaction(() => {
+      db.prepare(`
+        UPDATE merch_variants
+        SET is_active = COALESCE(deleted_previous_is_active, 1),
+            deleted_at = NULL,
+            deleted_by = NULL,
+            deletion_reason = NULL
+        WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL
+      `).run(...variantIds);
+
+      const parentProductIds = [...new Set(deletedRows.map((r) => Number(r.product_id)).filter(Boolean))];
+      for (const pid of parentProductIds) {
+        db.prepare(`
+          UPDATE merch_products
+          SET is_active = 1,
+              deleted_at = NULL,
+              deleted_by = NULL,
+              deletion_reason = NULL,
+              updated_at = datetime('now')
+          WHERE id = ? AND deleted_at IS NOT NULL
+        `).run(pid);
+      }
+    })();
     res.json({ restoredIds: variantIds });
   });
 
@@ -5485,10 +5683,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       return res.status(400).json({ message: 'Type PERMANENTLY DELETE to confirm this irreversible action.' });
     }
     const placeholders = productIds.map(() => '?').join(', ');
-    const deletedRows = db.prepare(`SELECT id FROM merch_products WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).all(...productIds);
-    if (deletedRows.length !== productIds.length) {
-      return res.status(400).json({ message: 'Every selected product must already be in Trash.' });
-    }
     const variantRowsForOrders = db.prepare(`SELECT id FROM merch_variants WHERE product_id IN (${placeholders})`).all(...productIds);
     const variantIdsForOrders = variantRowsForOrders.map((row) => Number(row.id));
     if (variantIdsForOrders.length) {
@@ -5510,7 +5704,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       db.prepare(`DELETE FROM merch_combo_items WHERE combo_product_id IN (${placeholders}) OR component_product_id IN (${placeholders})`).run(...productIds, ...productIds);
       db.prepare(`DELETE FROM merch_product_hypes WHERE product_id IN (${placeholders})`).run(...productIds);
       db.prepare(`DELETE FROM merch_variants WHERE product_id IN (${placeholders})`).run(...productIds);
-      db.prepare(`DELETE FROM merch_products WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).run(...productIds);
+      db.prepare(`DELETE FROM merch_products WHERE id IN (${placeholders})`).run(...productIds);
     });
     permanentDelete();
     res.json({ permanentlyDeletedIds: productIds });
@@ -5525,7 +5719,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       return res.status(400).json({ message: 'Type PERMANENTLY DELETE to confirm this irreversible action.' });
     }
     const placeholders = variantIds.map(() => '?').join(', ');
-    const deletedRows = db.prepare(`SELECT id FROM merch_variants WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).all(...variantIds);
+    const deletedRows = db.prepare(`SELECT id, product_id FROM merch_variants WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).all(...variantIds);
     if (deletedRows.length !== variantIds.length) {
       return res.status(400).json({ message: 'Every selected variant must already be in Trash.' });
     }
@@ -5538,6 +5732,23 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       db.prepare(`DELETE FROM merch_customer_wishlist_items WHERE variant_id IN (${placeholders})`).run(...variantIds);
       db.prepare(`DELETE FROM merch_combo_items WHERE component_variant_id IN (${placeholders})`).run(...variantIds);
       db.prepare(`DELETE FROM merch_variants WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).run(...variantIds);
+
+      // Clean up orphaned parent products that have zero remaining variants
+      const parentProductIds = [...new Set(deletedRows.map((r) => Number(r.product_id)).filter(Boolean))];
+      for (const pid of parentProductIds) {
+        const remaining = db.prepare('SELECT count(*) as count FROM merch_variants WHERE product_id = ?').get(pid);
+        if (Number(remaining?.count || 0) === 0) {
+          const inOrders = db.prepare('SELECT 1 FROM merch_order_items WHERE product_name = (SELECT name FROM merch_products WHERE id = ?) LIMIT 1').get(pid);
+          if (!inOrders) {
+            db.prepare('DELETE FROM merch_customer_wishlist_items WHERE product_id = ?').run(pid);
+            db.prepare('DELETE FROM merch_combo_items WHERE combo_product_id = ? OR component_product_id = ?').run(pid, pid);
+            db.prepare('DELETE FROM merch_product_hypes WHERE product_id = ?').run(pid);
+            db.prepare('DELETE FROM merch_products WHERE id = ?').run(pid);
+          } else {
+            db.prepare("UPDATE merch_products SET is_active = 0, deleted_at = datetime('now') WHERE id = ?").run(pid);
+          }
+        }
+      }
     });
     permanentDelete();
     res.json({ permanentlyDeletedIds: variantIds });
@@ -5860,6 +6071,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     `).get(productId);
     if (!product) return res.status(404).json({ message: 'Product not found.' });
     db.transaction(() => {
+      const deletedBy = String(req.user?.email || req.user?.id || 'admin');
+      const reason = String(req.body?.reason || '').trim() || null;
       db.prepare(`
         UPDATE merch_products
         SET deleted_previous_is_active = is_active,
@@ -5869,7 +6082,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
             deletion_reason = ?,
             updated_at = datetime('now')
         WHERE id = ? AND deleted_at IS NULL
-      `).run(String(req.user?.email || req.user?.id || 'admin'), String(req.body?.reason || '').trim() || null, Number(product.id));
+      `).run(deletedBy, reason, Number(product.id));
+      db.prepare(`
+        UPDATE merch_variants
+        SET deleted_previous_is_active = is_active,
+            is_active = 0,
+            deleted_at = datetime('now'),
+            deleted_by = ?,
+            deletion_reason = ?
+        WHERE product_id = ? AND deleted_at IS NULL
+      `).run(deletedBy, reason, Number(product.id));
     })();
     res.json({ message: 'Product moved to Trash.', id: Number(product.id), name: product.name, deleted: true });
   });
