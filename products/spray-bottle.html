@@ -2323,79 +2323,240 @@
 			>
 				
 					<div class='product__media-wrapper'>
-						<div
-							class='product__media-list-wrapper'
-							data-section='product-media-template--18594171256950__main-product'
-						>
-							
-								<div class='product__media-sublist-outer no-js-hidden'>
-									<div
-										class='product__media-sublist js-media-sublist swiper'
-										data-js-media-list-id='slider-7957291499638'
-										data-section-layout='container'
-									>
-										<div class='swiper-wrapper'>
+						<!-- COLOR VARIANT GALLERY -->
+						<style>
+							.h2-color-gallery { width: 100%; }
+							.h2-color-gallery__main {
+								position: relative;
+								width: 100%;
+								padding-top: 100%;
+								overflow: hidden;
+								border-radius: 8px;
+								background: #f5f5f5;
+							}
+							.h2-color-gallery__nav {
+								position: absolute;
+								top: 50%;
+								z-index: 2;
+								width: 34px;
+								height: 34px;
+								border: 1px solid rgba(0, 0, 0, 0.12);
+								border-radius: 50%;
+								background: rgba(255, 255, 255, 0.92);
+								color: #222;
+								font-size: 21px;
+								line-height: 30px;
+								text-align: center;
+								cursor: pointer;
+								transform: translateY(-50%);
+								box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+								transition: transform 0.2s ease, background 0.2s ease;
+							}
+							.h2-color-gallery__nav:hover {
+								background: #fff;
+								transform: translateY(-50%) scale(1.08);
+							}
+							.h2-color-gallery__nav--prev { left: 12px; }
+							.h2-color-gallery__nav--next { right: 12px; }
+							.h2-color-gallery__main img {
+								position: absolute;
+								top: 0; left: 0;
+								width: 100%; height: 100%;
+								object-fit: cover;
+								opacity: 0;
+								transition: opacity 0.4s ease;
+								pointer-events: none;
+							}
+							.h2-color-gallery__main img.active {
+								opacity: 1;
+								pointer-events: auto;
+							}
+							.h2-color-gallery__thumbs {
+								display: flex;
+								gap: 8px;
+								margin-top: 10px;
+								padding: 4px 0;
+							}
+							.h2-color-gallery__thumb {
+								width: 72px;
+								height: 72px;
+								border-radius: 6px;
+								overflow: hidden;
+								cursor: pointer;
+								border: 2px solid transparent;
+								transition: border-color 0.25s ease, transform 0.2s ease;
+								flexibility: 0 0 auto;
+							}
+							.h2-color-gallery__thumb:hover {
+								transform: scale(1.05);
+							}
+							.h2-color-gallery__thumb.active {
+								border-color: #8B1A1A;
+							}
+							.h2-color-gallery__thumb img {
+								width: 100%; height: 100%;
+								object-fit: cover;
+								display: block;
+							}
+							.h2-color-swatches {
+								display: flex;
+								align-items: center;
+								gap: 10px;
+								margin-top: 14px;
+								margin-bottom: 4px;
+							}
+							.h2-color-swatches__label {
+								font-size: 13px;
+								font-weight: 500;
+								color: rgba(var(--color-foreground-secondary));
+								text-transform: uppercase;
+								letter-spacing: 0.05em;
+								margin-right: 4px;
+							}
+							.h2-color-swatches__selected-name {
+								font-size: 13px;
+								font-weight: 600;
+								color: rgba(var(--color-foreground));
+								text-transform: capitalize;
+							}
+							.h2-swatch-btn {
+								width: 28px;
+								height: 28px;
+								border-radius: 50%;
+								border: 2px solid transparent;
+								cursor: pointer;
+								outline: none;
+								padding: 0;
+								transition: border-color 0.25s ease, transform 0.2s ease, box-shadow 0.2s ease;
+								box-shadow: 0 0 0 1px rgba(0,0,0,0.15);
+							}
+							.h2-swatch-btn:hover { transform: scale(1.12); }
+							.h2-swatch-btn.active {
+								border-color: #8B1A1A;
+								box-shadow: 0 0 0 3px rgba(139,26,26,0.25);
+							}
+							.h2-swatch-btn--black { background: #1a1a1a; }
+							.h2-swatch-btn--white { background: #ffffff; }
+							.h2-color-gallery__thumbs .h2-color-gallery__thumb[data-color='white'] { display: none; }
+							.h2-color-gallery__thumbs.show-white .h2-color-gallery__thumb[data-color='black'] { display: none; }
+							.h2-color-gallery__thumbs.show-white .h2-color-gallery__thumb[data-color='white'] { display: block; }
+						</style>
 
-												
-<div
-														class='product__media-subitem swiper-slide'
-														data-media-sub-id='template--18594171256950__main-product-27279629582454'
-													>
-														<div
-															class='product__media'
-															style='--section-aspect-ratio: 129.0%'
-														>
-															<img src="../cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.3378fe.jpg?v=1770378138&amp;width=200" alt="" height="187" loading="lazy">
-														</div>
-													</div></div>
-									</div>
+						<div class="h2-color-gallery" id="h2MistGallery">
+							<!-- Main Image Display -->
+							<div class="h2-color-gallery__main">
+								<img
+									id="h2-img-black-1"
+									data-color="black"
+									src="../cdn/shop/files/products/h2-mist-product-features-front-black 1.png"
+									alt="H2 Hydrogen Mist Sprayer - Black (front view)"
+									class="active"
+									loading="eager"
+								>
+								<img
+									id="h2-img-black-2"
+									data-color="black"
+									src="../cdn/shop/files/products/h2-mist-product-features-side-black-connected-cable 1.png"
+									alt="H2 Hydrogen Mist Sprayer - Black (side view with connected cable)"
+									loading="lazy"
+								>
+								<img
+									id="h2-img-white-1"
+									data-color="white"
+									src="../cdn/shop/files/products/h2-mist-product-features-front-correct-nozzle 1.png"
+									alt="H2 Hydrogen Mist Sprayer - White (front view with correct nozzle)"
+									loading="lazy"
+								>
+								<img
+									id="h2-img-white-2"
+									data-color="white"
+									src="../cdn/shop/files/products/h2-mist-product-features-side-connected-cable 1.png"
+									alt="H2 Hydrogen Mist Sprayer - White (side view with connected cable)"
+									loading="lazy"
+								>
+								<button type="button" class="h2-color-gallery__nav h2-color-gallery__nav--prev" id="h2MistPrev" aria-label="Previous Mist image">&#8592;</button>
+								<button type="button" class="h2-color-gallery__nav h2-color-gallery__nav--next" id="h2MistNext" aria-label="Next Mist image">&#8594;</button>
+							</div>
+
+							<!-- Thumbnail Strip -->
+							<div class="h2-color-gallery__thumbs" id="h2MistThumbs">
+								<!-- Black thumbnails -->
+								<div class="h2-color-gallery__thumb active" data-color="black" data-target="h2-img-black-1" tabindex="0" role="button" aria-label="View Black front">
+									<img src="../cdn/shop/files/products/h2-mist-product-features-front-black 1.png" alt="Black front" loading="lazy">
 								</div>
-							
-							<div
-								class='product__media-list js-media-list swiper'
-								data-js-media-list-id='slider-7957291499638'
-								data-stop-autoplay='false'
-								data-autoplay='false'
-								data-speed='1.1'
-								data-delay='3'
-								data-section='template--18594171256950__main-product'
-								id='template--18594171256950__main-product-slider'
-							>
-								<div class='swiper-wrapper'>
-
-										
-<div
-												class='product__media-item swiper-slide'
-												data-media-id='template--18594171256950__main-product-27279629582454'
-												
-											>
-												
-<noscript><div class="product__media media" style="padding-top: 100.0%;">
-      <img src="../cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.339f53.jpg?v=1770378138&amp;width=1946" alt="" width="1946" height="1946" loading="lazy" sizes="(min-width: 1100px) calc((100vw - 10rem) / 2), (min-width: 750px) calc((100vw - 10rem) / 2), calc(100vw - 4rem)">
-    </div></noscript>
-
-<modal-opener class="product__modal-opener product__modal-opener--image no-js-hidden" data-modal="#ProductModal-template--18594171256950__main-product">
-  <span class="product__media-icon motion-reduce" aria-hidden="true"><svg class="icon icon-plus-zoom" width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-	<path d="M15.9996 1.60001L15.9996 30.4M30.3996 16L1.59961 16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-</svg></span>
-
-  <div 
-    class="product__media"
-    style="--section-aspect-ratio: 129.0%"
-  >
-    <img src="../cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33de1d.jpg?v=1770378138&amp;width=1500" alt="" width="1500" height="1500" loading="lazy">
-  </div>
-  <button class="product__media-toggle focus-inset" type="button" aria-haspopup="dialog" data-media-id="27279629582454">
-  <span class="visually-hidden">Open media 1 in gallery view
-</span>
-  </button>
-</modal-opener>
-											</div></div>
-								
-									
-								
+								<div class="h2-color-gallery__thumb" data-color="black" data-target="h2-img-black-2" tabindex="0" role="button" aria-label="View Black side with connected cable">
+									<img src="../cdn/shop/files/products/h2-mist-product-features-side-black-connected-cable 1.png" alt="Black side with connected cable" loading="lazy">
+								</div>
+								<!-- White thumbnails (hidden by default) -->
+								<div class="h2-color-gallery__thumb" data-color="white" data-target="h2-img-white-1" tabindex="0" role="button" aria-label="View White front">
+									<img src="../cdn/shop/files/products/h2-mist-product-features-front-correct-nozzle 1.png" alt="White front with correct nozzle" loading="lazy">
+								</div>
+								<div class="h2-color-gallery__thumb" data-color="white" data-target="h2-img-white-2" tabindex="0" role="button" aria-label="View White side with connected cable">
+									<img src="../cdn/shop/files/products/h2-mist-product-features-side-connected-cable 1.png" alt="White side with connected cable" loading="lazy">
+								</div>
 							</div>
 						</div>
+
+						<script>
+							(function () {
+								var currentColor = 'black';
+								var currentMainId = 'h2-img-black-1';
+
+								function setMainImage(imgId) {
+									currentMainId = imgId;
+									document.querySelectorAll('#h2MistGallery .h2-color-gallery__main img').forEach(function(img) {
+										img.classList.toggle('active', img.id === imgId);
+									});
+									document.querySelectorAll('#h2MistThumbs .h2-color-gallery__thumb').forEach(function(thumb) {
+										thumb.classList.toggle('active', thumb.dataset.target === imgId);
+									});
+								}
+
+								function navigateGallery(direction) {
+									var visibleThumbs = Array.from(document.querySelectorAll('#h2MistThumbs .h2-color-gallery__thumb'))
+										.filter(function(thumb) { return thumb.dataset.color === currentColor; });
+									if (!visibleThumbs.length) return;
+									var currentIndex = visibleThumbs.findIndex(function(thumb) {
+										return thumb.dataset.target === currentMainId;
+									});
+									var nextIndex = (currentIndex + direction + visibleThumbs.length) % visibleThumbs.length;
+									setMainImage(visibleThumbs[nextIndex].dataset.target);
+								}
+
+								function switchColor(color) {
+									if (currentColor === color) return;
+									currentColor = color;
+									var thumbs = document.getElementById('h2MistThumbs');
+									if (color === 'white') {
+										thumbs.classList.add('show-white');
+										setMainImage('h2-img-white-1');
+									} else {
+										thumbs.classList.remove('show-white');
+										setMainImage('h2-img-black-1');
+									}
+									// Update swatch buttons
+									document.querySelectorAll('.h2-swatch-btn').forEach(function(btn) {
+										btn.classList.toggle('active', btn.dataset.color === color);
+									});
+									// Update color name
+									var nameEl = document.getElementById('h2SelectedColorName');
+									if (nameEl) nameEl.textContent = color.charAt(0).toUpperCase() + color.slice(1);
+								}
+
+								// Thumbnail click
+								document.querySelectorAll('#h2MistThumbs .h2-color-gallery__thumb').forEach(function(thumb) {
+									function handleThumbClick() { setMainImage(thumb.dataset.target); }
+									thumb.addEventListener('click', handleThumbClick);
+									thumb.addEventListener('keydown', function(e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleThumbClick(); }});
+								});
+
+								document.getElementById('h2MistPrev').addEventListener('click', function() { navigateGallery(-1); });
+								document.getElementById('h2MistNext').addEventListener('click', function() { navigateGallery(1); });
+
+								// Expose switchColor globally for swatch buttons
+								window.h2MistSwitchColor = switchColor;
+							})();
+						</script>
 					</div>
 				
 			</div>
@@ -2519,7 +2680,27 @@
 							</div>
 
 							<div class='product-parameters'>
-								
+								<!-- Color Variant Selector -->
+								<div class="h2-color-swatches">
+									<span class="h2-color-swatches__label">Color:</span>
+									<span class="h2-color-swatches__selected-name" id="h2SelectedColorName">Black</span>
+								</div>
+								<div style="display:flex;gap:10px;margin-bottom:12px;align-items:center;">
+									<button
+										class="h2-swatch-btn h2-swatch-btn--black active"
+										data-color="black"
+										aria-label="Select Black"
+										title="Black"
+										onclick="if(window.h2MistSwitchColor) window.h2MistSwitchColor('black')"
+									></button>
+									<button
+										class="h2-swatch-btn h2-swatch-btn--white"
+										data-color="white"
+										aria-label="Select White"
+										title="White"
+										onclick="if(window.h2MistSwitchColor) window.h2MistSwitchColor('white')"
+									></button>
+								</div>
 
 								<noscript class='product-form__noscript-wrapper-template--18594171256950__main-product'>
 									<fieldset class='product-form__controls  hidden'>
@@ -2537,7 +2718,7 @@
 														form='product-form-template--18594171256950__main-product'
 													><option
 																
-																	selected='selected'
+																selected='selected'
 																
 																
 																value='43038515036278'
