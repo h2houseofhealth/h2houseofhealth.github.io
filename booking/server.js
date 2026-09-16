@@ -72,6 +72,7 @@ const WHATSAPP_TOKEN = normalizeEnvValue(process.env.WHATSAPP_TOKEN);
 const WHATSAPP_PHONE_NUMBER_ID = normalizeEnvValue(process.env.WHATSAPP_PHONE_NUMBER_ID);
 const WHATSAPP_API_VERSION = normalizeEnvValue(process.env.WHATSAPP_API_VERSION);
 const WHATSAPP_VERIFY_TOKEN = normalizeEnvValue(process.env.WHATSAPP_VERIFY_TOKEN);
+const WHATSAPP_APPOINTMENT_TEMPLATE = normalizeEnvValue(process.env.WHATSAPP_APPOINTMENT_TEMPLATE) || 'appointment_confirmation';
 const OTP_RESEND_COOLDOWN_SECONDS = (() => {
   const candidate = Number(process.env.OTP_RESEND_COOLDOWN_SECONDS || 30);
   if (!Number.isFinite(candidate)) return 30;
@@ -6037,6 +6038,36 @@ app.get('/api/admin/analytics/payment-link-conversion', requireAuth, requireAdmi
   return res.json({ analytics: totals, rows: exportRows });
 });
 
+app.post('/api/bookings/:id/send-whatsapp', requireAuth, async (req, res) => {
+  const bookingId = Number(req.params.id);
+  if (!Number.isInteger(bookingId)) {
+    return res.status(400).json({ message: 'Invalid booking id' });
+  }
+
+  const booking = getBookingForWhatsApp(bookingId);
+  if (!booking) {
+    return res.status(404).json({ message: 'Booking not found' });
+  }
+
+  if (!canAccessBooking(req.user, booking.userId)) {
+    return res.status(403).json({ message: 'forbidden' });
+  }
+
+  const result = await sendWhatsAppBookingConfirmation(booking);
+  if (!result.ok) {
+    return res.status(result.statusCode || 500).json({
+      success: false,
+      message: result.message || 'Failed to send WhatsApp confirmation',
+    });
+  }
+
+  return res.json({
+    success: true,
+    message: 'WhatsApp appointment confirmation sent',
+    messageId: result.messageId || '',
+  });
+});
+
 app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, res) => {
   const bookingId = Number(req.params.id);
   if (!Number.isInteger(bookingId)) {
@@ -9930,6 +9961,12 @@ app.post('/api/payments/verify', requireAuth, async (req, res) => {
          AND payment_status <> 'paid'`
     ).run(razorpayOrderId, razorpayOrderId, razorpayPaymentId, razorpayPaymentId, paymentMethod, paymentMethod, booking.bookingGroupId);
 
+    for (const gb of groupBookings) {
+      void sendWhatsAppBookingConfirmation(gb.id).catch((err) => {
+        console.error('[WhatsApp] Group booking confirmation error:', err?.message || err);
+      });
+    }
+
     return res.json({ bookingId, paid: true, bookingCount: groupBookings.length });
   }
 
@@ -10060,6 +10097,11 @@ app.post('/api/payments/verify-cart', requireAuth, async (req, res) => {
   }
   if (matchedBookings.length) {
     consumeAdminDiscountForBooking(req.user.id, matchedBookings[0].id);
+    for (const mb of matchedBookings) {
+      void sendWhatsAppBookingConfirmation(mb.id).catch((err) => {
+        console.error('[WhatsApp] Cart booking confirmation error:', err?.message || err);
+      });
+    }
   }
 
   const paidAmountPaise = Number.isFinite(Number(cartOrder.amountPaise))
@@ -13051,6 +13093,13 @@ function markBookingPaid(bookingId, paymentOrderId, paymentRef, paymentMethod = 
   ).run(orderId, orderId, paymentId, paymentId, method, method, paidAmountPaise, paidAmountPaise, Number(bookingId));
   if (booking) {
     consumeAdminDiscountForBooking(booking.userId, booking.id);
+    void sendWhatsAppBookingConfirmation(booking.id).then((result) => {
+      if (!result?.ok) {
+        console.warn('[WhatsApp] Booking confirmation notice:', result?.message);
+      }
+    }).catch((err) => {
+      console.error('[WhatsApp] Booking confirmation error:', err?.message || err);
+    });
   }
 }
 
@@ -14421,15 +14470,6 @@ function sendWhatsAppText(to, message) {
   });
 }
 
-function sendWhatsAppBookingConfirmation(booking) {
-  return sendWhatsAppMessage(booking?.clientPhone || booking?.clientMobile, 'booking_confirmation', [
-    booking?.clientName || '',
-    booking?.bookingDate || '',
-    booking?.bookingTime || '',
-    booking?.serviceName || '',
-    'House of Health',
-  ]);
-}
 
 function normalizeWhatsAppMobile(value) {
   const raw = String(value || '').trim();
@@ -14583,13 +14623,95 @@ function sendWhatsAppText(to, message) {
   });
 }
 
-function sendWhatsAppBookingConfirmation(booking) {
-  return sendWhatsAppMessage(booking?.clientPhone || booking?.clientMobile, 'booking_confirmation', [
-    booking?.clientName || '',
-    booking?.bookingDate || '',
-    booking?.bookingTime || '',
-    booking?.serviceName || '',
-    'House of Health',
+function formatWhatsAppBookingDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [year, month, day] = raw.split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+    }
+  }
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  }
+  return raw;
+}
+
+function formatWhatsAppBookingTime(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/am|pm/i.test(raw)) return raw;
+  const match = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (match) {
+    let hours = parseInt(match[1], 10);
+    const minutes = match[2];
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12;
+    return `${hours}:${minutes} ${ampm}`;
+  }
+  return raw;
+}
+
+function getBookingForWhatsApp(bookingId) {
+  if (!Number.isInteger(Number(bookingId))) return null;
+  return db
+    .prepare(
+      `SELECT b.id,
+              b.user_id AS userId,
+              COALESCE(NULLIF(TRIM(b.client_name), ''), NULLIF(TRIM(u.name), ''), NULLIF(TRIM(b.guest_name), ''), 'Valued Guest') AS clientName,
+              COALESCE(NULLIF(TRIM(b.client_phone), ''), NULLIF(TRIM(u.mobile), ''), NULLIF(TRIM(b.guest_phone), ''), '') AS clientPhone,
+              b.service_name AS serviceName,
+              b.booking_date AS bookingDate,
+              b.booking_time AS bookingTime,
+              b.status,
+              b.payment_status AS paymentStatus
+       FROM bookings b
+       LEFT JOIN users u ON u.id = b.user_id
+       WHERE b.id = ?`
+    )
+    .get(Number(bookingId));
+}
+
+async function sendWhatsAppBookingConfirmation(bookingOrId) {
+  let booking = bookingOrId;
+  if (!booking || typeof booking !== 'object' || !booking.serviceName) {
+    const id = typeof bookingOrId === 'object' ? bookingOrId?.id : bookingOrId;
+    booking = getBookingForWhatsApp(id);
+  }
+  if (!booking) {
+    return { ok: false, message: 'Booking not found for WhatsApp confirmation.' };
+  }
+  const recipient = booking.clientPhone || booking.clientMobile;
+  if (!recipient) {
+    return { ok: false, message: 'No recipient mobile number found for booking.' };
+  }
+
+  const clientName = String(booking.clientName || 'Valued Guest').trim();
+  const dateFormatted = formatWhatsAppBookingDate(booking.bookingDate);
+  const timeFormatted = formatWhatsAppBookingTime(booking.bookingTime);
+  const serviceName = String(booking.serviceName || 'Consultation').trim();
+  const bookingId = booking.id ? `BK${booking.id}` : 'BK-REF';
+
+  const templateName = WHATSAPP_APPOINTMENT_TEMPLATE || 'appointment_confirmation';
+  console.log('[WhatsApp] Sending booking confirmation:', {
+    recipient,
+    templateName,
+    clientName,
+    dateFormatted,
+    timeFormatted,
+    serviceName,
+    bookingId,
+  });
+
+  return sendWhatsAppMessage(recipient, templateName, [
+    clientName,
+    dateFormatted,
+    timeFormatted,
+    serviceName,
+    bookingId,
   ]);
 }
 function getTransporter() {
