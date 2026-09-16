@@ -1,4 +1,4 @@
-﻿/* House Merch â€“ Storefront App */
+/* House Merch â€“ Storefront App */
 /* Vanilla JS SPA following booking portal patterns */
 
 (function () {
@@ -118,6 +118,10 @@
     merchBundleCode: '',
     merchBundlePreview: null,
     latestConfirmation: null,
+    offers: [],
+    offersLoading: false,
+    availableCoupons: [],
+    activeOfferId: null,
   };
 
   const FALLBACK_PRODUCT_IMAGE = '/booking/assets/service-hydrogen-session.jpg';
@@ -140,103 +144,8 @@
 
 
 
-  // â”€â”€â”€ Product Data (Static catalog until API is built) â”€â”€â”€
-  const PRODUCTS = [
-    {
-      id: 1,
-      name: 'Zenith Hoodie – Black',
-      slug: 'zenith-hoodie-black',
-      description: 'Meet the hoodie that understands the assignment. Engineered from a heavyweight 450 GSM organic cotton blend, the Zenith offers a structured, premium silhouette without sacrificing that "lived-in" softness. Whether you\'re hitting the gym, the coffee shop, or the couch, this is your new uniform.',
-      category: 'hoodies',
-      basePrice: 3499.00,
-      images: [
-        '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146',
-        '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_18271.jpg?v=1770377146',
-        '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.328271.jpg?v=1770377146',
-        '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.31_18271.jpg?v=1770377146',
-        '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.318271.jpg?v=1770377146',
-      ],
-      variants: [
-        { id: 1, size: 'S', color: 'Black', price: 3499.00, stock: 25, sku: 'HM-HOD-BLK-S' },
-        { id: 2, size: 'M', color: 'Black', price: 3499.00, stock: 30, sku: 'HM-HOD-BLK-M' },
-        { id: 3, size: 'L', color: 'Black', price: 3499.00, stock: 20, sku: 'HM-HOD-BLK-L' },
-        { id: 4, size: 'XL', color: 'Black', price: 3499.00, stock: 15, sku: 'HM-HOD-BLK-XL' },
-        { id: 5, size: 'XXL', color: 'Black', price: 3499.00, stock: 10, sku: 'HM-HOD-BLK-XXL' },
-      ],
-      gstRate: 18,
-      weightGrams: 650,
-      createdAt: '2026-02-06',
-    },
-    {
-      id: 2,
-      name: 'Zenith Hoodie – Sand',
-      slug: 'zenith-hoodie-sand',
-      description: 'Same Zenith. New vibe. The Sand colourway brings an earthy, tonal palette to the heavyweight 450 GSM frame. Perfect for layering or wearing solo — this piece transitions from sunrise sessions to evening outings effortlessly.',
-      category: 'hoodies',
-      basePrice: 3499.00,
-      images: [
-        '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.30034b.jpg?v=1770377146',
-        '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.308271.jpg?v=1770377146',
-        '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.302cf7.jpg?v=1770377146',
-      ],
-      variants: [
-        { id: 6, size: 'S', color: 'Sand', price: 3499.00, stock: 20, sku: 'HM-HOD-SND-S' },
-        { id: 7, size: 'M', color: 'Sand', price: 3499.00, stock: 25, sku: 'HM-HOD-SND-M' },
-        { id: 8, size: 'L', color: 'Sand', price: 3499.00, stock: 18, sku: 'HM-HOD-SND-L' },
-        { id: 9, size: 'XL', color: 'Sand', price: 3499.00, stock: 12, sku: 'HM-HOD-SND-XL' },
-        { id: 10, size: 'XXL', color: 'Sand', price: 3499.00, stock: 8, sku: 'HM-HOD-SND-XXL' },
-      ],
-      gstRate: 18,
-      weightGrams: 650,
-      createdAt: '2026-02-06',
-    },
-    {
-      id: 3,
-      name: 'H2 Molecular Hydrogen Water Bottle',
-      slug: 'molecular-hydrogen-water-bottle',
-      description: 'Generate hydrogen-rich water on the go. This portable bottle uses advanced PEM/SPE electrolysis technology to infuse your water with molecular hydrogen (H₂) in just 3 minutes. BPA-free, USB-C rechargeable, and built to last.',
-      specifications: { 'Product Name': 'Hydrogen-Rich Water Bottle', Capacity: '460ml', 'Electrolytic Material': 'Platinum-Titanium', 'Membrane Electrode': 'PEM + SPE', 'Main Material': 'Glass', 'Shell Material': 'Stainless Steel', 'Battery Type': '700mAh Lithium Polymer', 'Working Time': '5 minutes per cycle (3,000+ ppb)', Size: 'Ø7cm × 24cm', 'Colours Available': 'Blue / Black / Silver / Gold' },
-      category: 'bottles',
-      basePrice: 6499.00,
-      images: [
-        '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113',
-        '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_29477.jpg?v=1770378113',
-        '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_2c1ed.jpg?v=1770378113',
-      ],
-      variants: [
-        { id: 11, size: '300ml', color: 'Silver', price: 6999.00, stock: 40, sku: 'HM-BTL-300-SLV' },
-        { id: 12, size: '500ml', color: 'Silver', price: 6499.00, stock: 35, sku: 'HM-BTL-500-SLV' },
-        { id: 13, size: '300ml', color: 'Black', price: 7499.00, stock: 30, sku: 'HM-BTL-300-BLK' },
-        { id: 14, size: '500ml', color: 'Black', price: 8499.00, stock: 25, sku: 'HM-BTL-500-BLK' },
-      ],
-      gstRate: 18,
-      weightGrams: 380,
-      createdAt: '2026-03-15',
-    },
-    {
-      id: 4,
-      name: 'H2 Hydrogen Mist Spray',
-      slug: 'hydrogen-mist-spray',
-      description: 'Refresh and rejuvenate your skin anywhere. This compact hydrogen mist spray delivers antioxidant-rich hydrogen water directly to your face and body. Perfect for post-workout recovery, skincare routines, or a quick pick-me-up throughout the day.',
-      specifications: { 'Product Name': 'Hydrogen Mist Sprayer', 'Atomisation Amount': '0.8–1.2 ml/min', 'Hydrogen Concentration': '1000 ppb', 'Water Tank Capacity': '13ml', 'Main Material': 'PC (Polycarbonate)', 'Negative Potential': '< −300mV', 'Battery Capacity': '500mAh', 'Power Supply': 'DC 5V / Micro USB' },
-      category: 'sprays',
-      basePrice: 2499.00,
-      images: [
-        '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138',
-        '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.3351c7.jpg?v=1770378138',
-        '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33de1d.jpg?v=1770378138',
-      ],
-      variants: [
-        { id: 15, size: '50ml', color: 'White', price: 2499.00, stock: 50, sku: 'HM-SPR-050-WHT' },
-        { id: 16, size: '100ml', color: 'White', price: 3499.00, stock: 40, sku: 'HM-SPR-100-WHT' },
-        { id: 17, size: '50ml', color: 'Rose Gold', price: 2799.00, stock: 35, sku: 'HM-SPR-050-RSG' },
-        { id: 18, size: '100ml', color: 'Rose Gold', price: 3799.00, stock: 30, sku: 'HM-SPR-100-RSG' },
-      ],
-      gstRate: 18,
-      weightGrams: 150,
-      createdAt: '2026-04-01',
-    },
-  ];
+  // Product data is loaded from the merch API; do not duplicate catalog records here.
+  const PRODUCTS = [];
 
   // Presentation-only fallbacks for the storefront card redesign. These are
   // not product/API fields and should be replaced with real catalog metadata.
@@ -262,14 +171,10 @@
     trending: [
       { key: 'bottle', rating: 5 },
       { key: 'mist', rating: 5 },
-      { key: 'hoodie-sand', rating: 5 },
-      { key: 'hoodie-black', rating: 5 },
+      { key: 'hoodie', rating: 5 },
     ],
     bundles: [
       { keys: ['bottle', 'mist'], label: 'Bottle + Mist', savings: 'Save 15%', discount: 0.85 },
-    ],
-    offers: [
-      { eyebrow: '🏷 Limited Time Offer', title: 'Up to 10% OFF', detail: 'Make space for a more intentional everyday ritual.', cta: 'Shop Now' },
     ],
     benefits: [
       'Secure Payments',
@@ -280,8 +185,7 @@
     recommended: [
       { key: 'bottle' },
       { key: 'mist' },
-      { key: 'hoodie-black' },
-      { key: 'hoodie-sand' },
+      { key: 'hoodie' },
     ],
   };
 
@@ -297,25 +201,10 @@
     if (product.slug === 'hydrogen-mist-spray') {
       map['h2-mist-spray'] = source;
     }
-    if (product.slug === 'zenith-hoodie-black') {
-      map['zenith-hoodie-black'] = source;
-    }
-    if (product.slug === 'zenith-hoodie-sand') {
-      map['zenith-hoodie-sand'] = source;
-    }
     return map;
   }, {});
 
   const HOODIE_CARD_IMAGE = '/cdn/shop/files/hero/h2-hoodie-transparent-source.png';
-  PRODUCT_IMAGE_SOURCES['zenith-hoodie-black'] = { imageUrl: HOODIE_CARD_IMAGE, images: [HOODIE_CARD_IMAGE] };
-  PRODUCT_IMAGE_SOURCES['zenith-hoodie-sand'] = { imageUrl: HOODIE_CARD_IMAGE, images: [HOODIE_CARD_IMAGE] };
-
-  const PRODUCT_GALLERY_VARIANT_PRICES = {
-    'molecular-hydrogen-water-bottle': [6999.00, 6499.00, 7499.00],
-    'h2-water-bottle': [6999.00, 6499.00, 7499.00],
-    'hydrogen-mist-spray': [2499.00, 3499.00, 2799.00],
-    'h2-mist-spray': [2499.00, 3499.00, 2799.00],
-  };
 
   function resolveProductImageSource(product) {
     const slug = String(product?.slug || '').trim().toLowerCase();
@@ -326,8 +215,6 @@
       (!isCombo && slug && PRODUCT_IMAGE_SOURCES[slug]) ||
       (name.includes('water bottle') ? PRODUCT_IMAGE_SOURCES['h2-water-bottle'] : null) ||
       (name.includes('mist') || category === 'sprays' ? PRODUCT_IMAGE_SOURCES['h2-mist-spray'] : null) ||
-      (name.includes('hoodie') && name.includes('black') ? PRODUCT_IMAGE_SOURCES['zenith-hoodie-black'] : null) ||
-      (name.includes('hoodie') && name.includes('sand') ? PRODUCT_IMAGE_SOURCES['zenith-hoodie-sand'] : null) ||
       null
     );
     const fallbackImages = Array.isArray(source?.images) ? source.images.filter(Boolean) : [];
@@ -350,10 +237,32 @@
     return `/cdn/shop/files/${raw}`;
   }
 
+  // Variant media is authoritative whenever a specific variant is selected.
+  // Keep the primary configured image first so a variant's gallery can never
+  // replace it with another colour or an unrelated product image.
+  function getVariantImageSources(variant, product = null) {
+    const primary = normalizeProductImageUrl(variant?.imageUrl || variant?.image_url || '');
+    const gallery = (Array.isArray(variant?.images) ? variant.images : [])
+      .map(normalizeProductImageUrl)
+      .filter(Boolean);
+    const variantSources = [...new Set([primary, ...gallery].filter(Boolean))];
+    if (variantSources.length) return variantSources;
+
+    const productSources = (Array.isArray(product?.images) ? product.images : [])
+      .map(normalizeProductImageUrl)
+      .filter(Boolean);
+    const productPrimary = normalizeProductImageUrl(product?.imageUrl || product?.image || '');
+    return [...new Set([productPrimary, ...productSources].filter(Boolean))];
+  }
+
+  function getVariantImageUrl(variant, product = null) {
+    return getVariantImageSources(variant, product)[0] || getProductFallbackImage(product || {});
+  }
+
   function getProductFallbackImage(product) {
     const category = String(product?.category || '').toLowerCase();
     const name = String(product?.name || '').toLowerCase();
-    if (category === 'sprays' || name.includes('mist') || name.includes('spray')) return '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138';
+    if (category === 'sprays' || name.includes('mist') || name.includes('spray')) return '/cdn/shop/files/hero/h2-mist-transparent-source.png';
     if (category === 'bottles' || name.includes('bottle')) return '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113';
     if (category === 'hoodies' || name.includes('hoodie')) return HOODIE_CARD_IMAGE;
     return FALLBACK_PRODUCT_IMAGE;
@@ -370,22 +279,6 @@
     state.selectedCategory = els.categoryFilter.value;
   }
 
-  function getGalleryVariantPrice(product, index) {
-    const slug = String(product?.slug || '').trim().toLowerCase();
-    const prices = PRODUCT_GALLERY_VARIANT_PRICES[slug];
-    if (!Array.isArray(prices) || !Number.isInteger(index) || index < 0) return null;
-    const value = Number(prices[index]);
-    return Number.isFinite(value) && value > 0 ? value : null;
-  }
-
-  function getGalleryVariantForIndex(product, index) {
-    const targetPrice = getGalleryVariantPrice(product, index);
-    if (targetPrice == null) return null;
-
-    const variants = Array.isArray(product?.variants) ? product.variants : [];
-    return variants.find((variant) => Number(variant.price) === targetPrice) || variants[index] || null;
-  }
-
   function getGalleryVariantFromThumb(product, index) {
     const category = String(product?.category || '').trim().toLowerCase();
     const variants = Array.isArray(product?.variants) ? product.variants : [];
@@ -395,7 +288,7 @@
       return variants[index % variants.length] || variants[0] || null;
     }
 
-    return getGalleryVariantForIndex(product, index);
+    return variants[index] || variants[0] || null;
   }
 
   function isMistProduct(product) {
@@ -411,8 +304,16 @@
     return slug === 'molecular-hydrogen-water-bottle' || category === 'bottles' || category.includes('bottle') || name.includes('water bottle');
   }
 
-  function getProductGallerySlides(product) {
-    const productImages = (product.images || []).filter(Boolean);
+  function getProductGallerySlides(product, variant = state.selectedVariant) {
+    const variantImages = getVariantImageSources(variant, product);
+    if (variantImages.length) {
+      return variantImages.map((src, index) => ({
+        src,
+        label: `${product.name} ${variant?.color || ''} view ${index + 1}`.trim(),
+        productImageIndex: null,
+      }));
+    }
+    const productImages = (product.images || []).map(normalizeProductImageUrl).filter(Boolean);
     if (isMistProduct(product)) {
       return MIST_DETAIL_FEATURE_SLIDES.map((slide) => ({ ...slide, productImageIndex: null }));
     }
@@ -460,8 +361,7 @@
       const category = String(entry.category || '').toLowerCase();
       if (normalizedKey === 'bottle') return category === 'bottles' || name.includes('bottle');
       if (normalizedKey === 'mist') return category === 'sprays' || name.includes('mist') || name.includes('spray');
-      if (normalizedKey === 'hoodie-sand') return name.includes('hoodie') && name.includes('sand');
-      if (normalizedKey === 'hoodie-black') return name.includes('hoodie') && name.includes('black');
+      if (normalizedKey === 'hoodie') return name === 'hoodie' || name.includes('hoodie');
       return name.includes(normalizedKey);
     });
     return product || productPool[fallbackIndex % Math.max(1, productPool.length)] || null;
@@ -491,7 +391,6 @@
     return {
       trending,
       bundles,
-      offers: MERCH_SIDEBAR_DEMO_DATA.offers,
       benefits: MERCH_SIDEBAR_DEMO_DATA.benefits,
       recommended,
     };
@@ -499,7 +398,8 @@
 
   function renderSidebarProduct(item) {
     const product = item.product;
-    const image = product.images?.[0] || product.imageUrl || getProductFallbackImage(product);
+    const variant = getDefaultPurchasableVariant(product);
+    const image = variant ? getVariantImageUrl(variant, product) : (product.images?.[0] || product.imageUrl || getProductFallbackImage(product));
     return `
       <button class="smart-merch-product" type="button" data-sidebar-product-id="${escapeHtml(String(product.id))}" aria-label="View ${escapeHtml(product.name)}">
         <img src="${escapeHtml(image)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
@@ -535,7 +435,7 @@
             <div class="smart-merch-bundle__items">
               ${bundle.products.map((product, index) => `
                 ${index ? '<span class="smart-merch-bundle__plus" aria-hidden="true">+</span>' : ''}
-                <img src="${escapeHtml(product.images?.[0] || product.imageUrl || getProductFallbackImage(product))}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
+                <img src="${escapeHtml((getDefaultPurchasableVariant(product) && getVariantImageUrl(getDefaultPurchasableVariant(product), product)) || product.images?.[0] || product.imageUrl || getProductFallbackImage(product))}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
               `).join('')}
             </div>
             <strong>${escapeHtml(bundle.label)}</strong>
@@ -545,17 +445,6 @@
             </div>
           `).join('')}
         </div>
-      </section>
-
-      <section class="smart-merch-sidebar__section smart-merch-sidebar__section--offer" aria-labelledby="smartOfferTitle">
-        ${data.offers.map((offer) => `
-          <div class="smart-merch-offer">
-            <p class="smart-merch-offer__eyebrow">${escapeHtml(offer.eyebrow)}</p>
-            <h3 id="smartOfferTitle">${escapeHtml(offer.title)}</h3>
-            <p>${escapeHtml(offer.detail)}</p>
-            <button type="button" class="smart-merch-sidebar__text-cta" data-sidebar-action="shop-offer">${escapeHtml(offer.cta)} <span aria-hidden="true">→</span></button>
-          </div>
-        `).join('')}
       </section>
 
       <section class="smart-merch-sidebar__section smart-merch-sidebar__section--benefits" aria-labelledby="smartBenefitsTitle">
@@ -579,7 +468,7 @@
     els.smartMerchSidebar.querySelectorAll('[data-sidebar-product-id]').forEach((button) => {
       button.addEventListener('click', () => showProductDetail(Number(button.dataset.sidebarProductId)));
     });
-    els.smartMerchSidebar.querySelectorAll('[data-sidebar-action="view-all"], [data-sidebar-action="shop-offer"]').forEach((button) => {
+    els.smartMerchSidebar.querySelectorAll('[data-sidebar-action="view-all"]').forEach((button) => {
       button.addEventListener('click', () => els.shopSection?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     });
     els.smartMerchSidebar.querySelectorAll('[data-sidebar-action="shop-bundle"]').forEach((button) => {
@@ -1017,12 +906,13 @@ function getWishlistProductPrice(item) {
   const product = state.products.find(
     (entry) => Number(entry.id) === Number(item.productId)
   );
-
-  return (
-    product?.images?.[0] ||
-    product?.imageUrl ||
-    (product ? getProductFallbackImage(product) : '')
+  const variant = product?.variants?.find(
+    (entry) => Number(entry.id) === Number(item.variantId)
   );
+
+  return variant
+    ? getVariantImageUrl(variant, product)
+    : (product?.images?.[0] || product?.imageUrl || (product ? getProductFallbackImage(product) : ''));
 }
 
   function getWishlistItem(product, variant) {
@@ -1187,6 +1077,10 @@ function getWishlistProductPrice(item) {
     const normalizedVariants = variants.map((variant) => ({
       ...variant,
       price: normalizeCatalogAmount(variant?.price || 0),
+      imageUrl: normalizeProductImageUrl(variant?.imageUrl || variant?.image_url || ''),
+      images: Array.isArray(variant?.images)
+        ? variant.images.map(normalizeProductImageUrl).filter(Boolean)
+        : [],
     }));
     const normalizedPrices = normalizedVariants.map((variant) => Number(variant.price || 0));
     const basePrice = normalizeCatalogAmount(product?.basePrice || product?.base_price || 0);
@@ -1297,11 +1191,29 @@ function getWishlistProductPrice(item) {
     `;
   }
 
+  function syncCartVariantImages() {
+    state.cart = state.cart.map((item) => {
+      const product = state.products.find((entry) => Number(entry.id) === Number(item.productId));
+      const variant = product?.variants?.find((entry) => Number(entry.id) === Number(item.variantId));
+      if (!product || !variant) return item;
+      return {
+        ...item,
+        productName: product.name,
+        variantLabel: getVariantLabel(variant),
+        price: variant.price,
+        image: getVariantImageUrl(variant, product),
+        sku: variant.sku,
+      };
+    });
+    saveCart();
+  }
+
   async function loadMerchProducts() {
     try {
       const result = await api('/api/merch/products');
       const productRows = Array.isArray(result) ? result : (Array.isArray(result?.products) ? result.products : []);
       state.products = productRows.map(normalizeMerchProduct);
+      syncCartVariantImages();
       renderDynamicCategoryOptions();
     } catch (error) {
       state.products = [];
@@ -1418,11 +1330,13 @@ function getWishlistProductPrice(item) {
         variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '),
         price: variant.price,
         quantity: Math.min(quantity, variant.stock),
-        image: product.images?.[0] || product.imageUrl || FALLBACK_PRODUCT_IMAGE,
+        image: getVariantImageUrl(variant, product),
         sku: variant.sku,
       });
     }
+    clearMerchCoupon();
     saveCart();
+    loadMerchCoupons();
     if (openDrawerAfterAdd) {
       openCart();
     }
@@ -1439,8 +1353,9 @@ function getWishlistProductPrice(item) {
     await initiateCheckout();
   }
 
-  async function handleProductCardAction(action, product) {
-    const variant = getDefaultPurchasableVariant(product);
+  async function handleProductCardAction(action, product, variantId = null) {
+    const variant = product.variants.find((item) => String(item.id) === String(variantId))
+      || getDefaultPurchasableVariant(product);
     if (!variant || Number(variant.stock || 0) <= 0) {
       showCheckoutNotice('Out of stock', 'This product is currently unavailable.', { variant: 'error' });
       return;
@@ -1461,8 +1376,10 @@ function getWishlistProductPrice(item) {
 
   function removeFromCart(variantId) {
     state.cart = state.cart.filter(item => item.variantId !== variantId);
+    clearMerchCoupon();
     getMerchBundleDiscountAmount();
     saveCart();
+    loadMerchCoupons();
     renderCart();
   }
 
@@ -1536,6 +1453,32 @@ function getWishlistProductPrice(item) {
     return Math.max(0, Number(state.merchCouponPreview?.discountAmountInr || 0)) + getMerchBundleDiscountAmount();
   }
 
+  function clearMerchCoupon({ preserveCode = false } = {}) {
+    state.merchCouponPreview = null;
+    state.merchCouponError = '';
+    if (!preserveCode) state.merchCouponCode = '';
+    if (els.cartCouponCode && !preserveCode) els.cartCouponCode.value = '';
+  }
+
+  function getCouponDiscountLabel(coupon) {
+    if (!coupon) return '';
+    return String(coupon.discountType || '').toLowerCase() === 'percentage'
+      ? `${Number(coupon.discountValue || 0)}% OFF`
+      : `${formatPrice(Number(coupon.discountValue || 0))} OFF`;
+  }
+
+  async function loadMerchCoupons() {
+    try {
+      const productIds = [...new Set(state.cart.map((item) => Number(item.productId)).filter(Boolean))];
+      const query = productIds.length ? `?productIds=${encodeURIComponent(productIds.join(','))}` : '';
+      const result = await api(`/api/merch/coupons${query}`);
+      state.availableCoupons = Array.isArray(result?.coupons) ? result.coupons : [];
+    } catch {
+      state.availableCoupons = [];
+    }
+    if (state.currentView === 'checkout') renderCheckoutPage();
+  }
+
   function getCheckoutTotals() {
     const subtotal = getCartTotal();
     const shipping = getMerchShippingCharge(subtotal);
@@ -1582,14 +1525,19 @@ function getWishlistProductPrice(item) {
   }
 
   async function applyMerchCouponFromCart() {
-    const code = normalizeCouponCode(els.cartCouponCode?.value || state.merchCouponCode || '');
+    const checkoutCoupon = document.getElementById('checkoutCouponCode');
+    const rawCode = state.currentView === 'checkout'
+      ? (checkoutCoupon?.value || state.merchCouponCode || '')
+      : (els.cartCouponCode?.value || state.merchCouponCode || '');
+    const code = normalizeCouponCode(rawCode);
     state.merchCouponCode = code;
     state.merchCouponError = '';
 
     if (!code) {
-      state.merchCouponPreview = null;
+      clearMerchCoupon();
       renderMerchCouponPreview();
       renderCart();
+      if (state.currentView === 'checkout') renderCheckoutPage();
       return;
     }
 
@@ -1611,9 +1559,10 @@ function getWishlistProductPrice(item) {
       });
       state.merchCouponPreview = result.coupon || null;
       if (els.cartCouponCode) els.cartCouponCode.value = code;
+      if (checkoutCoupon) checkoutCoupon.value = code;
       showCheckoutNotice('Coupon applied', `${code} is ready for checkout.`);
     } catch (error) {
-      state.merchCouponPreview = null;
+      clearMerchCoupon({ preserveCode: true });
       state.merchCouponError = error.message || 'Unable to validate coupon.';
       showCheckoutNotice('Coupon error', state.merchCouponError, { variant: 'error' });
     } finally {
@@ -3482,6 +3431,20 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       );
     }
 
+    if (['bottles', 'sprays'].includes(String(state.selectedCategory || '').toLowerCase())) {
+      products = products.flatMap((product) => {
+        const variants = [];
+        const seenColors = new Set();
+        for (const variant of Array.isArray(product.variants) ? product.variants : []) {
+          const color = String(variant.color || '').trim();
+          if (!color || seenColors.has(color)) continue;
+          seenColors.add(color);
+          variants.push({ ...product, displayVariant: variant });
+        }
+        return variants.length ? variants : [product];
+      });
+    }
+
     // Sort
     switch (state.sortBy) {
       case 'price-asc':
@@ -3500,8 +3463,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   function renderProductCard(product, hypeLabel = '') {
-      const defaultVariant = getDefaultPurchasableVariant(product);
-      const isSoldOut = !defaultVariant || Number(defaultVariant.stock || 0) <= 0;
+      const displayVariant = product.displayVariant || getDefaultPurchasableVariant(product);
+      const isSoldOut = !displayVariant || Number(displayVariant.stock || 0) <= 0;
       const presentation = getProductCardPresentation(product);
       const isHoodie = String(product.category || '').toLowerCase() === 'hoodies';
       const normalizedCategory = String(product.category || '').toLowerCase();
@@ -3512,9 +3475,11 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         || normalizedName.includes('bottle');
       const isHoodieCombo = Boolean(product.isCombo) && Array.isArray(product.comboItems)
         && product.comboItems.some((item) => String(item.productName || item.name || '').toLowerCase().includes('hoodie'));
-      const cardImage = isHoodie || isHoodieCombo
-        ? HOODIE_CARD_IMAGE
-        : (product.images?.[0] || product.imageUrl || getProductFallbackImage(product));
+      const cardImage = displayVariant
+        ? getVariantImageUrl(displayVariant, product)
+        : (isHoodie || isHoodieCombo
+          ? HOODIE_CARD_IMAGE
+          : (product.images?.[0] || product.imageUrl || getProductFallbackImage(product)));
       const cardClasses = [
         isHoodie ? 'product-card--hoodie' : '',
         isMist ? 'product-card--mist' : '',
@@ -3522,14 +3487,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         isHoodieCombo ? 'product-card--hoodie-combo' : '',
       ].filter(Boolean).join(' ');
       return `
-      <article class="product-card ${cardClasses}" data-product-id="${product.id}" tabindex="0" role="button" aria-label="View ${escapeHtml(product.name)}">
+      <article class="product-card ${cardClasses}" data-product-id="${product.id}" data-variant-id="${escapeHtml(displayVariant?.id || '')}" tabindex="0" role="button" aria-label="View ${escapeHtml(product.name)} ${escapeHtml(displayVariant?.color || '')}">
         <div class="product-card__image">
           <div class="product-card__badges">
             <span class="product-card__badge">${escapeHtml(presentation.badge)}</span>
             ${hypeLabel ? `<span class="product-card__badge product-card__badge--hype">${escapeHtml(hypeLabel)}</span>` : ''}
             ${isSoldOut ? '<span class="product-card__badge product-card__badge--sold-out">Sold out</span>' : ''}
           </div>
-          <button class="product-card__wishlist${isProductWishlisted(product, defaultVariant) ? ' is-selected' : ''}" type="button" aria-label="${isProductWishlisted(product, defaultVariant) ? 'Remove' : 'Add'} ${escapeHtml(product.name)} ${isProductWishlisted(product, defaultVariant) ? 'from' : 'to'} wishlist" title="Wishlist" aria-pressed="${isProductWishlisted(product, defaultVariant)}">
+          <button class="product-card__wishlist${isProductWishlisted(product, displayVariant) ? ' is-selected' : ''}" type="button" aria-label="${isProductWishlisted(product, displayVariant) ? 'Remove' : 'Add'} ${escapeHtml(product.name)} ${isProductWishlisted(product, displayVariant) ? 'from' : 'to'} wishlist" title="Wishlist" aria-pressed="${isProductWishlisted(product, displayVariant)}">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 8.8c0 5.2-8.8 10.1-8.8 10.1S3.2 14 3.2 8.8A4.7 4.7 0 0 1 12 6.2a4.7 4.7 0 0 1 8.8 2.6Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
           </button>
           <div class="product-card__annotation" aria-hidden="true">
@@ -3541,12 +3506,13 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         <div class="product-card__body">
           <p class="product-card__category">${escapeHtml(getCategoryLabel(product.category))}</p>
           <h3 class="product-card__name">${escapeHtml(product.name)}</h3>
+          ${displayVariant?.color ? `<p class="product-card__variant">${escapeHtml(displayVariant.color)}</p>` : ''}
           <div class="product-card__rating" aria-label="${escapeHtml(`${presentation.stars} (${presentation.reviews} reviews)`) }">
             <span class="product-card__stars" aria-hidden="true">${presentation.stars}</span>
             <span>(${presentation.reviews})</span>
           </div>
           <p class="product-card__price">
-            ${product.variants.length > 1 ? '<span class="price-from">From </span>' : ''}${getPriceRange(product)}
+            ${product.displayVariant ? formatPrice(displayVariant.price) : `${product.variants.length > 1 ? '<span class="price-from">From </span>' : ''}${getPriceRange(product)}`}
           </p>
           <div class="product-card__actions">
             <button class="btn btn-secondary product-card__action" type="button" data-product-action="add-to-cart" data-product-id="${product.id}" ${isSoldOut ? 'disabled' : ''}>
@@ -3566,13 +3532,13 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     container.querySelectorAll('.product-card').forEach(card => {
       card.addEventListener('click', () => {
         const id = Number(card.dataset.productId);
-        showProductDetail(id);
+        showProductDetail(id, card.dataset.variantId);
       });
       card.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           const id = Number(card.dataset.productId);
-          showProductDetail(id);
+          showProductDetail(id, card.dataset.variantId);
         }
       });
     });
@@ -3583,7 +3549,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         event.stopPropagation();
         const product = state.products.find((item) => Number(item.id) === Number(button.dataset.productId));
         if (!product) return;
-        await handleProductCardAction(button.dataset.productAction, product);
+        await handleProductCardAction(button.dataset.productAction, product, button.closest('.product-card')?.dataset.variantId);
       });
     });
 
@@ -3591,8 +3557,11 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       button.addEventListener('click', async (event) => {
         event.preventDefault();
         event.stopPropagation();
-        const product = state.products.find((item) => Number(item.id) === Number(button.closest('.product-card')?.dataset.productId));
-        const variant = product ? getDefaultPurchasableVariant(product) : null;
+        const card = button.closest('.product-card');
+        const product = state.products.find((item) => Number(item.id) === Number(card?.dataset.productId));
+        const variant = product
+          ? product.variants.find((item) => String(item.id) === String(card?.dataset.variantId)) || getDefaultPurchasableVariant(product)
+          : null;
         await handleWishlistAction(button, product, variant);
       });
     });
@@ -3625,19 +3594,22 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   // â”€â”€â”€ Render: Product Detail â”€â”€â”€
-  function showProductDetail(productId) {
+  function showProductDetail(productId, variantId = null) {
     const product = state.products.find(p => Number(p.id) === Number(productId));
     if (!product) return;
 
     state.currentView = 'detail';
     state.selectedProduct = product;
-    state.selectedVariant = getDefaultPurchasableVariant(product);
+    state.selectedVariant = product.variants.find((variant) => String(variant.id) === String(variantId))
+      || getDefaultPurchasableVariant(product);
     state.quantity = 1;
 
     // Hide shop, show detail
     els.shopSection.hidden = true;
     document.querySelector('.merch-hero').hidden = true;
     document.querySelector('.merch-categories').hidden = true;
+    const _shopOffersSection = document.getElementById('shopOffersSection');
+    if (_shopOffersSection) _shopOffersSection.hidden = true;
     if (els.checkoutPage) els.checkoutPage.hidden = true;
     if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
     if (els.orderTracking) els.orderTracking.hidden = true;
@@ -3661,16 +3633,20 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     els.shopSection.hidden = false;
     document.querySelector('.merch-hero').hidden = false;
     document.querySelector('.merch-categories').hidden = false;
+    const _shopOffersSection2 = document.getElementById('shopOffersSection');
+    if (_shopOffersSection2) _shopOffersSection2.hidden = state.offers.length === 0;
     if (window.location.hash === '#booking-confirmation' || window.location.hash === '#checkout' || getTrackingOrderIdFromHash()) {
       history.replaceState(null, '', window.location.pathname + window.location.search);
     }
   }
 
   function renderProductGallery(product) {
-    const slides = getProductGallerySlides(product);
-    const mainImage = slides[0]?.src || getProductDetailMainImage(product);
+    const slides = getProductGallerySlides(product, state.selectedVariant);
+    const mainImage = getProductDetailMainImage(product, state.selectedVariant)
+      || slides[0]?.src
+      || getProductFallbackImage(product);
     els.productGallery.innerHTML = `
-      <div class="gallery-main" tabindex="0" aria-label="${escapeHtml(product.name)} image gallery">
+      <div class="gallery-main gallery-main--${escapeHtml(String(product.category || '').toLowerCase())}" tabindex="0" aria-label="${escapeHtml(product.name)} image gallery">
         <img id="galleryMainImg" src="${escapeHtml(mainImage)}" alt="${escapeHtml(product.name)}" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
         <div class="gallery-magnifier" id="galleryMagnifier" aria-hidden="true"></div>
         ${slides.length > 1 ? `
@@ -3737,8 +3713,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     magnifier.style.backgroundImage = `url("${mainImage}")`;
   }
 
-  function getProductDetailMainImage(product) {
-    
+  function getProductDetailMainImage(product, variant = state.selectedVariant) {
+    const variantSources = getVariantImageSources(variant, product);
+    if (variant && variantSources.length) return variantSources[0];
+
     const category = String(product?.category || '').toLowerCase();
     const name = String(product?.name || '').toLowerCase();
     const slug = String(product?.slug || '').toLowerCase();
@@ -3766,7 +3744,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   function updateProductDetailMainImage(product) {
     const image = document.getElementById('galleryMainImg');
-    if (image) image.src = getProductDetailMainImage(product);
+    if (image) image.src = getProductDetailMainImage(product, state.selectedVariant);
   }
 
   function renderProductInfo(product) {
@@ -3872,8 +3850,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         if (match) {
           state.selectedVariant = match;
           state.quantity = 1;
+          renderProductGallery(product);
           renderProductInfo(product);
-          updateProductDetailMainImage(product);
         }
       });
     });
@@ -3887,8 +3865,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         if (match) {
           state.selectedVariant = match;
           state.quantity = 1;
+          renderProductGallery(product);
           renderProductInfo(product);
-          updateProductDetailMainImage(product);
         }
       });
     });
@@ -4288,11 +4266,15 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             <span aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="m20 12-8 8-9-9V3h8l9 9Z"/><circle cx="7.5" cy="7.5" r="1.2"/></svg>
             </span>
-            <input id="checkoutCouponCode" type="text" value="${escapeHtml(state.merchCouponCode || '')}" placeholder="Discount code or gift card" autocomplete="off" aria-label="Discount code or gift card" />
+            <select id="checkoutCouponCode" aria-label="Select a coupon">
+              <option value="">${state.availableCoupons.length ? 'Select a coupon' : 'No coupons available'}</option>
+              ${state.availableCoupons.map((coupon) => `<option value="${escapeHtml(coupon.code)}" ${String(coupon.code) === String(state.merchCouponCode) ? 'selected' : ''}>${escapeHtml(coupon.code)}${coupon.description ? ` — ${escapeHtml(coupon.description)}` : ''} (${escapeHtml(getCouponDiscountLabel(coupon))})</option>`).join('')}
+            </select>
           </label>
-          <button id="checkoutCouponApplyBtn" class="shopify-coupon__apply" type="button" ${state.merchCouponLoading ? 'disabled' : ''}>${state.merchCouponLoading ? 'APPLYING' : 'APPLY'}</button>
+          <button id="checkoutCouponApplyBtn" class="shopify-coupon__apply" type="button" ${state.merchCouponLoading || !state.availableCoupons.length ? 'disabled' : ''}>${state.merchCouponLoading ? 'APPLYING' : 'APPLY'}</button>
+          ${state.merchCouponPreview ? `<button id="checkoutCouponRemoveBtn" class="shopify-coupon__apply" type="button">REMOVE</button>` : ''}
           <div class="shopify-coupon__message${state.merchCouponError ? ' is-error' : ''}" ${state.merchCouponPreview || state.merchCouponError ? '' : 'hidden'}>
-            ${state.merchCouponPreview ? `${escapeHtml(state.merchCouponPreview.code || state.merchCouponCode)} applied` : escapeHtml(state.merchCouponError || '')}
+            ${state.merchCouponPreview ? `✓ ${escapeHtml(state.merchCouponPreview.code || state.merchCouponCode)} applied — ${escapeHtml(getCouponDiscountLabel(state.availableCoupons.find((coupon) => coupon.code === state.merchCouponPreview.code) || state.merchCouponPreview))}` : escapeHtml(state.merchCouponError || '')}
           </div>
         </div>
 
@@ -4405,6 +4387,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     document.querySelector('.merch-hero').hidden = true;
     document.querySelector('.merch-categories').hidden = true;
     closeCart();
+    loadMerchCoupons();
     renderCheckoutPage();
     if (window.location.hash !== '#checkout') window.location.hash = 'checkout';
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -4426,11 +4409,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     });
     form.addEventListener('submit', handleCheckoutPageSubmit);
     els.checkoutPage?.querySelector('#checkoutCouponApplyBtn')?.addEventListener('click', applyMerchCouponFromCheckout);
-    els.checkoutPage?.querySelector('#checkoutCouponCode')?.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        applyMerchCouponFromCheckout();
-      }
+    els.checkoutPage?.querySelector('#checkoutCouponRemoveBtn')?.addEventListener('click', () => {
+      clearMerchCoupon();
+      renderCheckoutPage();
+    });
+    els.checkoutPage?.querySelector('#checkoutCouponCode')?.addEventListener('change', (event) => {
+      state.merchCouponCode = normalizeCouponCode(event.target.value);
+      state.merchCouponPreview = null;
+      state.merchCouponError = '';
     });
   }
 
@@ -4934,7 +4920,111 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     if (state.accountDrawerOpen) renderAccountDrawer();
   }
 
-  // â”€â”€â”€ Initialize â”€â”€â”€
+  async function loadMerchOffers() {
+    state.offersLoading = true;
+    try {
+      const data = await api('/api/merch/offers');
+      state.offers = Array.isArray(data?.offers) ? data.offers : [];
+    } catch {
+      state.offers = [];
+    }
+    state.offersLoading = false;
+    renderShopOffersSection();
+  }
+
+  function renderShopOffersSection() {
+    const section = document.getElementById('shopOffersSection');
+    if (!section) return;
+    section.hidden = state.currentView !== 'shop';
+    const grid = section.querySelector('#shopOffersGrid');
+    if (!grid) return;
+
+    if (!state.offers.length) {
+      grid.innerHTML = '<p class="merch-offers__empty">No offers available right now.</p>';
+      return;
+    }
+
+    grid.innerHTML = state.offers.map((offer) => {
+      // The public API joins each offer to its exact variant. Never fall back
+      // to a product-level price for a variant-specific offer.
+      const originalPricePaise = Number(offer.variantPrice);
+      const discountValue = Number(offer.discountValue || 0);
+      const hasPrice = Number.isFinite(originalPricePaise) && originalPricePaise >= 0;
+      const isPercentage = String(offer.discountType || '').toLowerCase() === 'percentage';
+      const discountAmountPaise = isPercentage
+        ? Math.round(originalPricePaise * discountValue / 100)
+        : discountValue;
+      const offerPricePaise = hasPrice
+        ? Math.max(0, originalPricePaise - discountAmountPaise)
+        : null;
+      const savingsPaise = hasPrice && offerPricePaise !== null
+        ? Math.max(0, originalPricePaise - offerPricePaise)
+        : null;
+      const discountLabel = isPercentage
+        ? `${discountValue}% OFF`
+        : `${formatMoneyFromPaise(discountValue)} OFF`;
+      const variantLabel = [offer.variantSize, offer.variantColor].filter(Boolean).join(' / ');
+      const isSoldOut = Number(offer.variantStock || 0) <= 0;
+      const variantImages = Array.isArray(offer.variantImages) ? offer.variantImages : [];
+      const productImages = Array.isArray(offer.productImages) ? offer.productImages : [];
+      const offerSlug = String(offer.productSlug || '').toLowerCase();
+      const offerCategory = offerSlug.includes('mist') || offerSlug.includes('spray')
+        ? 'sprays'
+        : offerSlug.includes('hoodie')
+          ? 'hoodies'
+          : '';
+      const imageUrl = normalizeProductImageUrl(
+        offer.variantImageUrl || variantImages[0] || productImages[0] || offer.productImageUrl || getProductFallbackImage({ category: offerCategory, name: offer.productName })
+      );
+      const expiry = offer.expiryDate || offer.expiresAt || offer.expires_at || '';
+
+      return `
+        <article class="merch-offer-card merch-offer-card--${escapeHtml(offerCategory || 'default')}" data-offer-id="${escapeHtml(String(offer.id))}">
+          <div class="merch-offer-card__image">
+            ${isSoldOut ? '<span class="merch-offer-card__availability">SOLD OUT</span>' : ''}
+            <img src="${escapeHtml(imageUrl)}"
+                 alt="${escapeHtml([offer.productName, variantLabel].filter(Boolean).join(' — '))}"
+                 loading="lazy"
+                 onerror="this.onerror=null;this.src='${escapeHtml(FALLBACK_PRODUCT_IMAGE)}'" />
+          </div>
+          <div class="merch-offer-card__body">
+            <p class="merch-offer-card__discount">${escapeHtml(discountLabel)}</p>
+            <p class="merch-offer-card__name">${escapeHtml(offer.name || '')}</p>
+            ${offer.productName ? `<p class="merch-offer-card__product">${escapeHtml(offer.productName)}</p>` : ''}
+            ${variantLabel ? `<p class="merch-offer-card__variant">${escapeHtml(variantLabel)}</p>` : ''}
+            ${hasPrice && offerPricePaise !== null ? `
+              <div class="merch-offer-card__pricing">
+                <span class="merch-offer-card__original">${escapeHtml(formatMoneyFromPaise(originalPricePaise))}</span>
+                <strong class="merch-offer-card__discounted">${escapeHtml(formatMoneyFromPaise(offerPricePaise))}</strong>
+              </div>
+              ${savingsPaise !== null ? `<p class="merch-offer-card__savings">Save ${escapeHtml(formatMoneyFromPaise(savingsPaise))}</p>` : ''}
+            ` : ''}
+            ${offer.shortDescription ? `<p class="merch-offer-card__desc">${escapeHtml(offer.shortDescription)}</p>` : ''}
+            ${expiry ? `<p class="merch-offer-card__expiry">Expires ${escapeHtml(formatTrackingDateTime(expiry))}</p>` : ''}
+            ${offer.fullDescription ? `<details class="merch-offer-card__details"><summary>View details</summary><p>${escapeHtml(offer.fullDescription)}</p>${offer.terms ? `<p>${escapeHtml(offer.terms)}</p>` : ''}</details>` : ''}
+            ${offer.productId ? `
+              <button type="button" class="merch-offer-card__shop-btn${isSoldOut ? ' is-disabled' : ''}"
+                      data-action="offer-shop"
+                      data-product-id="${escapeHtml(String(offer.productId))}"
+                      data-variant-id="${escapeHtml(String(offer.variantId || ''))}"
+                      ${isSoldOut ? 'disabled aria-disabled="true"' : ''}>
+                ${isSoldOut ? 'Sold Out' : 'Shop Now →'}
+              </button>` : ''}
+          </div>
+        </article>
+      `;
+    }).join('');
+
+    grid.querySelectorAll('[data-action="offer-shop"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const productId = Number(btn.dataset.productId);
+        const variantId = btn.dataset.variantId ? Number(btn.dataset.variantId) : null;
+        showProductDetail(productId, variantId);
+      });
+    });
+  }
+
+  // ─── Initialize ───
   function init() {
     loadCart();
     renderCartBadge();
@@ -4945,6 +5035,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     renderAccountTrigger();
     loadMerchProducts();
     loadTrendingProducts();
+    loadMerchOffers();
+    loadMerchCoupons();
     loadCustomerContext();
   }
 

@@ -55,6 +55,9 @@ const ALLOW_DEV_OTP_FALLBACK = normalizeEnvValue(process.env.ALLOW_DEV_OTP_FALLB
 const SHOW_DEV_OTP_OVERRIDE = parseBooleanEnv(process.env.SHOW_DEV_OTP_IN_UI, false);
 const SHOW_DEV_OTP_IN_UI = ALLOW_DEV_OTP_FALLBACK && (!IS_PRODUCTION || SHOW_DEV_OTP_OVERRIDE);
 const TOKEN_COOKIE = 'booking_portal_token';
+const AUTH_SESSION_TTL_MINUTES = 20;
+const AUTH_SESSION_TTL_MS = AUTH_SESSION_TTL_MINUTES * 60 * 1000;
+const AUTH_SESSION_JWT_EXPIRES_IN = `${AUTH_SESSION_TTL_MINUTES}m`;
 const ALLOWED_SLOT_START_TIMES = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'];
 const LEGACY_ALLOWED_SLOT_START_TIMES = ['10:30', '11:30', '12:30', '13:30', '14:30', '15:30', '16:30', '17:30', '18:30', '19:30'];
 const MAX_BOOKINGS_PER_SLOT_HYDROGEN = 8;
@@ -13536,12 +13539,12 @@ function setAuthCookie(req, res, user) {
   const token = jwt.sign(
     { sub: user.id, name: user.name, email: user.email, role: user.role },
     JWT_SECRET,
-    { expiresIn: '7d' }
+    { expiresIn: AUTH_SESSION_JWT_EXPIRES_IN }
   );
 
   res.cookie(TOKEN_COOKIE, token, {
     ...getAuthCookieOptions(req),
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    maxAge: AUTH_SESSION_TTL_MS,
   });
   return token;
 }
@@ -13554,6 +13557,7 @@ function getAuthCookieOptions(req) {
     sameSite: useCrossSiteCookie ? 'none' : 'lax',
     secure,
     path: '/',
+    maxAge: AUTH_SESSION_TTL_MS,
   };
 }
 

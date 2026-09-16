@@ -5,6 +5,7 @@
     dashboard: 'Dashboard',
     products: 'Products',
     trash: 'Trash',
+    offers: 'Offers',
     categories: 'Categories',
     orders: 'Orders',
     customers: 'Customers',
@@ -1201,111 +1202,8 @@
     { id: 3, name: 'Hydrogen Mists / Sprays', slug: 'sprays', active: true, productCount: 1, description: 'Hydrogen mist products for daily refresh.' },
   ];
 
-  const productsList = [
-    {
-      id: 1,
-      name: 'Zenith Hoodie - Black',
-      slug: 'zenith-hoodie-black',
-      primarySku: 'HM-HOD-BLK-S',
-      categoryId: 1,
-      category: 'Hoodies',
-      price: 3499.00,
-      priceLabel: '₹3,499',
-      stock: 100,
-      status: 'published',
-      createdAt: '2026-02-06',
-      sales: 174,
-      lowStockThreshold: 12,
-      featured: true,
-      archived: false,
-      image: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146',
-      description: 'Heavyweight 450 GSM organic cotton blend hoodie in black.',
-      variants: [
-        { id: 1, size: 'S', color: 'Black', price: 3499, stock: 25, sku: 'HM-HOD-BLK-S' },
-        { id: 2, size: 'M', color: 'Black', price: 3499, stock: 30, sku: 'HM-HOD-BLK-M' },
-        { id: 3, size: 'L', color: 'Black', price: 3499, stock: 20, sku: 'HM-HOD-BLK-L' },
-        { id: 4, size: 'XL', color: 'Black', price: 3499, stock: 15, sku: 'HM-HOD-BLK-XL' },
-        { id: 5, size: 'XXL', color: 'Black', price: 3499, stock: 10, sku: 'HM-HOD-BLK-XXL' },
-      ],
-    },
-    {
-      id: 2,
-      name: 'Zenith Hoodie - Sand',
-      slug: 'zenith-hoodie-sand',
-      primarySku: 'HM-HOD-SND-S',
-      categoryId: 1,
-      category: 'Hoodies',
-      price: 3499.00,
-      priceLabel: '₹3,499',
-      stock: 83,
-      status: 'published',
-      createdAt: '2026-02-06',
-      sales: 149,
-      lowStockThreshold: 12,
-      featured: true,
-      archived: false,
-      image: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.30034b.jpg?v=1770377146',
-      description: 'Earth-toned variant of the Zenith heavyweight hoodie.',
-      variants: [
-        { id: 6, size: 'S', color: 'Sand', price: 3499, stock: 20, sku: 'HM-HOD-SND-S' },
-        { id: 7, size: 'M', color: 'Sand', price: 3499, stock: 25, sku: 'HM-HOD-SND-M' },
-        { id: 8, size: 'L', color: 'Sand', price: 3499, stock: 18, sku: 'HM-HOD-SND-L' },
-        { id: 9, size: 'XL', color: 'Sand', price: 3499, stock: 12, sku: 'HM-HOD-SND-XL' },
-        { id: 10, size: 'XXL', color: 'Sand', price: 3499, stock: 8, sku: 'HM-HOD-SND-XXL' },
-      ],
-    },
-    {
-      id: 3,
-      name: 'H2 Molecular Hydrogen Water Bottle',
-      slug: 'molecular-hydrogen-water-bottle',
-      primarySku: 'HM-BTL-300-SLV',
-      categoryId: 2,
-      category: 'Hydrogen Water Bottles',
-      price: 6499.00,
-      priceLabel: '₹6,499 - ₹8,499',
-      stock: 130,
-      status: 'published',
-      createdAt: '2026-03-15',
-      sales: 88,
-      lowStockThreshold: 10,
-      featured: true,
-      archived: false,
-      image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113',
-      description: 'Hydrogen-rich water bottle with 300ml and 500ml variants.',
-      variants: [
-        { id: 11, size: '300ml', color: 'Silver', price: 6999, stock: 40, sku: 'HM-BTL-300-SLV' },
-        { id: 12, size: '500ml', color: 'Silver', price: 6499, stock: 35, sku: 'HM-BTL-500-SLV' },
-        { id: 13, size: '300ml', color: 'Black', price: 7499, stock: 30, sku: 'HM-BTL-300-BLK' },
-        { id: 14, size: '500ml', color: 'Black', price: 8499, stock: 25, sku: 'HM-BTL-500-BLK' },
-      ],
-    },
-    {
-      id: 4,
-      name: 'H2 Hydrogen Mist Spray',
-      slug: 'hydrogen-mist-spray',
-      primarySku: 'HM-SPR-050-WHT',
-      categoryId: 3,
-      category: 'Hydrogen Mists / Sprays',
-      price: 2499.00,
-      priceLabel: '₹2,499 - ₹3,799',
-      stock: 155,
-      status: 'published',
-      createdAt: '2026-04-01',
-      sales: 106,
-      lowStockThreshold: 10,
-      featured: false,
-      archived: false,
-      image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138',
-      description: 'Hydrogen mist and spray range with white and rose-gold variants.',
-      variants: [
-        { id: 15, size: '50ml', color: 'White', price: 2499, stock: 50, sku: 'HM-SPR-050-WHT' },
-        { id: 16, size: '100ml', color: 'White', price: 3499, stock: 40, sku: 'HM-SPR-100-WHT' },
-        { id: 17, size: '50ml', color: 'Rose Gold', price: 2799, stock: 35, sku: 'HM-SPR-050-RSG' },
-        { id: 18, size: '100ml', color: 'Rose Gold', price: 3799, stock: 30, sku: 'HM-SPR-100-RSG' },
-      ],
-    },
-  ];
-
+  // The merch API is the single source of truth for products and variants.
+  // Keep the initial state empty so Offers never renders stale fallback catalog data.
   function expandProductVariants(products) {
     return products.flatMap((product) => {
       const variants = Array.isArray(product.variants) && product.variants.length
@@ -1402,6 +1300,8 @@
     couponsDateFrom: '',
     couponsDateTo: '',
     couponsLoading: false,
+    productsLoading: true,
+    productsLoaded: false,
     influencersLoading: false,
     reportsLoading: false,
     influencersSearch: '',
@@ -1429,7 +1329,7 @@
 
   const state = {
     ...initialState,
-    products: expandProductVariants(productsList),
+    products: [],
     trashProducts: [],
     categories: categoryList,
     orders: ordersList,
@@ -1447,6 +1347,10 @@
     hypesLoading: false,
     reports: null,
     trashLoading: false,
+    offers: [],
+    offersLoading: false,
+    offerDraft: null,
+    offerError: '',
   };
 
   const els = {
@@ -1465,6 +1369,7 @@
     influencersView: document.getElementById('influencersView'),
     reportsView: document.getElementById('reportsView'),
     settingsView: document.getElementById('settingsView'),
+    offersView: document.getElementById('offersView'),
     notificationBadgeCount: document.getElementById('notificationBadgeCount'),
     adminModal: document.getElementById('adminModal'),
     adminModalDialog: document.getElementById('adminModalDialog'),
@@ -3389,6 +3294,551 @@
     `;
   }
 
+  // ─── Offers ───
+
+  async function loadOffers() {
+    state.offersLoading = true;
+    try {
+      const data = await apiRequest('/api/merch/admin/offers');
+      state.offers = Array.isArray(data.offers) ? data.offers : [];
+    } catch (err) {
+      console.error('[Admin] loadOffers error:', err);
+      state.offers = [];
+    }
+    state.offersLoading = false;
+    renderOffers();
+  }
+
+  // Returns an array of unique product objects (one per product, not per variant).
+  // state.products is expanded by expandProductVariants so each row is a variant;
+  // we deduplicate on parentProductId and reconstruct the full variants array.
+  function getUniqueOfferProducts() {
+    // Do not offer the static fallback catalog while the DB-backed catalog is loading.
+    if (!state.productsLoaded) return [];
+
+    const seen = new Map(); // parentProductId → product object with variants[]
+    for (const row of state.products) {
+      const pid = Number(row.parentProductId ?? row.productId ?? row.id);
+      if (!Number.isInteger(pid) || pid <= 0 || seen.has(pid)) continue;
+      const variants = Array.isArray(row.variants)
+        ? row.variants.filter((variant) => Number(variant.isActive ?? 1) === 1 && !variant.deletedAt)
+        : [];
+      if (!variants.length) continue;
+      seen.set(pid, {
+        id: pid,
+        name: row.name,
+        category: row.category,
+        image: row.image,
+        offerEligible: row.offerEligible !== false,
+        variants,
+      });
+    }
+    return Array.from(seen.values()).filter((product) => product.offerEligible);
+  }
+
+  function renderOffers() {
+    if (!els.offersView) return;
+    const draft = state.offerDraft;
+    const uniqueProducts = getUniqueOfferProducts();
+    const isFlat = draft?.discountType === 'flat';
+    const checkedIds = draft ? Object.keys(draft.checkedProducts || {}).map(Number) : [];
+    const selectedVariantCount = draft
+      ? Object.values(draft.checkedProducts || {}).reduce((count, productDraft) => count + Object.keys(productDraft.variants || {}).length, 0)
+      : 0;
+
+    // Build per-product rows. Selecting a product reveals its variants; each
+    // selected variant gets its own empty discount input and offer record.
+    const productCheckboxRows = uniqueProducts.map((p) => {
+      const isChecked = checkedIds.includes(p.id);
+      const productDraft = draft?.checkedProducts?.[p.id] || { variants: {} };
+      const variants = Array.isArray(p.variants) ? p.variants : [];
+      const variantRows = variants.map((variant) => {
+        const variantId = String(variant.id);
+        const selected = Boolean(productDraft.variants?.[variantId]);
+        const value = productDraft.variants?.[variantId]?.discountValue ?? '';
+        const label = [variant.size, variant.color].filter(Boolean).join(' / ') || variant.sku || `Variant ${variant.id}`;
+        return `
+          <div class="admin-offer-variant-row">
+            <label class="admin-offer-variant-row__check">
+              <input type="checkbox" data-offer-variant-for="${escapeHtml(String(p.id))}" data-offer-variant-id="${escapeHtml(variantId)}" ${selected ? 'checked' : ''} />
+              <span class="admin-offer-variant-row__name">${escapeHtml(label)}</span>
+            </label>
+            ${selected ? `
+              <label class="admin-offer-variant-row__discount">
+                <span>Discount: ${isFlat ? '\u20b9' : '%'}</span>
+                <input type="number" min="0.01" max="${isFlat ? '' : '100'}" step="0.01"
+                       placeholder="Enter value"
+                       required
+                       value="${escapeHtml(String(value))}"
+                       data-offer-discount-for="${escapeHtml(String(p.id))}"
+                       data-offer-discount-variant="${escapeHtml(variantId)}" />
+              </label>` : ''}
+          </div>
+        `;
+      }).join('');
+      return `
+        <div class="admin-offer-product-row ${isChecked ? 'admin-offer-product-row--checked' : ''}">
+          <label class="admin-offer-product-row__check">
+            <input type="checkbox" data-offer-product-id="${escapeHtml(String(p.id))}" ${isChecked ? 'checked' : ''} />
+            <span class="admin-offer-product-row__name">${escapeHtml(p.name)}</span>
+            <span class="admin-offer-product-row__cat">${escapeHtml(p.category || '')}</span>
+          </label>
+          ${isChecked ? `<div class="admin-offer-variant-list">
+            <p class="admin-table__muted" style="margin:0 0 6px;font-size:12px;">Select variants and enter a discount for each.</p>
+            ${variantRows || '<p class="admin-table__muted" style="margin:0;">No variants available.</p>'}
+          </div>` : ''}
+        </div>
+      `;
+    }).join('');
+
+    const editProduct = draft?.id
+      ? uniqueProducts.find((p) => p.id === draft.productId) || null
+      : null;
+    const editVariant = editProduct?.variants?.find((variant) => String(variant.id) === String(draft?.variantId)) || null;
+
+    els.offersView.innerHTML = `
+      <section class="admin-section">
+        <div class="admin-section__head">
+          <div>
+            <h2 class="admin-section__title">Offers</h2>
+            <p class="admin-section__desc">Create promotional offers shown on the storefront under "Shop Offers". Select products and the variants that should receive an offer, then enter a discount for each selected variant. Only active offers are visible to customers.</p>
+          </div>
+          <div class="admin-section__actions">
+            <button class="admin-btn admin-btn--primary" type="button" data-action="new-offer">+ New Offer</button>
+          </div>
+        </div>
+        <div class="admin-section__body">
+          ${draft ? `
+            <div class="admin-offer-form" id="offerForm"
+                 style="background:var(--admin-bg-subtle,#faf7f4);border:1px solid var(--admin-border);border-radius:10px;padding:20px 22px;margin-bottom:24px;">
+              <h3 style="margin:0 0 4px;font-size:15px;font-weight:700;">
+                ${draft.id ? 'Edit Offer' : 'New Offer'}
+                ${!draft.id && checkedIds.length > 0
+                  ? `<span style="font-size:12px;font-weight:400;color:var(--admin-muted);margin-left:8px;">${selectedVariantCount} variant${selectedVariantCount === 1 ? '' : 's'} selected</span>`
+                  : ''}
+              </h3>
+              ${state.offerError
+                ? `<p style="color:var(--admin-danger,#c0392b);font-size:13px;margin:8px 0 0;">${escapeHtml(state.offerError)}</p>`
+                : ''}
+
+              <div class="admin-form-grid" style="margin-top:16px;">
+                <label class="admin-field">
+                  <span>Offer Name <span aria-hidden="true" style="color:var(--admin-danger,#c0392b)">*</span></span>
+                  <input type="text" data-offer-input="name"
+                         value="${escapeHtml(draft.name || '')}"
+                         placeholder="e.g. Welcome Discount" />
+                </label>
+                <label class="admin-field">
+                  <span>Short Description</span>
+                  <input type="text" data-offer-input="shortDescription"
+                         value="${escapeHtml(draft.shortDescription || '')}"
+                         placeholder="Shown on the offer card" />
+                </label>
+                <label class="admin-field admin-field--wide">
+                  <span>Full Description</span>
+                  <textarea data-offer-input="fullDescription" rows="3"
+                            placeholder="Detail shown when customer expands the offer"
+                  >${escapeHtml(draft.fullDescription || '')}</textarea>
+                </label>
+                <label class="admin-field admin-field--wide">
+                  <span>Terms &amp; Conditions</span>
+                  <textarea data-offer-input="terms" rows="2"
+                            placeholder="e.g. Valid until 31 Dec 2026. One per customer."
+                  >${escapeHtml(draft.terms || '')}</textarea>
+                </label>
+                <label class="admin-field">
+                  <span>Discount Type</span>
+                  <select data-offer-input="discountType">
+                    <option value="percentage" ${!isFlat ? 'selected' : ''}>Percentage (%)</option>
+                    <option value="flat" ${isFlat ? 'selected' : ''}>Flat Amount (&#x20b9;)</option>
+                  </select>
+                </label>
+                <label class="admin-field">
+                  <span>Status</span>
+                  <select data-offer-input="isActive">
+                    <option value="1" ${draft.isActive !== 0 && draft.isActive !== false ? 'selected' : ''}>Active — shown on storefront</option>
+                    <option value="0" ${draft.isActive === 0 || draft.isActive === false ? 'selected' : ''}>Inactive — hidden</option>
+                  </select>
+                </label>
+              </div>
+
+              ${draft.id ? `
+                <!-- Edit mode: one existing offer targets one variant. -->
+                <div style="margin-top:18px;">
+                  <p class="admin-table__muted" style="margin:0 0 8px;">Product, Variant &amp; Discount</p>
+                  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+                    <strong>${escapeHtml(editProduct?.name || 'No product')}</strong>
+                    <span class="admin-table__muted">${escapeHtml(editVariant ? [editVariant.size, editVariant.color].filter(Boolean).join(' / ') || editVariant.sku : 'Selected variant')}</span>
+                    <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+                      <span>Discount: ${isFlat ? '\u20b9' : '%'}</span>
+                      <input type="number" min="0.01" max="${isFlat ? '' : '100'}" step="0.01"
+                             data-offer-input="discountValue"
+                             required
+                             value="${escapeHtml(draft.discountValue ? (isFlat ? (Number(draft.discountValue) / 100).toFixed(2) : String(draft.discountValue)) : '')}"
+                             placeholder="Enter value"
+                             style="width:110px;" />
+                    </label>
+                  </div>
+                </div>
+              ` : `
+                <!-- Create mode: product checkboxes with per-variant discount inputs -->
+                <div style="margin-top:18px;">
+                  <p class="admin-table__muted" style="margin:0 0 10px;">
+                    Select Products and Variants
+                    <span style="font-size:12px;"> — tick each variant and enter its discount</span>
+                  </p>
+                  <div class="admin-offer-product-list">
+                    ${productCheckboxRows || `<p class="admin-table__muted">${state.productsLoading ? 'Loading products…' : 'No products available.'}</p>`}
+                  </div>
+                </div>
+              `}
+
+              <div class="admin-toolbar" style="margin-top:20px;">
+                <button class="admin-btn admin-btn--primary" type="button" data-action="save-offer">
+                  ${draft.id ? 'Save Changes' : selectedVariantCount ? `Create ${selectedVariantCount} Offers` : 'Create Offer'}
+                </button>
+                <button class="admin-btn admin-btn--ghost" type="button" data-action="cancel-offer">Cancel</button>
+              </div>
+            </div>
+          ` : ''}
+
+          ${state.offersLoading
+            ? '<p class="admin-table__muted">Loading offers\u2026</p>'
+            : state.offers.length === 0
+              ? '<p class="admin-table__muted">No offers yet. Click + New Offer to create one.</p>'
+              : `
+            <div class="admin-table-wrap">
+              <table class="admin-table">
+                <thead><tr>
+                  <th>Offer</th>
+                  <th>Product / Variant</th>
+                  <th>Discount</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr></thead>
+                <tbody>
+                  ${state.offers.map((offer) => `
+                    <tr>
+                      <td>
+                        <strong>${escapeHtml(offer.name)}</strong><br>
+                        <span class="admin-table__muted">${escapeHtml(offer.shortDescription || '\u2014')}</span>
+                      </td>
+                      <td>${offer.productName
+                        ? `${escapeHtml(offer.productName)}${
+                            offer.variantSku
+                              ? `<br><span class="admin-table__muted">${escapeHtml([offer.variantSize, offer.variantColor].filter(Boolean).join(' / ') || offer.variantSku)}</span>`
+                              : ''}`
+                        : '<span class="admin-table__muted">\u2014</span>'}</td>
+                      <td>${offer.discountType === 'percentage'
+                        ? `${escapeHtml(String(offer.discountValue))}%`
+                        : `\u20b9${escapeHtml((Number(offer.discountValue) / 100).toFixed(2))}`}
+                      </td>
+                      <td>
+                        <span class="admin-badge ${offer.isActive ? 'admin-badge--active' : 'admin-badge--inactive'}">
+                          ${offer.isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td>
+                        <div class="admin-toolbar__group">
+                          <button class="admin-btn admin-btn--ghost" type="button"
+                                  data-action="edit-offer" data-offer-id="${escapeHtml(String(offer.id))}">Edit</button>
+                          <button class="admin-btn admin-btn--ghost admin-btn--danger" type="button"
+                                  data-action="delete-offer" data-offer-id="${escapeHtml(String(offer.id))}">Delete</button>
+                        </div>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `}
+        </div>
+      </section>
+    `;
+
+    // ── Wire shared text/select inputs ──
+    els.offersView.querySelectorAll('[data-offer-input]').forEach((input) => {
+      input.addEventListener(input.tagName === 'SELECT' ? 'change' : 'input', () => {
+        if (!state.offerDraft) return;
+        const key = input.dataset.offerInput;
+        if (key === 'discountType') {
+          state.offerDraft.discountType = input.value;
+          // Values are unit-specific. Clear them when the type changes so a
+          // percentage is never silently reused as rupees (or vice versa).
+          state.offerDraft.discountValue = '';
+          Object.values(state.offerDraft.checkedProducts || {}).forEach((productDraft) => {
+            Object.values(productDraft.variants || {}).forEach((variantDraft) => {
+              variantDraft.discountValue = '';
+            });
+          });
+          renderOffers();
+          return;
+        }
+        if (key === 'isActive') {
+          state.offerDraft.isActive = Number(input.value);
+          return;
+        }
+        if (key === 'discountValue') {
+          // Edit mode single discount field.
+          state.offerDraft.discountValue = input.value;
+          return;
+        }
+        state.offerDraft[key] = input.value;
+      });
+    });
+
+    // ── Wire product checkboxes ──
+    els.offersView.querySelectorAll('[data-offer-product-id]').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        if (!state.offerDraft) return;
+        const pid = Number(cb.dataset.offerProductId);
+        if (cb.checked) {
+          state.offerDraft.checkedProducts = state.offerDraft.checkedProducts || {};
+          state.offerDraft.checkedProducts[pid] = state.offerDraft.checkedProducts[pid] || { variants: {} };
+        } else {
+          delete (state.offerDraft.checkedProducts || {})[pid];
+        }
+        renderOffers();
+      });
+    });
+
+    // ── Wire per-variant checkboxes ──
+    els.offersView.querySelectorAll('[data-offer-variant-for]').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        if (!state.offerDraft) return;
+        const pid = String(cb.dataset.offerVariantFor);
+        const variantId = String(cb.dataset.offerVariantId);
+        const productDraft = state.offerDraft.checkedProducts?.[pid];
+        if (!productDraft) return;
+        productDraft.variants = productDraft.variants || {};
+        if (cb.checked) {
+          productDraft.variants[variantId] = productDraft.variants[variantId] || { discountValue: '' };
+        } else {
+          delete productDraft.variants[variantId];
+        }
+        renderOffers();
+      });
+    });
+
+    // ── Wire per-variant discount inputs ──
+    els.offersView.querySelectorAll('[data-offer-discount-for]').forEach((input) => {
+      input.addEventListener('input', () => {
+        if (!state.offerDraft) return;
+        const pid = String(input.dataset.offerDiscountFor);
+        const variantId = String(input.dataset.offerDiscountVariant);
+        const variantDraft = state.offerDraft.checkedProducts?.[pid]?.variants?.[variantId];
+        if (variantDraft) variantDraft.discountValue = input.value;
+      });
+    });
+
+    // ── Wire action buttons ──
+    els.offersView.querySelectorAll('[data-action]').forEach((btn) => {
+      btn.addEventListener('click', () => handleOfferAction(btn.dataset.action, btn.dataset));
+    });
+  }
+
+  async function handleOfferAction(action, dataset = {}) {
+    if (action === 'new-offer') {
+      state.offerDraft = {
+        name: '', shortDescription: '', fullDescription: '', terms: '',
+        checkedProducts: {},   // { [productId]: { variants: { [variantId]: { discountValue } } } }
+        discountType: 'percentage',
+        isActive: 1,
+        // Legacy single-product fields kept for edit compatibility:
+        productId: null, variantId: null, discountValue: '',
+      };
+      state.offerError = '';
+      renderOffers();
+      els.offersView.querySelector('#offerForm')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+
+    if (action === 'cancel-offer') {
+      state.offerDraft = null;
+      state.offerError = '';
+      renderOffers();
+      return;
+    }
+
+    if (action === 'edit-offer') {
+      const offer = state.offers.find((o) => String(o.id) === String(dataset.offerId));
+      if (!offer) return;
+      // Edit mode is single-product only. We use the legacy productId/discountValue fields.
+      state.offerDraft = {
+        id: offer.id,
+        name: offer.name || '',
+        shortDescription: offer.shortDescription || '',
+        fullDescription: offer.fullDescription || '',
+        terms: offer.terms || '',
+        discountType: offer.discountType || 'percentage',
+        discountValue: offer.discountType === 'flat'
+          ? (Number(offer.discountValue || 0) / 100)
+          : (offer.discountValue ?? ''),
+        isActive: offer.isActive ? 1 : 0,
+        productId: offer.productId ?? null,
+        variantId: offer.variantId ?? null,
+      };
+      state.offerError = '';
+      renderOffers();
+      els.offersView.querySelector('#offerForm')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+
+    if (action === 'save-offer') {
+      const draft = state.offerDraft;
+      if (!draft) return;
+      if (!String(draft.name || '').trim()) {
+        state.offerError = 'Offer name is required.';
+        renderOffers();
+        return;
+      }
+
+      const validateDiscount = (rawValue) => {
+        const raw = String(rawValue ?? '').trim();
+        const value = Number(raw);
+        if (!raw || !Number.isFinite(value) || value <= 0) return false;
+        return draft.discountType !== 'percentage' || value <= 100;
+      };
+
+      // ── Edit mode: single PATCH ──
+      if (draft.id) {
+        if (!draft.variantId) {
+          state.offerError = 'This offer has no selected variant. It must be assigned to a variant before saving.';
+          renderOffers();
+          return;
+        }
+        if (!validateDiscount(draft.discountValue)) {
+          state.offerError = draft.discountType === 'percentage'
+            ? 'Enter a percentage greater than 0 and no more than 100.'
+            : 'Enter a rupee discount greater than 0.';
+          renderOffers();
+          return;
+        }
+        const discountValuePaise = draft.discountType === 'flat'
+          ? Math.round(Number(draft.discountValue) * 100)
+          : Number(draft.discountValue);
+        const payload = {
+          name: String(draft.name).trim(),
+          shortDescription: String(draft.shortDescription || '').trim(),
+          fullDescription: String(draft.fullDescription || '').trim(),
+          terms: String(draft.terms || '').trim(),
+          productId: draft.productId || null,
+          variantId: draft.variantId || null,
+          discountType: draft.discountType,
+          discountValue: discountValuePaise,
+          isActive: draft.isActive ? 1 : 0,
+        };
+        try {
+          await apiRequest(`/api/merch/admin/offers/${encodeURIComponent(draft.id)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          toast('Offer updated', `"${draft.name}" has been saved.`);
+          state.offerDraft = null;
+          state.offerError = '';
+          await loadOffers();
+        } catch (err) {
+          state.offerError = err.message || 'Save failed.';
+          renderOffers();
+        }
+        return;
+      }
+
+      // ── Create mode: one POST per selected variant ──
+      const selectedVariants = [];
+      for (const [pid, entry] of Object.entries(draft.checkedProducts || {})) {
+        for (const [variantId, variantEntry] of Object.entries(entry.variants || {})) {
+          selectedVariants.push({ productId: Number(pid), variantId: Number(variantId), entry: variantEntry });
+        }
+      }
+      if (!selectedVariants.length) {
+        state.offerError = 'Select at least one variant.';
+        renderOffers();
+        return;
+      }
+
+      const basePayload = {
+        name: String(draft.name).trim(),
+        shortDescription: String(draft.shortDescription || '').trim(),
+        fullDescription: String(draft.fullDescription || '').trim(),
+        terms: String(draft.terms || '').trim(),
+        discountType: draft.discountType,
+        isActive: draft.isActive ? 1 : 0,
+      };
+
+      let succeeded = 0;
+      let failed = 0;
+      const failMessages = [];
+
+      for (const selectedVariant of selectedVariants) {
+        const rawDiscount = String(selectedVariant.entry?.discountValue ?? '').trim();
+        const numericDiscount = Number(rawDiscount);
+        if (!rawDiscount || !Number.isFinite(numericDiscount) || numericDiscount <= 0 ||
+            (draft.discountType === 'percentage' && numericDiscount > 100)) {
+          state.offerError = draft.discountType === 'percentage'
+            ? 'Enter a percentage greater than 0 and no more than 100 for every selected variant.'
+            : 'Enter a rupee discount greater than 0 for every selected variant.';
+          renderOffers();
+          return;
+        }
+      }
+
+      for (const selectedVariant of selectedVariants) {
+        const numericDiscount = Number(selectedVariant.entry.discountValue);
+        const discountValueFinal = draft.discountType === 'flat'
+          ? Math.round(numericDiscount * 100) // rupees → paise
+          : numericDiscount;                  // percentage: store as-is
+
+        const payload = {
+          ...basePayload,
+          productId: selectedVariant.productId,
+          variantId: selectedVariant.variantId,
+          discountValue: discountValueFinal,
+        };
+
+        try {
+          await apiRequest('/api/merch/admin/offers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          succeeded++;
+        } catch (err) {
+          failed++;
+          failMessages.push(err.message || `Failed for variant ID ${selectedVariant.variantId}`);
+        }
+      }
+
+      state.offerDraft = null;
+      state.offerError = '';
+
+      if (succeeded > 0 && failed === 0) {
+        toast('Offers created', `${succeeded} offer${succeeded === 1 ? '' : 's'} created successfully.`);
+      } else if (succeeded > 0 && failed > 0) {
+        toast('Partial success', `${succeeded} created, ${failed} failed: ${failMessages.join('; ')}`, 'warning');
+      } else {
+        toast('Create failed', failMessages.join('; ') || 'All offers failed to create.', 'warning');
+      }
+      await loadOffers();
+      return;
+    }
+
+    if (action === 'delete-offer') {
+      if (!window.confirm('Delete this offer? This cannot be undone.')) return;
+      try {
+        await apiRequest(`/api/merch/admin/offers/${encodeURIComponent(dataset.offerId)}`, {
+          method: 'DELETE',
+        });
+        toast('Offer deleted', 'The offer has been removed.');
+        await loadOffers();
+      } catch (err) {
+        toast('Delete failed', err.message || 'Unable to delete offer.', 'warning');
+      }
+    }
+  }
+
+
   function renderReports() {
     if (state.reportsLoading && !state.reports) {
       els.reportsView.innerHTML = `
@@ -3883,7 +4333,7 @@
             </select>
           </label>
           <label class="admin-field"><span>New Category Name</span><input class="admin-input" name="newCategoryName" value="" placeholder="Optional future category" /><small class="admin-field__hint">Enter a name to add a new category to the dropdown and storefront.</small></label>
-          <label class="admin-field"><span>Size / Ltrs / Metric</span><input class="admin-input" name="size" value="${escapeHtml(entity?.size || '')}" placeholder="e.g. 500ml, 1L, M, 42" /><small class="admin-field__hint">Use litres/ml for liquids, clothing size, or any future product metric.</small></label>
+          <label class="admin-field"><span>Size / Ltrs / Metric</span><input class="admin-input" name="size" value="${escapeHtml(entity?.size || '')}" placeholder="e.g. 1L, M, 42" /><small class="admin-field__hint">Use litres/ml for liquids, clothing size, or any future product metric.</small></label>
           <label class="admin-field"><span>Color</span><input class="admin-input" name="color" value="${escapeHtml(entity?.color || '')}" placeholder="e.g. Black, Silver" /></label>
           <label class="admin-field"><span>Price (rupees)</span><input class="admin-input" name="price" type="number" min="0" step="1" value="${escapeHtml(entity?.price || 0)}" required /></label>
           <label class="admin-field"><span>Stock</span><input class="admin-input" name="stock" type="number" min="0" value="${escapeHtml(entity?.stock || 0)}" required /></label>
@@ -4299,6 +4749,7 @@
       productId: existing?.productId || existing?.parentProductId || existing?.id,
       parentProductId: existing?.parentProductId || existing?.productId || existing?.id,
       variantId: existing?.variantId || existing?.id,
+      imageUrl: String(existing?.imageUrl || '').trim(),
       image: String(fd.get('image') || '').trim() || preservedImages[0] || '',
       images: preservedImages,
       description: String(fd.get('description') || '').trim(),
@@ -4461,6 +4912,8 @@
   }
 
   async function loadProductData() {
+    state.productsLoading = true;
+    state.productsLoaded = false;
     try {
       const result = await apiRequest('/api/merch/admin/products');
       const productRows = Array.isArray(result) ? result : (Array.isArray(result?.products) ? result.products : []);
@@ -4509,6 +4962,8 @@
             ...variant,
             price: Number(variant.price || 0) / 100,
             stock: Number(variant.stock || 0),
+            imageUrl: variant.imageUrl || '',
+            images: Array.isArray(variant.images) ? variant.images.filter(Boolean) : [],
           })),
         };
       });
@@ -4516,9 +4971,15 @@
         if (!state.categories.some((item) => String(item.id) === String(category.id))) state.categories.push(category);
       });
       state.products = expandProductVariants(products);
+      state.productsLoaded = true;
       renderAll();
     } catch (error) {
+      state.products = [];
+      state.productsLoaded = true;
       toast('Products unavailable', error.message || 'Unable to load products from the merch API.', 'warning');
+      renderOffers();
+    } finally {
+      state.productsLoading = false;
     }
   }
 
@@ -4855,6 +5316,7 @@
     renderDashboard();
     renderProducts();
     renderTrash();
+    renderOffers();
     renderCategories();
     renderOrders();
     renderCustomers();
@@ -6132,6 +6594,7 @@
               stock: entity.stock,
               size: entity.size,
               color: entity.color,
+              imageUrl: entity.imageUrl,
               status: entity.status,
               image: entity.image,
               images: entity.images,
@@ -6399,6 +6862,7 @@
     loadInfluencerData();
     loadCouponData();
     loadReportData();
+    loadOffers();
     setInterval(() => {
       if (document.hidden) return;
       loadDashboardStats();

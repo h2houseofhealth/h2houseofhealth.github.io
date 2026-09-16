@@ -24,7 +24,10 @@ function serializeCookie(name, value, options = {}) {
   const sameSite = options.sameSite;
   if (sameSite) parts.push(`SameSite=${String(sameSite).charAt(0).toUpperCase()}${String(sameSite).slice(1)}`);
   if (options.secure === true) parts.push('Secure');
-  if (Number.isFinite(Number(options.maxAge)) && Number(options.maxAge) <= 0) parts.push('Max-Age=0');
+  if (Number.isFinite(Number(options.maxAge))) {
+    const maxAgeSeconds = Math.max(0, Math.floor(Number(options.maxAge) / 1000));
+    parts.push(`Max-Age=${maxAgeSeconds}`);
+  }
   return parts.join('; ');
 }
 
@@ -41,6 +44,10 @@ module.exports = function sessionFallback(options = {}) {
     const sid = String(cookies[name] || '').trim();
     let isNewSession = false;
     let sessionData = sid && sessionStore.has(sid) ? cloneSession(sessionStore.get(sid)) : null;
+    if (sessionData?.__expiresAt && Number(sessionData.__expiresAt) <= Date.now()) {
+      sessionStore.delete(sid);
+      sessionData = null;
+    }
 
     if (!sessionData) {
       isNewSession = true;
@@ -72,6 +79,11 @@ module.exports = function sessionFallback(options = {}) {
       delete serializable.destroy;
       delete serializable.regenerate;
       delete serializable.save;
+      if (Number.isFinite(Number(cookieOptions.maxAge)) && Number(cookieOptions.maxAge) > 0) {
+        serializable.__expiresAt = Date.now() + Number(cookieOptions.maxAge);
+      } else {
+        delete serializable.__expiresAt;
+      }
       if (Object.keys(serializable).length === 0 && options.saveUninitialized === false && isNewSession) {
         return;
       }
