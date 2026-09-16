@@ -125,20 +125,29 @@
   };
 
   const FALLBACK_PRODUCT_IMAGE = '/booking/assets/service-hydrogen-session.jpg';
-  const BOTTLE_DETAIL_FEATURE_IMAGE = '/cdn/shop/files/h2-bottle-product-features-front.png';
+  const BOTTLE_DETAIL_FEATURE_IMAGE = '/cdn/shop/files/h2-bottle-transparent.png';
   const BOTTLE_DETAIL_FEATURE_SLIDES = [
     { src: '/cdn/shop/files/h2-bottle-product-features-front.png', label: 'Hydrogen water bottle front view' },
     { src: '/cdn/shop/files/h2-bottle-product-features-frontwithbag.png', label: 'Hydrogen water bottle with bag' },
     { src: '/cdn/shop/files/h2-bottle-product-features-bottom.png', label: 'Hydrogen water bottle bottom view' },
     { src: '/cdn/shop/files/h2-bottle-product-features-top.png', label: 'Hydrogen water bottle top view' },
   ];
-  const MIST_DETAIL_FEATURE_IMAGE = '/cdn/shop/files/h2-mist-product-features-front.png';
-  const MIST_DETAIL_FEATURE_SLIDES = [
-    { src: '/cdn/shop/files/h2-mist-product-features-front.png', label: 'Hydrogen mist sprayer front view' },
-    { src: '/cdn/shop/files/h2-mist-product-features-top.png', label: 'Hydrogen mist sprayer tank view' },
-    { src: '/cdn/shop/files/h2-mist-product-features-chargeport.png', label: 'Hydrogen mist sprayer charge port view' },
-    { src: '/cdn/shop/files/h2-mist-product-features-side.png', label: 'Hydrogen mist sprayer side view' },
-  ];
+  const MIST_DETAIL_FEATURE_SLIDES = {
+    black: [
+      { src: '/cdn/shop/files/products/h2-mist-product-features-front-black 1.png', label: 'Hydrogen mist sprayer black front view' },
+      { src: '/cdn/shop/files/products/h2-mist-product-features-side-black-connected-cable 1.png', label: 'Hydrogen mist sprayer black side view with connected cable' },
+    ],
+    white: [
+      { src: '/cdn/shop/files/products/h2-mist-product-features-front-correct-nozzle 1.png', label: 'Hydrogen mist sprayer white front view with correct nozzle' },
+      { src: '/cdn/shop/files/products/h2-mist-product-features-side-connected-cable 1.png', label: 'Hydrogen mist sprayer white side view with connected cable' },
+    ],
+    default: [
+      { src: '/cdn/shop/files/h2-mist-product-features-front.png', label: 'Hydrogen mist sprayer front view' },
+      { src: '/cdn/shop/files/h2-mist-product-features-top.png', label: 'Hydrogen mist sprayer tank view' },
+      { src: '/cdn/shop/files/h2-mist-product-features-chargeport.png', label: 'Hydrogen mist sprayer charge port view' },
+      { src: '/cdn/shop/files/h2-mist-product-features-side.png', label: 'Hydrogen mist sprayer side view' },
+    ],
+  };
   const HOODIE_DETAIL_FEATURE_IMAGE = '/cdn/shop/files/h2-hoodie-product-features.png';
 
 
@@ -304,7 +313,54 @@
     return slug === 'molecular-hydrogen-water-bottle' || category === 'bottles' || category.includes('bottle') || name.includes('water bottle');
   }
 
+  function getMistFeatureSlides(variant, product = null) {
+    const color = String(variant?.color || '').trim().toLowerCase();
+    const featureSlides = MIST_DETAIL_FEATURE_SLIDES[color] || MIST_DETAIL_FEATURE_SLIDES.default;
+    const primaryImage = getVariantImageSources(variant, product)[0];
+    if (!primaryImage) return featureSlides;
+    return [
+      { src: primaryImage, label: `${product?.name || 'Hydrogen mist sprayer'} ${variant?.color || ''} product view`.trim() },
+      ...featureSlides,
+    ];
+  }
+
+  function getProductVideoSources(product) {
+    const videos = [product?.videoUrl, product?.video_url, ...(Array.isArray(product?.videos) ? product.videos : [])]
+      .map((video) => typeof video === 'string' ? video : video?.src || video?.url || '')
+      .map(normalizeProductImageUrl)
+      .filter(Boolean);
+    return [...new Set(videos)];
+  }
+
+  function getBottleFeatureSlides(variant, product = null) {
+    const primaryImage = getVariantImageSources(variant, product)[0];
+    const featureSlides = BOTTLE_DETAIL_FEATURE_SLIDES.map((slide) => ({ ...slide }));
+    if (!primaryImage) return featureSlides;
+    return [
+      { src: primaryImage, label: `${product?.name || 'Hydrogen water bottle'} ${variant?.color || ''} product view`.trim() },
+      ...featureSlides,
+    ];
+  }
+
   function getProductGallerySlides(product, variant = state.selectedVariant) {
+    const videoSlides = getProductVideoSources(product).map((src, index) => ({
+      src,
+      type: 'video',
+      label: `${product.name} video ${index + 1}`,
+      productImageIndex: null,
+    }));
+    if (isMistProduct(product)) {
+      return [
+        ...getMistFeatureSlides(variant, product).map((slide) => ({ ...slide, productImageIndex: null })),
+        ...videoSlides,
+      ];
+    }
+    if (isBottleProduct(product)) {
+      return [
+        ...getBottleFeatureSlides(variant, product).map((slide) => ({ ...slide, productImageIndex: null })),
+        ...videoSlides,
+      ];
+    }
     const variantImages = getVariantImageSources(variant, product);
     if (variantImages.length) {
       return variantImages.map((src, index) => ({
@@ -314,17 +370,11 @@
       }));
     }
     const productImages = (product.images || []).map(normalizeProductImageUrl).filter(Boolean);
-    if (isMistProduct(product)) {
-      return MIST_DETAIL_FEATURE_SLIDES.map((slide) => ({ ...slide, productImageIndex: null }));
-    }
-    if (isBottleProduct(product)) {
-      return BOTTLE_DETAIL_FEATURE_SLIDES.map((slide) => ({ ...slide, productImageIndex: null }));
-    }
-    return productImages.map((src, productImageIndex) => ({
+    return [...productImages.map((src, productImageIndex) => ({
       src,
       label: `${product.name} view ${productImageIndex + 1}`,
       productImageIndex,
-    }));
+    })), ...videoSlides];
   }
 
   // â”€â”€â”€ Utility â”€â”€â”€
@@ -1477,6 +1527,7 @@ function getWishlistProductPrice(item) {
       state.availableCoupons = [];
     }
     if (state.currentView === 'checkout') renderCheckoutPage();
+    else if (state.cart.length) renderCart();
   }
 
   function getCheckoutTotals() {
@@ -1609,6 +1660,27 @@ function getWishlistProductPrice(item) {
       els.cartCouponApplyBtn.textContent = state.merchCouponLoading ? 'APPLYING...' : 'APPLY COUPON';
       els.cartCouponApplyBtn.disabled = Boolean(state.merchCouponLoading);
     }
+    const cartAvailableCoupons = document.getElementById('cartAvailableCoupons');
+    if (cartAvailableCoupons) {
+      const coupons = state.availableCoupons.filter((coupon) => String(coupon.couponType || 'public').toLowerCase() === 'public');
+      cartAvailableCoupons.innerHTML = coupons.length ? `
+        <p class="cart-available-coupons__title">Available coupons</p>
+        ${coupons.map((coupon) => `
+          <button type="button" class="cart-available-coupon${String(coupon.code) === String(state.merchCouponCode) ? ' is-selected' : ''}" data-cart-coupon-code="${escapeHtml(coupon.code)}">
+            <span><strong>${escapeHtml(coupon.code)}</strong><small>${escapeHtml(coupon.couponCategory === 'festival' ? 'Festival coupon' : coupon.couponCategory === 'seasonal' ? 'Seasonal coupon' : 'Public coupon')}${coupon.description ? ` · ${escapeHtml(coupon.description)}` : ''}</small></span>
+            <b>${escapeHtml(getCouponDiscountLabel(coupon))}</b>
+          </button>
+        `).join('')}
+      ` : '';
+      cartAvailableCoupons.querySelectorAll('[data-cart-coupon-code]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const code = normalizeCouponCode(button.dataset.cartCouponCode);
+          if (els.cartCouponCode) els.cartCouponCode.value = code;
+          state.merchCouponCode = code;
+          await applyMerchCouponFromCart();
+        });
+      });
+    }
     renderMerchCouponPreview();
 
     els.cartItems.innerHTML = state.cart.map(item => `
@@ -1713,6 +1785,7 @@ function getWishlistProductPrice(item) {
       email: String(customer?.email || order?.customer?.email || 'example@email.com').trim(),
       customerName: String(customer?.name || order?.customer?.name || 'H2 Customer').trim(),
       totalAmount: Number(order?.amount || 0),
+      notifications: verifyResult?.notifications || order?.notifications || {},
       items: items.map((item) => ({
         productName: item.productName,
         variantLabel: item.variantLabel,
@@ -1766,7 +1839,31 @@ function getWishlistProductPrice(item) {
     `;
   }
 
-  function BookingUpdatesCard() {
+  function getConfirmationNotificationState(notifications = {}) {
+    const emailStatus = String(notifications?.email?.status || '').toLowerCase();
+    const whatsappLatest = notifications?.whatsapp?.latest || {};
+    const whatsappStatus = String(whatsappLatest.status || notifications?.whatsapp?.status || '').toLowerCase();
+    const map = {
+      read: ['Read', 'Your WhatsApp confirmation has been read.'],
+      delivered: ['Delivered', 'Your WhatsApp confirmation was delivered.'],
+      sent: ['Sent', 'Your WhatsApp confirmation was sent.'],
+      triggered: ['Sending...', 'We are sending your WhatsApp confirmation now.'],
+      pending: ['Sending...', 'We are sending your WhatsApp confirmation now.'],
+      failed: ['Needs Attention', 'WhatsApp delivery failed. Our team can retry from the order record.'],
+      skipped: ['Not Sent', 'WhatsApp updates are not enabled for this order.'],
+    };
+    const [whatsappLabel, whatsappText] = map[whatsappStatus] || ['Preparing...', 'We are preparing your WhatsApp confirmation.'];
+    const emailLabel = emailStatus === 'sent' ? 'Sent' : emailStatus === 'failed' ? 'Needs Attention' : 'Preparing...';
+    const emailText = emailStatus === 'sent'
+      ? 'Your confirmation email has been sent.'
+      : emailStatus === 'failed'
+        ? 'Email delivery needs attention. Your order is still confirmed.'
+        : "We're preparing your confirmation email.";
+    return { emailLabel, emailText, whatsappLabel, whatsappText };
+  }
+
+  function BookingUpdatesCard(data = {}) {
+    const notificationState = getConfirmationNotificationState(data.notifications || {});
     return `
       <section class="booking-updates-card" aria-label="Booking status updates">
         <h2>We'll keep you updated</h2>
@@ -1775,16 +1872,16 @@ function getWishlistProductPrice(item) {
             <div class="booking-update-icon">${confirmationIcon('mail')}</div>
             <div>
               <h3>Email Confirmation</h3>
-              <strong>Preparing...</strong>
-              <p>We're preparing your confirmation email.</p>
+              <strong>${escapeHtml(notificationState.emailLabel)}</strong>
+              <p>${escapeHtml(notificationState.emailText)}</p>
             </div>
           </article>
           <article class="booking-update-item">
             <div class="booking-update-icon">${confirmationIcon('whatsapp')}</div>
             <div>
-              <h3>WhatsApp Updates <span>Coming Soon</span></h3>
-              <strong>Coming Soon</strong>
-              <p>We'll notify you on WhatsApp when your order is shipped.</p>
+              <h3>WhatsApp Updates</h3>
+              <strong>${escapeHtml(notificationState.whatsappLabel)}</strong>
+              <p>${escapeHtml(notificationState.whatsappText)}</p>
             </div>
           </article>
         </div>
@@ -3480,6 +3577,16 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         : (isHoodie || isHoodieCombo
           ? HOODIE_CARD_IMAGE
           : (product.images?.[0] || product.imageUrl || getProductFallbackImage(product)));
+      const cardSizes = [...new Set((product.variants || []).map((variant) => variant.size).filter(Boolean))];
+      const cardColors = [...new Set((product.variants || []).map((variant) => variant.color).filter(Boolean))];
+      const cardSpecifications = Object.entries(getProductSpecifications(product, displayVariant))
+        .filter(([label, value]) => String(label).trim() && String(value).trim())
+        .slice(0, 2);
+      const stockLabel = isSoldOut
+        ? 'Out of stock'
+        : Number(displayVariant?.stock || 0) <= LOW_STOCK_THRESHOLD
+          ? `Low stock · ${Number(displayVariant.stock)} left`
+          : `In stock · ${Number(displayVariant.stock)} available`;
       const cardClasses = [
         isHoodie ? 'product-card--hoodie' : '',
         isMist ? 'product-card--mist' : '',
@@ -3506,7 +3613,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         <div class="product-card__body">
           <p class="product-card__category">${escapeHtml(getCategoryLabel(product.category))}</p>
           <h3 class="product-card__name">${escapeHtml(product.name)}</h3>
-          ${displayVariant?.color ? `<p class="product-card__variant">${escapeHtml(displayVariant.color)}</p>` : ''}
+          ${(cardSizes.length || cardColors.length) ? `<p class="product-card__variant">${cardSizes.length ? `Size: ${cardSizes.join(', ')}` : ''}${cardSizes.length && cardColors.length ? ' · ' : ''}${cardColors.length ? `Color: ${cardColors.join(', ')}` : ''}</p>` : ''}
+          ${cardSpecifications.length ? `<div class="product-card__specs">${cardSpecifications.map(([label, value]) => `<span><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</span>`).join('')}</div>` : ''}
+          <p class="product-card__stock ${isSoldOut ? 'out-of-stock' : Number(displayVariant?.stock || 0) <= LOW_STOCK_THRESHOLD ? 'low-stock' : 'in-stock'}">${escapeHtml(stockLabel)}</p>
           <div class="product-card__rating" aria-label="${escapeHtml(`${presentation.stars} (${presentation.reviews} reviews)`) }">
             <span class="product-card__stars" aria-hidden="true">${presentation.stars}</span>
             <span>(${presentation.reviews})</span>
@@ -3648,6 +3757,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     els.productGallery.innerHTML = `
       <div class="gallery-main gallery-main--${escapeHtml(String(product.category || '').toLowerCase())}" tabindex="0" aria-label="${escapeHtml(product.name)} image gallery">
         <img id="galleryMainImg" src="${escapeHtml(mainImage)}" alt="${escapeHtml(product.name)}" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
+        ${slides.some((slide) => slide.type === 'video') ? '<video id="galleryMainVideo" controls playsinline preload="metadata" hidden></video>' : ''}
         <div class="gallery-magnifier" id="galleryMagnifier" aria-hidden="true"></div>
         ${slides.length > 1 ? `
           <button class="gallery-nav gallery-nav--previous" type="button" data-gallery-direction="previous" aria-label="Previous product image">&#8592;</button>
@@ -3668,13 +3778,25 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     let activeIndex = 0;
     const main = els.productGallery.querySelector('.gallery-main');
     const mainImageElement = document.getElementById('galleryMainImg');
+    const mainVideoElement = document.getElementById('galleryMainVideo');
     const magnifier = document.getElementById('galleryMagnifier');
     const setActiveSlide = (nextIndex) => {
       activeIndex = (nextIndex + slides.length) % slides.length;
       const slide = slides[activeIndex];
-      mainImageElement.src = slide.src;
-      mainImageElement.alt = slide.label;
-      magnifier.style.backgroundImage = `url("${slide.src}")`;
+      const isVideo = slide.type === 'video';
+      mainImageElement.hidden = isVideo;
+      if (mainVideoElement) {
+        mainVideoElement.hidden = !isVideo;
+        if (isVideo && mainVideoElement.src !== new URL(slide.src, window.location.href).href) {
+          mainVideoElement.src = slide.src;
+          mainVideoElement.load();
+        }
+      }
+      if (!isVideo) {
+        mainImageElement.src = slide.src;
+        mainImageElement.alt = slide.label;
+        magnifier.style.backgroundImage = `url("${slide.src}")`;
+      }
       els.productGallery.querySelectorAll('.gallery-thumb').forEach((thumb, index) => {
         thumb.classList.toggle('is-active', index === activeIndex);
       });
@@ -3735,7 +3857,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     return isBottle
       ? BOTTLE_DETAIL_FEATURE_IMAGE
       : isMist
-        ? MIST_DETAIL_FEATURE_IMAGE
+        ? getMistFeatureSlides(variant, product)[0].src
         : isHoodie
           ? HOODIE_DETAIL_FEATURE_IMAGE
           : (product.images?.[0] || product.imageUrl || getProductFallbackImage(product));
@@ -4266,12 +4388,18 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             <span aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="m20 12-8 8-9-9V3h8l9 9Z"/><circle cx="7.5" cy="7.5" r="1.2"/></svg>
             </span>
-            <select id="checkoutCouponCode" aria-label="Select a coupon">
-              <option value="">${state.availableCoupons.length ? 'Select a coupon' : 'No coupons available'}</option>
-              ${state.availableCoupons.map((coupon) => `<option value="${escapeHtml(coupon.code)}" ${String(coupon.code) === String(state.merchCouponCode) ? 'selected' : ''}>${escapeHtml(coupon.code)}${coupon.description ? ` — ${escapeHtml(coupon.description)}` : ''} (${escapeHtml(getCouponDiscountLabel(coupon))})</option>`).join('')}
-            </select>
+            <input id="checkoutCouponCode" value="${escapeHtml(state.merchCouponCode || '')}" placeholder="Enter coupon code" autocomplete="off" aria-label="Coupon code" />
           </label>
-          <button id="checkoutCouponApplyBtn" class="shopify-coupon__apply" type="button" ${state.merchCouponLoading || !state.availableCoupons.length ? 'disabled' : ''}>${state.merchCouponLoading ? 'APPLYING' : 'APPLY'}</button>
+          <button id="checkoutCouponApplyBtn" class="shopify-coupon__apply" type="button" ${state.merchCouponLoading ? 'disabled' : ''}>${state.merchCouponLoading ? 'APPLYING' : 'APPLY'}</button>
+          ${state.availableCoupons.length ? `<div class="checkout-coupon-offers" aria-label="Available coupons">
+            <p class="checkout-coupon-offers__title">Available coupons</p>
+            ${state.availableCoupons.filter((coupon) => String(coupon.couponType || 'public').toLowerCase() === 'public').map((coupon) => `
+              <button type="button" class="checkout-coupon-offer${String(coupon.code) === String(state.merchCouponCode) ? ' is-selected' : ''}" data-checkout-coupon-code="${escapeHtml(coupon.code)}">
+                <span><strong>${escapeHtml(coupon.code)}</strong><small>${escapeHtml(coupon.couponCategory === 'festival' ? 'Festival coupon' : coupon.couponCategory === 'seasonal' ? 'Seasonal coupon' : 'Public coupon')}${coupon.description ? ` · ${escapeHtml(coupon.description)}` : ''}</small></span>
+                <b>${escapeHtml(getCouponDiscountLabel(coupon))}</b>
+              </button>
+            `).join('')}
+          </div>` : ''}
           ${state.merchCouponPreview ? `<button id="checkoutCouponRemoveBtn" class="shopify-coupon__apply" type="button">REMOVE</button>` : ''}
           <div class="shopify-coupon__message${state.merchCouponError ? ' is-error' : ''}" ${state.merchCouponPreview || state.merchCouponError ? '' : 'hidden'}>
             ${state.merchCouponPreview ? `✓ ${escapeHtml(state.merchCouponPreview.code || state.merchCouponCode)} applied — ${escapeHtml(getCouponDiscountLabel(state.availableCoupons.find((coupon) => coupon.code === state.merchCouponPreview.code) || state.merchCouponPreview))}` : escapeHtml(state.merchCouponError || '')}
@@ -4417,6 +4545,15 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       state.merchCouponCode = normalizeCouponCode(event.target.value);
       state.merchCouponPreview = null;
       state.merchCouponError = '';
+    });
+    els.checkoutPage?.querySelectorAll('[data-checkout-coupon-code]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const input = els.checkoutPage?.querySelector('#checkoutCouponCode');
+        const code = normalizeCouponCode(button.dataset.checkoutCouponCode);
+        if (input) input.value = code;
+        state.merchCouponCode = code;
+        await applyMerchCouponFromCheckout();
+      });
     });
   }
 

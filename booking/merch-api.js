@@ -499,6 +499,23 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       ,commission_amount_paise INTEGER NOT NULL DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS merch_whatsapp_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER REFERENCES merch_orders(id),
+      order_number TEXT,
+      message_type TEXT NOT NULL DEFAULT 'order_confirmation',
+      recipient_phone TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      graph_message_id TEXT,
+      template_name TEXT,
+      error_message TEXT,
+      response_json TEXT,
+      delivered_at TEXT,
+      read_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS merch_influencer_commission_payments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       influencer_id INTEGER NOT NULL REFERENCES merch_influencers(id) ON DELETE CASCADE,
@@ -3331,7 +3348,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function getMerchWhatsAppConfig() {
     const enabledValue = String(process.env.WHATSAPP_ORDER_CONFIRMATION_ENABLED || '').trim().toLowerCase();
-    const token = String(process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_WHATSAPP_ACCESS_TOKEN || '').trim();
+    const token = String(process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_WHATSAPP_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || '').trim();
     const phoneNumberId = String(process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.META_WHATSAPP_PHONE_NUMBER_ID || '').trim();
     return {
       enabled: enabledValue === 'true' || (!['false', '0', 'no', 'off'].includes(enabledValue) && Boolean(token && phoneNumberId)),
@@ -3348,6 +3365,54 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!digits) return '';
     if (digits.length === 10) return `91${digits}`;
     return digits;
+  }
+
+  function createMerchWhatsAppMessageLog({ orderId, orderNumber, to, status = 'pending', templateName = '' } = {}) {
+    const result = db.prepare(`
+      INSERT INTO merch_whatsapp_messages (order_id, order_number, recipient_phone, status, template_name)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(
+      Number.isInteger(Number(orderId)) && Number(orderId) > 0 ? Number(orderId) : null,
+      String(orderNumber || '').trim() || null,
+      String(to || '').trim() || null,
+      String(status || 'pending').trim() || 'pending',
+      String(templateName || '').trim() || null
+    );
+    return Number(result.lastInsertRowid);
+  }
+
+  function updateMerchWhatsAppMessageLog(logId, patch = {}) {
+    if (!Number.isInteger(Number(logId)) || Number(logId) <= 0) return;
+    const fields = [];
+    const values = [];
+    const add = (column, value) => {
+      fields.push(`${column} = ?`);
+      values.push(value);
+    };
+    if (patch.status) add('status', String(patch.status));
+    if (patch.graphMessageId !== undefined) add('graph_message_id', String(patch.graphMessageId || '') || null);
+    if (patch.errorMessage !== undefined) add('error_message', String(patch.errorMessage || '').slice(0, 1000) || null);
+    if (patch.response !== undefined) add('response_json', JSON.stringify(patch.response || {}));
+    if (patch.deliveredAt !== undefined) add('delivered_at', patch.deliveredAt || null);
+    if (patch.readAt !== undefined) add('read_at', patch.readAt || null);
+    if (!fields.length) return;
+    fields.push("updated_at = datetime('now')");
+    db.prepare(`UPDATE merch_whatsapp_messages SET ${fields.join(', ')} WHERE id = ?`).run(...values, Number(logId));
+  }
+
+  function getLatestMerchWhatsAppMessageStatus(orderId) {
+    if (!Number.isInteger(Number(orderId)) || Number(orderId) <= 0) return null;
+    const row = db.prepare(`
+      SELECT id, order_id AS orderId, order_number AS orderNumber, recipient_phone AS recipientPhone,
+             status, graph_message_id AS graphMessageId, template_name AS templateName,
+             error_message AS errorMessage, delivered_at AS deliveredAt, read_at AS readAt,
+             created_at AS createdAt, updated_at AS updatedAt
+      FROM merch_whatsapp_messages
+      WHERE order_id = ?
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(Number(orderId));
+    return row || null;
   }
 
   function formatMerchWhatsAppCurrency(paise) {
@@ -3543,10 +3608,15 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return data;
   }
 
+  function getWhatsAppGraphMessageId(response) {
+    const messages = Array.isArray(response?.messages) ? response.messages : [];
+    return String(messages[0]?.id || '').trim();
+  }
+
   async function sendMerchWhatsAppActionMessage({ config, to, order, links }) {
     const actionText = "Choose an action below 👇\n\nWe're here to help!";
     if (config.actionTemplateName) {
-      await sendWhatsAppGraphMessage(config, {
+      return sendWhatsAppGraphMessage(config, {
         to,
         type: 'template',
         template: {
@@ -3565,10 +3635,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           ],
         },
       });
-      return;
     }
 
-    await sendWhatsAppGraphMessage(config, {
+    return sendWhatsAppGraphMessage(config, {
       to,
       type: 'interactive',
       interactive: {
@@ -3587,40 +3656,74 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   async function sendMerchWhatsAppOrderConfirmation(orderId, req) {
     const config = getMerchWhatsAppConfig();
-    if (!config.enabled) return;
+    let logId = 0;
+    const finish = (status, extra = {}) => ({ status, ...extra, logId: logId || null });
+
+    if (!config.enabled) {
+      logId = createMerchWhatsAppMessageLog({ orderId, status: 'skipped', templateName: config.actionTemplateName });
+      updateMerchWhatsAppMessageLog(logId, { status: 'skipped', errorMessage: 'WhatsApp order confirmations are disabled.' });
+      return finish('skipped', { reason: 'disabled' });
+    }
     if (!config.token || !config.phoneNumberId) {
       console.warn('[Merch] WhatsApp confirmation skipped: WhatsApp credentials are not configured.');
-      return;
+      logId = createMerchWhatsAppMessageLog({ orderId, status: 'skipped', templateName: config.actionTemplateName });
+      updateMerchWhatsAppMessageLog(logId, { status: 'skipped', errorMessage: 'WhatsApp credentials are not configured.' });
+      return finish('skipped', { reason: 'missing_config' });
     }
 
     const data = getMerchOrderEmailData(orderId);
     const to = normalizeMerchWhatsAppPhone(data?.order?.customerPhone);
+    logId = createMerchWhatsAppMessageLog({
+      orderId,
+      orderNumber: data?.order?.orderNumber || '',
+      to,
+      status: 'triggered',
+      templateName: config.actionTemplateName,
+    });
     if (!data || !to) {
       console.warn('[Merch] WhatsApp confirmation skipped: customer phone is missing.');
-      return;
+      updateMerchWhatsAppMessageLog(logId, { status: 'skipped', errorMessage: 'Customer phone is missing.' });
+      return finish('skipped', { reason: 'missing_phone' });
     }
 
-    const links = buildMerchEmailLinks(req, data.order.id);
-    const cardBuffer = await renderMerchWhatsAppCardImage({ order: data.order, items: data.items, req });
-    const mediaId = await submitWhatsAppMediaUpload({
-      config,
-      toUploadBuffer: cardBuffer,
-      filename: `h2-order-${String(data.order.orderNumber || data.order.id).replace(/[^a-z0-9_-]+/gi, '-')}.png`,
-    });
-    await sendWhatsAppGraphMessage(config, {
-      to,
-      type: 'image',
-      image: { id: mediaId },
-    });
-    await sendMerchWhatsAppActionMessage({ config, to, order: data.order, links });
+    try {
+      const links = buildMerchEmailLinks(req, data.order.id);
+      const cardBuffer = await renderMerchWhatsAppCardImage({ order: data.order, items: data.items, req });
+      const mediaId = await submitWhatsAppMediaUpload({
+        config,
+        toUploadBuffer: cardBuffer,
+        filename: `h2-order-${String(data.order.orderNumber || data.order.id).replace(/[^a-z0-9_-]+/gi, '-')}.png`,
+      });
+      const imageResponse = await sendWhatsAppGraphMessage(config, {
+        to,
+        type: 'image',
+        image: { id: mediaId },
+      });
+      const actionResponse = await sendMerchWhatsAppActionMessage({ config, to, order: data.order, links });
+      const graphMessageId = getWhatsAppGraphMessageId(actionResponse) || getWhatsAppGraphMessageId(imageResponse);
+      updateMerchWhatsAppMessageLog(logId, {
+        status: 'sent',
+        graphMessageId,
+        response: { image: imageResponse, action: actionResponse },
+      });
+      return finish('sent', { messageId: graphMessageId || null });
+    } catch (error) {
+      updateMerchWhatsAppMessageLog(logId, {
+        status: 'failed',
+        errorMessage: error?.message || String(error),
+      });
+      throw error;
+    }
   }
 
   async function sendMerchOrderConfirmationEmail(orderId, req) {
     const data = getMerchOrderEmailData(orderId);
-    if (!data || !isValidMerchEmail(data.order.customerEmail)) return;
+    if (!data || !isValidMerchEmail(data.order.customerEmail)) {
+      return { status: 'skipped', reason: 'missing_email' };
+    }
     if (typeof sendMerchEmail !== 'function') {
       console.warn('[Merch] Order confirmation email skipped: email service is not configured.');
-      return;
+      return { status: 'skipped', reason: 'missing_config' };
     }
     const { html, text } = buildMerchOrderConfirmationHtml({ order: data.order, items: data.items, req });
     await sendMerchEmail({
@@ -3629,10 +3732,83 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       text,
       html,
     });
-    sendMerchWhatsAppOrderConfirmation(orderId, req).catch((error) => {
-      console.error('[Merch] Failed to send WhatsApp order confirmation:', error?.message || error);
-    });
+    return { status: 'sent' };
   }
+
+  async function triggerMerchOrderConfirmationNotifications(orderId, req) {
+    const result = {
+      email: { status: 'skipped' },
+      whatsapp: { status: 'skipped' },
+    };
+
+    try {
+      result.email = await sendMerchOrderConfirmationEmail(orderId, req);
+    } catch (error) {
+      result.email = { status: 'failed', error: error?.message || String(error) };
+      console.error('[Merch] Failed to send order confirmation email:', error?.message || error);
+    }
+
+    try {
+      result.whatsapp = await sendMerchWhatsAppOrderConfirmation(orderId, req);
+    } catch (error) {
+      result.whatsapp = {
+        status: 'failed',
+        error: error?.message || String(error),
+        latest: getLatestMerchWhatsAppMessageStatus(orderId),
+      };
+      console.error('[Merch] Failed to send WhatsApp order confirmation:', error?.message || error);
+    }
+
+    if (!result.whatsapp.latest) {
+      result.whatsapp.latest = getLatestMerchWhatsAppMessageStatus(orderId);
+    }
+    return result;
+  }
+
+  function handleMerchWhatsAppStatusWebhook(body) {
+    const entries = Array.isArray(body?.entry) ? body.entry : [];
+    let updated = 0;
+    for (const entry of entries) {
+      const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+      for (const change of changes) {
+        const statuses = Array.isArray(change?.value?.statuses) ? change.value.statuses : [];
+        for (const statusEvent of statuses) {
+          const graphMessageId = String(statusEvent?.id || '').trim();
+          const status = String(statusEvent?.status || '').trim().toLowerCase();
+          if (!graphMessageId || !status) continue;
+          const timestamp = Number(statusEvent?.timestamp || 0);
+          const eventTime = timestamp > 0 ? new Date(timestamp * 1000).toISOString() : null;
+          const updates = ['status = ?', 'updated_at = datetime(\'now\')'];
+          const params = [status];
+          if (status === 'delivered' && eventTime) {
+            updates.push('delivered_at = COALESCE(delivered_at, ?)');
+            params.push(eventTime);
+          }
+          if (status === 'read' && eventTime) {
+            updates.push('read_at = COALESCE(read_at, ?)');
+            params.push(eventTime);
+          }
+          params.push(graphMessageId);
+          const result = db.prepare(`
+            UPDATE merch_whatsapp_messages
+            SET ${updates.join(', ')}
+            WHERE graph_message_id = ?
+          `).run(...params);
+          updated += Number(result.changes || 0);
+        }
+      }
+    }
+    return updated;
+  }
+
+  app.post('/webhooks/whatsapp', (req, _res, next) => {
+    try {
+      handleMerchWhatsAppStatusWebhook(req.body);
+    } catch (error) {
+      console.error('[Merch] Failed to record WhatsApp webhook status:', error?.message || error);
+    }
+    next();
+  });
 
   function requireAdmin(req, res, next) {
     const token = req.cookies?.booking_portal_token ||
@@ -3649,6 +3825,45 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
 
   // ─── PUBLIC: Get all active products ───
+  app.get('/api/merch/admin/orders/:id/whatsapp-confirmation', requireAdmin, (req, res) => {
+    const orderId = Number(req.params.id);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      return res.status(400).json({ error: 'Invalid order id' });
+    }
+    const order = db.prepare('SELECT id, order_number AS orderNumber FROM merch_orders WHERE id = ?').get(orderId);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    return res.json({
+      orderId,
+      orderNumber: order.orderNumber,
+      whatsapp: getLatestMerchWhatsAppMessageStatus(orderId),
+    });
+  });
+
+  app.post('/api/merch/admin/orders/:id/whatsapp-confirmation', requireAdmin, async (req, res) => {
+    const orderId = Number(req.params.id);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      return res.status(400).json({ error: 'Invalid order id' });
+    }
+    const order = db.prepare('SELECT id FROM merch_orders WHERE id = ?').get(orderId);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    try {
+      const whatsapp = await sendMerchWhatsAppOrderConfirmation(orderId, req);
+      return res.json({
+        success: whatsapp.status === 'sent',
+        whatsapp: {
+          ...whatsapp,
+          latest: getLatestMerchWhatsAppMessageStatus(orderId),
+        },
+      });
+    } catch (error) {
+      return res.status(502).json({
+        success: false,
+        error: error?.message || String(error),
+        whatsapp: getLatestMerchWhatsAppMessageStatus(orderId),
+      });
+    }
+  });
+
   function normalizeMerchCouponCode(code) {
     if (typeof normalizeCouponCode === 'function') {
       return normalizeCouponCode(code);
@@ -3823,7 +4038,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         if (['all', 'merch'].includes(appliesTo)) return true;
         const match = appliesTo.match(/^product:([\\d,]+)$/);
         return Boolean(match && productIds.some((id) => match[1].split(',').includes(String(id))));
-      }).map((row) => ({
+      }).map((row) => {
+        const campaignText = `${row.festivalName || ''} ${row.description || ''}`.toLowerCase();
+        const couponCategory = campaignText.includes('festival')
+          ? 'festival'
+          : campaignText.includes('seasonal') || campaignText.includes('season')
+            ? 'seasonal'
+            : 'public';
+        return {
         id: Number(row.id),
         code: row.code,
         description: row.description || '',
@@ -3831,13 +4053,15 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         discountValue: Number(row.discountValue || 0),
         appliesTo: row.appliesTo || 'all',
         couponType: row.couponType || 'public',
+        couponCategory,
         festivalName: row.festivalName || '',
         validFrom: row.validFrom || null,
         validTill: row.validTill || row.expiresAt || null,
         expiresAt: row.validTill || row.expiresAt || null,
         maxRedemptions: row.maxRedemptions == null ? null : Number(row.maxRedemptions),
         perUserLimit: Number(row.perUserLimit || 1),
-      }));
+        };
+      });
       return res.json({ coupons });
     } catch (error) {
       console.error('[Merch] GET /api/merch/coupons error:', error);
@@ -3997,7 +4221,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   });
 
   // ─── PUBLIC: Verify payment after Razorpay checkout ───
-  app.post('/api/merch/verify-payment', (req, res) => {
+  app.post('/api/merch/verify-payment', async (req, res) => {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, order_number } = req.body || {};
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return res.status(400).json({ error: 'Missing payment details' });
@@ -4045,15 +4269,18 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       });
     }
 
-    sendMerchOrderConfirmationEmail(order.id, req).catch((error) => {
-      console.error('[Merch] Failed to send order confirmation email:', error?.message || error);
-    });
+    const notifications = await triggerMerchOrderConfirmationNotifications(order.id, req);
 
-    res.json({ success: true, message: 'Payment verified, order confirmed', orderId: order.id });
+    res.json({
+      success: true,
+      message: 'Payment verified, order confirmed',
+      orderId: order.id,
+      notifications,
+    });
   });
 
   // ─── COD Checkout ───
-  app.post('/api/merch/checkout-cod', (req, res) => {
+  app.post('/api/merch/checkout-cod', async (req, res) => {
     const { items, customer, address, billingAddress } = req.body || {};
     const authUser = getMerchAuthUser(req);
     const merchProfile = authUser ? ensureMerchCustomerProfileForUser(authUser) : null;
@@ -4157,6 +4384,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       });
     }
 
+    const notifications = await triggerMerchOrderConfirmationNotifications(orderId, req);
+
     res.json({
       success: true,
       orderNumber,
@@ -4164,6 +4393,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       totalAmount,
       discountAmount,
       coupon: buildMerchCouponPreview(couponResult),
+      notifications,
       message: 'COD order placed',
       customer: resolvedCustomer,
     });
@@ -5381,12 +5611,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   app.post('/api/merch/admin/products/trash', requireAdmin, (req, res) => {
     const productIds = parseExplicitProductIds(req.body);
     if (!productIds?.length) {
-      return res.status(400).json({ message: 'Select at least one product to move to Trash.' });
+      return res.status(400).json({ message: 'Select at least one product to move to Bin.' });
     }
     const placeholders = productIds.map(() => '?').join(', ');
     const products = db.prepare(`SELECT id FROM merch_products WHERE id IN (${placeholders}) AND deleted_at IS NULL`).all(...productIds);
     if (products.length !== productIds.length) {
-      return res.status(400).json({ message: 'Every selected product must be active and not already in Trash.' });
+      return res.status(400).json({ message: 'Every selected product must be active and not already in Bin.' });
     }
     db.prepare(`
       UPDATE merch_products
@@ -5404,7 +5634,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   app.post('/api/merch/admin/variants/trash', requireAdmin, (req, res) => {
     const variantIds = parseExplicitProductIds(req.body);
     if (!variantIds?.length) {
-      return res.status(400).json({ message: 'Select at least one variant to move to Trash.' });
+      return res.status(400).json({ message: 'Select at least one variant to move to Bin.' });
     }
     const placeholders = variantIds.map(() => '?').join(', ');
     const variants = db.prepare(`
@@ -5414,7 +5644,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       WHERE v.id IN (${placeholders}) AND v.deleted_at IS NULL AND p.deleted_at IS NULL
     `).all(...variantIds);
     if (variants.length !== variantIds.length) {
-      return res.status(400).json({ message: 'Every selected variant must be active and not already in Trash.' });
+      return res.status(400).json({ message: 'Every selected variant must be active and not already in Bin.' });
     }
     db.prepare(`
       UPDATE merch_variants
@@ -5436,7 +5666,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const placeholders = productIds.map(() => '?').join(', ');
     const deletedRows = db.prepare(`SELECT id FROM merch_products WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).all(...productIds);
     if (deletedRows.length !== productIds.length) {
-      return res.status(400).json({ message: 'Every selected product must be in Trash.' });
+      return res.status(400).json({ message: 'Every selected product must be in Bin.' });
     }
     db.prepare(`
       UPDATE merch_products
@@ -5463,7 +5693,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       WHERE v.id IN (${placeholders}) AND v.deleted_at IS NOT NULL AND p.deleted_at IS NULL
     `).all(...variantIds);
     if (deletedRows.length !== variantIds.length) {
-      return res.status(400).json({ message: 'Every selected variant must be in Trash under an active product.' });
+      return res.status(400).json({ message: 'Every selected variant must be in Bin under an active product.' });
     }
     db.prepare(`
       UPDATE merch_variants
@@ -5479,7 +5709,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   app.post('/api/merch/admin/products/permanent-delete', requireAdmin, (req, res) => {
     const productIds = parseExplicitProductIds(req.body);
     if (!productIds?.length) {
-      return res.status(400).json({ message: 'Select at least one Trash product to permanently delete.' });
+      return res.status(400).json({ message: 'Select at least one Bin product to permanently delete.' });
     }
     if (String(req.body?.confirmation || '').trim() !== 'PERMANENTLY DELETE') {
       return res.status(400).json({ message: 'Type PERMANENTLY DELETE to confirm this irreversible action.' });
@@ -5487,7 +5717,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const placeholders = productIds.map(() => '?').join(', ');
     const deletedRows = db.prepare(`SELECT id FROM merch_products WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).all(...productIds);
     if (deletedRows.length !== productIds.length) {
-      return res.status(400).json({ message: 'Every selected product must already be in Trash.' });
+      return res.status(400).json({ message: 'Every selected product must already be in Bin.' });
     }
     const variantRowsForOrders = db.prepare(`SELECT id FROM merch_variants WHERE product_id IN (${placeholders})`).all(...productIds);
     const variantIdsForOrders = variantRowsForOrders.map((row) => Number(row.id));
@@ -5519,7 +5749,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   app.post('/api/merch/admin/variants/permanent-delete', requireAdmin, (req, res) => {
     const variantIds = parseExplicitProductIds(req.body);
     if (!variantIds?.length) {
-      return res.status(400).json({ message: 'Select at least one Trash variant to permanently delete.' });
+      return res.status(400).json({ message: 'Select at least one Bin variant to permanently delete.' });
     }
     if (String(req.body?.confirmation || '').trim() !== 'PERMANENTLY DELETE') {
       return res.status(400).json({ message: 'Type PERMANENTLY DELETE to confirm this irreversible action.' });
@@ -5527,7 +5757,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const placeholders = variantIds.map(() => '?').join(', ');
     const deletedRows = db.prepare(`SELECT id FROM merch_variants WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).all(...variantIds);
     if (deletedRows.length !== variantIds.length) {
-      return res.status(400).json({ message: 'Every selected variant must already be in Trash.' });
+      return res.status(400).json({ message: 'Every selected variant must already be in Bin.' });
     }
     const orderReference = db.prepare(`SELECT 1 FROM merch_order_items WHERE variant_id IN (${placeholders}) LIMIT 1`).get(...variantIds);
     if (orderReference) {
@@ -5871,7 +6101,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         WHERE id = ? AND deleted_at IS NULL
       `).run(String(req.user?.email || req.user?.id || 'admin'), String(req.body?.reason || '').trim() || null, Number(product.id));
     })();
-    res.json({ message: 'Product moved to Trash.', id: Number(product.id), name: product.name, deleted: true });
+    res.json({ message: 'Product moved to Bin.', id: Number(product.id), name: product.name, deleted: true });
   });
 
   // ─── ADMIN: Get inventory ───
