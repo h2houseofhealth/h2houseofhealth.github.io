@@ -3272,7 +3272,10 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   const festivalName = String(req.body?.festivalName || '').trim();
   const discountType = 'flat';
   const discountValue = Number(req.body?.discountValue || 0);
-  const commissionPerOrderPaise = Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
+  const couponCategory = String(req.body?.couponCategory || '').trim().toLowerCase();
+  const commissionPerOrderPaise = couponCategory && couponCategory !== 'influencer'
+    ? 0
+    : Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
   const commissionByProductJson = normalizeCommissionByProduct(req.body?.commissionByProduct);
   const appliesToRaw = String(req.body?.appliesTo || 'all').trim().toLowerCase();
   const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
@@ -3500,7 +3503,10 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   const festivalName = String(req.body?.festivalName || existing.festivalName || '').trim();
   const discountType = String(req.body?.discountType || existing.discountType || 'flat').trim().toLowerCase() || 'flat';
   const discountValue = Number(req.body?.discountValue ?? existing.discountValue ?? 0);
-  const commissionPerOrderPaise = Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? existing.commissionPerOrderPaise ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
+  const couponCategory = String(req.body?.couponCategory || '').trim().toLowerCase();
+  const commissionPerOrderPaise = couponCategory && couponCategory !== 'influencer'
+    ? 0
+    : Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? existing.commissionPerOrderPaise ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
   const commissionByProductJson = normalizeCommissionByProduct(req.body?.commissionByProduct, existing.commissionByProduct);
   const appliesToRaw = String(req.body?.appliesTo || existing.appliesTo || 'all').trim().toLowerCase();
   const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);

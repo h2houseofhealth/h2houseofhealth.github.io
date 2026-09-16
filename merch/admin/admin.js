@@ -4,7 +4,7 @@
   const SECTION_TITLES = {
     dashboard: 'Dashboard',
     products: 'Products',
-    trash: 'Trash',
+    trash: 'Bin',
     offers: 'Offers',
     categories: 'Categories',
     orders: 'Orders',
@@ -2253,7 +2253,7 @@
             <h2 class="admin-section__title">Deleted Products</h2>
             <p class="admin-section__desc">Deleted products remain recoverable here with their original IDs, variants, prices, inventory, and image references.</p>
           </div>
-          <span class="admin-chip">${trashItems.length} in Trash</span>
+          <span class="admin-chip">${trashItems.length} in Bin</span>
         </div>
         <div class="admin-section__body">
           <div class="admin-toolbar">
@@ -2263,11 +2263,11 @@
               <button class="admin-btn admin-btn--danger" type="button" data-action="bulk-permanent-delete-trash" ${selectedCount ? '' : 'disabled'}>Delete Permanently</button>
             </div>
           </div>
-          ${state.trashLoading ? '<p class="admin-table__muted">Loading Trash...</p>' : pageItems.length ? `
+          ${state.trashLoading ? '<p class="admin-table__muted">Loading Bin...</p>' : pageItems.length ? `
             <div class="admin-table-wrap">
               <table class="admin-table">
                 <thead><tr>
-                  <th><input type="checkbox" data-action="toggle-trash-page-selection" ${pageSelected ? 'checked' : ''} aria-label="Select all Trash items on this page" /></th>
+                  <th><input type="checkbox" data-action="toggle-trash-page-selection" ${pageSelected ? 'checked' : ''} aria-label="Select all Bin items on this page" /></th>
                   <th>Image</th><th>Product</th><th>Variants</th><th>Price</th><th>Deleted By</th><th>Deleted Date</th><th>Actions</th>
                 </tr></thead>
                 <tbody>${pageItems.map((product) => `
@@ -2285,7 +2285,7 @@
               </table>
             </div>
             <div class="admin-toolbar" style="margin-top:16px;"><span class="admin-table__muted">Page ${state.trashProductsPage} of ${totalPages}</span><div class="admin-toolbar__group"><button class="admin-btn admin-btn--ghost" type="button" data-action="trash-prev" ${state.trashProductsPage <= 1 ? 'disabled' : ''}>Previous</button><button class="admin-btn admin-btn--ghost" type="button" data-action="trash-next" ${state.trashProductsPage >= totalPages ? 'disabled' : ''}>Next</button></div></div>
-          ` : '<p class="admin-table__muted">Trash is empty.</p>'}
+          ` : '<p class="admin-table__muted">Bin is empty.</p>'}
         </div>
       </section>
     `;
@@ -4384,7 +4384,7 @@
           <label class="admin-field"><span>Campaign Name</span><input class="admin-input" name="festivalName" value="${escapeHtml(entity?.festivalName || '')}" /></label>
           <label class="admin-field admin-field--wide"><span>Description</span><input class="admin-input" name="description" value="${escapeHtml(entity?.description || '')}" /></label>
           <label class="admin-field"><span>Discount</span><input class="admin-input" name="discount" type="number" min="1" step="1" value="${escapeHtml(entity?.discount || entity?.discountValue || '')}" required /></label>
-          <label class="admin-field"><span>Commission per Order (rupees)</span><input class="admin-input" name="commissionPerOrder" type="number" min="0" step="1" value="${escapeHtml(Number(entity?.commissionPerOrderPaise || 0) / 100)}" /></label>
+          <label class="admin-field"><span>Commission per Order (rupees)</span><input class="admin-input" name="commissionPerOrder" data-coupon-commission type="number" min="0" step="1" value="${escapeHtml(Number(entity?.commissionPerOrderPaise || 0) / 100)}" /><small class="admin-field__hint" data-coupon-commission-hint></small></label>
           <label class="admin-field" data-coupon-usage-type-field hidden><span>Usage Type</span>
             <select class="admin-select" name="usageType" data-coupon-usage-type>
               <option value="limited" ${getCouponUsageTypeValue(entity) === 'limited' ? 'selected' : ''}>Limited</option>
@@ -4509,6 +4509,8 @@
     const productsToggle = form.querySelector('[data-coupon-products-toggle]');
     const productsMenu = form.querySelector('[data-coupon-products-menu]');
     const productsSearch = form.querySelector('[data-input="couponProductSearch"]');
+    const commissionInput = form.querySelector('[data-coupon-commission]');
+    const commissionHint = form.querySelector('[data-coupon-commission-hint]');
 
     productsToggle?.addEventListener('click', () => {
       const isOpen = !productsMenu?.hidden;
@@ -4550,6 +4552,15 @@
       const defaults = getCouponCategoryDefaults(category);
       const isInfluencer = category === 'influencer';
       const isPrivate = category === 'private';
+      const isCommissionBlackout = category !== 'influencer';
+
+      if (commissionInput) {
+        commissionInput.disabled = isCommissionBlackout;
+        if (isCommissionBlackout) commissionInput.value = '0';
+      }
+      if (commissionHint) commissionHint.textContent = isCommissionBlackout
+        ? 'Commission applies only to influencer coupons.'
+        : '';
 
       if (influencerField) influencerField.hidden = !isInfluencer;
       if (ownerField) ownerField.hidden = !isPrivate;
@@ -4805,7 +4816,9 @@
       code: String(fd.get('code') || '').trim().toUpperCase(),
       description: String(fd.get('description') || '').trim(),
       discount: String(fd.get('discount') || '').trim(),
-      commissionPerOrderPaise: Math.max(0, Math.round(Number(fd.get('commissionPerOrder') || 0) * 100)),
+      commissionPerOrderPaise: couponCategory !== 'influencer'
+        ? 0
+        : Math.max(0, Math.round(Number(fd.get('commissionPerOrder') || 0) * 100)),
       usageCount: isUnlimitedInfluencer ? null : Number.isFinite(usageCount) && usageCount > 0 ? usageCount : null,
       expiry: isUnlimitedInfluencer ? '' : String(fd.get('expiry') || '').trim(),
       usageType,
@@ -4998,7 +5011,7 @@
       state.trashProductsPage = Math.min(state.trashProductsPage, totalPages);
     } catch (error) {
       state.trashProducts = [];
-      toast('Trash unavailable', error.message || 'Unable to load deleted products.', 'warning');
+      toast('Bin unavailable', error.message || 'Unable to load deleted products.', 'warning');
     } finally {
       state.trashLoading = false;
       renderTrash();
@@ -5213,7 +5226,7 @@
   async function restoreTrashProducts(productIds) {
     const ids = [...new Set((Array.isArray(productIds) ? productIds : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
     if (!ids.length) {
-      toast('Select deleted products', 'Choose at least one Trash item to restore.', 'warning');
+      toast('Select deleted products', 'Choose at least one Bin item to restore.', 'warning');
       return;
     }
     try {
@@ -5235,7 +5248,7 @@
   async function restoreTrashVariants(variantIds) {
     const ids = [...new Set((Array.isArray(variantIds) ? variantIds : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
     if (!ids.length) {
-      toast('Select deleted variants', 'Choose at least one variant in Trash to restore.', 'warning');
+      toast('Select deleted variants', 'Choose at least one variant in Bin to restore.', 'warning');
       return;
     }
     try {
@@ -5258,14 +5271,14 @@
     const ids = [...new Set((Array.isArray(productIds) ? productIds : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
     const variantIdList = [...new Set((Array.isArray(variantIds) ? variantIds : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
     if (!ids.length && !variantIdList.length) {
-      toast('Select deleted products', 'Choose at least one Trash item to permanently delete.', 'warning');
+      toast('Select deleted products', 'Choose at least one Bin item to permanently delete.', 'warning');
       return;
     }
     const names = ids.map((id) => state.trashProducts.find((product) => Number(product.id) === id)?.name).filter(Boolean);
     openModal({
       title: 'Permanently delete products',
       subtitle: 'Irreversible action',
-      body: `<p style="margin:0 0 14px;color:var(--admin-danger);font-weight:700;line-height:1.6;">This permanently removes the selected Trash records and their non-order relationships. Existing order history is preserved. This cannot be undone.</p><p style="margin:0 0 14px;color:var(--admin-muted);line-height:1.6;">Selected: ${escapeHtml(names.join(', ') || `${ids.length} product${ids.length === 1 ? '' : 's'}`)}</p><label class="admin-field"><span>Type PERMANENTLY DELETE to continue</span><input class="admin-input" data-permanent-delete-confirm autocomplete="off" /></label><p class="admin-table__muted" data-permanent-delete-error hidden>Confirmation text does not match.</p>`,
+      body: `<p style="margin:0 0 14px;color:var(--admin-danger);font-weight:700;line-height:1.6;">This permanently removes the selected Bin records and their non-order relationships. Existing order history is preserved. This cannot be undone.</p><p style="margin:0 0 14px;color:var(--admin-muted);line-height:1.6;">Selected: ${escapeHtml(names.join(', ') || `${ids.length} product${ids.length === 1 ? '' : 's'}`)}</p><label class="admin-field"><span>Type PERMANENTLY DELETE to continue</span><input class="admin-input" data-permanent-delete-confirm autocomplete="off" /></label><p class="admin-table__muted" data-permanent-delete-error hidden>Confirmation text does not match.</p>`,
       footer: '<button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button><button class="admin-btn admin-btn--danger" type="button" data-permanent-delete-submit>Delete permanently</button>',
       size: 'md',
     });
@@ -5295,7 +5308,7 @@
         state.selectedTrashVariantIds = state.selectedTrashVariantIds.filter((id) => !variantIdList.includes(Number(id)));
         await loadTrashData();
         const deletedCount = ids.length + variantIdList.length;
-        toast('Trash items permanently deleted', `${deletedCount} item${deletedCount === 1 ? '' : 's'} permanently deleted.`, 'danger');
+      toast('Bin items permanently deleted', `${deletedCount} item${deletedCount === 1 ? '' : 's'} permanently deleted.`, 'danger');
         renderAll();
       } catch (requestError) {
         toast('Permanent delete failed', requestError.message || 'Unable to permanently delete the selected products.', 'warning');
@@ -5661,7 +5674,7 @@
                 state.selectedProductIds = state.selectedProductIds.filter((itemId) => itemId !== id);
                 await loadProductData();
                 await loadTrashData();
-                toast(result.trashed ? (deleteProduct ? 'Product moved to Trash' : 'Variant moved to Trash') : 'Product deleted', `${product.name} remains recoverable in Trash.`, 'warning');
+        toast(result.trashed ? (deleteProduct ? 'Product moved to Bin' : 'Variant moved to Bin') : 'Product deleted', `${product.name} remains recoverable in Bin.`, 'warning');
                 renderAll();
               } catch (error) {
                 toast('Delete failed', error.message || 'Unable to remove the product.', 'warning');
@@ -5766,7 +5779,7 @@
           .filter((itemId) => Number.isInteger(itemId) && itemId > 0))];
         openConfirmModal({
           title: 'Delete selected products',
-          message: `Move ${selectedParentIdsAtConfirmation.length + selectedVariantIdsAtConfirmation.length} selected item${selectedParentIdsAtConfirmation.length + selectedVariantIdsAtConfirmation.length === 1 ? '' : 's'} to Trash? Only the selected variant rows will be affected; other variants remain active.`,
+          message: `Move ${selectedParentIdsAtConfirmation.length + selectedVariantIdsAtConfirmation.length} selected item${selectedParentIdsAtConfirmation.length + selectedVariantIdsAtConfirmation.length === 1 ? '' : 's'} to Bin? Only the selected variant rows will be affected; other variants remain active.`,
           confirmLabel: 'Delete',
           onConfirm: async () => {
             const selected = selectedAtConfirmation;
@@ -5795,10 +5808,10 @@
               const trashedCount = results.reduce((count, result) => count + Number(result?.trashedCount || 0), 0);
               const removedCount = localDuplicateIds.size;
               const summary = [
-                trashedCount ? `${trashedCount} moved to Trash` : '',
+                trashedCount ? `${trashedCount} moved to Bin` : '',
                 removedCount ? `${removedCount} duplicate${removedCount === 1 ? '' : 's'} removed` : '',
               ].filter(Boolean).join('; ');
-              toast('Products moved to Trash', `${summary || 'Selected products moved to Trash'}.`, 'warning');
+              toast('Products moved to Bin', `${summary || 'Selected products moved to Bin'}.`, 'warning');
               renderAll();
             } catch (error) {
               toast('Bulk delete failed', error.message || 'Unable to remove the selected products.', 'warning');
@@ -6692,6 +6705,7 @@
         description: entity.description,
         discountValue: Number(entity.discount) || 0,
         commissionPerOrderPaise: Math.max(0, Math.round(Number(entity.commissionPerOrderPaise || 0))),
+        couponCategory: entity.couponCategory,
         couponType: entity.couponType,
         appliesTo: entity.appliesTo,
         festivalName: entity.festivalName,
