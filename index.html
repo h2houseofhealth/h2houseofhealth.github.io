@@ -1797,9 +1797,29 @@
   .header__account, .header__cart, .menu-drawer__utility-links, .product-form, .product__buy-buttons, .pickup-availability { display: none !important; }
 </style>
 <style id="house-hero-book-now">
-  .template-index .header__icons-wrapper {
-    display: none !important;
-  }
+	  .template-index .header__icons-wrapper {
+	    display: none !important;
+	  }
+
+	  .template-index .storefront-header__cta,
+	  .template-index .header__icons.storefront-header__cta {
+	    display: flex;
+	    align-items: center;
+	    justify-content: flex-end;
+	    gap: 0.8rem;
+	    flex-wrap: nowrap;
+	  }
+
+	  .template-index .header-auth-btn {
+	    background: transparent;
+	    border: 1px solid rgba(174, 84, 49, 0.35);
+	    color: rgb(174, 84, 49) !important;
+	  }
+
+	  .template-index .header-auth-btn:hover {
+	    background: rgba(174, 84, 49, 0.08);
+	    color: rgb(174, 84, 49) !important;
+	  }
 
   .template-index .slideshow .slideshow__button-wrapper {
     position: absolute;
@@ -1859,10 +1879,22 @@
     outline-offset: 3px;
   }
 
-  @media only screen and (max-width: 768px) {
-    .template-index .slideshow .slideshow__button-wrapper {
-      position: relative;
-      left: auto;
+	  @media only screen and (max-width: 768px) {
+	    .template-index .header__icons.storefront-header__cta {
+	      gap: 0.6rem;
+	      min-width: 0;
+	    }
+
+	    .template-index .header__icons.storefront-header__cta .header-book-now-btn {
+	      min-width: 0;
+	      height: 3.8rem;
+	      padding: 0 1.1rem !important;
+	      font-size: 1.2rem !important;
+	    }
+
+	    .template-index .slideshow .slideshow__button-wrapper {
+	      position: relative;
+	      left: auto;
       bottom: auto;
       transform: none;
       width: 100%;
@@ -1879,10 +1911,10 @@
       max-width: calc(100vw - 3rem);
       min-height: 3.8rem;
       padding: 0 1.4rem;
-      font-size: 1rem;
-      line-height: 1.1;
-    }
-  }
+	      font-size: 1rem;
+	      line-height: 1.1;
+	    }
+	  }
 </style>
 		<link rel="stylesheet" href="/site-background.css" />
 </head>
@@ -2169,9 +2201,10 @@
                   </span>
                 </a>
               </li></ul>
-      </nav></div><div class="header__icons storefront-header__cta">
-    <a href="booking/?entry=guest" class="header-book-now-btn" aria-label="Book Now">Book Now</a>
-  </div>
+	      </nav></div><div class="header__icons storefront-header__cta">
+	    <a href="booking/?entry=guest" class="header-book-now-btn" aria-label="Book Now">Book Now</a>
+	    <a href="booking/?auth=1" class="header-book-now-btn header-auth-btn" aria-label="Sign Up or Sign In">Sign Up / Sign In</a>
+	  </div>
 
 	</header>
 </sticky-header>

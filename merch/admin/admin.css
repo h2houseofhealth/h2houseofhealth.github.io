@@ -606,6 +606,15 @@ a {
   color: #a59a91;
 }
 
+/* Make non-influencer coupon commission clearly unavailable. */
+.admin-input:disabled {
+  border-color: #d7d2cd;
+  background: #ece9e6;
+  color: #8f8983;
+  cursor: not-allowed;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
 .admin-select {
   padding-right: 38px;
 }
@@ -2228,7 +2237,94 @@ body.merch-admin-page {
 .admin-combo-item small { color: var(--admin-muted); }
 .admin-combo-item .admin-input { width: 110px; margin-left: auto; }
 
-/* Keep the admin shell inside the viewport on narrow portrait screens. */
+
+/* Offer creation: each selected product exposes independently selectable variants. */
+.admin-offer-product-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-offer-product-row {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: var(--admin-radius-sm);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.admin-offer-product-row--checked {
+  border-color: rgba(200, 101, 45, 0.24);
+  background: rgba(255, 247, 240, 0.84);
+}
+
+.admin-offer-product-row__check,
+.admin-offer-variant-row__check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.admin-offer-product-row__check input,
+.admin-offer-variant-row__check input {
+  accent-color: var(--admin-accent);
+  flex: 0 0 auto;
+}
+
+.admin-offer-product-row__name,
+.admin-offer-variant-row__name {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.admin-offer-product-row__cat {
+  margin-left: 28px;
+  color: var(--admin-muted);
+  font-size: 12px;
+}
+
+.admin-offer-variant-list {
+  display: grid;
+  gap: 7px;
+  margin-left: 28px;
+}
+
+.admin-offer-variant-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.admin-offer-variant-row__discount {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  color: var(--admin-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.admin-offer-variant-row__discount .admin-input,
+.admin-offer-variant-row__discount input {
+  width: 112px;
+  padding: 8px 10px;
+}
+
+@media (max-width: 560px) {
+  .admin-offer-variant-list { margin-left: 0; }
+  .admin-offer-variant-row { align-items: flex-start; flex-direction: column; }
+  .admin-offer-variant-row__discount { width: 100%; }
+  .admin-offer-variant-row__discount input { flex: 1 1 auto; width: auto; }
+}
+
 @media (max-width: 720px) {
   html,
   body {

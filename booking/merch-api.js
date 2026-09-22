@@ -126,11 +126,18 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   // Replace the generic placeholder used by older catalog rows with the
   // product photography stored in the CDN files directory.
   db.prepare("UPDATE merch_products SET image_url = ? WHERE lower(category) = 'hoodies' AND (image_url IS NULL OR image_url LIKE '%merch%signup%image%')")
-    .run('/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146');
+    .run('/cdn/shop/files/hero/h2-hoodie-transparent-source.png');
   db.prepare("UPDATE merch_products SET image_url = ? WHERE lower(category) = 'bottles' AND (image_url IS NULL OR image_url LIKE '%merch%signup%image%')")
     .run('/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113');
   db.prepare("UPDATE merch_products SET image_url = ? WHERE lower(category) = 'sprays' AND (image_url IS NULL OR image_url LIKE '%merch%signup%image%')")
-    .run('/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138');
+    .run('/cdn/shop/files/hero/h2-mist-transparent-source.png');
+
+  // Use the existing transparent product artwork for the legacy catalog images.
+  // These updates are conditional so later Admin image changes remain intact.
+  db.prepare("UPDATE merch_products SET image_url = ? WHERE lower(category) = 'hoodies' AND image_url LIKE '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg%'")
+    .run('/cdn/shop/files/hero/h2-hoodie-transparent-source.png');
+  db.prepare("UPDATE merch_products SET image_url = ? WHERE lower(category) = 'sprays' AND image_url LIKE '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg%'")
+    .run('/cdn/shop/files/hero/h2-mist-transparent-source.png');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS merch_variants (
@@ -141,10 +148,33 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       color TEXT,
       price INTEGER NOT NULL,
       stock INTEGER NOT NULL DEFAULT 0,
+      image_url TEXT,
+      images_json TEXT,
       is_active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS merch_offers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      short_description TEXT NOT NULL DEFAULT '',
+      full_description TEXT NOT NULL DEFAULT '',
+      terms TEXT NOT NULL DEFAULT '',
+      product_id INTEGER REFERENCES merch_products(id) ON DELETE SET NULL,
+      variant_id INTEGER REFERENCES merch_variants(id) ON DELETE SET NULL,
+      discount_type TEXT NOT NULL DEFAULT 'percentage',
+      discount_value REAL NOT NULL DEFAULT 0,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
+  if (!hasColumn('merch_variants', 'image_url')) {
+    db.exec('ALTER TABLE merch_variants ADD COLUMN image_url TEXT');
+  }
+  if (!hasColumn('merch_variants', 'images_json')) {
+    db.exec('ALTER TABLE merch_variants ADD COLUMN images_json TEXT');
+  }
   if (!hasColumn('merch_variants', 'deleted_at')) {
     db.exec('ALTER TABLE merch_variants ADD COLUMN deleted_at TEXT');
   }
@@ -157,61 +187,78 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   if (!hasColumn('merch_variants', 'deleted_previous_is_active')) {
     db.exec('ALTER TABLE merch_variants ADD COLUMN deleted_previous_is_active INTEGER NOT NULL DEFAULT 1');
   }
+  db.prepare("UPDATE merch_variants SET image_url = ? WHERE sku = 'HM-SPR-013-WHT' AND image_url LIKE '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg%'")
+    .run('/cdn/shop/files/hero/h2-mist-transparent-source.png');
 
-  // Restore the bundled hoodie catalog if it was removed by the previous
-  // soft-delete implementation. Only restore products whose entire variant
-  // set is inactive, so later admin stock edits are never overwritten.
-  const bundledHoodieSlugs = ['zenith-hoodie-black', 'zenith-hoodie-sand'];
-  for (const slug of bundledHoodieSlugs) {
-    const hoodie = db.prepare(`
-      SELECT p.id
-      FROM merch_products p
-      WHERE p.slug = ?
-        AND p.is_active = 0
-        AND p.deleted_at IS NULL
-        AND EXISTS (SELECT 1 FROM merch_variants v WHERE v.product_id = p.id)
-        AND NOT EXISTS (SELECT 1 FROM merch_variants v WHERE v.product_id = p.id AND v.is_active = 1)
-    `).get(slug);
-    if (!hoodie) continue;
-    db.transaction(() => {
-      db.prepare("UPDATE merch_products SET is_active = 1, updated_at = datetime('now') WHERE id = ?").run(hoodie.id);
-      db.prepare('UPDATE merch_variants SET is_active = 1, stock = 35 WHERE product_id = ?').run(hoodie.id);
-    })();
+  // Consolidate the legacy two-product hoodie catalog into one product while
+  // preserving every variant ID and any offer/order references. Order item
+  // snapshots are intentionally left untouched for historical accuracy.
+  const hoodieMergeKey = 'hoodie-single-product-v1';
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS merch_catalog_migrations (
+      migration_key TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  if (!db.prepare('SELECT migration_key FROM merch_catalog_migrations WHERE migration_key = ?').get(hoodieMergeKey)) {
+    const mergeHoodies = db.transaction(() => {
+      const rows = db.prepare(`
+        SELECT id, slug, is_active AS isActive, deleted_at AS deletedAt
+        FROM merch_products
+        WHERE slug IN ('zenith-hoodie-black', 'zenith-hoodie-sand')
+        ORDER BY CASE slug WHEN 'zenith-hoodie-black' THEN 0 ELSE 1 END, id ASC
+      `).all();
+      const canonical = rows.find((row) => !row.deletedAt) || rows[0];
+      if (canonical) {
+        const duplicateIds = rows.filter((row) => Number(row.id) !== Number(canonical.id)).map((row) => Number(row.id));
+        db.prepare(`
+          UPDATE merch_products
+          SET name = 'Hoodie', slug = 'hoodie',
+              description = 'Premium pullover hoodie with Sand and Black colour variants.',
+              is_active = 1, deleted_at = NULL, deleted_by = NULL,
+              deletion_reason = NULL, updated_at = datetime('now')
+          WHERE id = ?
+        `).run(Number(canonical.id));
+        for (const duplicateId of duplicateIds) {
+          db.prepare('UPDATE merch_variants SET product_id = ? WHERE product_id = ?').run(Number(canonical.id), duplicateId);
+          db.prepare('UPDATE merch_offers SET product_id = ? WHERE product_id = ?').run(Number(canonical.id), duplicateId);
+          db.prepare(`
+            UPDATE merch_products
+            SET name = 'Hoodie (legacy record)', is_active = 0,
+                deleted_at = COALESCE(deleted_at, datetime('now')),
+                deletion_reason = 'Merged into the canonical Hoodie product',
+                updated_at = datetime('now')
+            WHERE id = ?
+          `).run(duplicateId);
+        }
+      }
+      db.prepare('INSERT INTO merch_catalog_migrations (migration_key) VALUES (?)').run(hoodieMergeKey);
+    });
+    mergeHoodies();
   }
 
-  // Restore the other bundled merch products if they were removed by the
-  // previous admin delete flow. Existing stock values are preserved.
+  // Restore the bundled product records if they were removed by the previous
+  // soft-delete implementation. Existing stock values are preserved.
   const bundledProductRestores = [
     {
-      name: 'Zenith Hoodie - Black',
-      slug: 'zenith-hoodie-black',
-      description: 'Heavyweight 450 GSM organic cotton blend hoodie with structured premium silhouette.',
+      name: 'Hoodie',
+      slug: 'hoodie',
+      description: 'Premium pullover hoodie with Sand and Black colour variants.',
       category: 'hoodies',
       basePrice: 349900,
-      image: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146&width=600',
+      image: '/cdn/shop/files/hero/h2-hoodie-transparent-source.png',
       weight: 650,
       variants: [
-        ['HM-HOD-BLK-S', 'S', 'Black', 349900, 35],
-        ['HM-HOD-BLK-M', 'M', 'Black', 349900, 35],
-        ['HM-HOD-BLK-L', 'L', 'Black', 349900, 35],
-        ['HM-HOD-BLK-XL', 'XL', 'Black', 349900, 35],
-        ['HM-HOD-BLK-XXL', 'XXL', 'Black', 349900, 35],
-      ],
-    },
-    {
-      name: 'Zenith Hoodie - Sand',
-      slug: 'zenith-hoodie-sand',
-      description: 'Same Zenith frame in earthy sand colourway. 450 GSM organic cotton blend.',
-      category: 'hoodies',
-      basePrice: 349900,
-      image: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146&width=600',
-      weight: 650,
-      variants: [
-        ['HM-HOD-SND-S', 'S', 'Sand', 349900, 35],
-        ['HM-HOD-SND-M', 'M', 'Sand', 349900, 35],
-        ['HM-HOD-SND-L', 'L', 'Sand', 349900, 35],
-        ['HM-HOD-SND-XL', 'XL', 'Sand', 349900, 35],
-        ['HM-HOD-SND-XXL', 'XXL', 'Sand', 349900, 35],
+        ['HM-HOD-BLK-S', 'S', 'Black', 349900, 0],
+        ['HM-HOD-BLK-M', 'M', 'Black', 349900, 0],
+        ['HM-HOD-BLK-L', 'L', 'Black', 349900, 0],
+        ['HM-HOD-BLK-XL', 'XL', 'Black', 349900, 0],
+        ['HM-HOD-BLK-XXL', 'XXL', 'Black', 349900, 0],
+        ['HM-HOD-SND-S', 'S', 'Sand', 349900, 0],
+        ['HM-HOD-SND-M', 'M', 'Sand', 349900, 0],
+        ['HM-HOD-SND-L', 'L', 'Sand', 349900, 0],
+        ['HM-HOD-SND-XL', 'XL', 'Sand', 349900, 0],
+        ['HM-HOD-SND-XXL', 'XXL', 'Sand', 349900, 0],
       ],
     },
     {
@@ -219,14 +266,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       slug: 'h2-water-bottle',
       description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 3 minutes. BPA-free, USB-C rechargeable.',
       category: 'bottles',
-      basePrice: 649900,
+      basePrice: 2590000,
       image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113',
       weight: 380,
       variants: [
-        ['HM-BTL-300-SLV', '300ml', 'Silver', 699900, 40],
-        ['HM-BTL-500-SLV', '500ml', 'Silver', 649900, 35],
-        ['HM-BTL-300-BLK', '300ml', 'Black', 749900, 30],
-        ['HM-BTL-500-BLK', '500ml', 'Black', 849900, 25],
+        ['HM-BTL-460-SLV', '460ml', 'Silver', 2590000, 50, '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113'],
+        ['HM-BTL-460-BLK', '460ml', 'Black', 2590000, 50, '/cdn/shop/files/products/bottle-black.png', ['/cdn/shop/files/products/bottle-black-interior.png', '/cdn/shop/files/products/bottle-black-portable.png', '/cdn/shop/files/products/bottle-black-cap.png']],
+        ['HM-BTL-460-GLD', '460ml', 'Gold', 2590000, 50, '/cdn/shop/files/products/bottle-gold.png', ['/cdn/shop/files/products/bottle-gold-interior.png', '/cdn/shop/files/products/bottle-gold-portable.png', '/cdn/shop/files/products/bottle-gold-cap.png']],
+        ['HM-BTL-460-BLU', '460ml', 'Blue', 2590000, 50, '/cdn/shop/files/products/bottle-blue.png', ['/cdn/shop/files/products/bottle-blue-interior.png', '/cdn/shop/files/products/bottle-blue-portable.png', '/cdn/shop/files/products/bottle-blue-cap.png']],
       ],
     },
     {
@@ -234,14 +281,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       slug: 'h2-mist-spray',
       description: 'Compact hydrogen mist spray for skin rejuvenation. Antioxidant-rich hydrogen water delivery.',
       category: 'sprays',
-      basePrice: 249900,
-      image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138',
+      basePrice: 1190000,
+      image: '/cdn/shop/files/hero/h2-mist-transparent-source.png',
       weight: 150,
       variants: [
-        ['HM-SPR-050-WHT', '50ml', 'White', 249900, 50],
-        ['HM-SPR-100-WHT', '100ml', 'White', 349900, 40],
-        ['HM-SPR-050-RSG', '50ml', 'Rose Gold', 279900, 35],
-        ['HM-SPR-100-RSG', '100ml', 'Rose Gold', 379900, 30],
+        ['HM-SPR-013-WHT', '13ml', 'White', 1190000, 50, '/cdn/shop/files/hero/h2-mist-transparent-source.png'],
+        ['HM-SPR-013-BLK', '13ml', 'Black', 1190000, 50, '/cdn/shop/files/products/mist-black.png'],
       ],
     },
   ];
@@ -259,14 +304,132 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     } else {
       db.prepare("UPDATE merch_products SET is_active = 1, updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL").run(row.id);
     }
-    const insertVariant = db.prepare('INSERT OR IGNORE INTO merch_variants (product_id, sku, size, color, price, stock) VALUES (?, ?, ?, ?, ?, ?)');
+    const insertVariant = db.prepare('INSERT OR IGNORE INTO merch_variants (product_id, sku, size, color, price, stock, image_url, images_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     const activateVariant = db.prepare('UPDATE merch_variants SET is_active = 1 WHERE product_id = ? AND sku = ?');
-    product.variants.forEach(([sku, size, color, price, stock]) => {
-      insertVariant.run(row.id, sku, size, color, price, stock);
+    product.variants.forEach(([sku, size, color, price, stock, imageUrl, images]) => {
+      insertVariant.run(row.id, sku, size, color, price, stock, imageUrl || null, JSON.stringify(images || []));
       activateVariant.run(row.id, sku);
     });
   });
   bundledProductRestores.forEach(restoreProduct);
+
+  // Run the merge again after bundled restoration so fresh databases and
+  // previously migrated databases converge to exactly one visible Hoodie.
+  const canonicalHoodie = db.prepare("SELECT id FROM merch_products WHERE slug = 'hoodie' AND deleted_at IS NULL ORDER BY id ASC LIMIT 1").get();
+  if (canonicalHoodie) {
+    const legacyHoodies = db.prepare("SELECT id FROM merch_products WHERE slug IN ('zenith-hoodie-black', 'zenith-hoodie-sand') AND id <> ?").all(canonicalHoodie.id);
+    for (const legacyHoodie of legacyHoodies) {
+      db.prepare('UPDATE merch_variants SET product_id = ? WHERE product_id = ?').run(canonicalHoodie.id, legacyHoodie.id);
+      db.prepare('UPDATE merch_offers SET product_id = ? WHERE product_id = ?').run(canonicalHoodie.id, legacyHoodie.id);
+      db.prepare("UPDATE merch_products SET name = 'Hoodie (legacy record)', is_active = 0, deleted_at = COALESCE(deleted_at, datetime('now')), deletion_reason = 'Merged into the canonical Hoodie product', updated_at = datetime('now') WHERE id = ?").run(legacyHoodie.id);
+    }
+    db.prepare("UPDATE merch_variants SET stock = 0 WHERE product_id = ?").run(canonicalHoodie.id);
+  }
+
+  // Correct the existing bottle and mist catalog without deleting historical
+
+  // Hoodie remains in the catalog for future collection inventory, but is
+  // currently sold out. Keep its real variants and IDs; only stock is zeroed.
+  const hoodieStockMigrationKey = 'hoodie-sold-out-v1';
+  if (!db.prepare('SELECT migration_key FROM merch_catalog_migrations WHERE migration_key = ?').get(hoodieStockMigrationKey)) {
+    db.prepare(`
+      UPDATE merch_variants
+      SET stock = 0
+      WHERE product_id = (SELECT id FROM merch_products WHERE slug = 'hoodie' AND deleted_at IS NULL LIMIT 1)
+    `).run();
+    db.prepare('INSERT INTO merch_catalog_migrations (migration_key) VALUES (?)').run(hoodieStockMigrationKey);
+  }
+
+  // Correct the existing bottle and mist catalog without deleting historical
+  // variants. Old size-labelled variants remain stored but inactive; the new
+  // corrected variants intentionally start with zero stock.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS merch_catalog_migrations (
+      migration_key TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  const placeholderStockMigrationKey = 'hydrogen-variants-placeholder-stock-50-v1';
+  const placeholderStockMigrationApplied = Boolean(
+    db.prepare('SELECT migration_key FROM merch_catalog_migrations WHERE migration_key = ?')
+      .get(placeholderStockMigrationKey)
+  );
+
+  const correctHydrogenCatalog = db.transaction(() => {
+    const corrections = [
+      {
+        slug: 'h2-water-bottle',
+        price: 2590000,
+        oldSkus: ['HM-BTL-300-SLV', 'HM-BTL-500-SLV', 'HM-BTL-300-BLK', 'HM-BTL-500-BLK'],
+        specifications: {
+          'Product Name': 'Hydrogen-Rich Water Bottle',
+          Capacity: '460ml',
+          'Electrolytic Material': 'Platinum-Titanium',
+          'Membrane Electrode': 'PEM + SPE',
+          'Main Material': 'Glass',
+          'Shell Material': 'Stainless Steel',
+          'Battery Type': '700mAh Lithium Polymer',
+          'Working Time': '5 minutes per cycle (3,000+ ppb)',
+          Size: 'Ø7cm × 24cm',
+          'Colours Available': 'Black / Silver / Gold / Blue',
+        },
+        variants: [
+          ['HM-BTL-460-SLV', '460ml', 'Silver', '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113'],
+          ['HM-BTL-460-BLK', '460ml', 'Black', '/cdn/shop/files/products/bottle-black.png', ['/cdn/shop/files/products/bottle-black-interior.png', '/cdn/shop/files/products/bottle-black-portable.png', '/cdn/shop/files/products/bottle-black-cap.png']],
+          ['HM-BTL-460-GLD', '460ml', 'Gold', '/cdn/shop/files/products/bottle-gold.png', ['/cdn/shop/files/products/bottle-gold-interior.png', '/cdn/shop/files/products/bottle-gold-portable.png', '/cdn/shop/files/products/bottle-gold-cap.png']],
+          ['HM-BTL-460-BLU', '460ml', 'Blue', '/cdn/shop/files/products/bottle-blue.png', ['/cdn/shop/files/products/bottle-blue-interior.png', '/cdn/shop/files/products/bottle-blue-portable.png', '/cdn/shop/files/products/bottle-blue-cap.png']],
+        ],
+      },
+      {
+        slug: 'h2-mist-spray',
+        price: 1190000,
+        oldSkus: ['HM-SPR-050-WHT', 'HM-SPR-100-WHT', 'HM-SPR-050-RSG', 'HM-SPR-100-RSG'],
+        specifications: {
+          'Product Name': 'Hydrogen Mist Sprayer',
+          'Atomisation Amount': '0.8–1.2 ml/min',
+          'Hydrogen Concentration': '1000 ppb',
+          'Water Tank Capacity': '13ml',
+          'Main Material': 'PC (Polycarbonate)',
+          'Negative Potential': '< −300mV',
+          'Battery Capacity': '500mAh',
+          'Power Supply': 'DC 5V / Micro USB',
+          Weight: '60g',
+          Dimensions: '103mm × 40mm',
+          Charging: 'Rechargeable via USB',
+          'Colours Available': 'Black / White',
+        },
+        variants: [
+          ['HM-SPR-013-WHT', '13ml', 'White', '/cdn/shop/files/hero/h2-mist-transparent-source.png'],
+          ['HM-SPR-013-BLK', '13ml', 'Black', '/cdn/shop/files/products/mist-black.png'],
+        ],
+      },
+    ];
+
+    for (const correction of corrections) {
+      const product = db.prepare('SELECT id FROM merch_products WHERE slug = ? AND deleted_at IS NULL').get(correction.slug);
+      if (!product) continue;
+      db.prepare('UPDATE merch_products SET base_price = ?, specifications_json = ?, updated_at = datetime(\'now\') WHERE id = ?')
+        .run(correction.price, JSON.stringify(correction.specifications), product.id);
+      const oldPlaceholders = correction.oldSkus.map(() => '?').join(', ');
+      db.prepare(`UPDATE merch_variants SET is_active = 0 WHERE product_id = ? AND sku IN (${oldPlaceholders})`)
+        .run(product.id, ...correction.oldSkus);
+      const insert = db.prepare('INSERT OR IGNORE INTO merch_variants (product_id, sku, size, color, price, stock, image_url, images_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+      const update = db.prepare(`
+        UPDATE merch_variants
+        SET size = ?, color = ?, price = ?, image_url = ?, images_json = ?, is_active = 1
+            ${placeholderStockMigrationApplied ? '' : ', stock = 50'}
+        WHERE product_id = ? AND sku = ?
+      `);
+      for (const [sku, size, color, imageUrl, images] of correction.variants) {
+        insert.run(product.id, sku, size, color, correction.price, 50, imageUrl, JSON.stringify(images || []));
+        update.run(size, color, correction.price, imageUrl, JSON.stringify(images || []), product.id, sku);
+      }
+    }
+    if (!placeholderStockMigrationApplied) {
+      db.prepare('INSERT INTO merch_catalog_migrations (migration_key) VALUES (?)').run(placeholderStockMigrationKey);
+    }
+  });
+  correctHydrogenCatalog();
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS merch_combo_items (
@@ -334,6 +497,23 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       quantity INTEGER NOT NULL,
       line_total INTEGER NOT NULL
       ,commission_amount_paise INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS merch_whatsapp_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER REFERENCES merch_orders(id),
+      order_number TEXT,
+      message_type TEXT NOT NULL DEFAULT 'order_confirmation',
+      recipient_phone TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      graph_message_id TEXT,
+      template_name TEXT,
+      error_message TEXT,
+      response_json TEXT,
+      delivered_at TEXT,
+      read_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS merch_influencer_commission_payments (
@@ -630,17 +810,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
 
   const LOW_STOCK_THRESHOLD = 15;
-
-  function getMerchVariantPriceOverrides(slug) {
-    const normalizedSlug = String(slug || '').trim().toLowerCase();
-    if (normalizedSlug === 'h2-water-bottle' || normalizedSlug === 'molecular-hydrogen-water-bottle') {
-      return [699900, 649900, 749900];
-    }
-    if (normalizedSlug === 'h2-mist-spray' || normalizedSlug === 'hydrogen-mist-spray') {
-      return [249900, 349900, 279900];
-    }
-    return null;
-  }
 
   function normalizeInfluencerPayload(body = {}) {
     const commissionPerOrderPaise = Number(body.commissionPerOrderPaise ?? body.commission_per_order_paise ?? 0);
@@ -1491,13 +1660,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!includeDeleted) clauses.push('deleted_at IS NULL');
 
     let sql = `
-      SELECT id, product_id AS productId, sku, size, color, price, stock, is_active AS isActive, created_at AS createdAt,
+      SELECT id, product_id AS productId, sku, size, color, price, stock, image_url AS imageUrl, images_json AS imagesJson, is_active AS isActive, created_at AS createdAt,
              deleted_at AS deletedAt, deleted_by AS deletedBy, deletion_reason AS deletionReason,
              deleted_previous_is_active AS deletedPreviousIsActive
       FROM merch_variants
     `;
     if (clauses.length) sql += ` WHERE ${clauses.join(' AND ')}`;
-    sql += ' ORDER BY product_id ASC, id ASC';
+    sql += " ORDER BY product_id ASC, CASE (SELECT slug FROM merch_products WHERE id = product_id) WHEN 'hoodie' THEN CASE color WHEN 'Sand' THEN 0 WHEN 'Black' THEN 1 ELSE 2 END WHEN 'h2-water-bottle' THEN CASE color WHEN 'Silver' THEN 0 WHEN 'Gold' THEN 1 WHEN 'Black' THEN 2 WHEN 'Blue' THEN 3 ELSE 4 END WHEN 'h2-mist-spray' THEN CASE color WHEN 'White' THEN 0 WHEN 'Black' THEN 1 ELSE 2 END ELSE 5 END, id ASC";
 
     return db.prepare(sql).all(...params);
   }
@@ -1573,22 +1742,32 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return stored;
   }
 
+  function getVariantActiveOffer(variantId, productId) {
+    try {
+      return db.prepare(`
+        SELECT id, name, short_description AS shortDescription, full_description AS fullDescription,
+               terms, discount_type AS discountType, discount_value AS discountValue
+        FROM merch_offers
+        WHERE is_active = 1
+          AND (variant_id = ? OR (variant_id IS NULL AND product_id = ?))
+        ORDER BY (variant_id IS NOT NULL) DESC, id DESC
+        LIMIT 1
+      `).get(Number(variantId || 0), Number(productId || 0));
+    } catch {
+      return null;
+    }
+  }
+
   function buildMerchProductRecord(product, variants = [], sales = null, { includeInactive = false } = {}) {
     const activeVariants = variants.filter((variant) => Number(variant.isActive ?? 1) === 1);
     const catalogVariants = includeInactive ? variants : activeVariants;
-    const priceOverrides = getMerchVariantPriceOverrides(product.slug);
-    const normalizedVariants = catalogVariants.map((variant, index) => {
-      const overridePrice = Array.isArray(priceOverrides) ? Number(priceOverrides[index]) : NaN;
-      return Number.isFinite(overridePrice) && overridePrice > 0
-        ? { ...variant, price: overridePrice }
-        : variant;
-    });
+    const normalizedVariants = catalogVariants;
     const priceValues = activeVariants.length
       ? normalizedVariants.map((variant) => Number(variant.price || 0)).filter((value) => Number.isFinite(value))
       : [Number(product.base_price || 0)];
     const minPrice = priceValues.length ? Math.min(...priceValues) : Number(product.base_price || 0);
     const maxPrice = priceValues.length ? Math.max(...priceValues) : Number(product.base_price || 0);
-    const primaryVariant = normalizedVariants[0] || activeVariants[0] || variants[0] || null;
+    const primaryVariant = activeVariants[0] || normalizedVariants[0] || null;
     const comboItems = Number(product.is_combo || 0) === 1
       ? db.prepare(`
           SELECT ci.component_variant_id AS variantId, ci.quantity,
@@ -1627,20 +1806,45 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       imageUrl: String(productImages[0] || getMerchProductImage(product) || ''),
       image: String(productImages[0] || getMerchProductImage(product) || ''),
       images: productImages,
-      variants: normalizedVariants.map((variant) => ({
-        id: Number(variant.id),
-        productId: Number(variant.productId),
-        sku: String(variant.sku || ''),
-        size: variant.size || null,
-        color: variant.color || null,
-        price: Number(variant.price || 0),
-        stock: Number(variant.stock || 0),
-        isActive: Number(variant.isActive ?? 1),
-        createdAt: variant.createdAt || null,
-        deletedAt: variant.deletedAt || null,
-        deletedBy: variant.deletedBy || null,
-        deletionReason: variant.deletionReason || null,
-      })),
+      variants: normalizedVariants.map((variant) => {
+        const offer = getVariantActiveOffer(variant.id, product.id);
+        let offerDetails = null;
+        if (offer) {
+          const origPaise = Number(variant.price || 0);
+          const isPct = String(offer.discountType || '').toLowerCase() === 'percentage';
+          const discPaise = isPct
+            ? Math.round(origPaise * Number(offer.discountValue || 0) / 100)
+            : Math.round(Number(offer.discountValue || 0));
+          const offPricePaise = Math.max(0, origPaise - discPaise);
+          offerDetails = {
+            id: offer.id,
+            name: offer.name,
+            discountType: offer.discountType,
+            discountValue: Number(offer.discountValue || 0),
+            discountLabel: isPct ? `${offer.discountValue}% OFF` : `₹${Math.round(discPaise / 100)} OFF`,
+            originalPrice: origPaise,
+            offerPrice: offPricePaise,
+            savings: origPaise - offPricePaise,
+          };
+        }
+        return {
+          id: Number(variant.id),
+          productId: Number(variant.productId),
+          sku: String(variant.sku || ''),
+          size: variant.size || null,
+          color: variant.color || null,
+          price: Number(variant.price || 0),
+          stock: Number(variant.stock || 0),
+          imageUrl: String(variant.imageUrl || ''),
+          images: parseMerchImages(variant.imagesJson),
+          isActive: Number(variant.isActive ?? 1),
+          createdAt: variant.createdAt || null,
+          deletedAt: variant.deletedAt || null,
+          deletedBy: variant.deletedBy || null,
+          deletionReason: variant.deletionReason || null,
+          offer: offerDetails,
+        };
+      }),
       variantCount: activeVariants.length,
       primarySku: String(primaryVariant?.sku || ''),
       sku: String(primaryVariant?.sku || ''),
@@ -1674,6 +1878,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       deletionReason: product.deletion_reason || null,
       isDeleted: Boolean(product.deleted_at),
       lowStockThreshold: LOW_STOCK_THRESHOLD,
+      offerEligible: ['hoodie', 'h2-water-bottle', 'h2-mist-spray'].includes(String(product.slug || '').toLowerCase()),
     };
   }
 
@@ -1705,15 +1910,25 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       { includeInactive }
     ));
 
+    const activeCatalog = catalog.filter((product) => {
+      if (includeInactive) return true;
+      if (product.isDeleted || product.deletedAt) return false;
+      if (Number(product.archived)) return false;
+      if (product.isCombo) {
+        return Array.isArray(product.comboItems) && product.comboItems.length > 0;
+      }
+      return Array.isArray(product.variants) && product.variants.some((v) => !v.deletedAt && Number(v.isActive ?? 1) === 1);
+    });
+
     const featuredIds = new Set(
-      [...catalog]
+      [...activeCatalog]
         .sort((left, right) => right.sales - left.sales || right.orderCount - left.orderCount || String(right.createdAt || '').localeCompare(String(left.createdAt || '')))
         .slice(0, 3)
         .filter((product) => product.sales > 0)
         .map((product) => Number(product.id))
     );
 
-    return catalog.map((product) => ({
+    return activeCatalog.map((product) => ({
       ...product,
       featured: featuredIds.has(Number(product.id)),
     }));
@@ -3182,14 +3397,30 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function getMerchWhatsAppConfig() {
     const enabledValue = String(process.env.WHATSAPP_ORDER_CONFIRMATION_ENABLED || '').trim().toLowerCase();
-    const token = String(process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_WHATSAPP_ACCESS_TOKEN || '').trim();
+    const token = String(
+      process.env.WHATSAPP_TOKEN ||
+      process.env.WHATSAPP_ACCESS_TOKEN ||
+      process.env.META_WHATSAPP_ACCESS_TOKEN ||
+      ''
+    ).trim();
+    const phoneNumberId = String(
+      process.env.WHATSAPP_PHONE_NUMBER_ID ||
+      process.env.META_WHATSAPP_PHONE_NUMBER_ID ||
+      ''
+    ).trim();
+    const orderTemplate = String(
+      process.env.WHATSAPP_MERCH_ORDER_TEMPLATE ||
+      process.env.WHATSAPP_ORDER_TEMPLATE ||
+      'merch_order_confirmation'
+    ).trim();
+    const token = String(process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_WHATSAPP_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || '').trim();
     const phoneNumberId = String(process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.META_WHATSAPP_PHONE_NUMBER_ID || '').trim();
     return {
       enabled: enabledValue === 'true' || (!['false', '0', 'no', 'off'].includes(enabledValue) && Boolean(token && phoneNumberId)),
       token,
       phoneNumberId,
-      apiVersion: String(process.env.WHATSAPP_API_VERSION || 'v20.0').trim(),
-      actionTemplateName: String(process.env.WHATSAPP_ORDER_ACTION_TEMPLATE || '').trim(),
+      apiVersion: String(process.env.WHATSAPP_API_VERSION || 'v25.0').trim(),
+      orderTemplate,
       templateLanguage: String(process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'en').trim(),
     };
   }
@@ -3199,6 +3430,54 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!digits) return '';
     if (digits.length === 10) return `91${digits}`;
     return digits;
+  }
+
+  function createMerchWhatsAppMessageLog({ orderId, orderNumber, to, status = 'pending', templateName = '' } = {}) {
+    const result = db.prepare(`
+      INSERT INTO merch_whatsapp_messages (order_id, order_number, recipient_phone, status, template_name)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(
+      Number.isInteger(Number(orderId)) && Number(orderId) > 0 ? Number(orderId) : null,
+      String(orderNumber || '').trim() || null,
+      String(to || '').trim() || null,
+      String(status || 'pending').trim() || 'pending',
+      String(templateName || '').trim() || null
+    );
+    return Number(result.lastInsertRowid);
+  }
+
+  function updateMerchWhatsAppMessageLog(logId, patch = {}) {
+    if (!Number.isInteger(Number(logId)) || Number(logId) <= 0) return;
+    const fields = [];
+    const values = [];
+    const add = (column, value) => {
+      fields.push(`${column} = ?`);
+      values.push(value);
+    };
+    if (patch.status) add('status', String(patch.status));
+    if (patch.graphMessageId !== undefined) add('graph_message_id', String(patch.graphMessageId || '') || null);
+    if (patch.errorMessage !== undefined) add('error_message', String(patch.errorMessage || '').slice(0, 1000) || null);
+    if (patch.response !== undefined) add('response_json', JSON.stringify(patch.response || {}));
+    if (patch.deliveredAt !== undefined) add('delivered_at', patch.deliveredAt || null);
+    if (patch.readAt !== undefined) add('read_at', patch.readAt || null);
+    if (!fields.length) return;
+    fields.push("updated_at = datetime('now')");
+    db.prepare(`UPDATE merch_whatsapp_messages SET ${fields.join(', ')} WHERE id = ?`).run(...values, Number(logId));
+  }
+
+  function getLatestMerchWhatsAppMessageStatus(orderId) {
+    if (!Number.isInteger(Number(orderId)) || Number(orderId) <= 0) return null;
+    const row = db.prepare(`
+      SELECT id, order_id AS orderId, order_number AS orderNumber, recipient_phone AS recipientPhone,
+             status, graph_message_id AS graphMessageId, template_name AS templateName,
+             error_message AS errorMessage, delivered_at AS deliveredAt, read_at AS readAt,
+             created_at AS createdAt, updated_at AS updatedAt
+      FROM merch_whatsapp_messages
+      WHERE order_id = ?
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(Number(orderId));
+    return row || null;
   }
 
   function formatMerchWhatsAppCurrency(paise) {
@@ -3394,10 +3673,15 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return data;
   }
 
+  function getWhatsAppGraphMessageId(response) {
+    const messages = Array.isArray(response?.messages) ? response.messages : [];
+    return String(messages[0]?.id || '').trim();
+  }
+
   async function sendMerchWhatsAppActionMessage({ config, to, order, links }) {
     const actionText = "Choose an action below 👇\n\nWe're here to help!";
     if (config.actionTemplateName) {
-      await sendWhatsAppGraphMessage(config, {
+      return sendWhatsAppGraphMessage(config, {
         to,
         type: 'template',
         template: {
@@ -3416,10 +3700,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           ],
         },
       });
-      return;
     }
 
-    await sendWhatsAppGraphMessage(config, {
+    return sendWhatsAppGraphMessage(config, {
       to,
       type: 'interactive',
       interactive: {
@@ -3438,40 +3721,126 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   async function sendMerchWhatsAppOrderConfirmation(orderId, req) {
     const config = getMerchWhatsAppConfig();
-    if (!config.enabled) return;
+    if (!config.enabled) {
+      return { ok: false, message: 'Merch WhatsApp confirmation is disabled or unconfigured' };
+    }
     if (!config.token || !config.phoneNumberId) {
       console.warn('[Merch] WhatsApp confirmation skipped: WhatsApp credentials are not configured.');
-      return;
+      return { ok: false, message: 'WhatsApp credentials not configured' };
+    let logId = 0;
+    const finish = (status, extra = {}) => ({ status, ...extra, logId: logId || null });
+
+    if (!config.enabled) {
+      logId = createMerchWhatsAppMessageLog({ orderId, status: 'skipped', templateName: config.actionTemplateName });
+      updateMerchWhatsAppMessageLog(logId, { status: 'skipped', errorMessage: 'WhatsApp order confirmations are disabled.' });
+      return finish('skipped', { reason: 'disabled' });
+    }
+    if (!config.token || !config.phoneNumberId) {
+      console.warn('[Merch] WhatsApp confirmation skipped: WhatsApp credentials are not configured.');
+      logId = createMerchWhatsAppMessageLog({ orderId, status: 'skipped', templateName: config.actionTemplateName });
+      updateMerchWhatsAppMessageLog(logId, { status: 'skipped', errorMessage: 'WhatsApp credentials are not configured.' });
+      return finish('skipped', { reason: 'missing_config' });
     }
 
     const data = getMerchOrderEmailData(orderId);
     const to = normalizeMerchWhatsAppPhone(data?.order?.customerPhone);
+    logId = createMerchWhatsAppMessageLog({
+      orderId,
+      orderNumber: data?.order?.orderNumber || '',
+      to,
+      status: 'triggered',
+      templateName: config.actionTemplateName,
+    });
     if (!data || !to) {
       console.warn('[Merch] WhatsApp confirmation skipped: customer phone is missing.');
-      return;
+      return { ok: false, message: 'Customer phone number is missing' };
     }
 
-    const links = buildMerchEmailLinks(req, data.order.id);
-    const cardBuffer = await renderMerchWhatsAppCardImage({ order: data.order, items: data.items, req });
-    const mediaId = await submitWhatsAppMediaUpload({
-      config,
-      toUploadBuffer: cardBuffer,
-      filename: `h2-order-${String(data.order.orderNumber || data.order.id).replace(/[^a-z0-9_-]+/gi, '-')}.png`,
-    });
-    await sendWhatsAppGraphMessage(config, {
+    const customerName = String(data.order?.customerName || 'Valued Customer').trim();
+    const orderNumber = String(data.order?.orderNumber || `Order #${data.order?.id}`).trim();
+    const totalAmount = formatMerchWhatsAppCurrency(data.order?.totalAmount || 0);
+
+    const payload = {
       to,
-      type: 'image',
-      image: { id: mediaId },
+      type: 'template',
+      template: {
+        name: config.orderTemplate,
+        language: { code: config.templateLanguage },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: customerName },
+              { type: 'text', text: orderNumber },
+              { type: 'text', text: totalAmount },
+            ],
+          },
+        ],
+      },
+    };
+
+    console.log('[Merch] Sending WhatsApp order confirmation template:', {
+      to,
+      template: config.orderTemplate,
+      customerName,
+      orderNumber,
+      totalAmount,
     });
-    await sendMerchWhatsAppActionMessage({ config, to, order: data.order, links });
+
+    try {
+      const result = await sendWhatsAppGraphMessage(config, payload);
+      const messageId = result?.messages?.[0]?.id || '';
+      console.log('[Merch] WhatsApp order confirmation accepted by Meta:', {
+        orderId,
+        to,
+        messageId,
+      });
+      return { ok: true, messageId, to };
+    } catch (error) {
+      console.error('[Merch] Failed to send WhatsApp order confirmation:', error?.message || error);
+      return { ok: false, message: error?.message || 'Failed to send WhatsApp message' };
+      updateMerchWhatsAppMessageLog(logId, { status: 'skipped', errorMessage: 'Customer phone is missing.' });
+      return finish('skipped', { reason: 'missing_phone' });
+    }
+
+    try {
+      const links = buildMerchEmailLinks(req, data.order.id);
+      const cardBuffer = await renderMerchWhatsAppCardImage({ order: data.order, items: data.items, req });
+      const mediaId = await submitWhatsAppMediaUpload({
+        config,
+        toUploadBuffer: cardBuffer,
+        filename: `h2-order-${String(data.order.orderNumber || data.order.id).replace(/[^a-z0-9_-]+/gi, '-')}.png`,
+      });
+      const imageResponse = await sendWhatsAppGraphMessage(config, {
+        to,
+        type: 'image',
+        image: { id: mediaId },
+      });
+      const actionResponse = await sendMerchWhatsAppActionMessage({ config, to, order: data.order, links });
+      const graphMessageId = getWhatsAppGraphMessageId(actionResponse) || getWhatsAppGraphMessageId(imageResponse);
+      updateMerchWhatsAppMessageLog(logId, {
+        status: 'sent',
+        graphMessageId,
+        response: { image: imageResponse, action: actionResponse },
+      });
+      return finish('sent', { messageId: graphMessageId || null });
+    } catch (error) {
+      updateMerchWhatsAppMessageLog(logId, {
+        status: 'failed',
+        errorMessage: error?.message || String(error),
+      });
+      throw error;
+    }
   }
 
   async function sendMerchOrderConfirmationEmail(orderId, req) {
     const data = getMerchOrderEmailData(orderId);
-    if (!data || !isValidMerchEmail(data.order.customerEmail)) return;
+    if (!data || !isValidMerchEmail(data.order.customerEmail)) {
+      return { status: 'skipped', reason: 'missing_email' };
+    }
     if (typeof sendMerchEmail !== 'function') {
       console.warn('[Merch] Order confirmation email skipped: email service is not configured.');
-      return;
+      return { status: 'skipped', reason: 'missing_config' };
     }
     const { html, text } = buildMerchOrderConfirmationHtml({ order: data.order, items: data.items, req });
     await sendMerchEmail({
@@ -3480,10 +3849,83 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       text,
       html,
     });
-    sendMerchWhatsAppOrderConfirmation(orderId, req).catch((error) => {
-      console.error('[Merch] Failed to send WhatsApp order confirmation:', error?.message || error);
-    });
+    return { status: 'sent' };
   }
+
+  async function triggerMerchOrderConfirmationNotifications(orderId, req) {
+    const result = {
+      email: { status: 'skipped' },
+      whatsapp: { status: 'skipped' },
+    };
+
+    try {
+      result.email = await sendMerchOrderConfirmationEmail(orderId, req);
+    } catch (error) {
+      result.email = { status: 'failed', error: error?.message || String(error) };
+      console.error('[Merch] Failed to send order confirmation email:', error?.message || error);
+    }
+
+    try {
+      result.whatsapp = await sendMerchWhatsAppOrderConfirmation(orderId, req);
+    } catch (error) {
+      result.whatsapp = {
+        status: 'failed',
+        error: error?.message || String(error),
+        latest: getLatestMerchWhatsAppMessageStatus(orderId),
+      };
+      console.error('[Merch] Failed to send WhatsApp order confirmation:', error?.message || error);
+    }
+
+    if (!result.whatsapp.latest) {
+      result.whatsapp.latest = getLatestMerchWhatsAppMessageStatus(orderId);
+    }
+    return result;
+  }
+
+  function handleMerchWhatsAppStatusWebhook(body) {
+    const entries = Array.isArray(body?.entry) ? body.entry : [];
+    let updated = 0;
+    for (const entry of entries) {
+      const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+      for (const change of changes) {
+        const statuses = Array.isArray(change?.value?.statuses) ? change.value.statuses : [];
+        for (const statusEvent of statuses) {
+          const graphMessageId = String(statusEvent?.id || '').trim();
+          const status = String(statusEvent?.status || '').trim().toLowerCase();
+          if (!graphMessageId || !status) continue;
+          const timestamp = Number(statusEvent?.timestamp || 0);
+          const eventTime = timestamp > 0 ? new Date(timestamp * 1000).toISOString() : null;
+          const updates = ['status = ?', 'updated_at = datetime(\'now\')'];
+          const params = [status];
+          if (status === 'delivered' && eventTime) {
+            updates.push('delivered_at = COALESCE(delivered_at, ?)');
+            params.push(eventTime);
+          }
+          if (status === 'read' && eventTime) {
+            updates.push('read_at = COALESCE(read_at, ?)');
+            params.push(eventTime);
+          }
+          params.push(graphMessageId);
+          const result = db.prepare(`
+            UPDATE merch_whatsapp_messages
+            SET ${updates.join(', ')}
+            WHERE graph_message_id = ?
+          `).run(...params);
+          updated += Number(result.changes || 0);
+        }
+      }
+    }
+    return updated;
+  }
+
+  app.post('/webhooks/whatsapp', (req, _res, next) => {
+    try {
+      handleMerchWhatsAppStatusWebhook(req.body);
+    } catch (error) {
+      console.error('[Merch] Failed to record WhatsApp webhook status:', error?.message || error);
+    }
+    next();
+  });
 
   function requireAdmin(req, res, next) {
     const token = req.cookies?.booking_portal_token ||
@@ -3500,6 +3942,45 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
 
   // ─── PUBLIC: Get all active products ───
+  app.get('/api/merch/admin/orders/:id/whatsapp-confirmation', requireAdmin, (req, res) => {
+    const orderId = Number(req.params.id);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      return res.status(400).json({ error: 'Invalid order id' });
+    }
+    const order = db.prepare('SELECT id, order_number AS orderNumber FROM merch_orders WHERE id = ?').get(orderId);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    return res.json({
+      orderId,
+      orderNumber: order.orderNumber,
+      whatsapp: getLatestMerchWhatsAppMessageStatus(orderId),
+    });
+  });
+
+  app.post('/api/merch/admin/orders/:id/whatsapp-confirmation', requireAdmin, async (req, res) => {
+    const orderId = Number(req.params.id);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      return res.status(400).json({ error: 'Invalid order id' });
+    }
+    const order = db.prepare('SELECT id FROM merch_orders WHERE id = ?').get(orderId);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    try {
+      const whatsapp = await sendMerchWhatsAppOrderConfirmation(orderId, req);
+      return res.json({
+        success: whatsapp.status === 'sent',
+        whatsapp: {
+          ...whatsapp,
+          latest: getLatestMerchWhatsAppMessageStatus(orderId),
+        },
+      });
+    } catch (error) {
+      return res.status(502).json({
+        success: false,
+        error: error?.message || String(error),
+        whatsapp: getLatestMerchWhatsAppMessageStatus(orderId),
+      });
+    }
+  });
+
   function normalizeMerchCouponCode(code) {
     if (typeof normalizeCouponCode === 'function') {
       return normalizeCouponCode(code);
@@ -3555,6 +4036,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       code: result?.coupon?.code || result?.couponCode || '',
       description: result?.coupon?.description || '',
       discountType: result?.coupon?.discountType || '',
+      discountValue: Number(result?.coupon?.discountValue || 0),
       appliesTo: result?.coupon?.appliesTo || 'merch',
       originalAmountInr: Math.round(originalAmountPaise / 100),
       discountAmountInr: Math.round(discountAmountPaise / 100),
@@ -3648,6 +4130,62 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
 
   // ─── PUBLIC: Create Razorpay order for checkout ───
+  app.get('/api/merch/coupons', (req, res) => {
+    try {
+      const rawProductIds = String(req.query?.productIds || '').split(',');
+      const productIds = [...new Set(rawProductIds.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0))];
+      const rows = db.prepare(`
+        SELECT id, code, description, discount_type AS discountType, discount_value AS discountValue,
+               applies_to AS appliesTo, max_redemptions AS maxRedemptions, per_user_limit AS perUserLimit,
+               active, is_active AS isActive, coupon_type AS couponType,
+               valid_from AS validFrom, valid_till AS validTill, expires_at AS expiresAt,
+               festival_name AS festivalName, created_at AS createdAt
+        FROM coupons
+        WHERE portal = 'merch'
+          AND active = 1
+          AND COALESCE(is_active, 1) = 1
+          AND COALESCE(coupon_type, 'public') = 'public'
+          AND (valid_from IS NULL OR datetime(valid_from) <= datetime('now'))
+          AND ((valid_till IS NOT NULL AND datetime(valid_till) > datetime('now'))
+            OR (valid_till IS NULL AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))))
+        ORDER BY datetime(created_at) DESC, id DESC
+      `).all();
+      const coupons = rows.filter((row) => {
+        const appliesTo = String(row.appliesTo || 'all').trim().toLowerCase();
+        if (['all', 'merch'].includes(appliesTo)) return true;
+        const match = appliesTo.match(/^product:([\\d,]+)$/);
+        return Boolean(match && productIds.some((id) => match[1].split(',').includes(String(id))));
+      }).map((row) => {
+        const campaignText = `${row.festivalName || ''} ${row.description || ''}`.toLowerCase();
+        const couponCategory = campaignText.includes('festival')
+          ? 'festival'
+          : campaignText.includes('seasonal') || campaignText.includes('season')
+            ? 'seasonal'
+            : 'public';
+        return {
+        id: Number(row.id),
+        code: row.code,
+        description: row.description || '',
+        discountType: row.discountType || 'flat',
+        discountValue: Number(row.discountValue || 0),
+        appliesTo: row.appliesTo || 'all',
+        couponType: row.couponType || 'public',
+        couponCategory,
+        festivalName: row.festivalName || '',
+        validFrom: row.validFrom || null,
+        validTill: row.validTill || row.expiresAt || null,
+        expiresAt: row.validTill || row.expiresAt || null,
+        maxRedemptions: row.maxRedemptions == null ? null : Number(row.maxRedemptions),
+        perUserLimit: Number(row.perUserLimit || 1),
+        };
+      });
+      return res.json({ coupons });
+    } catch (error) {
+      console.error('[Merch] GET /api/merch/coupons error:', error);
+      return res.status(500).json({ message: 'Failed to load merch coupons.' });
+    }
+  });
+
   app.post('/api/merch/preview-coupon',(req, res) => {
     const authUser = getMerchAuthUser(req);
     const couponCode = normalizeMerchCouponCode(req.body?.couponCode);
@@ -3707,7 +4245,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       if (purchase.stock < quantity) {
         return res.status(409).json({ error: `Insufficient stock for ${variant.product_name} (available: ${purchase.stock})` });
       }
-      const lineTotal = variant.price * quantity;
+      const offer = getVariantActiveOffer(variant.id, variant.product_id);
+      let unitPrice = Number(variant.price || 0);
+      if (offer) {
+        const isPercentage = String(offer.discountType || '').toLowerCase() === 'percentage';
+        const discountPaise = isPercentage
+          ? Math.round(unitPrice * Number(offer.discountValue || 0) / 100)
+          : Math.round(Number(offer.discountValue || 0));
+        unitPrice = Math.max(0, unitPrice - discountPaise);
+      }
+      const lineTotal = unitPrice * quantity;
       subtotal += lineTotal;
       validatedItems.push({
         variantId: variant.id,
@@ -3715,7 +4262,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         productName: variant.product_name,
         variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '),
         sku: variant.sku,
-        unitPrice: variant.price,
+        unitPrice,
+        originalUnitPrice: Number(variant.price || 0),
+        offerName: offer ? offer.name : null,
         quantity,
         lineTotal,
       });
@@ -3800,7 +4349,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   });
 
   // ─── PUBLIC: Verify payment after Razorpay checkout ───
-  app.post('/api/merch/verify-payment', (req, res) => {
+  app.post('/api/merch/verify-payment', async (req, res) => {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, order_number } = req.body || {};
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return res.status(400).json({ error: 'Missing payment details' });
@@ -3848,15 +4397,46 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       });
     }
 
-    sendMerchOrderConfirmationEmail(order.id, req).catch((error) => {
-      console.error('[Merch] Failed to send order confirmation email:', error?.message || error);
-    });
+    const notifications = await triggerMerchOrderConfirmationNotifications(order.id, req);
 
-    res.json({ success: true, message: 'Payment verified, order confirmed', orderId: order.id });
+    res.json({
+      success: true,
+      message: 'Payment verified, order confirmed',
+      orderId: order.id,
+      notifications,
+    });
+  });
+
+  // ─── PUBLIC: Send/Resend WhatsApp order confirmation ───
+  app.post('/api/merch/orders/:id/send-whatsapp', async (req, res) => {
+    const orderId = Number(req.params.id);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid order ID' });
+    }
+
+    const order = db.prepare('SELECT id, customer_phone, order_number FROM merch_orders WHERE id = ?').get(orderId);
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    const result = await sendMerchWhatsAppOrderConfirmation(orderId, req);
+    if (!result.ok) {
+      return res.status(502).json({
+        success: false,
+        message: result.message || 'Failed to send WhatsApp confirmation',
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'WhatsApp order confirmation sent',
+      messageId: result.messageId || '',
+      phone: result.to || '',
+    });
   });
 
   // ─── COD Checkout ───
-  app.post('/api/merch/checkout-cod', (req, res) => {
+  app.post('/api/merch/checkout-cod', async (req, res) => {
     const { items, customer, address, billingAddress } = req.body || {};
     const authUser = getMerchAuthUser(req);
     const merchProfile = authUser ? ensureMerchCustomerProfileForUser(authUser) : null;
@@ -3960,6 +4540,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       });
     }
 
+    sendMerchOrderConfirmationEmail(orderId, req).catch((error) => {
+      console.error('[Merch] Failed to send COD order confirmation email:', error?.message || error);
+    });
+    const notifications = await triggerMerchOrderConfirmationNotifications(orderId, req);
+
     res.json({
       success: true,
       orderNumber,
@@ -3967,6 +4552,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       totalAmount,
       discountAmount,
       coupon: buildMerchCouponPreview(couponResult),
+      notifications,
       message: 'COD order placed',
       customer: resolvedCustomer,
     });
@@ -5184,50 +5770,84 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   app.post('/api/merch/admin/products/trash', requireAdmin, (req, res) => {
     const productIds = parseExplicitProductIds(req.body);
     if (!productIds?.length) {
-      return res.status(400).json({ message: 'Select at least one product to move to Trash.' });
+      return res.status(400).json({ message: 'Select at least one product to move to Bin.' });
     }
     const placeholders = productIds.map(() => '?').join(', ');
     const products = db.prepare(`SELECT id FROM merch_products WHERE id IN (${placeholders}) AND deleted_at IS NULL`).all(...productIds);
     if (products.length !== productIds.length) {
-      return res.status(400).json({ message: 'Every selected product must be active and not already in Trash.' });
+      return res.status(400).json({ message: 'Every selected product must be active and not already in Bin.' });
     }
-    db.prepare(`
-      UPDATE merch_products
-      SET deleted_previous_is_active = is_active,
-          is_active = 0,
-          deleted_at = datetime('now'),
-          deleted_by = ?,
-          deletion_reason = ?,
-          updated_at = datetime('now')
-      WHERE id IN (${placeholders}) AND deleted_at IS NULL
-    `).run(String(req.user?.email || req.user?.id || 'admin'), String(req.body?.reason || '').trim() || null, ...productIds);
+    const deletedBy = String(req.user?.email || req.user?.id || 'admin');
+    const reason = String(req.body?.reason || '').trim() || null;
+    db.transaction(() => {
+      db.prepare(`
+        UPDATE merch_products
+        SET deleted_previous_is_active = is_active,
+            is_active = 0,
+            deleted_at = datetime('now'),
+            deleted_by = ?,
+            deletion_reason = ?,
+            updated_at = datetime('now')
+        WHERE id IN (${placeholders}) AND deleted_at IS NULL
+      `).run(deletedBy, reason, ...productIds);
+      db.prepare(`
+        UPDATE merch_variants
+        SET deleted_previous_is_active = is_active,
+            is_active = 0,
+            deleted_at = datetime('now'),
+            deleted_by = ?,
+            deletion_reason = ?
+        WHERE product_id IN (${placeholders}) AND deleted_at IS NULL
+      `).run(deletedBy, reason, ...productIds);
+    })();
     res.json({ trashedIds: productIds, trashedCount: productIds.length });
   });
 
   app.post('/api/merch/admin/variants/trash', requireAdmin, (req, res) => {
     const variantIds = parseExplicitProductIds(req.body);
     if (!variantIds?.length) {
-      return res.status(400).json({ message: 'Select at least one variant to move to Trash.' });
+      return res.status(400).json({ message: 'Select at least one variant to move to Bin.' });
     }
     const placeholders = variantIds.map(() => '?').join(', ');
     const variants = db.prepare(`
-      SELECT v.id
+      SELECT v.id, v.product_id
       FROM merch_variants v
       JOIN merch_products p ON p.id = v.product_id
       WHERE v.id IN (${placeholders}) AND v.deleted_at IS NULL AND p.deleted_at IS NULL
     `).all(...variantIds);
     if (variants.length !== variantIds.length) {
-      return res.status(400).json({ message: 'Every selected variant must be active and not already in Trash.' });
+      return res.status(400).json({ message: 'Every selected variant must be active and not already in Bin.' });
     }
-    db.prepare(`
-      UPDATE merch_variants
-      SET deleted_previous_is_active = is_active,
-          is_active = 0,
-          deleted_at = datetime('now'),
-          deleted_by = ?,
-          deletion_reason = ?
-      WHERE id IN (${placeholders}) AND deleted_at IS NULL
-    `).run(String(req.user?.email || req.user?.id || 'admin'), String(req.body?.reason || '').trim() || null, ...variantIds);
+    const deletedBy = String(req.user?.email || req.user?.id || 'admin');
+    const reason = String(req.body?.reason || '').trim() || null;
+    db.transaction(() => {
+      db.prepare(`
+        UPDATE merch_variants
+        SET deleted_previous_is_active = is_active,
+            is_active = 0,
+            deleted_at = datetime('now'),
+            deleted_by = ?,
+            deletion_reason = ?
+        WHERE id IN (${placeholders}) AND deleted_at IS NULL
+      `).run(deletedBy, reason, ...variantIds);
+
+      const parentProductIds = [...new Set(variants.map((v) => Number(v.product_id)).filter(Boolean))];
+      for (const pid of parentProductIds) {
+        const activeRemaining = db.prepare('SELECT count(*) as count FROM merch_variants WHERE product_id = ? AND deleted_at IS NULL').get(pid);
+        if (Number(activeRemaining?.count || 0) === 0) {
+          db.prepare(`
+            UPDATE merch_products
+            SET deleted_previous_is_active = is_active,
+                is_active = 0,
+                deleted_at = datetime('now'),
+                deleted_by = ?,
+                deletion_reason = 'All variants moved to Trash',
+                updated_at = datetime('now')
+            WHERE id = ? AND deleted_at IS NULL
+          `).run(deletedBy, pid);
+        }
+      }
+    })();
     res.json({ trashedIds: variantIds, trashedCount: variantIds.length });
   });
 
@@ -5239,17 +5859,27 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const placeholders = productIds.map(() => '?').join(', ');
     const deletedRows = db.prepare(`SELECT id FROM merch_products WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).all(...productIds);
     if (deletedRows.length !== productIds.length) {
-      return res.status(400).json({ message: 'Every selected product must be in Trash.' });
+      return res.status(400).json({ message: 'Every selected product must be in Bin.' });
     }
-    db.prepare(`
-      UPDATE merch_products
-      SET is_active = COALESCE(deleted_previous_is_active, 1),
-          deleted_at = NULL,
-          deleted_by = NULL,
-          deletion_reason = NULL,
-          updated_at = datetime('now')
-      WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL
-    `).run(...productIds);
+    db.transaction(() => {
+      db.prepare(`
+        UPDATE merch_products
+        SET is_active = COALESCE(deleted_previous_is_active, 1),
+            deleted_at = NULL,
+            deleted_by = NULL,
+            deletion_reason = NULL,
+            updated_at = datetime('now')
+        WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL
+      `).run(...productIds);
+      db.prepare(`
+        UPDATE merch_variants
+        SET is_active = COALESCE(deleted_previous_is_active, 1),
+            deleted_at = NULL,
+            deleted_by = NULL,
+            deletion_reason = NULL
+        WHERE product_id IN (${placeholders}) AND deleted_at IS NOT NULL
+      `).run(...productIds);
+    })();
     res.json({ restoredIds: productIds });
   });
 
@@ -5260,29 +5890,44 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
     const placeholders = variantIds.map(() => '?').join(', ');
     const deletedRows = db.prepare(`
-      SELECT v.id
+      SELECT v.id, v.product_id
       FROM merch_variants v
       JOIN merch_products p ON p.id = v.product_id
-      WHERE v.id IN (${placeholders}) AND v.deleted_at IS NOT NULL AND p.deleted_at IS NULL
+      WHERE v.id IN (${placeholders}) AND v.deleted_at IS NOT NULL
     `).all(...variantIds);
     if (deletedRows.length !== variantIds.length) {
-      return res.status(400).json({ message: 'Every selected variant must be in Trash under an active product.' });
+      return res.status(400).json({ message: 'Every selected variant must be in Bin under an active product.' });
     }
-    db.prepare(`
-      UPDATE merch_variants
-      SET is_active = COALESCE(deleted_previous_is_active, 1),
-          deleted_at = NULL,
-          deleted_by = NULL,
-          deletion_reason = NULL
-      WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL
-    `).run(...variantIds);
+    db.transaction(() => {
+      db.prepare(`
+        UPDATE merch_variants
+        SET is_active = COALESCE(deleted_previous_is_active, 1),
+            deleted_at = NULL,
+            deleted_by = NULL,
+            deletion_reason = NULL
+        WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL
+      `).run(...variantIds);
+
+      const parentProductIds = [...new Set(deletedRows.map((r) => Number(r.product_id)).filter(Boolean))];
+      for (const pid of parentProductIds) {
+        db.prepare(`
+          UPDATE merch_products
+          SET is_active = 1,
+              deleted_at = NULL,
+              deleted_by = NULL,
+              deletion_reason = NULL,
+              updated_at = datetime('now')
+          WHERE id = ? AND deleted_at IS NOT NULL
+        `).run(pid);
+      }
+    })();
     res.json({ restoredIds: variantIds });
   });
 
   app.post('/api/merch/admin/products/permanent-delete', requireAdmin, (req, res) => {
     const productIds = parseExplicitProductIds(req.body);
     if (!productIds?.length) {
-      return res.status(400).json({ message: 'Select at least one Trash product to permanently delete.' });
+      return res.status(400).json({ message: 'Select at least one Bin product to permanently delete.' });
     }
     if (String(req.body?.confirmation || '').trim() !== 'PERMANENTLY DELETE') {
       return res.status(400).json({ message: 'Type PERMANENTLY DELETE to confirm this irreversible action.' });
@@ -5290,7 +5935,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const placeholders = productIds.map(() => '?').join(', ');
     const deletedRows = db.prepare(`SELECT id FROM merch_products WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).all(...productIds);
     if (deletedRows.length !== productIds.length) {
-      return res.status(400).json({ message: 'Every selected product must already be in Trash.' });
+      return res.status(400).json({ message: 'Every selected product must already be in Bin.' });
     }
     const variantRowsForOrders = db.prepare(`SELECT id FROM merch_variants WHERE product_id IN (${placeholders})`).all(...productIds);
     const variantIdsForOrders = variantRowsForOrders.map((row) => Number(row.id));
@@ -5313,7 +5958,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       db.prepare(`DELETE FROM merch_combo_items WHERE combo_product_id IN (${placeholders}) OR component_product_id IN (${placeholders})`).run(...productIds, ...productIds);
       db.prepare(`DELETE FROM merch_product_hypes WHERE product_id IN (${placeholders})`).run(...productIds);
       db.prepare(`DELETE FROM merch_variants WHERE product_id IN (${placeholders})`).run(...productIds);
-      db.prepare(`DELETE FROM merch_products WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).run(...productIds);
+      db.prepare(`DELETE FROM merch_products WHERE id IN (${placeholders})`).run(...productIds);
     });
     permanentDelete();
     res.json({ permanentlyDeletedIds: productIds });
@@ -5322,15 +5967,15 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   app.post('/api/merch/admin/variants/permanent-delete', requireAdmin, (req, res) => {
     const variantIds = parseExplicitProductIds(req.body);
     if (!variantIds?.length) {
-      return res.status(400).json({ message: 'Select at least one Trash variant to permanently delete.' });
+      return res.status(400).json({ message: 'Select at least one Bin variant to permanently delete.' });
     }
     if (String(req.body?.confirmation || '').trim() !== 'PERMANENTLY DELETE') {
       return res.status(400).json({ message: 'Type PERMANENTLY DELETE to confirm this irreversible action.' });
     }
     const placeholders = variantIds.map(() => '?').join(', ');
-    const deletedRows = db.prepare(`SELECT id FROM merch_variants WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).all(...variantIds);
+    const deletedRows = db.prepare(`SELECT id, product_id FROM merch_variants WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).all(...variantIds);
     if (deletedRows.length !== variantIds.length) {
-      return res.status(400).json({ message: 'Every selected variant must already be in Trash.' });
+      return res.status(400).json({ message: 'Every selected variant must already be in Bin.' });
     }
     const orderReference = db.prepare(`SELECT 1 FROM merch_order_items WHERE variant_id IN (${placeholders}) LIMIT 1`).get(...variantIds);
     if (orderReference) {
@@ -5341,6 +5986,23 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       db.prepare(`DELETE FROM merch_customer_wishlist_items WHERE variant_id IN (${placeholders})`).run(...variantIds);
       db.prepare(`DELETE FROM merch_combo_items WHERE component_variant_id IN (${placeholders})`).run(...variantIds);
       db.prepare(`DELETE FROM merch_variants WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).run(...variantIds);
+
+      // Clean up orphaned parent products that have zero remaining variants
+      const parentProductIds = [...new Set(deletedRows.map((r) => Number(r.product_id)).filter(Boolean))];
+      for (const pid of parentProductIds) {
+        const remaining = db.prepare('SELECT count(*) as count FROM merch_variants WHERE product_id = ?').get(pid);
+        if (Number(remaining?.count || 0) === 0) {
+          const inOrders = db.prepare('SELECT 1 FROM merch_order_items WHERE product_name = (SELECT name FROM merch_products WHERE id = ?) LIMIT 1').get(pid);
+          if (!inOrders) {
+            db.prepare('DELETE FROM merch_customer_wishlist_items WHERE product_id = ?').run(pid);
+            db.prepare('DELETE FROM merch_combo_items WHERE combo_product_id = ? OR component_product_id = ?').run(pid, pid);
+            db.prepare('DELETE FROM merch_product_hypes WHERE product_id = ?').run(pid);
+            db.prepare('DELETE FROM merch_products WHERE id = ?').run(pid);
+          } else {
+            db.prepare("UPDATE merch_products SET is_active = 0, deleted_at = datetime('now') WHERE id = ?").run(pid);
+          }
+        }
+      }
     });
     permanentDelete();
     res.json({ permanentlyDeletedIds: variantIds });
@@ -5620,6 +6282,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       if (body.color !== undefined) addVariantField('color', String(body.color || '').trim() || null);
       if (body.price !== undefined) addVariantField('price', Math.max(0, Math.round(Number(body.price || 0) * 100)));
       if (body.stock !== undefined) addVariantField('stock', Math.max(0, Math.floor(Number(body.stock || 0))));
+      if (body.imageUrl !== undefined) addVariantField('image_url', normalizeMerchImageInput(body.imageUrl));
+      if (body.images !== undefined || body.imageUrls !== undefined) {
+        const imageValues = Array.isArray(body.images) ? body.images : body.imageUrls;
+        const normalizedImages = [...new Set((Array.isArray(imageValues) ? imageValues : []).map(normalizeMerchImageInput).filter(Boolean))];
+        addVariantField('images_json', JSON.stringify(normalizedImages));
+        if (normalizedImages.length && body.imageUrl === undefined) addVariantField('image_url', normalizedImages[0]);
+      }
       if (variantUpdates.length) {
         variantParams.push(variantId, productId);
       }
@@ -5656,6 +6325,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     `).get(productId);
     if (!product) return res.status(404).json({ message: 'Product not found.' });
     db.transaction(() => {
+      const deletedBy = String(req.user?.email || req.user?.id || 'admin');
+      const reason = String(req.body?.reason || '').trim() || null;
       db.prepare(`
         UPDATE merch_products
         SET deleted_previous_is_active = is_active,
@@ -5665,9 +6336,18 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
             deletion_reason = ?,
             updated_at = datetime('now')
         WHERE id = ? AND deleted_at IS NULL
-      `).run(String(req.user?.email || req.user?.id || 'admin'), String(req.body?.reason || '').trim() || null, Number(product.id));
+      `).run(deletedBy, reason, Number(product.id));
+      db.prepare(`
+        UPDATE merch_variants
+        SET deleted_previous_is_active = is_active,
+            is_active = 0,
+            deleted_at = datetime('now'),
+            deleted_by = ?,
+            deletion_reason = ?
+        WHERE product_id = ? AND deleted_at IS NULL
+      `).run(deletedBy, reason, Number(product.id));
     })();
-    res.json({ message: 'Product moved to Trash.', id: Number(product.id), name: product.name, deleted: true });
+    res.json({ message: 'Product moved to Bin.', id: Number(product.id), name: product.name, deleted: true });
   });
 
   // ─── ADMIN: Get inventory ───
@@ -5799,57 +6479,193 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
   });
 
-  console.log('[Merch] API routes mounted at /api/merch/*');
+  // ─── Merch Offers ───
+  // Public: storefront fetches active offers (no auth required).
+  app.get('/api/merch/offers', (req, res) => {
+    try {
+      const rows = db.prepare(`
+        SELECT o.id, o.name, o.short_description AS shortDescription,
+               o.full_description AS fullDescription, o.terms,
+               o.discount_type AS discountType, o.discount_value AS discountValue,
+               o.product_id AS productId, o.variant_id AS variantId,
+               p.name AS productName, p.slug AS productSlug,
+               p.image_url AS productImageUrl, p.images_json AS productImagesJson,
+               v.sku AS variantSku, v.size AS variantSize, v.color AS variantColor,
+               v.image_url AS variantImageUrl, v.images_json AS variantImagesJson,
+               v.price AS variantPrice, v.stock AS variantStock
+        FROM merch_offers o
+        JOIN merch_products p ON p.id = o.product_id
+          AND p.deleted_at IS NULL AND p.is_active = 1
+        JOIN merch_variants v ON v.id = o.variant_id
+          AND v.deleted_at IS NULL AND v.is_active = 1
+        WHERE o.is_active = 1
+        ORDER BY o.id DESC
+      `).all().map((row) => ({
+        ...row,
+        productImages: parseMerchImages(row.productImagesJson),
+        variantImages: parseMerchImages(row.variantImagesJson),
+      }));
+      return res.json({ offers: rows });
+    } catch (err) {
+      console.error('[Merch] GET /api/merch/offers error:', err);
+      return res.status(500).json({ message: 'Failed to load offers' });
+    }
+  });
+
+  // Admin: list all offers (active + inactive).
+  app.get('/api/merch/admin/offers', requireAdmin, (req, res) => {
+    try {
+      const rows = db.prepare(`
+        SELECT o.id, o.name, o.short_description AS shortDescription,
+               o.full_description AS fullDescription, o.terms,
+               o.discount_type AS discountType, o.discount_value AS discountValue,
+               o.product_id AS productId, o.variant_id AS variantId,
+               o.is_active AS isActive, o.created_at AS createdAt, o.updated_at AS updatedAt,
+               p.name AS productName, p.image_url AS productImageUrl,
+               v.sku AS variantSku, v.size AS variantSize, v.color AS variantColor,
+               v.price AS variantPrice
+        FROM merch_offers o
+        LEFT JOIN merch_products p ON p.id = o.product_id AND p.deleted_at IS NULL
+        LEFT JOIN merch_variants v ON v.id = o.variant_id AND v.deleted_at IS NULL
+        ORDER BY o.id DESC
+      `).all();
+      return res.json({ offers: rows });
+    } catch (err) {
+      console.error('[Merch] GET /api/merch/admin/offers error:', err);
+      return res.status(500).json({ message: 'Failed to load offers' });
+    }
+  });
+
+  // Admin: create offer.
+  // discountValue for flat offers arrives in paise (client converts rupees → paise before POST).
+  app.post('/api/merch/admin/offers', requireAdmin, (req, res) => {
+    const {
+      name, shortDescription = '', fullDescription = '', terms = '',
+      productId = null, variantId = null,
+      discountType = 'percentage', discountValue = 0, isActive = 1,
+    } = req.body || {};
+    if (!String(name || '').trim()) {
+      return res.status(400).json({ message: 'name is required' });
+    }
+    if (!['percentage', 'flat'].includes(discountType)) {
+      return res.status(400).json({ message: 'discountType must be percentage or flat' });
+    }
+    const numericProductId = Number(productId);
+    const numericVariantId = Number(variantId);
+    const value = Number(discountValue);
+    if (!Number.isInteger(numericProductId) || numericProductId <= 0 ||
+        !Number.isInteger(numericVariantId) || numericVariantId <= 0) {
+      return res.status(400).json({ message: 'A valid product variant is required.' });
+    }
+    if (!Number.isFinite(value) || value <= 0 ||
+        (discountType === 'percentage' && value > 100)) {
+      return res.status(400).json({
+        message: discountType === 'percentage'
+          ? 'Percentage discount must be greater than 0 and no more than 100.'
+          : 'Rupee discount must be greater than 0.',
+      });
+    }
+    try {
+      const variant = db.prepare(`
+        SELECT id
+        FROM merch_variants
+        WHERE id = ? AND product_id = ? AND deleted_at IS NULL
+      `).get(numericVariantId, numericProductId);
+      if (!variant) {
+        return res.status(400).json({ message: 'The selected variant does not belong to the selected product.' });
+      }
+      const result = db.prepare(`
+        INSERT INTO merch_offers
+          (name, short_description, full_description, terms, product_id, variant_id,
+           discount_type, discount_value, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      `).run(
+        String(name).trim(), String(shortDescription).trim(), String(fullDescription).trim(),
+        String(terms).trim(),
+        numericProductId,
+        numericVariantId,
+        discountType, value, isActive ? 1 : 0,
+      );
+      return res.json({ id: result.lastInsertRowid });
+    } catch (err) {
+      console.error('[Merch] POST /api/merch/admin/offers error:', err);
+      return res.status(500).json({ message: 'Failed to create offer' });
+    }
+  });
+
+  // Admin: update offer fields.
+  app.patch('/api/merch/admin/offers/:id', requireAdmin, (req, res) => {
+    const id = Number(req.params.id);
+    const offer = db.prepare('SELECT id FROM merch_offers WHERE id = ?').get(id);
+    if (!offer) return res.status(404).json({ message: 'Offer not found' });
+    const {
+      name, shortDescription, fullDescription, terms,
+      productId, variantId, discountType, discountValue, isActive,
+    } = req.body || {};
+    const existing = db.prepare(`
+      SELECT product_id AS productId, variant_id AS variantId,
+             discount_type AS discountType, discount_value AS discountValue
+      FROM merch_offers WHERE id = ?
+    `).get(id);
+    const nextDiscountType = discountType === undefined ? existing.discountType : discountType;
+    const nextDiscountValue = discountValue === undefined ? existing.discountValue : Number(discountValue);
+    if (!['percentage', 'flat'].includes(nextDiscountType)) {
+      return res.status(400).json({ message: 'discountType must be percentage or flat' });
+    }
+    if (!Number.isFinite(nextDiscountValue) || nextDiscountValue <= 0 ||
+        (nextDiscountType === 'percentage' && nextDiscountValue > 100)) {
+      return res.status(400).json({
+        message: nextDiscountType === 'percentage'
+          ? 'Percentage discount must be greater than 0 and no more than 100.'
+          : 'Rupee discount must be greater than 0.',
+      });
+    }
+    const nextProductId = productId === undefined ? existing.productId : Number(productId);
+    const nextVariantId = variantId === undefined ? existing.variantId : Number(variantId);
+    if (!Number.isInteger(nextProductId) || nextProductId <= 0 ||
+        !Number.isInteger(nextVariantId) || nextVariantId <= 0) {
+      return res.status(400).json({ message: 'A valid product variant is required.' });
+    }
+    {
+      const variant = db.prepare(`
+        SELECT id FROM merch_variants
+        WHERE id = ? AND product_id = ? AND deleted_at IS NULL
+      `).get(nextVariantId, nextProductId);
+      if (!variant) {
+        return res.status(400).json({ message: 'The selected variant does not belong to the selected product.' });
+      }
+    }
+    const fields = [];
+    const params = [];
+    if (name !== undefined)              { fields.push('name = ?');               params.push(String(name).trim()); }
+    if (shortDescription !== undefined)  { fields.push('short_description = ?');  params.push(String(shortDescription).trim()); }
+    if (fullDescription !== undefined)   { fields.push('full_description = ?');   params.push(String(fullDescription).trim()); }
+    if (terms !== undefined)             { fields.push('terms = ?');              params.push(String(terms).trim()); }
+    if (productId !== undefined)         { fields.push('product_id = ?');         params.push(productId ? Number(productId) : null); }
+    if (variantId !== undefined)         { fields.push('variant_id = ?');         params.push(variantId ? Number(variantId) : null); }
+    if (discountType !== undefined)      { fields.push('discount_type = ?');      params.push(discountType); }
+    if (discountValue !== undefined)     { fields.push('discount_value = ?');     params.push(Number(discountValue)); }
+    if (isActive !== undefined)          { fields.push('is_active = ?');          params.push(isActive ? 1 : 0); }
+    if (!fields.length) return res.status(400).json({ message: 'No fields to update' });
+    fields.push("updated_at = datetime('now')");
+    try {
+      db.prepare(`UPDATE merch_offers SET ${fields.join(', ')} WHERE id = ?`).run(...params, id);
+      return res.json({ ok: true });
+    } catch (err) {
+      console.error('[Merch] PATCH /api/merch/admin/offers error:', err);
+      return res.status(500).json({ message: 'Failed to update offer' });
+    }
+  });
+
+  // Admin: hard-delete offer (offers have no order references, no Trash needed).
+  app.delete('/api/merch/admin/offers/:id', requireAdmin, (req, res) => {
+    const id = Number(req.params.id);
+    try {
+      db.prepare('DELETE FROM merch_offers WHERE id = ?').run(id);
+      return res.json({ ok: true });
+    } catch (err) {
+      console.error('[Merch] DELETE /api/merch/admin/offers error:', err);
+      return res.status(500).json({ message: 'Failed to delete offer' });
+    }
+  });
 };
-
-// ─── Seed initial product data ───
-function seedMerchProducts(db) {
-  const products = [
-    { name: 'Zenith Hoodie – Black', slug: 'zenith-hoodie-black', description: 'Heavyweight 450 GSM organic cotton blend hoodie with structured premium silhouette.', specifications_json: { 'Product type': 'Premium pullover hoodie', 'Fabric': '450 GSM organic cotton blend', 'Colour': 'Black', 'Fit': 'Structured relaxed fit', 'Care': 'Machine wash cold; air dry' }, category: 'hoodies', base_price: 349900, image_url: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146&width=600', gst_rate: 18, weight_grams: 650 },
-    { name: 'Zenith Hoodie – Sand', slug: 'zenith-hoodie-sand', description: 'Same Zenith frame in earthy sand colourway. 450 GSM organic cotton blend.', specifications_json: { 'Product type': 'Premium pullover hoodie', 'Fabric': '450 GSM organic cotton blend', 'Colour': 'Sand', 'Fit': 'Structured relaxed fit', 'Care': 'Machine wash cold; air dry' }, category: 'hoodies', base_price: 349900, image_url: '/cdn/shop/files/WhatsAppImage2026-02-06at16.09.32_12254.jpg?v=1770377146&width=600', gst_rate: 18, weight_grams: 650 },
-    { name: 'H2 Molecular Hydrogen Water Bottle', slug: 'h2-water-bottle', description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 3 minutes. BPA-free, USB-C rechargeable.', specifications_json: { 'Product Name': 'Hydrogen-Rich Water Bottle', 'Capacity': '460ml', 'Electrolytic Material': 'Platinum-Titanium', 'Membrane Electrode': 'PEM + SPE', 'Main Material': 'Glass', 'Shell Material': 'Stainless Steel', 'Battery Type': '700mAh Lithium Polymer', 'Working Time': '5 minutes per cycle (3,000+ ppb)', 'Size': 'Ø7cm × 24cm', 'Colours Available': 'Blue / Black / Silver / Gold' }, category: 'bottles', base_price: 649900, image_url: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113', gst_rate: 18, weight_grams: 380 },
-    { name: 'H2 Hydrogen Mist Spray', slug: 'h2-mist-spray', description: 'Compact hydrogen mist spray for skin rejuvenation. Antioxidant-rich hydrogen water delivery.', specifications_json: { 'Product Name': 'Hydrogen Mist Sprayer', 'Atomisation Amount': '0.8–1.2 ml/min', 'Hydrogen Concentration': '1000 ppb', 'Water Tank Capacity': '13ml', 'Main Material': 'PC (Polycarbonate)', 'Negative Potential': '< −300mV', 'Battery Capacity': '500mAh', 'Power Supply': 'DC 5V / Micro USB' }, category: 'sprays', base_price: 249900, image_url: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.33874b.jpg?v=1770378138', gst_rate: 18, weight_grams: 150 },
-  ];
-
-  const insertProduct = db.prepare(`
-    INSERT INTO merch_products (name, slug, description, specifications_json, category, base_price, image_url, gst_rate, weight_grams)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const insertVariant = db.prepare(`
-    INSERT INTO merch_variants (product_id, sku, size, color, price, stock)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
-
-  // Product 1: Zenith Hoodie Black
-  let r = insertProduct.run(products[0].name, products[0].slug, products[0].description, JSON.stringify(products[0].specifications_json), products[0].category, products[0].base_price, products[0].image_url, products[0].gst_rate, products[0].weight_grams);
-  let pid = r.lastInsertRowid;
-  for (const size of ['S', 'M', 'L', 'XL', 'XXL']) {
-    insertVariant.run(pid, `HM-HOD-BLK-${size}`, size, 'Black', 349900, 35);
-  }
-
-  // Product 2: Zenith Hoodie Sand
-  r = insertProduct.run(products[1].name, products[1].slug, products[1].description, JSON.stringify(products[1].specifications_json), products[1].category, products[1].base_price, products[1].image_url, products[1].gst_rate, products[1].weight_grams);
-  pid = r.lastInsertRowid;
-  for (const size of ['S', 'M', 'L', 'XL', 'XXL']) {
-    insertVariant.run(pid, `HM-HOD-SND-${size}`, size, 'Sand', 349900, 35);
-  }
-
-  // Product 3: Water Bottle
-  r = insertProduct.run(products[2].name, products[2].slug, products[2].description, JSON.stringify(products[2].specifications_json), products[2].category, products[2].base_price, products[2].image_url, products[2].gst_rate, products[2].weight_grams);
-  pid = r.lastInsertRowid;
-  insertVariant.run(pid, 'HM-BTL-300-SLV', '300ml', 'Silver', 699900, 40);
-  insertVariant.run(pid, 'HM-BTL-500-SLV', '500ml', 'Silver', 649900, 35);
-  insertVariant.run(pid, 'HM-BTL-300-BLK', '300ml', 'Black', 749900, 30);
-  insertVariant.run(pid, 'HM-BTL-500-BLK', '500ml', 'Black', 849900, 25);
-
-  // Product 4: Mist Spray
-  r = insertProduct.run(products[3].name, products[3].slug, products[3].description, JSON.stringify(products[3].specifications_json), products[3].category, products[3].base_price, products[3].image_url, products[3].gst_rate, products[3].weight_grams);
-  pid = r.lastInsertRowid;
-  insertVariant.run(pid, 'HM-SPR-050-WHT', '50ml', 'White', 249900, 50);
-  insertVariant.run(pid, 'HM-SPR-100-WHT', '100ml', 'White', 349900, 40);
-  insertVariant.run(pid, 'HM-SPR-050-RSG', '50ml', 'Rose Gold', 279900, 35);
-  insertVariant.run(pid, 'HM-SPR-100-RSG', '100ml', 'Rose Gold', 379900, 30);
-
-  console.log('[Merch] Seeded 4 products with variants');
-}
