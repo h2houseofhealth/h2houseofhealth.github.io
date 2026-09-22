@@ -3398,9 +3398,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   function getMerchWhatsAppConfig() {
     const enabledValue = String(process.env.WHATSAPP_ORDER_CONFIRMATION_ENABLED || '').trim().toLowerCase();
     const token = String(
-      process.env.WHATSAPP_TOKEN ||
       process.env.WHATSAPP_ACCESS_TOKEN ||
       process.env.META_WHATSAPP_ACCESS_TOKEN ||
+      process.env.WHATSAPP_TOKEN ||
       ''
     ).trim();
     const phoneNumberId = String(
@@ -3413,8 +3413,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       process.env.WHATSAPP_ORDER_TEMPLATE ||
       'merch_order_confirmation'
     ).trim();
-    const token = String(process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_WHATSAPP_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || '').trim();
-    const phoneNumberId = String(process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.META_WHATSAPP_PHONE_NUMBER_ID || '').trim();
     return {
       enabled: enabledValue === 'true' || (!['false', '0', 'no', 'off'].includes(enabledValue) && Boolean(token && phoneNumberId)),
       token,
@@ -3721,23 +3719,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   async function sendMerchWhatsAppOrderConfirmation(orderId, req) {
     const config = getMerchWhatsAppConfig();
-    if (!config.enabled) {
-      return { ok: false, message: 'Merch WhatsApp confirmation is disabled or unconfigured' };
-    }
-    if (!config.token || !config.phoneNumberId) {
-      console.warn('[Merch] WhatsApp confirmation skipped: WhatsApp credentials are not configured.');
-      return { ok: false, message: 'WhatsApp credentials not configured' };
     let logId = 0;
     const finish = (status, extra = {}) => ({ status, ...extra, logId: logId || null });
 
     if (!config.enabled) {
-      logId = createMerchWhatsAppMessageLog({ orderId, status: 'skipped', templateName: config.actionTemplateName });
+      logId = createMerchWhatsAppMessageLog({ orderId, status: 'skipped', templateName: config.orderTemplate });
       updateMerchWhatsAppMessageLog(logId, { status: 'skipped', errorMessage: 'WhatsApp order confirmations are disabled.' });
       return finish('skipped', { reason: 'disabled' });
     }
     if (!config.token || !config.phoneNumberId) {
       console.warn('[Merch] WhatsApp confirmation skipped: WhatsApp credentials are not configured.');
-      logId = createMerchWhatsAppMessageLog({ orderId, status: 'skipped', templateName: config.actionTemplateName });
+      logId = createMerchWhatsAppMessageLog({ orderId, status: 'skipped', templateName: config.orderTemplate });
       updateMerchWhatsAppMessageLog(logId, { status: 'skipped', errorMessage: 'WhatsApp credentials are not configured.' });
       return finish('skipped', { reason: 'missing_config' });
     }
@@ -3749,11 +3741,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       orderNumber: data?.order?.orderNumber || '',
       to,
       status: 'triggered',
-      templateName: config.actionTemplateName,
+      templateName: config.orderTemplate,
     });
     if (!data || !to) {
       console.warn('[Merch] WhatsApp confirmation skipped: customer phone is missing.');
-      return { ok: false, message: 'Customer phone number is missing' };
+      updateMerchWhatsAppMessageLog(logId, { status: 'skipped', errorMessage: 'Customer phone is missing.' });
+      return finish('skipped', { reason: 'missing_phone' });
     }
 
     const customerName = String(data.order?.customerName || 'Valued Customer').trim();
@@ -3795,41 +3788,19 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         to,
         messageId,
       });
-      return { ok: true, messageId, to };
-    } catch (error) {
-      console.error('[Merch] Failed to send WhatsApp order confirmation:', error?.message || error);
-      return { ok: false, message: error?.message || 'Failed to send WhatsApp message' };
-      updateMerchWhatsAppMessageLog(logId, { status: 'skipped', errorMessage: 'Customer phone is missing.' });
-      return finish('skipped', { reason: 'missing_phone' });
-    }
-
-    try {
-      const links = buildMerchEmailLinks(req, data.order.id);
-      const cardBuffer = await renderMerchWhatsAppCardImage({ order: data.order, items: data.items, req });
-      const mediaId = await submitWhatsAppMediaUpload({
-        config,
-        toUploadBuffer: cardBuffer,
-        filename: `h2-order-${String(data.order.orderNumber || data.order.id).replace(/[^a-z0-9_-]+/gi, '-')}.png`,
-      });
-      const imageResponse = await sendWhatsAppGraphMessage(config, {
-        to,
-        type: 'image',
-        image: { id: mediaId },
-      });
-      const actionResponse = await sendMerchWhatsAppActionMessage({ config, to, order: data.order, links });
-      const graphMessageId = getWhatsAppGraphMessageId(actionResponse) || getWhatsAppGraphMessageId(imageResponse);
       updateMerchWhatsAppMessageLog(logId, {
         status: 'sent',
-        graphMessageId,
-        response: { image: imageResponse, action: actionResponse },
+        graphMessageId: messageId,
+        response: result,
       });
-      return finish('sent', { messageId: graphMessageId || null });
+      return finish('sent', { ok: true, messageId, to });
     } catch (error) {
+      console.error('[Merch] Failed to send WhatsApp order confirmation:', error?.message || error);
       updateMerchWhatsAppMessageLog(logId, {
         status: 'failed',
         errorMessage: error?.message || String(error),
       });
-      throw error;
+      return finish('failed', { ok: false, message: error?.message || 'Failed to send WhatsApp message' });
     }
   }
 

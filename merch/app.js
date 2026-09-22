@@ -1944,13 +1944,6 @@ function getWishlistProductPrice(item) {
     `;
   }
 
-  function BookingUpdatesCard(data) {
-    const customerEmail = data?.email || '';
-    const customerPhone = data?.phone || '';
-    const digits = customerPhone.replace(/\D/g, '');
-    const phoneDisplay = digits.length >= 10 ? ` (+91 ${digits.slice(-10)})` : '';
-    const orderId = data?.orderId || '';
-
   function getConfirmationNotificationState(notifications = {}) {
     const emailStatus = String(notifications?.email?.status || '').toLowerCase();
     const whatsappLatest = notifications?.whatsapp?.latest || {};
@@ -1971,11 +1964,17 @@ function getWishlistProductPrice(item) {
       : emailStatus === 'failed'
         ? 'Email delivery needs attention. Your order is still confirmed.'
         : "We're preparing your confirmation email.";
-    return { emailLabel, emailText, whatsappLabel, whatsappText };
+    return { emailLabel, emailText, whatsappLabel, whatsappText, whatsappStatus };
   }
 
   function BookingUpdatesCard(data = {}) {
-    const notificationState = getConfirmationNotificationState(data.notifications || {});
+    const customerEmail = data?.email || '';
+    const customerPhone = data?.phone || '';
+    const digits = customerPhone.replace(/\D/g, '');
+    const phoneDisplay = digits.length >= 10 ? ` (+91 ${digits.slice(-10)})` : '';
+    const orderId = data?.orderId || '';
+    const notificationState = getConfirmationNotificationState(data?.notifications || {});
+
     return `
       <section class="booking-updates-card" aria-label="Order status updates">
         <h2>Order Confirmations & Updates</h2>
@@ -1985,7 +1984,7 @@ function getWishlistProductPrice(item) {
             <div class="booking-update-content">
               <h3>Email Confirmation</h3>
               <strong class="booking-update-badge is-sent">✓ Sent to ${escapeHtml(customerEmail || 'your email')}</strong>
-              <p>Check your inbox for order details and receipt.</p>
+              <p>${escapeHtml(notificationState.emailText || 'Check your inbox for order details and receipt.')}</p>
             </div>
           </article>
           <article class="booking-update-item">
@@ -1993,23 +1992,13 @@ function getWishlistProductPrice(item) {
             <div class="booking-update-content">
               <h3>WhatsApp Confirmation</h3>
               <strong class="booking-update-badge is-sent" id="merchWhatsAppBadge">✓ Sent to WhatsApp${escapeHtml(phoneDisplay)}</strong>
-              <p id="merchWhatsAppSubtext">Order summary and real-time delivery alerts are sent to your WhatsApp number.</p>
+              <p id="merchWhatsAppSubtext">${escapeHtml(notificationState.whatsappStatus === 'failed' ? notificationState.whatsappText : 'Order summary and real-time delivery alerts are sent to your WhatsApp number.')}</p>
               ${orderId ? `
                 <button class="booking-whatsapp-action-btn" type="button" data-confirmation-action="send-whatsapp" data-order-id="${escapeHtml(String(orderId))}">
                   ${confirmationIcon('whatsapp')}
                   <span>Resend to WhatsApp</span>
                 </button>
               ` : ''}
-              <strong>${escapeHtml(notificationState.emailLabel)}</strong>
-              <p>${escapeHtml(notificationState.emailText)}</p>
-            </div>
-          </article>
-          <article class="booking-update-item">
-            <div class="booking-update-icon">${confirmationIcon('whatsapp')}</div>
-            <div>
-              <h3>WhatsApp Updates</h3>
-              <strong>${escapeHtml(notificationState.whatsappLabel)}</strong>
-              <p>${escapeHtml(notificationState.whatsappText)}</p>
             </div>
           </article>
         </div>
