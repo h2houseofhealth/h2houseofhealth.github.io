@@ -100,7 +100,7 @@ console.log('ALLOWED_CORS_ORIGINS:', ALLOWED_CORS_ORIGINS);
 const ADMIN_DISCOUNT_GATE_PASSWORD = normalizeEnvValue(process.env.ADMIN_DISCOUNT_GATE_PASSWORD || 'H2-FOUNDERS-2026');
 const RAZORPAY_KEY_ID = normalizeEnvValue(process.env.RAZORPAY_KEY_ID);
 const RAZORPAY_KEY_SECRET = normalizeEnvValue(process.env.RAZORPAY_KEY_SECRET);
-const RAZORPAY_MODE = normalizeEnvValue(process.env.RAZORPAY_MODE || 'test').toLowerCase() || 'test';
+const RAZORPAY_MODE = normalizeEnvValue(process.env.RAZORPAY_MODE || '').toLowerCase() || (RAZORPAY_KEY_ID.startsWith('rzp_live_') ? 'live' : 'test');
 const SENDGRID_API_KEY = normalizeEnvValue(process.env.SENDGRID_API_KEY);
 const SENDGRID_FROM_EMAIL = normalizeEnvValue(
   process.env.SENDGRID_FROM_EMAIL || process.env.SMTP_FROM || process.env.SMTP_USER || ''
@@ -591,6 +591,8 @@ const razorpay = !razorpayConfigError
 
 if (razorpayConfigError && (RAZORPAY_KEY_ID || RAZORPAY_KEY_SECRET || process.env.RAZORPAY_MODE)) {
   console.warn(`Razorpay disabled: ${razorpayConfigError}`);
+} else if (razorpay) {
+  console.log(`Razorpay enabled in ${RAZORPAY_MODE.toUpperCase()} mode.`);
 }
 
 migrate();
@@ -823,15 +825,21 @@ function getRazorpayConfigError() {
     return 'Razorpay is not configured';
   }
 
-  if (RAZORPAY_MODE !== 'test') {
-    return 'Razorpay live mode is blocked. Set RAZORPAY_MODE=test.';
+  if (RAZORPAY_MODE === 'live') {
+    if (!RAZORPAY_KEY_ID.startsWith('rzp_live_')) {
+      return 'Invalid live key. Live mode requires rzp_live_* credentials.';
+    }
+    return null;
   }
 
-  if (!RAZORPAY_KEY_ID.startsWith('rzp_test_')) {
-    return 'Razorpay live keys are blocked. Use rzp_test_* credentials.';
+  if (RAZORPAY_MODE === 'test') {
+    if (!RAZORPAY_KEY_ID.startsWith('rzp_test_')) {
+      return 'Invalid test key. Test mode requires rzp_test_* credentials.';
+    }
+    return null;
   }
 
-  return null;
+  return 'RAZORPAY_MODE must be either "test" or "live".';
 }
 
 app.use(
