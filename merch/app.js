@@ -899,7 +899,7 @@
       orderNumber: confirmation.bookingId,
       customerEmail: confirmation.email,
       email: confirmation.email,
-      status: confirmation.trackingNumber ? 'shipped' : 'processing',
+      status: 'processing',
       createdAt: confirmation.createdAt,
       updatedAt: confirmation.createdAt,
       trackingNumber: confirmation.trackingNumber || '',
@@ -3367,7 +3367,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   function canCancelMerchOrder(order) {
-    return ['pending', 'processing'].includes(String(order?.status || '').trim().toLowerCase());
+    const status = String(order?.status || '').trim().toLowerCase();
+    return Boolean(status) && !['delivered', 'returned', 'cancelled'].includes(status);
   }
 
   async function cancelMerchOrder(order) {

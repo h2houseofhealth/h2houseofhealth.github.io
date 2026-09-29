@@ -4836,7 +4836,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
             shiprocket_courier_name = ?,
             tracking_number = ?,
             carrier_name = ?,
-            status = 'shipped',
+            status = 'processing',
             shiprocket_status = 'AWB ASSIGNED',
             shiprocket_label_url = COALESCE(?, shiprocket_label_url),
             updated_at = datetime('now')
@@ -5671,8 +5671,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
       return res.json({ success: true, order: buildMerchOrderRecord(order, items) });
     }
-    if (!['pending', 'processing'].includes(currentStatus)) {
-      return res.status(409).json({ error: 'This order can no longer be cancelled because it has been shipped or completed.' });
+    if (['delivered', 'returned'].includes(currentStatus)) {
+      return res.status(409).json({ error: 'This order can no longer be cancelled because it has already been delivered.' });
     }
 
     const cancel = db.transaction(() => {
@@ -5681,7 +5681,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         SET status = 'cancelled',
             payment_status = CASE WHEN payment_status IN ('paid', 'cod_pending') THEN 'refunded' ELSE payment_status END,
             updated_at = datetime('now')
-        WHERE id = ? AND status IN ('pending', 'processing')
+        WHERE id = ? AND status NOT IN ('delivered', 'returned', 'cancelled')
       `).run(order.id);
       if (result.changes && ['paid', 'cod_pending'].includes(String(order.payment_status || '').toLowerCase())) {
         restoreMerchOrderStock(order.id);
@@ -6659,8 +6659,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const existingOrder = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
     if (!existingOrder) return res.status(404).json({ error: 'Order not found' });
     const existingStatus = String(existingOrder.status || '').toLowerCase();
-    if (String(status).toLowerCase() === 'cancelled' && !['pending', 'processing', 'cancelled'].includes(existingStatus)) {
-      return res.status(409).json({ error: 'Shipped, delivered, and returned orders cannot be cancelled.' });
+    if (String(status).toLowerCase() === 'cancelled' && ['delivered', 'returned'].includes(existingStatus)) {
+      return res.status(409).json({ error: 'Delivered and returned orders cannot be cancelled.' });
     }
     const updates = ['status = ?', "updated_at = datetime('now')"];
     const params = [status];
