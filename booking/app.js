@@ -13225,18 +13225,12 @@ function compareBookingsByScheduleDesc(a, b) {
 
 function getUserRescheduleEligibility(row, options = {}) {
   const booking = row?.booking || row;
-  const enforceRescheduleLimit = options?.enforceRescheduleLimit !== false;
   const status = String(booking?.status || '').trim().toLowerCase();
   if (status === 'completed' || status === 'cancelled') {
     return { allowed: false, message: 'Completed or cancelled bookings cannot be rescheduled.' };
   }
   if (status === 'schedule_later') {
     return { allowed: true, message: '' };
-  }
-  const rescheduleCount = Number(booking?.rescheduleCount || 0);
-  const hasUserRescheduleHistory = rescheduleCount >= 1;
-  if (enforceRescheduleLimit && hasUserRescheduleHistory) {
-    return { allowed: false, message: 'Reschedule limit reached. Further rescheduling can be done only by admin.' };
   }
   const slotStart = getBookingStartTime(booking);
   if (!Number.isFinite(slotStart)) {
