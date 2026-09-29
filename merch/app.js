@@ -899,9 +899,11 @@
       orderNumber: confirmation.bookingId,
       customerEmail: confirmation.email,
       email: confirmation.email,
-      status: 'processing',
+      status: confirmation.trackingNumber ? 'shipped' : 'processing',
       createdAt: confirmation.createdAt,
       updatedAt: confirmation.createdAt,
+      trackingNumber: confirmation.trackingNumber || '',
+      carrier: confirmation.carrierName || confirmation.carrier || '',
       totalAmount: confirmation.totalAmount,
       items: (Array.isArray(confirmation.items) ? confirmation.items : []).map((item) => ({
         name: item.productName,
@@ -2029,6 +2031,8 @@ function getWishlistProductPrice(item) {
     return {
       bookingId: String(order?.orderNumber || verifyResult?.orderNumber || 'BK20260717001'),
       orderId: verifyResult?.orderId || order?.orderId || null,
+      trackingNumber: verifyResult?.trackingNumber || order?.trackingNumber || null,
+      carrierName: verifyResult?.carrierName || order?.carrierName || null,
       createdAt,
       dateLabel: formatConfirmationDate(createdAt),
       timeLabel: `${formatConfirmationTime(createdAt)} - Order received`,
@@ -2082,6 +2086,7 @@ function getWishlistProductPrice(item) {
   }
 
   function BookingIdCard(data) {
+    const hasTracking = Boolean(data.trackingNumber);
     return `
       <div class="booking-id-card">
         <span>Order Number</span>
@@ -2090,6 +2095,15 @@ function getWishlistProductPrice(item) {
           ${confirmationIcon('copy')}
         </button>
       </div>
+      ${hasTracking ? `
+        <div class="booking-id-card" style="margin-top: 10px; background: rgba(34, 197, 94, 0.08); border-color: rgba(34, 197, 94, 0.35);">
+          <span>Courier Tracking AWB (${escapeHtml(data.carrierName || 'Shiprocket')})</span>
+          <strong style="color: #16a34a; font-family: monospace; letter-spacing: 0.5px;">${escapeHtml(data.trackingNumber)}</strong>
+          <button class="booking-copy-btn" type="button" data-confirmation-action="copy-awb" aria-label="Copy tracking AWB">
+            ${confirmationIcon('copy')}
+          </button>
+        </div>
+      ` : ''}
     `;
   }
 
@@ -2173,14 +2187,16 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   month: 'short',
   year: 'numeric',
 });
-        const details = [
+    const details = [
       { icon: 'calendar', label: 'Date & Time', lines: [data.dateLabel, data.timeLabel] },
       { icon: 'user', label: 'Service', lines: [data.service] },
       { icon: 'map', label: data.locationTitle || 'Location', lines: [data.location] },
       {
         icon: 'truck',
-        label: 'Estimated Delivery Date',
-        lines: [estimatedDelivery, "We'll notify you once your order is shipped."],
+        label: data.trackingNumber ? `Shipment Assigned (${data.carrierName || 'Shiprocket'})` : 'Estimated Delivery Date',
+        lines: data.trackingNumber
+          ? [`Tracking AWB: ${data.trackingNumber}`, 'Live tracking code generated instantly upon order confirmation.']
+          : [estimatedDelivery, "We'll notify you once your order is shipped."],
         isDelivery: true,
       },
     ];
@@ -2267,6 +2283,16 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             setTimeout(() => button.classList.remove('is-copied'), 1200);
           } catch {
             showCheckoutNotice('Copy unavailable', `Booking ID: ${data.bookingId}`);
+          }
+          return;
+        }
+        if (action === 'copy-awb') {
+          try {
+            await navigator.clipboard?.writeText(data.trackingNumber);
+            button.classList.add('is-copied');
+            setTimeout(() => button.classList.remove('is-copied'), 1200);
+          } catch {
+            showCheckoutNotice('Copy unavailable', `Tracking AWB: ${data.trackingNumber}`);
           }
           return;
         }

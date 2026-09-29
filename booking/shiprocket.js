@@ -23,7 +23,19 @@ class ShiprocketService {
   }
 
   isConfigured() {
-    return Boolean(this.email && this.password);
+    return Boolean(this.getEmail() && this.getPassword());
+  }
+
+  getEmail() {
+    return (this.email || process.env.SHIPROCKET_EMAIL || '').trim();
+  }
+
+  getPassword() {
+    return (this.password || process.env.SHIPROCKET_PASSWORD || '').trim();
+  }
+
+  getPickupLocation() {
+    return (this.pickupLocation || process.env.SHIPROCKET_PICKUP_LOCATION || 'work').trim();
   }
 
   /**
@@ -35,7 +47,10 @@ class ShiprocketService {
       return this.token;
     }
 
-    if (!this.email || !this.password) {
+    const email = this.getEmail();
+    const password = this.getPassword();
+
+    if (!email || !password) {
       throw new Error('Shiprocket credentials missing. Please set SHIPROCKET_EMAIL and SHIPROCKET_PASSWORD in your environment.');
     }
 
@@ -43,8 +58,8 @@ class ShiprocketService {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: this.email.trim(),
-        password: this.password.trim(),
+        email,
+        password,
       }),
     });
 
@@ -150,7 +165,7 @@ class ShiprocketService {
     const payload = {
       order_id: String(order.order_number || `ORD-${order.id}`),
       order_date: orderDate,
-      pickup_location: customPickupLocation || this.pickupLocation,
+      pickup_location: customPickupLocation || this.getPickupLocation(),
       channel_id: '',
       comment: `Order #${order.order_number || order.id} from H2 House of Health Store`,
       billing_customer_name: firstName,
