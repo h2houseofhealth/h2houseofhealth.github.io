@@ -2106,7 +2106,7 @@ function attachEvents() {
   elements.userCouponCode?.addEventListener('input', () => {
     state.cartCouponPreview = null;
     renderCartCouponPreview();
-    renderUserCheckoutSummary(state.bookings || []);
+    renderUserCheckoutSummary(getCurrentUserCartPayableBookings());
   });
 
   elements.openBookingBtn?.addEventListener('click', () => openDialog());
@@ -4642,6 +4642,7 @@ async function proceedToGuestPayment() {
         guestEmail: state.guestCheckout.guestEmail,
         guestPhone: state.guestCheckout.guestPhone,
         bookings: state.cart,
+        couponCode: String(state.cartCouponPreview?.code || state.cartCouponCode || '').trim(),
       }),
     });
     
@@ -12740,6 +12741,11 @@ function renderCartCouponPreview() {
   renderCouponPreview(state.cartCouponPreview, elements.userCouponPreview);
 }
 
+function getCurrentUserCartPayableBookings() {
+  const cartSourceBookings = state.isGuestUser ? getGuestCartBookings() : (state.bookings || []);
+  return getUserCartPayableBookings(cartSourceBookings);
+}
+
 function renderGeneralCouponsForTarget({ coupons = [], container, onApply }) {
   if (!container) return;
   const isCartOffersContainer = container === elements.userGeneralCoupons;
@@ -12862,7 +12868,7 @@ async function previewCartCoupon() {
   if (!couponCode) {
     state.cartCouponPreview = null;
     renderCartCouponPreview();
-    renderUserCheckoutSummary(state.bookings || []);
+    renderUserCheckoutSummary(getCurrentUserCartPayableBookings());
     return;
   }
 
@@ -12870,15 +12876,18 @@ async function previewCartCoupon() {
     const result = await api('/api/payments/preview-cart-coupon', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ couponCode }),
+      body: JSON.stringify({
+        couponCode,
+        ...(state.isGuestUser && !state.user ? { bookings: getGuestCartBookings() } : {}),
+      }),
     });
     state.cartCouponPreview = result.coupon || null;
     renderCartCouponPreview();
-    renderUserCheckoutSummary(state.bookings || []);
+    renderUserCheckoutSummary(getCurrentUserCartPayableBookings());
   } catch (error) {
     state.cartCouponPreview = null;
     renderCartCouponPreview();
-    renderUserCheckoutSummary(state.bookings || []);
+    renderUserCheckoutSummary(getCurrentUserCartPayableBookings());
     showNotice({ title: 'Error', body: error.message || 'Unable to apply this coupon.' });
   }
 }
