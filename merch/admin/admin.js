@@ -3339,7 +3339,7 @@
                       ${!selectedOrder?.shiprocketAwbCode ? `<button class="admin-btn admin-btn--primary" type="button" data-action="shiprocket-fulfill" data-id="${selectedOrder?.id || ''}">🚀 Ship with Shiprocket</button>` : ''}
                       <button class="admin-btn admin-btn--ghost" type="button" data-action="ship-order" data-id="${selectedOrder?.id || ''}">Ship</button>
                       <button class="admin-btn admin-btn--ghost" type="button" data-action="deliver-order" data-id="${selectedOrder?.id || ''}">Deliver</button>
-                      <button class="admin-btn admin-btn--danger" type="button" data-action="cancel-order" data-id="${selectedOrder?.id || ''}" ${['pending', 'processing'].includes(normalizeOrderStatus(selectedOrder?.status)) ? '' : 'disabled title="Only pending or processing orders can be cancelled"'}>Cancel</button>
+                      <button class="admin-btn admin-btn--danger" type="button" data-action="cancel-order" data-id="${selectedOrder?.id || ''}" ${['delivered', 'returned', 'cancelled'].includes(normalizeOrderStatus(selectedOrder?.status)) ? 'disabled title="Delivered and returned orders cannot be cancelled"' : ''}>Cancel</button>
                       <button class="admin-btn admin-btn--soft" type="button" data-action="refund-order" data-id="${selectedOrder?.id || ''}">Refund</button>
                     </div>
                   </div>

@@ -3367,7 +3367,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   function canCancelMerchOrder(order) {
-    return ['pending', 'processing'].includes(String(order?.status || '').trim().toLowerCase());
+    const status = String(order?.status || '').trim().toLowerCase();
+    return Boolean(status) && !['delivered', 'returned', 'cancelled'].includes(status);
   }
 
   async function cancelMerchOrder(order) {
