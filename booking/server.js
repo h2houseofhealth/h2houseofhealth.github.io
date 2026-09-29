@@ -7258,6 +7258,129 @@ app.get('/api/public/guest/bookings', (req, res) => {
   });
 });
 
+app.put('/api/public/guest/bookings/:id', (req, res) => {
+  const guestAccess = verifyGuestCheckoutAccessToken(req.body?.token || req.query?.token);
+  const bookingId = Number(req.params.id);
+  if (!guestAccess || !Number.isInteger(bookingId) || !guestAccess.bookingIds.map(Number).includes(bookingId)) {
+    return res.status(403).json({ message: 'Invalid or expired guest session' });
+  }
+
+  const existing = db
+    .prepare(
+      `SELECT id, status, service_name AS serviceName, booking_date AS bookingDate,
+              booking_time AS bookingTime, notes, reschedule_count AS rescheduleCount,
+              guest_phone AS guestPhone
+       FROM bookings WHERE id = ? AND booking_type = 'guest'`
+    )
+    .get(bookingId);
+  if (!existing) return res.status(404).json({ message: 'booking not found' });
+  const existingStatus = String(existing.status || '').trim().toLowerCase();
+  if (['completed', 'cancelled'].includes(existingStatus)) {
+    return res.status(409).json({ message: 'Completed or cancelled bookings cannot be edited.' });
+  }
+
+  const bookingDate = String(req.body?.bookingDate || '').trim();
+  const bookingTime = normalizeSlotStartTime(String(req.body?.bookingTime || '').trim());
+  const selectedDate = new Date(`${bookingDate}T00:00:00`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(bookingDate) || Number.isNaN(selectedDate.getTime())) {
+    return res.status(400).json({ message: 'bookingDate is invalid' });
+  }
+  if (selectedDate < new Date(new Date().setHours(0, 0, 0, 0))) {
+    return res.status(400).json({ message: 'bookingDate cannot be in the past' });
+  }
+  if (!bookingTime) return res.status(400).json({ message: 'bookingTime must be one of the allowed 1-hour slots' });
+  if (isBookingSlotInPast(bookingDate, bookingTime)) {
+    return res.status(400).json({ message: 'bookingTime cannot be in the past for the selected date' });
+  }
+
+  const changedSlot = bookingDate !== String(existing.bookingDate || '') || bookingTime !== normalizeSlotStartTime(existing.bookingTime);
+  if (changedSlot && existingStatus !== 'schedule_later') {
+    if (Number(existing.rescheduleCount || 0) >= 1) {
+      return res.status(409).json({ message: 'You can reschedule only once. Please contact admin for further changes.' });
+    }
+    const currentTime = normalizeSlotStartTime(String(existing.bookingTime || '').trim()) || String(existing.bookingTime || '').trim();
+    const slotStart = new Date(`${String(existing.bookingDate || '').trim()}T${currentTime}:00`).getTime();
+    if (!Number.isFinite(slotStart) || Date.now() > slotStart - 12 * 60 * 60 * 1000) {
+      return res.status(409).json({ message: 'Reschedule is allowed only up to 12 hours before slot start time.' });
+    }
+  }
+
+  const phone = String(req.body?.customerPhone || existing.guestPhone || guestAccess.guestPhone || '').replace(/\D+/g, '');
+  if (phone && !/^[6-9]\d{9}$/.test(phone)) {
+    return res.status(400).json({ message: 'Contact number must be exactly 10 digits.' });
+  }
+  const nextNotes = String(req.body?.notes || '').trim();
+  db.prepare(
+    `UPDATE bookings
+     SET booking_date = ?, booking_time = ?, notes = ?,
+         guest_phone = CASE WHEN ? <> '' THEN ? ELSE guest_phone END,
+         client_phone = CASE WHEN ? <> '' THEN ? ELSE client_phone END,
+         reschedule_count = CASE WHEN ? = 1 AND ? <> 'schedule_later' THEN COALESCE(reschedule_count, 0) + 1 ELSE reschedule_count END
+     WHERE id = ?`
+  ).run(
+    bookingDate, bookingTime, nextNotes,
+    phone, phone, phone, phone,
+    changedSlot ? 1 : 0, existingStatus,
+    bookingId
+  );
+  const booking = db.prepare(
+    `SELECT id, service_name AS serviceName, booking_date AS bookingDate, booking_time AS bookingTime,
+            status, notes, guest_phone AS guestPhone FROM bookings WHERE id = ?`
+  ).get(bookingId);
+  return res.json({ booking });
+});
+
+app.patch('/api/public/guest/bookings/:id/status', (req, res) => {
+  const guestAccess = verifyGuestCheckoutAccessToken(req.body?.token || req.query?.token);
+  const bookingId = Number(req.params.id);
+  const status = normalizeBookingStatus(req.body?.status);
+  if (!guestAccess || !Number.isInteger(bookingId) || !guestAccess.bookingIds.map(Number).includes(bookingId)) {
+    return res.status(403).json({ message: 'Invalid or expired guest session' });
+  }
+  if (!['cancelled', 'schedule_later'].includes(status)) {
+    return res.status(403).json({ message: 'Guest sessions can only be cancelled or moved to Schedule Later.' });
+  }
+
+  const existing = db
+    .prepare(
+      `SELECT id, status, payment_status AS paymentStatus, booking_date AS bookingDate,
+              booking_time AS bookingTime, notes
+       FROM bookings WHERE id = ? AND booking_type = 'guest'`
+    )
+    .get(bookingId);
+  if (!existing) return res.status(404).json({ message: 'booking not found' });
+
+  const existingStatus = String(existing.status || '').trim().toLowerCase();
+  if (['completed', 'cancelled'].includes(existingStatus)) {
+    return res.status(409).json({ message: 'Completed or cancelled bookings cannot be changed.' });
+  }
+  if (status === 'schedule_later') {
+    if (existingStatus === 'schedule_later') {
+      return res.status(409).json({ message: 'This session is already waiting to be scheduled.' });
+    }
+    if (!['booked', 'confirmed'].includes(existingStatus)) {
+      return res.status(409).json({ message: 'Only booked sessions can be moved to Schedule Later.' });
+    }
+    if (String(existing.paymentStatus || '').trim().toLowerCase() !== 'paid') {
+      return res.status(409).json({ message: 'Only paid bookings can be moved to Schedule Later.' });
+    }
+    const normalizedTime = normalizeSlotStartTime(String(existing.bookingTime || '').trim()) || String(existing.bookingTime || '').trim();
+    const slotStart = new Date(`${String(existing.bookingDate || '').trim()}T${normalizedTime}:00`).getTime();
+    if (!Number.isFinite(slotStart) || Date.now() > slotStart - 12 * 60 * 60 * 1000) {
+      return res.status(409).json({ message: 'Schedule Later can be used only up to 12 hours before slot start.' });
+    }
+    if (String(existing.notes || '').toLowerCase().includes('moved to schedule later')) {
+      return res.status(409).json({ message: 'Schedule Later can be used only once for this session.' });
+    }
+    const note = `Moved to Schedule Later by user from ${existing.bookingDate} ${existing.bookingTime}`;
+    db.prepare('UPDATE bookings SET status = ?, notes = ? WHERE id = ?')
+      .run(status, [String(existing.notes || '').trim(), note].filter(Boolean).join('\n'), bookingId);
+  } else {
+    db.prepare('UPDATE bookings SET status = ? WHERE id = ?').run(status, bookingId);
+  }
+  return res.status(204).send();
+});
+
 // Guest Checkout Endpoint
 // Allows unauthenticated users to start checkout with basic info
 app.post('/api/guest/checkout', async (req, res) => {

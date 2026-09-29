@@ -681,6 +681,12 @@
     return [variant?.size, variant?.color].filter(Boolean).join(' / ') || 'Default variant';
   }
 
+  function isHoodieProduct(product) {
+    const category = String(product?.category || '').toLowerCase();
+    const name = String(product?.name || '').toLowerCase();
+    return category === 'hoodies' || category.includes('hoodie') || name.includes('hoodie');
+  }
+
   function getLowStockVariants(product) {
     return (Array.isArray(product?.variants) ? product.variants : [])
       .filter((variant) => Number(variant?.stock || 0) > 0 && Number(variant?.stock || 0) <= LOW_STOCK_THRESHOLD)
@@ -1500,7 +1506,7 @@ function getWishlistProductPrice(item) {
   async function buyNow(variantId, quantity, product) {
     const added = addToCart(variantId, quantity, product, { openDrawerAfterAdd: false });
     if (!added) {
-      showCheckoutNotice('Out of stock', 'This product is currently unavailable.', { variant: 'error' });
+      showCheckoutNotice(isHoodieProduct(product) ? 'Sold out' : 'Out of stock', 'This product is currently unavailable.', { variant: 'error' });
       return;
     }
 
@@ -1511,14 +1517,14 @@ function getWishlistProductPrice(item) {
     const variant = product.variants.find((item) => String(item.id) === String(variantId))
       || getDefaultPurchasableVariant(product);
     if (!variant || Number(variant.stock || 0) <= 0) {
-      showCheckoutNotice('Out of stock', 'This product is currently unavailable.', { variant: 'error' });
+      showCheckoutNotice(isHoodieProduct(product) ? 'Sold out' : 'Out of stock', 'This product is currently unavailable.', { variant: 'error' });
       return;
     }
 
     if (action === 'buy-now') {
       const added = addToCart(variant.id, 1, product, { openDrawerAfterAdd: false });
       if (!added) {
-        showCheckoutNotice('Out of stock', 'This product is currently unavailable.', { variant: 'error' });
+        showCheckoutNotice(isHoodieProduct(product) ? 'Sold out' : 'Out of stock', 'This product is currently unavailable.', { variant: 'error' });
         return;
       }
       await initiateCheckout({ directToCheckout: true });
@@ -1562,13 +1568,13 @@ function getWishlistProductPrice(item) {
     const variant = product.variants.find((entry) => Number(entry.id) === Number(item?.variantId))
       || getDefaultPurchasableVariant(product);
     if (!variant || Number(variant.stock || 0) <= 0) {
-      showCheckoutNotice('Out of stock', 'This wishlist product is currently unavailable.', { variant: 'error' });
+      showCheckoutNotice(isHoodieProduct(product) ? 'Sold out' : 'Out of stock', 'This wishlist product is currently unavailable.', { variant: 'error' });
       return;
     }
 
     const added = addToCart(variant.id, 1, product, { openDrawerAfterAdd: false });
     if (!added) {
-      showCheckoutNotice('Out of stock', 'This wishlist product is currently unavailable.', { variant: 'error' });
+      showCheckoutNotice(isHoodieProduct(product) ? 'Sold out' : 'Out of stock', 'This wishlist product is currently unavailable.', { variant: 'error' });
       return;
     }
 
@@ -3726,7 +3732,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       const isSoldOut = !displayVariant || Number(displayVariant.stock || 0) <= 0;
       const presentation = getProductCardPresentation(product);
       const offerInfo = getVariantOfferDetails(displayVariant, product);
-      const isHoodie = String(product.category || '').toLowerCase() === 'hoodies';
+      const isHoodie = isHoodieProduct(product);
       const normalizedCategory = String(product.category || '').toLowerCase();
       const normalizedName = String(product.name || '').toLowerCase();
       const isMist = normalizedCategory.includes('mist') || normalizedCategory === 'sprays'
@@ -3746,7 +3752,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         .filter(([label, value]) => String(label).trim() && String(value).trim())
         .slice(0, 2);
       const stockLabel = isSoldOut
-        ? 'Out of stock'
+        ? (isHoodie ? 'Sold out' : 'Out of stock')
         : Number(displayVariant?.stock || 0) <= LOW_STOCK_THRESHOLD
           ? `Low stock · ${Number(displayVariant.stock)} left`
           : `In stock · ${Number(displayVariant.stock)} available`;
@@ -3791,7 +3797,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           </p>
           <div class="product-card__actions">
             <button class="btn btn-secondary product-card__action" type="button" data-product-action="add-to-cart" data-product-id="${product.id}" ${isSoldOut ? 'disabled' : ''}>
-              ${isSoldOut ? 'Out of Stock' : 'Add to Cart'}
+              ${isSoldOut ? (isHoodie ? 'Sold Out' : 'Out of Stock') : 'Add to Cart'}
             </button>
             <button class="btn btn-outline product-card__action" type="button" data-product-action="buy-now" data-product-id="${product.id}" ${isSoldOut ? 'disabled' : ''}>
               ${isSoldOut ? 'Unavailable' : 'Buy Now'}
@@ -4045,6 +4051,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   function renderProductInfo(product) {
     const variant = state.selectedVariant;
+    const isHoodie = isHoodieProduct(product);
     const offerInfo = getVariantOfferDetails(variant, product);
     const productDescription = isBottleProduct(product)
       ? 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 5 minutes. BPA-free, USB-C rechargeable.'
@@ -4125,7 +4132,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
       <div class="detail-actions">
         <button id="addToCartBtn" class="btn btn-primary btn-lg" type="button" ${variant.stock <= 0 ? 'disabled' : ''}>
-          ${variant.stock <= 0 ? 'Out of Stock' : 'Add to Cart'}
+          ${variant.stock <= 0 ? (isHoodie ? 'Sold Out' : 'Out of Stock') : 'Add to Cart'}
         </button>
         <button id="buyNowBtn" class="btn btn-secondary btn-lg" type="button" ${variant.stock <= 0 ? 'disabled' : ''}>
           ${variant.stock <= 0 ? 'Unavailable' : 'Buy Now'}

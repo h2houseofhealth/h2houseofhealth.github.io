@@ -2932,7 +2932,13 @@ function setBookingCustomerInlineMessage(message = '') {
 
 function syncBookingModalCustomerGate() {
   const isAdmin = state.user?.role === 'admin';
-  if (elements.bookingCustomerStep) elements.bookingCustomerStep.hidden = !isAdmin;
+  const isEditingBooking = Boolean(String(elements.bookingId?.value || '').trim());
+  const hasSavedPhone = Boolean(normalizeTenDigitMobile(
+    state.user?.mobile || state.user?.phone || state.guestCheckout?.guestPhone || ''
+  ));
+  if (elements.bookingCustomerStep) {
+    elements.bookingCustomerStep.hidden = !isAdmin && !isEditingBooking && hasSavedPhone;
+  }
   if (elements.bookingSchedulerSection) elements.bookingSchedulerSection.hidden = false;
   setBookingCustomerInlineMessage('');
 }
@@ -2945,10 +2951,13 @@ function getCurrentUserBookingContactFallback(bookingId = '') {
     name: String(state.user?.name || booking?.clientName || booking?.customerName || '').trim(),
     email: String(state.user?.email || booking?.clientEmail || booking?.customerEmail || '').trim(),
     phone: normalizeTenDigitMobile(
-      state.user?.mobile ||
+        state.user?.mobile ||
         state.user?.phone ||
+        state.guestCheckout?.guestPhone ||
         booking?.clientPhone ||
         booking?.customerPhone ||
+        booking?.clientMobile ||
+        booking?.guestPhone ||
         booking?.mobile ||
         ''
     ),
@@ -3251,6 +3260,12 @@ async function loadGuestDashboardData() {
     try {
       const result = await api(`/api/public/guest/bookings?token=${encodeURIComponent(storedGuestToken)}`);
       state.bookings = Array.isArray(result?.bookings) ? result.bookings : [];
+      state.guestCheckout = {
+        ...state.guestCheckout,
+        guestName: String(result?.guest?.name || state.guestCheckout?.guestName || '').trim(),
+        guestEmail: String(result?.guest?.email || state.guestCheckout?.guestEmail || '').trim(),
+        guestPhone: normalizeTenDigitMobile(result?.guest?.phone || state.guestCheckout?.guestPhone || ''),
+      };
     } catch (error) {
       if (Number(error?.status || 0) === 400 || Number(error?.status || 0) === 404) {
         clearStoredGuestSessionToken();
@@ -6002,10 +6017,17 @@ async function changeStatus(id, status) {
   const bookingBefore = (Array.isArray(state.bookings) ? state.bookings : []).find((booking) => Number(booking?.id) === Number(id));
   const bookingDate = String(bookingBefore?.bookingDate || '').trim();
   const normalizedStatus = normalizeBookingStatusValue(status);
-  await api(`/api/bookings/${id}/status`, {
+  const isGuestMode = Boolean(state.isGuestUser && !state.user);
+  const statusUrl = isGuestMode
+    ? `/api/public/guest/bookings/${encodeURIComponent(id)}/status`
+    : `/api/bookings/${id}/status`;
+  await api(statusUrl, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status: normalizedStatus }),
+    body: JSON.stringify({
+      status: normalizedStatus,
+      token: isGuestMode ? String(state.guestSessionToken || getStoredGuestSessionToken() || '').trim() : undefined,
+    }),
   });
   await loadDashboardData();
   if (state.user?.role === 'admin' && bookingDate) {
@@ -16935,6 +16957,17 @@ async function api(url, options = {}) {
     } else if (method === 'DELETE' && /^\/api\/bookings\/[^/]+$/.test(normalizedUrl)) {
       removeGuestCartBooking(decodeURIComponent(normalizedUrl.split('/').pop() || ''));
       return { ok: true };
+    } else if (method === 'PUT' && /^\/api\/bookings\/[^/]+$/.test(normalizedUrl)) {
+      const bookingId = decodeURIComponent(normalizedUrl.split('/').pop() || '');
+      const payload = JSON.parse(String(options.body || '{}'));
+      url = `/api/public/guest/bookings/${encodeURIComponent(bookingId)}`;
+      options = {
+        ...options,
+        body: JSON.stringify({
+          ...payload,
+          token: String(state.guestSessionToken || getStoredGuestSessionToken() || '').trim(),
+        }),
+      };
     }
   }
 
