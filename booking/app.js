@@ -2106,7 +2106,7 @@ function attachEvents() {
   elements.userCouponCode?.addEventListener('input', () => {
     state.cartCouponPreview = null;
     renderCartCouponPreview();
-    renderUserCheckoutSummary(state.bookings || []);
+    renderUserCheckoutSummary(getCurrentUserCartPayableBookings());
   });
 
   elements.openBookingBtn?.addEventListener('click', () => openDialog());
@@ -2932,23 +2932,48 @@ function setBookingCustomerInlineMessage(message = '') {
 
 function syncBookingModalCustomerGate() {
   const isAdmin = state.user?.role === 'admin';
-  if (elements.bookingCustomerStep) elements.bookingCustomerStep.hidden = !isAdmin;
+  const isEditingBooking = Boolean(String(elements.bookingId?.value || '').trim());
+  const hasSavedPhone = Boolean(normalizeTenDigitMobile(
+    state.user?.mobile || state.user?.phone || state.guestCheckout?.guestPhone || ''
+  ));
+  if (elements.bookingCustomerStep) {
+    elements.bookingCustomerStep.hidden = !isAdmin && !isEditingBooking && hasSavedPhone;
+  }
   if (elements.bookingSchedulerSection) elements.bookingSchedulerSection.hidden = false;
   setBookingCustomerInlineMessage('');
+}
+
+function isPlaceholderEmail(email) {
+  if (!email || typeof email !== 'string') return false;
+  const normalized = email.trim().toLowerCase();
+  return (
+    normalized.endsWith('@h2houseofhealth.local') ||
+    (normalized.endsWith('@h2health.local') && normalized.startsWith('customer-')) ||
+    /^customer-\d+@/i.test(normalized) ||
+    /^guest-\d+@/i.test(normalized)
+  );
+}
+
+function hasRealEmail(email) {
+  return Boolean(email && !isPlaceholderEmail(email));
 }
 
 function getCurrentUserBookingContactFallback(bookingId = '') {
   const booking = String(bookingId || '').trim()
     ? (state.bookings || []).find((entry) => String(entry?.id || '') === String(bookingId || '').trim())
     : null;
+  const rawEmail = String(state.user?.email || booking?.clientEmail || booking?.customerEmail || '').trim();
   return {
     name: String(state.user?.name || booking?.clientName || booking?.customerName || '').trim(),
-    email: String(state.user?.email || booking?.clientEmail || booking?.customerEmail || '').trim(),
+    email: hasRealEmail(rawEmail) ? rawEmail : '',
     phone: normalizeTenDigitMobile(
-      state.user?.mobile ||
+        state.user?.mobile ||
         state.user?.phone ||
+        state.guestCheckout?.guestPhone ||
         booking?.clientPhone ||
         booking?.customerPhone ||
+        booking?.clientMobile ||
+        booking?.guestPhone ||
         booking?.mobile ||
         ''
     ),
@@ -3251,6 +3276,12 @@ async function loadGuestDashboardData() {
     try {
       const result = await api(`/api/public/guest/bookings?token=${encodeURIComponent(storedGuestToken)}`);
       state.bookings = Array.isArray(result?.bookings) ? result.bookings : [];
+      state.guestCheckout = {
+        ...state.guestCheckout,
+        guestName: String(result?.guest?.name || state.guestCheckout?.guestName || '').trim(),
+        guestEmail: String(result?.guest?.email || state.guestCheckout?.guestEmail || '').trim(),
+        guestPhone: normalizeTenDigitMobile(result?.guest?.phone || state.guestCheckout?.guestPhone || ''),
+      };
     } catch (error) {
       if (Number(error?.status || 0) === 400 || Number(error?.status || 0) === 404) {
         clearStoredGuestSessionToken();
@@ -3863,7 +3894,7 @@ function renderAdminCalendarCustomerSearchDialog() {
     item.className = 'admin-calendar-customer-result';
     item.innerHTML = `
       <strong>${escapeHtml(String(user?.name || 'Customer').trim() || 'Customer')}</strong>
-      <span>${escapeHtml(String(user?.email || '-').trim() || '-')}</span>
+      <span>${escapeHtml(hasRealEmail(user?.email) ? user.email : 'Email not provided')}</span>
       <small>${escapeHtml(String(user?.mobile || user?.phone || '-').trim() || '-')}</small>
     `;
     item.addEventListener('click', async () => {
@@ -3879,7 +3910,7 @@ function renderAdminCalendarCustomerSearchDialog() {
       state.adminResolvedCustomer = selectedCustomer;
       state.adminCustomerForm = {
         name: String(selectedCustomer?.name || '').trim(),
-        email: String(selectedCustomer?.email || '').trim(),
+        email: hasRealEmail(selectedCustomer?.email) ? String(selectedCustomer.email).trim() : '',
         phone: normalizeTenDigitMobile(selectedCustomer?.mobile || selectedCustomer?.phone || ''),
       };
       if (elements.bookingCustomerName) elements.bookingCustomerName.value = state.adminCustomerForm.name || '';
@@ -4494,7 +4525,7 @@ function renderAdminCalendar() {
   elements.adminCalendarTracker.innerHTML = `
     <div class="admin-calendar-tracker-head">
       <h3>${escapeHtml(trackedUser.name || 'User')} Users Tracking</h3>
-      <p>${escapeHtml(trackedUser.email || trackedUser.mobile || '')}</p>
+      <p>${escapeHtml((hasRealEmail(trackedUser.email) ? trackedUser.email : '') || trackedUser.mobile || '')}</p>
     </div>
     <div class="admin-calendar-tracker-grid">
       <article><span>Total</span><strong>${escapeHtml(String(summary.total))}</strong></article>
@@ -4627,6 +4658,7 @@ async function proceedToGuestPayment() {
         guestEmail: state.guestCheckout.guestEmail,
         guestPhone: state.guestCheckout.guestPhone,
         bookings: state.cart,
+        couponCode: String(state.cartCouponPreview?.code || state.cartCouponCode || '').trim(),
       }),
     });
     
@@ -6002,10 +6034,17 @@ async function changeStatus(id, status) {
   const bookingBefore = (Array.isArray(state.bookings) ? state.bookings : []).find((booking) => Number(booking?.id) === Number(id));
   const bookingDate = String(bookingBefore?.bookingDate || '').trim();
   const normalizedStatus = normalizeBookingStatusValue(status);
-  await api(`/api/bookings/${id}/status`, {
+  const isGuestMode = Boolean(state.isGuestUser && !state.user);
+  const statusUrl = isGuestMode
+    ? `/api/public/guest/bookings/${encodeURIComponent(id)}/status`
+    : `/api/bookings/${id}/status`;
+  await api(statusUrl, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status: normalizedStatus }),
+    body: JSON.stringify({
+      status: normalizedStatus,
+      token: isGuestMode ? String(state.guestSessionToken || getStoredGuestSessionToken() || '').trim() : undefined,
+    }),
   });
   await loadDashboardData();
   if (state.user?.role === 'admin' && bookingDate) {
@@ -7627,7 +7666,7 @@ function getFilteredAdminUsers() {
   }
 
   return sortedUsers.filter((user) => {
-    const haystack = [user?.id, user?.name, user?.email, user?.mobile].join(' ').toLowerCase();
+    const haystack = [user?.id, user?.name, hasRealEmail(user?.email) ? user?.email : '', user?.mobile].join(' ').toLowerCase();
     return haystack.includes(query);
   });
 }
@@ -8433,7 +8472,7 @@ function renderServicePanelContext() {
       </div>
       <div class="admin-client-chip">
         <strong>Contact</strong>
-        <span>${escapeHtml(state.adminCustomerForm.phone || state.adminCustomerForm.email || '-')}</span>
+        <span>${escapeHtml(state.adminCustomerForm.phone || (hasRealEmail(state.adminCustomerForm.email) ? state.adminCustomerForm.email : '-'))}</span>
       </div>
       <div class="admin-client-chip">
         <strong>Membership</strong>
@@ -12718,6 +12757,11 @@ function renderCartCouponPreview() {
   renderCouponPreview(state.cartCouponPreview, elements.userCouponPreview);
 }
 
+function getCurrentUserCartPayableBookings() {
+  const cartSourceBookings = state.isGuestUser ? getGuestCartBookings() : (state.bookings || []);
+  return getUserCartPayableBookings(cartSourceBookings);
+}
+
 function renderGeneralCouponsForTarget({ coupons = [], container, onApply }) {
   if (!container) return;
   const isCartOffersContainer = container === elements.userGeneralCoupons;
@@ -12840,7 +12884,7 @@ async function previewCartCoupon() {
   if (!couponCode) {
     state.cartCouponPreview = null;
     renderCartCouponPreview();
-    renderUserCheckoutSummary(state.bookings || []);
+    renderUserCheckoutSummary(getCurrentUserCartPayableBookings());
     return;
   }
 
@@ -12848,15 +12892,18 @@ async function previewCartCoupon() {
     const result = await api('/api/payments/preview-cart-coupon', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ couponCode }),
+      body: JSON.stringify({
+        couponCode,
+        ...(state.isGuestUser && !state.user ? { bookings: getGuestCartBookings() } : {}),
+      }),
     });
     state.cartCouponPreview = result.coupon || null;
     renderCartCouponPreview();
-    renderUserCheckoutSummary(state.bookings || []);
+    renderUserCheckoutSummary(getCurrentUserCartPayableBookings());
   } catch (error) {
     state.cartCouponPreview = null;
     renderCartCouponPreview();
-    renderUserCheckoutSummary(state.bookings || []);
+    renderUserCheckoutSummary(getCurrentUserCartPayableBookings());
     showNotice({ title: 'Error', body: error.message || 'Unable to apply this coupon.' });
   }
 }
@@ -16771,7 +16818,7 @@ function getFilenameFromContentDisposition(headerValue, fallbackLabel = 'Invoice
   }
   const match = header.match(/filename="?([^";]+)"?/i);
   if (match?.[1]) return match[1];
-  return `Invoice-${String(fallbackLabel || 'Invoice').replace(/[^a-z0-9_-]+/gi, '-')}.pdf`;
+  return 'H2_invoice.pdf';
 }
 
 async function downloadPortalDocument(url, fallbackLabel = 'Invoice') {
@@ -16935,6 +16982,17 @@ async function api(url, options = {}) {
     } else if (method === 'DELETE' && /^\/api\/bookings\/[^/]+$/.test(normalizedUrl)) {
       removeGuestCartBooking(decodeURIComponent(normalizedUrl.split('/').pop() || ''));
       return { ok: true };
+    } else if (method === 'PUT' && /^\/api\/bookings\/[^/]+$/.test(normalizedUrl)) {
+      const bookingId = decodeURIComponent(normalizedUrl.split('/').pop() || '');
+      const payload = JSON.parse(String(options.body || '{}'));
+      url = `/api/public/guest/bookings/${encodeURIComponent(bookingId)}`;
+      options = {
+        ...options,
+        body: JSON.stringify({
+          ...payload,
+          token: String(state.guestSessionToken || getStoredGuestSessionToken() || '').trim(),
+        }),
+      };
     }
   }
 

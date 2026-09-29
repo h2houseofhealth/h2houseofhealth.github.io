@@ -1372,7 +1372,7 @@ app.post('/api/auth/login', (req, res) => {
     const authUser = {
       id: Number(authSource.id),
       name: String(authSource.name),
-      email: String(authSource.email),
+      email: authSource.email ? String(authSource.email) : '',
       role: String(authSource.role || 'user'),
       age: authSource.age ?? null,
       gender: authSource.gender || '',
@@ -1490,7 +1490,7 @@ app.post('/api/auth/verify-whatsapp-otp', (req, res) => {
   const authUser = {
     id: Number(syncedUser.id),
     name: String(syncedUser.name),
-    email: String(syncedUser.email),
+    email: syncedUser.email ? String(syncedUser.email) : '',
     role: String(syncedUser.role || 'user'),
     age: syncedUser.age ?? null,
     gender: syncedUser.gender || '',
@@ -7258,10 +7258,133 @@ app.get('/api/public/guest/bookings', (req, res) => {
   });
 });
 
+app.put('/api/public/guest/bookings/:id', (req, res) => {
+  const guestAccess = verifyGuestCheckoutAccessToken(req.body?.token || req.query?.token);
+  const bookingId = Number(req.params.id);
+  if (!guestAccess || !Number.isInteger(bookingId) || !guestAccess.bookingIds.map(Number).includes(bookingId)) {
+    return res.status(403).json({ message: 'Invalid or expired guest session' });
+  }
+
+  const existing = db
+    .prepare(
+      `SELECT id, status, service_name AS serviceName, booking_date AS bookingDate,
+              booking_time AS bookingTime, notes, reschedule_count AS rescheduleCount,
+              guest_phone AS guestPhone
+       FROM bookings WHERE id = ? AND booking_type = 'guest'`
+    )
+    .get(bookingId);
+  if (!existing) return res.status(404).json({ message: 'booking not found' });
+  const existingStatus = String(existing.status || '').trim().toLowerCase();
+  if (['completed', 'cancelled'].includes(existingStatus)) {
+    return res.status(409).json({ message: 'Completed or cancelled bookings cannot be edited.' });
+  }
+
+  const bookingDate = String(req.body?.bookingDate || '').trim();
+  const bookingTime = normalizeSlotStartTime(String(req.body?.bookingTime || '').trim());
+  const selectedDate = new Date(`${bookingDate}T00:00:00`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(bookingDate) || Number.isNaN(selectedDate.getTime())) {
+    return res.status(400).json({ message: 'bookingDate is invalid' });
+  }
+  if (selectedDate < new Date(new Date().setHours(0, 0, 0, 0))) {
+    return res.status(400).json({ message: 'bookingDate cannot be in the past' });
+  }
+  if (!bookingTime) return res.status(400).json({ message: 'bookingTime must be one of the allowed 1-hour slots' });
+  if (isBookingSlotInPast(bookingDate, bookingTime)) {
+    return res.status(400).json({ message: 'bookingTime cannot be in the past for the selected date' });
+  }
+
+  const changedSlot = bookingDate !== String(existing.bookingDate || '') || bookingTime !== normalizeSlotStartTime(existing.bookingTime);
+  if (changedSlot && existingStatus !== 'schedule_later') {
+    if (Number(existing.rescheduleCount || 0) >= 1) {
+      return res.status(409).json({ message: 'You can reschedule only once. Please contact admin for further changes.' });
+    }
+    const currentTime = normalizeSlotStartTime(String(existing.bookingTime || '').trim()) || String(existing.bookingTime || '').trim();
+    const slotStart = new Date(`${String(existing.bookingDate || '').trim()}T${currentTime}:00`).getTime();
+    if (!Number.isFinite(slotStart) || Date.now() > slotStart - 12 * 60 * 60 * 1000) {
+      return res.status(409).json({ message: 'Reschedule is allowed only up to 12 hours before slot start time.' });
+    }
+  }
+
+  const phone = String(req.body?.customerPhone || existing.guestPhone || guestAccess.guestPhone || '').replace(/\D+/g, '');
+  if (phone && !/^[6-9]\d{9}$/.test(phone)) {
+    return res.status(400).json({ message: 'Contact number must be exactly 10 digits.' });
+  }
+  const nextNotes = String(req.body?.notes || '').trim();
+  db.prepare(
+    `UPDATE bookings
+     SET booking_date = ?, booking_time = ?, notes = ?,
+         guest_phone = CASE WHEN ? <> '' THEN ? ELSE guest_phone END,
+         client_phone = CASE WHEN ? <> '' THEN ? ELSE client_phone END,
+         reschedule_count = CASE WHEN ? = 1 AND ? <> 'schedule_later' THEN COALESCE(reschedule_count, 0) + 1 ELSE reschedule_count END
+     WHERE id = ?`
+  ).run(
+    bookingDate, bookingTime, nextNotes,
+    phone, phone, phone, phone,
+    changedSlot ? 1 : 0, existingStatus,
+    bookingId
+  );
+  const booking = db.prepare(
+    `SELECT id, service_name AS serviceName, booking_date AS bookingDate, booking_time AS bookingTime,
+            status, notes, guest_phone AS guestPhone FROM bookings WHERE id = ?`
+  ).get(bookingId);
+  return res.json({ booking });
+});
+
+app.patch('/api/public/guest/bookings/:id/status', (req, res) => {
+  const guestAccess = verifyGuestCheckoutAccessToken(req.body?.token || req.query?.token);
+  const bookingId = Number(req.params.id);
+  const status = normalizeBookingStatus(req.body?.status);
+  if (!guestAccess || !Number.isInteger(bookingId) || !guestAccess.bookingIds.map(Number).includes(bookingId)) {
+    return res.status(403).json({ message: 'Invalid or expired guest session' });
+  }
+  if (!['cancelled', 'schedule_later'].includes(status)) {
+    return res.status(403).json({ message: 'Guest sessions can only be cancelled or moved to Schedule Later.' });
+  }
+
+  const existing = db
+    .prepare(
+      `SELECT id, status, payment_status AS paymentStatus, booking_date AS bookingDate,
+              booking_time AS bookingTime, notes
+       FROM bookings WHERE id = ? AND booking_type = 'guest'`
+    )
+    .get(bookingId);
+  if (!existing) return res.status(404).json({ message: 'booking not found' });
+
+  const existingStatus = String(existing.status || '').trim().toLowerCase();
+  if (['completed', 'cancelled'].includes(existingStatus)) {
+    return res.status(409).json({ message: 'Completed or cancelled bookings cannot be changed.' });
+  }
+  if (status === 'schedule_later') {
+    if (existingStatus === 'schedule_later') {
+      return res.status(409).json({ message: 'This session is already waiting to be scheduled.' });
+    }
+    if (!['booked', 'confirmed'].includes(existingStatus)) {
+      return res.status(409).json({ message: 'Only booked sessions can be moved to Schedule Later.' });
+    }
+    if (String(existing.paymentStatus || '').trim().toLowerCase() !== 'paid') {
+      return res.status(409).json({ message: 'Only paid bookings can be moved to Schedule Later.' });
+    }
+    const normalizedTime = normalizeSlotStartTime(String(existing.bookingTime || '').trim()) || String(existing.bookingTime || '').trim();
+    const slotStart = new Date(`${String(existing.bookingDate || '').trim()}T${normalizedTime}:00`).getTime();
+    if (!Number.isFinite(slotStart) || Date.now() > slotStart - 12 * 60 * 60 * 1000) {
+      return res.status(409).json({ message: 'Schedule Later can be used only up to 12 hours before slot start.' });
+    }
+    if (String(existing.notes || '').toLowerCase().includes('moved to schedule later')) {
+      return res.status(409).json({ message: 'Schedule Later can be used only once for this session.' });
+    }
+    const note = `Moved to Schedule Later by user from ${existing.bookingDate} ${existing.bookingTime}`;
+    db.prepare('UPDATE bookings SET status = ?, notes = ? WHERE id = ?')
+      .run(status, [String(existing.notes || '').trim(), note].filter(Boolean).join('\n'), bookingId);
+  } else {
+    db.prepare('UPDATE bookings SET status = ? WHERE id = ?').run(status, bookingId);
+  }
+  return res.status(204).send();
+});
+
 // Guest Checkout Endpoint
 // Allows unauthenticated users to start checkout with basic info
 app.post('/api/guest/checkout', async (req, res) => {
-  const { guestName, guestEmail, guestPhone, bookings } = req.body;
+  const { guestName, guestEmail, guestPhone, bookings, couponCode } = req.body;
 
   // Validate guest information
   if (!guestName || typeof guestName !== 'string' || guestName.trim().length < 2 || guestName.trim().length > 80) {
@@ -7359,18 +7482,6 @@ app.post('/api/guest/checkout', async (req, res) => {
       return res.status(400).json({ message: 'No valid bookings to create' });
     }
 
-    // Generate payment token for guest
-    const paymentToken = createGuestCheckoutAccessToken({
-      guestEmail: guestEmail.trim(),
-      guestPhone: guestPhone.trim(),
-      guestName: guestName.trim(),
-      bookingIds: createdBookings.map((b) => b.id),
-    });
-
-    if (!paymentToken) {
-      return res.status(500).json({ message: 'Unable to prepare guest payment token' });
-    }
-
     const pricingBookings = db
       .prepare(
         `SELECT id,
@@ -7397,6 +7508,35 @@ app.post('/api/guest/checkout', async (req, res) => {
       mobile: guestPhone.trim(),
     };
     const pricingSummary = finalizeSummaryWithGst(buildAggregatePaymentSummary(pricingBookings, guestPricingUser));
+    let guestCouponPreview = null;
+    if (String(couponCode || '').trim()) {
+      const couponResult = validateCouponForUser({
+        code: couponCode,
+        userId: null,
+        appliesTo: 'services',
+        portal: 'booking',
+        subtotalAmountPaise: Math.round(Number(pricingSummary.totalAmountInr || 0) * 100),
+        singleBookingAmountPaise: getSingleBookingCouponBasePaise(pricingSummary),
+      });
+      if (couponResult.error) {
+        db.prepare(`DELETE FROM bookings WHERE id IN (${createdBookings.map(() => '?').join(', ')})`).run(...createdBookings.map((booking) => booking.id));
+        return res.status(400).json({ message: couponResult.error });
+      }
+      guestCouponPreview = serializeCouponPreview(couponResult);
+    }
+
+    // Generate payment token for guest after coupon validation succeeds.
+    const paymentToken = createGuestCheckoutAccessToken({
+      guestEmail: guestEmail.trim(),
+      guestPhone: guestPhone.trim(),
+      guestName: guestName.trim(),
+      bookingIds: createdBookings.map((b) => b.id),
+      couponCode: String(couponCode || '').trim(),
+    });
+
+    if (!paymentToken) {
+      return res.status(500).json({ message: 'Unable to prepare guest payment token' });
+    }
 
     res.json({
       success: true,
@@ -7417,6 +7557,7 @@ app.post('/api/guest/checkout', async (req, res) => {
           bookingCount: Number(unit.bookingCount || 0),
         })),
         units: pricingSummary.units || [],
+        coupon: guestCouponPreview,
       },
     });
   } catch (error) {
@@ -7543,7 +7684,24 @@ app.post('/api/public/payments/create-order', async (req, res) => {
     return res.status(409).json({ message: error?.message || 'Unable to calculate payment total for this booking.' });
   }
 
-  const payableTotalInr = Number(paymentSummary.totalAmountInr || 0);
+  let guestCouponResult = null;
+  if (paymentContext.kind === 'guest' && paymentContext.guestAccess?.couponCode) {
+    guestCouponResult = validateCouponForUser({
+      code: paymentContext.guestAccess.couponCode,
+      userId: null,
+      appliesTo: 'services',
+      portal: 'booking',
+      subtotalAmountPaise: Math.round(Number(paymentSummary.totalAmountInr || 0) * 100),
+      singleBookingAmountPaise: getSingleBookingCouponBasePaise(paymentSummary),
+    });
+    if (guestCouponResult.error) {
+      return res.status(400).json({ message: guestCouponResult.error });
+    }
+  }
+
+  const payableTotalInr = guestCouponResult
+    ? Number(guestCouponResult.finalAmountPaise || 0) / 100
+    : Number(paymentSummary.totalAmountInr || 0);
   const amountInPaise = Math.max(0, Math.round(payableTotalInr * 100));
 
   try {
@@ -7624,6 +7782,7 @@ app.post('/api/public/payments/create-order', async (req, res) => {
             bookingIds: paymentContext.payableBookings.map((entry) => String(entry.id)).join(','),
             guestEmail: paymentContext.guestAccess?.guestEmail || '',
             guestPhone: paymentContext.guestAccess?.guestPhone || '',
+            couponCode: paymentContext.guestAccess?.couponCode || '',
           }
         : {
             bookingId: String(booking.id),
@@ -7824,17 +7983,32 @@ app.post('/api/public/payments/verify', async (req, res) => {
   });
 });
 
-app.post('/api/payments/preview-cart-coupon', requireAuth, (req, res) => {
-  if (req.user.role !== 'user') {
+app.post('/api/payments/preview-cart-coupon', (req, res) => {
+  if (req.user && req.user.role !== 'user') {
     return res.status(403).json({ message: 'forbidden' });
   }
 
-  const pricingUser = {
-    membershipStatus: req.user.membershipStatus || 'inactive',
-    membershipExpiresAt: req.user.membershipExpiresAt || null,
-    mobile: req.user.mobile || '',
-  };
-  const payableBookings = getPayableUserBookings(req.user.id);
+  const isGuestPreview = !req.user;
+  const pricingUser = isGuestPreview
+    ? { membershipStatus: 'inactive', membershipExpiresAt: null, mobile: '' }
+    : {
+        membershipStatus: req.user.membershipStatus || 'inactive',
+        membershipExpiresAt: req.user.membershipExpiresAt || null,
+        mobile: req.user.mobile || '',
+      };
+  const payableBookings = isGuestPreview
+    ? (Array.isArray(req.body?.bookings) ? req.body.bookings : [])
+        .map((booking, index) => ({
+          id: Number(booking?.id || index + 1),
+          bookingGroupId: String(booking?.bookingGroupId || booking?.booking_group_id || '').trim() || null,
+          serviceName: String(booking?.serviceName || '').trim(),
+          bookingDate: String(booking?.bookingDate || '').trim(),
+          bookingTime: String(booking?.bookingTime || '').trim(),
+          status: 'pending',
+          paymentStatus: 'unpaid',
+        }))
+        .filter((booking) => booking.serviceName)
+    : getPayableUserBookings(req.user.id);
   if (!payableBookings.length) {
     return res.status(409).json({ message: 'No unpaid payable bookings found.' });
   }
@@ -7842,7 +8016,9 @@ app.post('/api/payments/preview-cart-coupon', requireAuth, (req, res) => {
   let paymentSummary;
   try {
     paymentSummary = buildAggregatePaymentSummary(payableBookings, pricingUser);
-    paymentSummary = applyOneUseAdminPhoneDiscountToSummary(payableBookings, { ...pricingUser, mobile: req.user.mobile || '' }, paymentSummary);
+    if (!isGuestPreview) {
+      paymentSummary = applyOneUseAdminPhoneDiscountToSummary(payableBookings, { ...pricingUser, mobile: req.user.mobile || '' }, paymentSummary);
+    }
     paymentSummary = finalizeSummaryWithGst(paymentSummary);
   } catch (error) {
     return res.status(409).json({ message: error?.message || 'Unable to calculate payment total for current bookings.' });
@@ -7850,8 +8026,9 @@ app.post('/api/payments/preview-cart-coupon', requireAuth, (req, res) => {
 
   const couponResult = validateCouponForUser({
     code: req.body?.couponCode,
-    userId: req.user.id,
+    userId: req.user?.id ?? null,
     appliesTo: 'services',
+    portal: 'booking',
     subtotalAmountPaise: Math.round(Number(paymentSummary.totalAmountInr || 0) * 100),
     singleBookingAmountPaise: getSingleBookingCouponBasePaise(paymentSummary),
   });
@@ -7893,6 +8070,7 @@ app.post('/api/payments/create-cart-order', requireAuth, async (req, res) => {
     code: req.body?.couponCode,
     userId: req.user.id,
     appliesTo: 'services',
+    portal: 'booking',
     subtotalAmountPaise,
     singleBookingAmountPaise: getSingleBookingCouponBasePaise(paymentSummary),
   });
@@ -8232,9 +8410,8 @@ async function sendInvoiceResponse(req, res, html, invoiceNo) {
       printBackground: true,
       margin: { top: '0', right: '0', bottom: '0', left: '0' },
     });
-    const safeInvoiceNo = sanitizeInvoiceFilenamePart(invoiceNo);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=Invoice-${safeInvoiceNo}.pdf`);
+    res.setHeader('Content-Disposition', 'attachment; filename=H2_invoice.pdf');
     return res.send(pdfBuffer);
   } catch (error) {
     console.error('Invoice PDF generation failed:', error);
@@ -11369,6 +11546,7 @@ function createGuestCheckoutAccessToken(payload) {
       guestName: String(payload?.guestName || '').trim(),
       guestEmail: String(payload?.guestEmail || '').trim(),
       guestPhone: String(payload?.guestPhone || '').trim(),
+      couponCode: normalizeCouponCode(payload?.couponCode || ''),
     },
     JWT_SECRET,
     { expiresIn: '15m' }
@@ -11388,6 +11566,7 @@ function verifyGuestCheckoutAccessToken(token) {
       guestName: String(payload.guestName || '').trim(),
       guestEmail: String(payload.guestEmail || '').trim(),
       guestPhone: String(payload.guestPhone || '').trim(),
+      couponCode: normalizeCouponCode(payload.couponCode || ''),
     };
   } catch {
     return null;
@@ -13676,7 +13855,7 @@ function requireAuth(req, res, next) {
       req.user = {
         id: Number(user.id),
         name: String(user.name),
-        email: String(user.email),
+        email: user.email ? String(user.email) : '',
         role: String(user.role || 'user'),
         age: user.age ?? null,
         gender: user.gender || '',

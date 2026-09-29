@@ -1215,103 +1215,270 @@ a {
 }
 
 .admin-notifications {
-  display: grid;
-  gap: 10px;
-  padding: 18px;
-}
-
-.admin-notification {
-  display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
-  align-items: start;
-  padding: 14px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.92);
+  padding: 14px 0 6px;
 }
 
-.admin-notification.is-unread {
-  border-color: rgba(200, 101, 45, 0.2);
-  background: #fffaf5;
-}
-
-.admin-notification__icon {
-  width: 26px;
-  height: 26px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  line-height: 1;
-}
-
-.admin-notification__content {
-  min-width: 0;
-  display: grid;
-  gap: 4px;
-}
-
-.admin-notification__title-row {
+.admin-activity-filter-bar {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
+  margin: 10px 0 14px;
+  overflow-x: auto;
+  padding: 2px 2px 6px;
+  -webkit-overflow-scrolling: touch;
 }
 
-.admin-notification__title-row h4 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 800;
-}
-
-.admin-notification__content p,
-.admin-notification__content time {
-  margin: 0;
-  color: var(--admin-muted);
-  font-size: 13px;
-  line-height: 1.45;
-}
-
-.admin-notification__content time {
-  color: var(--admin-subtle);
+.admin-activity-filter-btn {
+  appearance: none;
+  border: 1px solid rgba(174, 84, 49, 0.18);
+  background: #ffffff;
+  color: #5c534e;
   font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  line-height: 1.2;
 }
 
-.admin-notification__unread {
+.admin-activity-filter-btn:hover {
+  border-color: #ae5431;
+  color: #ae5431;
+  background: #fffaf7;
+}
+
+.admin-activity-filter-btn.is-active {
+  background: #ae5431;
+  border-color: #ae5431;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(174, 84, 49, 0.22);
+}
+
+.admin-activity-card,
+.admin-notification {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 20px;
+  border: 1px solid rgba(174, 84, 49, 0.12);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(174, 84, 49, 0.03), 0 1px 3px rgba(0, 0, 0, 0.02);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
+}
+
+.admin-activity-card:hover,
+.admin-notification:hover {
+  border-color: rgba(174, 84, 49, 0.28);
+  box-shadow: 0 4px 14px rgba(174, 84, 49, 0.08), 0 1px 4px rgba(0, 0, 0, 0.03);
+}
+
+.admin-activity-card.is-unread,
+.admin-notification.is-unread {
+  border-left: 3.5px solid #ae5431;
+  background: #ffffff;
+}
+
+.admin-activity-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-activity-card__type-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-activity__dot {
   width: 7px;
   height: 7px;
-  flex: 0 0 auto;
   border-radius: 50%;
-  background: var(--admin-accent);
+  display: inline-block;
+  flex-shrink: 0;
 }
 
-.admin-notification__close {
+.admin-activity__dot--payment {
+  background-color: #ae5431;
+}
+
+.admin-activity__dot--customer {
+  background-color: #2d7a43;
+}
+
+.admin-activity__dot--danger {
+  background-color: #b23b2e;
+}
+
+.admin-activity__dot--warning {
+  background-color: #b57a22;
+}
+
+.admin-activity__dot--order,
+.admin-activity__dot--info {
+  background-color: #726258;
+}
+
+.admin-activity-card__type {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #5c534e;
+}
+
+.admin-activity-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-activity-card__time {
+  font-size: 12px;
+  font-weight: 500;
+  color: #8c827a;
+  white-space: nowrap;
+}
+
+.admin-activity-card__dismiss {
   appearance: none;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 0;
-  border: 0;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
   background: transparent;
-  color: var(--admin-muted);
-  font-size: 12px;
+  color: #a49991;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.admin-activity-card__dismiss:hover {
+  color: #ae5431;
+  background: rgba(174, 84, 49, 0.08);
+}
+
+.admin-activity-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-activity-card__headline {
+  font-size: 14.5px;
+  color: #1f1d1d;
+  line-height: 1.45;
+  margin: 0;
+  word-break: break-word;
+}
+
+.admin-activity-card__amount {
+  font-size: 16px;
+  font-weight: 800;
+  color: #ae5431;
+  letter-spacing: -0.01em;
+}
+
+.admin-activity-card__customer {
+  font-weight: 700;
+  color: #1f1d1d;
+}
+
+.admin-activity-card__product-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1f1d1d;
+}
+
+.admin-activity-card__sub {
+  font-size: 12.5px;
+  color: #6f6762;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.admin-activity-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(174, 84, 49, 0.06);
+}
+
+.admin-activity-card__pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.admin-activity-card__pill--success {
+  background: rgba(45, 122, 67, 0.08);
+  color: #246a38;
+  border: 1px solid rgba(45, 122, 67, 0.18);
+}
+
+.admin-activity-card__pill--danger {
+  background: rgba(178, 59, 46, 0.08);
+  color: #9c2e22;
+  border: 1px solid rgba(178, 59, 46, 0.18);
+}
+
+.admin-activity-card__pill--warning {
+  background: rgba(181, 122, 34, 0.08);
+  color: #8c5b16;
+  border: 1px solid rgba(181, 122, 34, 0.18);
+}
+
+.admin-activity-card__pill--info {
+  background: rgba(114, 98, 88, 0.08);
+  color: #5c5048;
+  border: 1px solid rgba(114, 98, 88, 0.18);
+}
+
+.admin-activity-card__action-btn {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+  color: #ae5431;
+  font-size: 13px;
   font-weight: 700;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 4px;
+  margin-left: auto;
+  transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
-.admin-notification__close:hover {
-  color: var(--admin-danger);
-}
-
-.admin-notification__close span:first-child {
-  font-size: 18px;
-  line-height: 0.8;
+.admin-activity-card__action-btn:hover {
+  color: #873d20;
+  background: rgba(174, 84, 49, 0.06);
+  transform: translateX(2px);
 }
 
 .admin-notifications__foot {
   display: flex;
   justify-content: center;
-  padding-top: 0;
+  padding-top: 4px;
 }
 
 .admin-divider {
@@ -2005,13 +2172,27 @@ a {
     min-width: 0;
   }
 
+  .admin-activity-card,
   .admin-notification {
-    grid-template-columns: 26px minmax(0, 1fr);
+    padding: 13px 14px;
+    gap: 8px;
   }
 
-  .admin-notification__close {
-    grid-column: 2;
-    justify-self: start;
+  .admin-activity-card__header {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .admin-activity-card__footer {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .admin-activity-card__action-btn {
+    min-height: 36px;
+    padding: 6px 8px;
   }
 
   .admin-card__head--with-filter {
@@ -2541,3 +2722,21 @@ body.merch-admin-page {
   .admin-profile__meta strong { font-size: 13px; }
   .admin-profile__meta small { font-size: 11px; }
 }
+
+/* Influencer Commission Payment & Invoice */
+.admin-invoice-preview-frame {
+  width: 100%;
+  height: 520px;
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.admin-commission-pay-modal,
+.admin-commission-correction-modal,
+.admin-commission-history {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
