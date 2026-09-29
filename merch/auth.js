@@ -39,6 +39,106 @@ function isAdminLoginIdentity(value) {
   return String(value || '').trim().toLowerCase() === ADMIN_LOGIN_EMAIL;
 }
 
+function getPhoneErrorMessage(countryCode = '+91') {
+  if (countryCode === '+91') return 'Enter a valid 10-digit mobile number for India.';
+  if (countryCode === '+1') return 'Enter a valid 10-digit mobile number for US/Canada.';
+  if (countryCode === '+44') return 'Enter a valid UK mobile number.';
+  return 'Enter a valid mobile number with country code.';
+}
+
+function isValidPhoneNumber(phone, countryCode = '+91') {
+  if (!phone || typeof phone !== 'string') return false;
+  const trimmed = phone.trim();
+  if (!trimmed) return false;
+  if (/[^\d\s+\-]/.test(trimmed)) return false;
+
+  if (trimmed.startsWith('+')) {
+    const digits = trimmed.slice(1).replace(/[\s\-]/g, '');
+    if (trimmed.startsWith('+91')) return /^\d{10}$/.test(digits.slice(2));
+    if (trimmed.startsWith('+1')) return /^\d{10}$/.test(digits.slice(1));
+    if (trimmed.startsWith('+44')) {
+      const local = digits.slice(2).replace(/^0/, '');
+      return /^\d{9,10}$/.test(local);
+    }
+    return digits.length >= 7 && digits.length <= 15;
+  }
+
+  const digits = trimmed.replace(/[\s\-]/g, '');
+  const code = String(countryCode || '+91').trim();
+
+  if (code === '+1') {
+    const local = (digits.length === 11 && digits.startsWith('1')) ? digits.slice(1) : digits;
+    return /^\d{10}$/.test(local);
+  }
+  if (code === '+44') {
+    let local = digits.startsWith('44') ? digits.slice(2) : digits;
+    if (local.startsWith('0')) local = local.slice(1);
+    return /^\d{9,10}$/.test(local);
+  }
+  if (code === '+91') {
+    const local = (digits.length === 12 && digits.startsWith('91')) ? digits.slice(2) : digits;
+    return /^\d{10}$/.test(local);
+  }
+
+  return digits.length >= 7 && digits.length <= 15;
+}
+
+function parseAuthPhone(value = '') {
+  const raw = String(value || '').trim();
+  if (raw.startsWith('+')) {
+    if (raw.startsWith('+91')) return { countryCode: '+91', localNumber: raw.slice(3).replace(/\D+/g, '') };
+    if (raw.startsWith('+44')) return { countryCode: '+44', localNumber: raw.slice(3).replace(/\D+/g, '') };
+    if (raw.startsWith('+1')) return { countryCode: '+1', localNumber: raw.slice(2).replace(/\D+/g, '') };
+    if (raw.startsWith('+971')) return { countryCode: '+971', localNumber: raw.slice(4).replace(/\D+/g, '') };
+    if (raw.startsWith('+65')) return { countryCode: '+65', localNumber: raw.slice(3).replace(/\D+/g, '') };
+    if (raw.startsWith('+61')) return { countryCode: '+61', localNumber: raw.slice(3).replace(/\D+/g, '') };
+    const match = raw.match(/^\+(\d{1,4})(\d+)$/);
+    if (match) return { countryCode: `+${match[1]}`, localNumber: match[2] };
+  }
+  const digits = raw.replace(/\D+/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) return { countryCode: '+91', localNumber: digits.slice(2) };
+  if (digits.length === 11 && digits.startsWith('1')) return { countryCode: '+1', localNumber: digits.slice(1) };
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith('44')) return { countryCode: '+44', localNumber: digits.slice(2) };
+  return { countryCode: '+91', localNumber: digits };
+}
+
+function formatE164Phone(phone = '', countryCode = '+91') {
+  const trimmed = String(phone || '').trim();
+  if (!trimmed) return '';
+  const prefix = countryCode.startsWith('+') ? countryCode : `+${countryCode}`;
+
+  let digits = trimmed.replace(/\D+/g, '');
+  if (trimmed.startsWith('+')) {
+    const rawNoPlus = trimmed.slice(1).replace(/\D+/g, '');
+    const prefixDigits = prefix.replace(/\D+/g, '');
+    if (rawNoPlus.startsWith(prefixDigits)) {
+      digits = rawNoPlus.slice(prefixDigits.length);
+    } else if (rawNoPlus.startsWith('91') && rawNoPlus.length === 12) {
+      digits = rawNoPlus.slice(2);
+    } else if (rawNoPlus.startsWith('1') && rawNoPlus.length === 11) {
+      digits = rawNoPlus.slice(1);
+    } else if (rawNoPlus.startsWith('44')) {
+      digits = rawNoPlus.slice(2);
+    } else {
+      digits = rawNoPlus;
+    }
+  } else {
+    if (prefix === '+1' && digits.length === 11 && digits.startsWith('1')) {
+      digits = digits.slice(1);
+    } else if (prefix === '+91' && digits.length === 12 && digits.startsWith('91')) {
+      digits = digits.slice(2);
+    } else if (prefix === '+44' && (digits.length === 12 || digits.length === 11) && digits.startsWith('44')) {
+      digits = digits.slice(2);
+    }
+  }
+
+  if (prefix === '+44' && digits.startsWith('0')) {
+    digits = digits.slice(1);
+  }
+
+  return `${prefix}${digits}`;
+}
+
 function getPostAuthRedirectTarget({ email = '', user = null } = {}) {
   if (isAdminLoginIdentity(email) || isAdminLoginIdentity(user?.email) || String(user?.role || '').toLowerCase() === 'admin') {
     return '/merch/admin/index.html';
@@ -85,6 +185,7 @@ const elements = {
   authNameWrap: document.getElementById('authNameWrap'),
   authName: document.getElementById('authName'),
   authMobileWrap: document.getElementById('authMobileWrap'),
+  authMobileCountry: document.getElementById('authMobileCountry'),
   authMobile: document.getElementById('authMobile'),
   authRoleWrap: document.getElementById('authRoleWrap'),
   authRole: document.getElementById('authRole'),
@@ -258,7 +359,18 @@ function renderAuthMode(preserveMessage = false) {
   if (isEmailSignup && (isSignupOtpStep || isSignupPasswordStep) && state.pendingSignupEmail) {
     elements.authEmail.value = state.pendingSignupEmail;
   }
-  if (isMobileSignup && state.pendingSignupMobile) elements.authMobile.value = state.pendingSignupMobile;
+  if (isMobileSignup && state.pendingSignupMobile) {
+    const parsed = parseAuthPhone(state.pendingSignupMobile);
+    if (elements.authMobileCountry && parsed.countryCode) {
+      elements.authMobileCountry.value = parsed.countryCode;
+    }
+    elements.authMobile.value = parsed.localNumber;
+    elements.authMobile.readOnly = isSignupOtpStep;
+    if (elements.authMobileCountry) elements.authMobileCountry.disabled = isSignupOtpStep;
+  } else if (isMobileSignup) {
+    elements.authMobile.readOnly = false;
+    if (elements.authMobileCountry) elements.authMobileCountry.disabled = false;
+  }
   if ((isForgotOtpStep || isForgotPasswordStep) && state.pendingForgotEmail) {
     elements.authEmail.value = state.pendingForgotEmail;
   }
@@ -476,11 +588,17 @@ async function submitAuth() {
       state.pendingSignupName = name;
       let result;
       if (state.signupMethod === 'mobile') {
-        const mobile = elements.authMobile.value.trim();
-        if (!mobile) {
+        const countryCode = elements.authMobileCountry?.value || '+91';
+        const rawMobile = elements.authMobile.value.trim();
+        if (!rawMobile) {
           elements.authError.textContent = 'Mobile number is required.';
           return;
         }
+        if (!isValidPhoneNumber(rawMobile, countryCode)) {
+          elements.authError.textContent = getPhoneErrorMessage(countryCode);
+          return;
+        }
+        const mobile = formatE164Phone(rawMobile, countryCode);
         result = await api('/api/auth/signup/send-whatsapp-otp', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -516,7 +634,7 @@ async function submitAuth() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             name: state.pendingSignupName || elements.authName.value.trim(),
-            mobile: state.pendingSignupMobile || elements.authMobile.value.trim(),
+            mobile: state.pendingSignupMobile || formatE164Phone(elements.authMobile.value.trim(), elements.authMobileCountry?.value || '+91'),
             otp: elements.authWhatsappOtp.value.trim(),
           }),
         });
@@ -629,8 +747,50 @@ function bindEvents() {
   elements.authPasswordToggleBtn?.addEventListener('click', toggleAuthPasswordVisibility);
   elements.authResendOtpBtn?.addEventListener('click', resendAuthOtp);
 
+  elements.authMobileCountry?.addEventListener('change', () => {
+    const code = elements.authMobileCountry.value;
+    const maxDigits = (code === '+91' || code === '+1') ? 10 : 15;
+    elements.authMobile.maxLength = maxDigits;
+    elements.authMobile.placeholder = (code === '+91' || code === '+1') ? '10-digit mobile number' : 'Mobile number';
+    elements.authMobile.value = elements.authMobile.value.replace(/\D/g, '').slice(0, maxDigits);
+  });
+
+  elements.mobileAuthCountry?.addEventListener('change', () => {
+    const code = elements.mobileAuthCountry.value;
+    const maxDigits = (code === '+91' || code === '+1') ? 10 : 15;
+    elements.mobileAuthNumber.maxLength = maxDigits;
+    elements.mobileAuthNumber.placeholder = (code === '+91' || code === '+1') ? '10-digit mobile number' : 'Mobile number';
+    elements.mobileAuthNumber.value = elements.mobileAuthNumber.value.replace(/\D/g, '').slice(0, maxDigits);
+  });
+
+  elements.mobileAuthNumber?.addEventListener('input', (e) => {
+    const code = elements.mobileAuthCountry?.value || '+91';
+    const maxDigits = (code === '+91' || code === '+1') ? 10 : 15;
+    e.target.value = e.target.value.replace(/\D/g, '').slice(0, maxDigits);
+  });
+
+  elements.authMobile?.addEventListener('input', (e) => {
+    const code = elements.authMobileCountry?.value || '+91';
+    const maxDigits = (code === '+91' || code === '+1') ? 10 : 15;
+    e.target.value = e.target.value.replace(/\D/g, '').slice(0, maxDigits);
+  });
+
+  elements.authName?.addEventListener('input', (e) => {
+    e.target.value = e.target.value.replace(/[^A-Za-z\s]/g, '');
+  });
+
   elements.sendWhatsappOtpBtn?.addEventListener('click', async () => {
-    const mobile = `${elements.mobileAuthCountry?.value || '+91'}${elements.mobileAuthNumber.value.replace(/\D/g, '')}`;
+    const countryCode = elements.mobileAuthCountry?.value || '+91';
+    const rawNumber = elements.mobileAuthNumber.value.trim();
+    if (!rawNumber) {
+      elements.authError.textContent = 'Mobile number is required.';
+      return;
+    }
+    if (!isValidPhoneNumber(rawNumber, countryCode)) {
+      elements.authError.textContent = getPhoneErrorMessage(countryCode);
+      return;
+    }
+    const mobile = formatE164Phone(rawNumber, countryCode);
     elements.authError.textContent = '';
     elements.sendWhatsappOtpBtn.disabled = true;
     try {
@@ -646,7 +806,11 @@ function bindEvents() {
       elements.authError.textContent = result.message || 'WhatsApp OTP sent.';
       elements.mobileAuthOtp.focus();
     } catch (error) {
-      elements.authError.textContent = error.message || 'Unable to send WhatsApp OTP.';
+      if (String(error.message || '').toLowerCase().includes('account not found')) {
+        elements.authError.textContent = 'Account not found. Please click "Sign up" below to register with your mobile number first.';
+      } else {
+        elements.authError.textContent = error.message || 'Unable to send WhatsApp OTP.';
+      }
     } finally {
       elements.sendWhatsappOtpBtn.disabled = false;
     }
@@ -654,7 +818,8 @@ function bindEvents() {
 
   elements.verifyWhatsappOtpBtn?.addEventListener('click', async () => {
     if (!whatsappOtpSent) return;
-    const mobile = `${elements.mobileAuthCountry?.value || '+91'}${elements.mobileAuthNumber.value.replace(/\D/g, '')}`;
+    const countryCode = elements.mobileAuthCountry?.value || '+91';
+    const mobile = formatE164Phone(elements.mobileAuthNumber.value.trim(), countryCode);
     const otp = elements.mobileAuthOtp.value.trim();
     elements.authError.textContent = '';
     elements.verifyWhatsappOtpBtn.disabled = true;

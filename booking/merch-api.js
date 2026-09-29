@@ -938,6 +938,89 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim()) && !isPlaceholderEmail(email);
   }
 
+  function isValidMerchName(value) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return false;
+    return /^[A-Za-z]+(?:\s+[A-Za-z]+)*$/.test(trimmed);
+  }
+
+  function isValidMerchAddress(value) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed || trimmed.length < 3) return false;
+    if (!/[A-Za-z0-9]/.test(trimmed)) return false;
+    return /^[A-Za-z0-9\s,.\-#/()':;&+]+$/.test(trimmed);
+  }
+
+  function isValidMerchCityOrState(value) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed || trimmed.length < 2) return false;
+    if (!/[A-Za-z]/.test(trimmed)) return false;
+    if (/[0-9]/.test(trimmed)) return false;
+    return /^[A-Za-z\s.'-]+$/.test(trimmed);
+  }
+
+  function isValidMerchPostalCode(value, country = 'India') {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return false;
+    const norm = String(country || '').trim().toLowerCase();
+    if (norm === 'united states' || norm === 'us' || norm === 'usa') {
+      return /^\d{5}(?:-\d{4})?$/.test(trimmed);
+    }
+    if (norm === 'united kingdom' || norm === 'uk' || norm === 'great britain' || norm === 'england') {
+      return /^[A-Z]{1,2}[0-9][A-Z0-9]? ?[0-9][A-Z]{2}$/i.test(trimmed);
+    }
+    if (norm === 'canada' || norm === 'ca') {
+      return /^[A-Za-z]\d[A-Za-z] ?\d[A-Za-z]\d$/.test(trimmed);
+    }
+    if (norm === 'india' || norm === 'in') {
+      return /^\d{6}$/.test(trimmed);
+    }
+    return /^[A-Za-z0-9\s-]{3,10}$/.test(trimmed);
+  }
+
+  function isValidMerchPhone(phone, country = '') {
+    if (!phone || typeof phone !== 'string') return false;
+    const trimmed = phone.trim();
+    if (!trimmed) return false;
+    if (/[^\d\s+\-]/.test(trimmed)) return false;
+
+    if (trimmed.startsWith('+')) {
+      const digits = trimmed.slice(1).replace(/[\s\-]/g, '');
+      if (trimmed.startsWith('+91')) {
+        return /^\d{10}$/.test(digits.slice(2));
+      }
+      if (trimmed.startsWith('+1')) {
+        return /^\d{10}$/.test(digits.slice(1));
+      }
+      if (trimmed.startsWith('+44')) {
+        const local = digits.slice(2).replace(/^0/, '');
+        return /^\d{9,10}$/.test(local);
+      }
+      return digits.length >= 7 && digits.length <= 15;
+    }
+
+    const digits = trimmed.replace(/[\s\-]/g, '');
+    const normCountry = String(country || '').trim().toLowerCase();
+
+    if (normCountry === 'united states' || normCountry === 'us' || (digits.length === 11 && digits.startsWith('1'))) {
+      const local = digits.length === 11 ? digits.slice(1) : digits;
+      return /^\d{10}$/.test(local);
+    }
+    if (normCountry === 'united kingdom' || normCountry === 'uk' || ((digits.length === 12 || digits.length === 13) && digits.startsWith('44'))) {
+      let local = digits.startsWith('44') ? digits.slice(2) : digits;
+      if (local.startsWith('0')) local = local.slice(1);
+      return /^\d{9,10}$/.test(local);
+    }
+    if (normCountry === 'india' || normCountry === 'in' || !normCountry) {
+      if (digits.length === 12 && digits.startsWith('91')) {
+        return /^\d{10}$/.test(digits.slice(2));
+      }
+      return /^\d{10}$/.test(digits);
+    }
+
+    return digits.length >= 7 && digits.length <= 15;
+  }
+
   function getMerchReportTransporter() {
     const host = process.env.SMTP_HOST;
     const port = Number(process.env.SMTP_PORT || 587);
@@ -4672,8 +4755,37 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!resolvedCustomer.name || !resolvedCustomer.phone) {
       return res.status(400).json({ error: 'Customer name and phone number required' });
     }
+    if (!isValidMerchName(resolvedCustomer.name)) {
+      return res.status(400).json({ error: 'Name should contain letters and spaces only' });
+    }
+    if (!isValidMerchPhone(resolvedCustomer.phone)) {
+      return res.status(400).json({ error: 'Enter a valid phone number' });
+    }
     if (!authUser && !resolvedCustomer.phone && !realEmailToUse) {
       return res.status(400).json({ error: 'Customer phone or email required' });
+    }
+    if (address && typeof address === 'object') {
+      if (address.recipientName && !isValidMerchName(address.recipientName)) {
+        return res.status(400).json({ error: 'Name should contain letters and spaces only' });
+      }
+      if (address.phone && !isValidMerchPhone(address.phone, address.country)) {
+        return res.status(400).json({ error: 'Enter a valid phone number' });
+      }
+      if (address.line1 && !isValidMerchAddress(address.line1)) {
+        return res.status(400).json({ error: 'Enter a valid address' });
+      }
+      if (address.line2 && !isValidMerchAddress(address.line2)) {
+        return res.status(400).json({ error: 'Enter a valid address' });
+      }
+      if (address.city && !isValidMerchCityOrState(address.city)) {
+        return res.status(400).json({ error: 'Enter a valid city name' });
+      }
+      if (address.state && !isValidMerchCityOrState(address.state)) {
+        return res.status(400).json({ error: 'Enter a valid state name' });
+      }
+      if (address.postalCode && !isValidMerchPostalCode(address.postalCode, address.country)) {
+        return res.status(400).json({ error: 'Enter a valid postal code' });
+      }
     }
 
     // Validate items and calculate totals
@@ -4836,7 +4948,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
             shiprocket_courier_name = ?,
             tracking_number = ?,
             carrier_name = ?,
-            status = 'shipped',
+            status = 'processing',
             shiprocket_status = 'AWB ASSIGNED',
             shiprocket_label_url = COALESCE(?, shiprocket_label_url),
             updated_at = datetime('now')
@@ -5347,8 +5459,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       Object.prototype.hasOwnProperty.call(req.body || {}, 'phone');
     const hasEmailField = Object.prototype.hasOwnProperty.call(req.body || {}, 'email');
 
-    if (mobile && !/^[0-9+\-\s()]{7,20}$/.test(mobile)) {
-      return res.status(400).json({ message: 'invalid mobile number' });
+    if (fullName && !isValidMerchName(fullName)) {
+      return res.status(400).json({ message: 'Name should contain letters and spaces only' });
+    }
+    if (mobile && !isValidMerchPhone(mobile)) {
+      return res.status(400).json({ message: 'Enter a valid phone number' });
     }
     if (hasEmailField && email) {
       if (!isValidMerchEmail(email)) {
@@ -5504,6 +5619,27 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!address.recipientName || !address.phone || !address.line1) {
       return res.status(400).json({ message: 'Recipient, phone, and address line 1 are required' });
     }
+    if (!isValidMerchName(address.recipientName)) {
+      return res.status(400).json({ message: 'Name should contain letters and spaces only' });
+    }
+    if (!isValidMerchPhone(address.phone, address.country)) {
+      return res.status(400).json({ message: 'Enter a valid phone number' });
+    }
+    if (!isValidMerchAddress(address.line1)) {
+      return res.status(400).json({ message: 'Enter a valid address' });
+    }
+    if (address.line2 && !isValidMerchAddress(address.line2)) {
+      return res.status(400).json({ message: 'Enter a valid address' });
+    }
+    if (address.city && !isValidMerchCityOrState(address.city)) {
+      return res.status(400).json({ message: 'Enter a valid city name' });
+    }
+    if (address.state && !isValidMerchCityOrState(address.state)) {
+      return res.status(400).json({ message: 'Enter a valid state name' });
+    }
+    if (address.postalCode && !isValidMerchPostalCode(address.postalCode, address.country)) {
+      return res.status(400).json({ message: 'Enter a valid postal code' });
+    }
 
     const existingCount = db
       .prepare('SELECT COUNT(*) AS count FROM merch_customer_addresses WHERE customer_id = ?')
@@ -5558,6 +5694,27 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const address = normalizeAddressInput(req.body);
     if (!address.recipientName || !address.phone || !address.line1) {
       return res.status(400).json({ message: 'Recipient, phone, and address line 1 are required' });
+    }
+    if (!isValidMerchName(address.recipientName)) {
+      return res.status(400).json({ message: 'Name should contain letters and spaces only' });
+    }
+    if (!isValidMerchPhone(address.phone, address.country)) {
+      return res.status(400).json({ message: 'Enter a valid phone number' });
+    }
+    if (!isValidMerchAddress(address.line1)) {
+      return res.status(400).json({ message: 'Enter a valid address' });
+    }
+    if (address.line2 && !isValidMerchAddress(address.line2)) {
+      return res.status(400).json({ message: 'Enter a valid address' });
+    }
+    if (address.city && !isValidMerchCityOrState(address.city)) {
+      return res.status(400).json({ message: 'Enter a valid city name' });
+    }
+    if (address.state && !isValidMerchCityOrState(address.state)) {
+      return res.status(400).json({ message: 'Enter a valid state name' });
+    }
+    if (address.postalCode && !isValidMerchPostalCode(address.postalCode, address.country)) {
+      return res.status(400).json({ message: 'Enter a valid postal code' });
     }
 
     if (address.isDefault) {
@@ -5671,8 +5828,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
       return res.json({ success: true, order: buildMerchOrderRecord(order, items) });
     }
-    if (!['pending', 'processing'].includes(currentStatus)) {
-      return res.status(409).json({ error: 'This order can no longer be cancelled because it has been shipped or completed.' });
+    if (['delivered', 'returned'].includes(currentStatus)) {
+      return res.status(409).json({ error: 'This order can no longer be cancelled because it has already been delivered.' });
     }
 
     const cancel = db.transaction(() => {
@@ -5681,7 +5838,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         SET status = 'cancelled',
             payment_status = CASE WHEN payment_status IN ('paid', 'cod_pending') THEN 'refunded' ELSE payment_status END,
             updated_at = datetime('now')
-        WHERE id = ? AND status IN ('pending', 'processing')
+        WHERE id = ? AND status NOT IN ('delivered', 'returned', 'cancelled')
       `).run(order.id);
       if (result.changes && ['paid', 'cod_pending'].includes(String(order.payment_status || '').toLowerCase())) {
         restoreMerchOrderStock(order.id);
@@ -6659,8 +6816,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const existingOrder = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
     if (!existingOrder) return res.status(404).json({ error: 'Order not found' });
     const existingStatus = String(existingOrder.status || '').toLowerCase();
-    if (String(status).toLowerCase() === 'cancelled' && !['pending', 'processing', 'cancelled'].includes(existingStatus)) {
-      return res.status(409).json({ error: 'Shipped, delivered, and returned orders cannot be cancelled.' });
+    if (String(status).toLowerCase() === 'cancelled' && ['delivered', 'returned'].includes(existingStatus)) {
+      return res.status(409).json({ error: 'Delivered and returned orders cannot be cancelled.' });
     }
     const updates = ['status = ?', "updated_at = datetime('now')"];
     const params = [status];
