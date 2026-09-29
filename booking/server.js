@@ -7384,7 +7384,7 @@ app.patch('/api/public/guest/bookings/:id/status', (req, res) => {
 // Guest Checkout Endpoint
 // Allows unauthenticated users to start checkout with basic info
 app.post('/api/guest/checkout', async (req, res) => {
-  const { guestName, guestEmail, guestPhone, bookings } = req.body;
+  const { guestName, guestEmail, guestPhone, bookings, couponCode } = req.body;
 
   // Validate guest information
   if (!guestName || typeof guestName !== 'string' || guestName.trim().length < 2 || guestName.trim().length > 80) {
@@ -7482,18 +7482,6 @@ app.post('/api/guest/checkout', async (req, res) => {
       return res.status(400).json({ message: 'No valid bookings to create' });
     }
 
-    // Generate payment token for guest
-    const paymentToken = createGuestCheckoutAccessToken({
-      guestEmail: guestEmail.trim(),
-      guestPhone: guestPhone.trim(),
-      guestName: guestName.trim(),
-      bookingIds: createdBookings.map((b) => b.id),
-    });
-
-    if (!paymentToken) {
-      return res.status(500).json({ message: 'Unable to prepare guest payment token' });
-    }
-
     const pricingBookings = db
       .prepare(
         `SELECT id,
@@ -7520,6 +7508,35 @@ app.post('/api/guest/checkout', async (req, res) => {
       mobile: guestPhone.trim(),
     };
     const pricingSummary = finalizeSummaryWithGst(buildAggregatePaymentSummary(pricingBookings, guestPricingUser));
+    let guestCouponPreview = null;
+    if (String(couponCode || '').trim()) {
+      const couponResult = validateCouponForUser({
+        code: couponCode,
+        userId: null,
+        appliesTo: 'services',
+        portal: 'booking',
+        subtotalAmountPaise: Math.round(Number(pricingSummary.totalAmountInr || 0) * 100),
+        singleBookingAmountPaise: getSingleBookingCouponBasePaise(pricingSummary),
+      });
+      if (couponResult.error) {
+        db.prepare(`DELETE FROM bookings WHERE id IN (${createdBookings.map(() => '?').join(', ')})`).run(...createdBookings.map((booking) => booking.id));
+        return res.status(400).json({ message: couponResult.error });
+      }
+      guestCouponPreview = serializeCouponPreview(couponResult);
+    }
+
+    // Generate payment token for guest after coupon validation succeeds.
+    const paymentToken = createGuestCheckoutAccessToken({
+      guestEmail: guestEmail.trim(),
+      guestPhone: guestPhone.trim(),
+      guestName: guestName.trim(),
+      bookingIds: createdBookings.map((b) => b.id),
+      couponCode: String(couponCode || '').trim(),
+    });
+
+    if (!paymentToken) {
+      return res.status(500).json({ message: 'Unable to prepare guest payment token' });
+    }
 
     res.json({
       success: true,
@@ -7540,6 +7557,7 @@ app.post('/api/guest/checkout', async (req, res) => {
           bookingCount: Number(unit.bookingCount || 0),
         })),
         units: pricingSummary.units || [],
+        coupon: guestCouponPreview,
       },
     });
   } catch (error) {
@@ -7666,7 +7684,24 @@ app.post('/api/public/payments/create-order', async (req, res) => {
     return res.status(409).json({ message: error?.message || 'Unable to calculate payment total for this booking.' });
   }
 
-  const payableTotalInr = Number(paymentSummary.totalAmountInr || 0);
+  let guestCouponResult = null;
+  if (paymentContext.kind === 'guest' && paymentContext.guestAccess?.couponCode) {
+    guestCouponResult = validateCouponForUser({
+      code: paymentContext.guestAccess.couponCode,
+      userId: null,
+      appliesTo: 'services',
+      portal: 'booking',
+      subtotalAmountPaise: Math.round(Number(paymentSummary.totalAmountInr || 0) * 100),
+      singleBookingAmountPaise: getSingleBookingCouponBasePaise(paymentSummary),
+    });
+    if (guestCouponResult.error) {
+      return res.status(400).json({ message: guestCouponResult.error });
+    }
+  }
+
+  const payableTotalInr = guestCouponResult
+    ? Number(guestCouponResult.finalAmountPaise || 0) / 100
+    : Number(paymentSummary.totalAmountInr || 0);
   const amountInPaise = Math.max(0, Math.round(payableTotalInr * 100));
 
   try {
@@ -7747,6 +7782,7 @@ app.post('/api/public/payments/create-order', async (req, res) => {
             bookingIds: paymentContext.payableBookings.map((entry) => String(entry.id)).join(','),
             guestEmail: paymentContext.guestAccess?.guestEmail || '',
             guestPhone: paymentContext.guestAccess?.guestPhone || '',
+            couponCode: paymentContext.guestAccess?.couponCode || '',
           }
         : {
             bookingId: String(booking.id),
@@ -7947,17 +7983,32 @@ app.post('/api/public/payments/verify', async (req, res) => {
   });
 });
 
-app.post('/api/payments/preview-cart-coupon', requireAuth, (req, res) => {
-  if (req.user.role !== 'user') {
+app.post('/api/payments/preview-cart-coupon', (req, res) => {
+  if (req.user && req.user.role !== 'user') {
     return res.status(403).json({ message: 'forbidden' });
   }
 
-  const pricingUser = {
-    membershipStatus: req.user.membershipStatus || 'inactive',
-    membershipExpiresAt: req.user.membershipExpiresAt || null,
-    mobile: req.user.mobile || '',
-  };
-  const payableBookings = getPayableUserBookings(req.user.id);
+  const isGuestPreview = !req.user;
+  const pricingUser = isGuestPreview
+    ? { membershipStatus: 'inactive', membershipExpiresAt: null, mobile: '' }
+    : {
+        membershipStatus: req.user.membershipStatus || 'inactive',
+        membershipExpiresAt: req.user.membershipExpiresAt || null,
+        mobile: req.user.mobile || '',
+      };
+  const payableBookings = isGuestPreview
+    ? (Array.isArray(req.body?.bookings) ? req.body.bookings : [])
+        .map((booking, index) => ({
+          id: Number(booking?.id || index + 1),
+          bookingGroupId: String(booking?.bookingGroupId || booking?.booking_group_id || '').trim() || null,
+          serviceName: String(booking?.serviceName || '').trim(),
+          bookingDate: String(booking?.bookingDate || '').trim(),
+          bookingTime: String(booking?.bookingTime || '').trim(),
+          status: 'pending',
+          paymentStatus: 'unpaid',
+        }))
+        .filter((booking) => booking.serviceName)
+    : getPayableUserBookings(req.user.id);
   if (!payableBookings.length) {
     return res.status(409).json({ message: 'No unpaid payable bookings found.' });
   }
@@ -7965,7 +8016,9 @@ app.post('/api/payments/preview-cart-coupon', requireAuth, (req, res) => {
   let paymentSummary;
   try {
     paymentSummary = buildAggregatePaymentSummary(payableBookings, pricingUser);
-    paymentSummary = applyOneUseAdminPhoneDiscountToSummary(payableBookings, { ...pricingUser, mobile: req.user.mobile || '' }, paymentSummary);
+    if (!isGuestPreview) {
+      paymentSummary = applyOneUseAdminPhoneDiscountToSummary(payableBookings, { ...pricingUser, mobile: req.user.mobile || '' }, paymentSummary);
+    }
     paymentSummary = finalizeSummaryWithGst(paymentSummary);
   } catch (error) {
     return res.status(409).json({ message: error?.message || 'Unable to calculate payment total for current bookings.' });
@@ -7973,8 +8026,9 @@ app.post('/api/payments/preview-cart-coupon', requireAuth, (req, res) => {
 
   const couponResult = validateCouponForUser({
     code: req.body?.couponCode,
-    userId: req.user.id,
+    userId: req.user?.id ?? null,
     appliesTo: 'services',
+    portal: 'booking',
     subtotalAmountPaise: Math.round(Number(paymentSummary.totalAmountInr || 0) * 100),
     singleBookingAmountPaise: getSingleBookingCouponBasePaise(paymentSummary),
   });
@@ -8016,6 +8070,7 @@ app.post('/api/payments/create-cart-order', requireAuth, async (req, res) => {
     code: req.body?.couponCode,
     userId: req.user.id,
     appliesTo: 'services',
+    portal: 'booking',
     subtotalAmountPaise,
     singleBookingAmountPaise: getSingleBookingCouponBasePaise(paymentSummary),
   });
@@ -11492,6 +11547,7 @@ function createGuestCheckoutAccessToken(payload) {
       guestName: String(payload?.guestName || '').trim(),
       guestEmail: String(payload?.guestEmail || '').trim(),
       guestPhone: String(payload?.guestPhone || '').trim(),
+      couponCode: normalizeCouponCode(payload?.couponCode || ''),
     },
     JWT_SECRET,
     { expiresIn: '15m' }
@@ -11511,6 +11567,7 @@ function verifyGuestCheckoutAccessToken(token) {
       guestName: String(payload.guestName || '').trim(),
       guestEmail: String(payload.guestEmail || '').trim(),
       guestPhone: String(payload.guestPhone || '').trim(),
+      couponCode: normalizeCouponCode(payload.couponCode || ''),
     };
   } catch {
     return null;
