@@ -264,7 +264,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     {
       name: 'H2 Molecular Hydrogen Water Bottle',
       slug: 'h2-water-bottle',
-      description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 3 minutes. BPA-free, USB-C rechargeable.',
+      description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 5 minutes. BPA-free, USB-C rechargeable.',
       category: 'bottles',
       basePrice: 2590000,
       image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113',
@@ -359,6 +359,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const corrections = [
       {
         slug: 'h2-water-bottle',
+        description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 5 minutes. BPA-free, USB-C rechargeable.',
         price: 2590000,
         oldSkus: ['HM-BTL-300-SLV', 'HM-BTL-500-SLV', 'HM-BTL-300-BLK', 'HM-BTL-500-BLK'],
         specifications: {
@@ -382,7 +383,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       },
       {
         slug: 'h2-mist-spray',
-        price: 1190000,
+        price: 100, // Temporary test price: 100 paise = Rs. 1 (original: 1190000)
         oldSkus: ['HM-SPR-050-WHT', 'HM-SPR-100-WHT', 'HM-SPR-050-RSG', 'HM-SPR-100-RSG'],
         specifications: {
           'Product Name': 'Hydrogen Mist Sprayer',
@@ -408,8 +409,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     for (const correction of corrections) {
       const product = db.prepare('SELECT id FROM merch_products WHERE slug = ? AND deleted_at IS NULL').get(correction.slug);
       if (!product) continue;
-      db.prepare('UPDATE merch_products SET base_price = ?, specifications_json = ?, updated_at = datetime(\'now\') WHERE id = ?')
-        .run(correction.price, JSON.stringify(correction.specifications), product.id);
+      db.prepare('UPDATE merch_products SET description = COALESCE(?, description), base_price = ?, specifications_json = ?, updated_at = datetime(\'now\') WHERE id = ?')
+        .run(correction.description || null, correction.price, JSON.stringify(correction.specifications), product.id);
       const oldPlaceholders = correction.oldSkus.map(() => '?').join(', ');
       db.prepare(`UPDATE merch_variants SET is_active = 0 WHERE product_id = ? AND sku IN (${oldPlaceholders})`)
         .run(product.id, ...correction.oldSkus);
@@ -1797,7 +1798,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       id: Number(product.id),
       name: String(product.name || ''),
       slug: String(product.slug || ''),
-      description: String(product.description || ''),
+      description: String(product.slug || '').toLowerCase() === 'h2-water-bottle'
+        ? 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 5 minutes. BPA-free, USB-C rechargeable.'
+        : String(product.description || ''),
       specifications: parseMerchSpecifications(product.specifications_json),
       category: String(product.category || ''),
       basePrice: minPrice,
@@ -4256,7 +4259,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     // Product prices are GST-inclusive; derive included GST for reporting only.
     const gstAmount = Math.max(0, subtotal - Math.round(subtotal / 1.18));
-    const shippingCharge = subtotal >= 99900 ? 0 : 9900; // Free above ₹999
+    const shippingCharge = (subtotal >= 99900 || subtotal <= 100) ? 0 : 9900; // Free above ₹999 or ₹1 test
     const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
       + getMerchBundleDiscountPaise(bundleCode, validatedItems);
     const influencerId = Number(couponResult.coupon?.influencerId || 0) > 0 ? Number(couponResult.coupon.influencerId) : null;
@@ -4452,7 +4455,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     const gstAmount = Math.max(0, subtotal - Math.round(subtotal / 1.18));
-    const shippingCharge = subtotal >= 99900 ? 0 : 9900;
+    const shippingCharge = (subtotal >= 99900 || subtotal <= 100) ? 0 : 9900;
     const codSurcharge = 5000; // ₹50
     const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
       + getMerchBundleDiscountPaise(bundleCode, validatedItems);

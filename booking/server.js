@@ -285,16 +285,16 @@ const SERVICE_CATALOG = [
   {
     category: 'EXPERIENCE SESSION',
     name: 'Demo Session',
-    priceInr: 4000,
+    priceInr: 1, // Temporary test price (original: 4000)
     includes: '30 min consultation + hydrogen session',
     description: 'Demo hydrogen session for non-members with consultation.',
   },
   {
     category: 'HYDROGEN SESSION',
     name: 'H2 Single Session',
-    priceInr: 4800,
-    nonMemberPriceInr: 9500,
-    memberPriceInr: 4800,
+    priceInr: 1, // Temporary test price (original: 4800)
+    nonMemberPriceInr: 1, // Temporary test price (original: 9500)
+    memberPriceInr: 1, // Temporary test price (original: 4800)
     includes: '1 Hydrogen Session',
     description:
       'Single hydrogen session for immediate recovery and cellular wellness support. Non-member pricing: Rs. 9,500.',
@@ -376,7 +376,7 @@ const SERVICE_CATALOG = [
   {
     category: 'IV THERAPIES',
     name: 'Gym Hero',
-    priceInr: 4800,
+    priceInr: 1, // Temporary test price (original: 4800)
     includes: 'Normal saline, B1, B2, B6, B12, Vitamin C, Magnesium, Glutathione',
     description:
       'Designed for fitness enthusiasts to support muscle recovery, hydration, energy production, and antioxidant support after intense workouts.',

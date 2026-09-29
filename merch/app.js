@@ -333,13 +333,21 @@
   }
 
   function getBottleFeatureSlides(variant, product = null) {
-    const primaryImage = getVariantImageSources(variant, product)[0];
+    const variantImages = getVariantImageSources(variant, product);
+    const variantGalleryImages = (Array.isArray(variant?.images) ? variant.images : [])
+      .map(normalizeProductImageUrl)
+      .filter(Boolean);
+    if (variantGalleryImages.length) {
+      return variantImages.map((src, index) => ({
+        src,
+        label: `${product?.name || 'Hydrogen water bottle'} ${variant?.color || ''} view ${index + 1}`.trim(),
+      }));
+    }
+    const primaryImage = variantImages[0];
     const featureSlides = BOTTLE_DETAIL_FEATURE_SLIDES.map((slide) => ({ ...slide }));
-    if (!primaryImage) return featureSlides;
-    return [
-      { src: primaryImage, label: `${product?.name || 'Hydrogen water bottle'} ${variant?.color || ''} product view`.trim() },
-      ...featureSlides,
-    ];
+    return primaryImage
+      ? [{ src: primaryImage, label: `${product?.name || 'Hydrogen water bottle'} ${variant?.color || ''} product view`.trim() }, ...featureSlides]
+      : featureSlides;
   }
 
   function getProductGallerySlides(product, variant = state.selectedVariant) {
@@ -1496,7 +1504,7 @@ function getWishlistProductPrice(item) {
       return;
     }
 
-    await initiateCheckout();
+    await initiateCheckout({ directToCheckout: true });
   }
 
   async function handleProductCardAction(action, product, variantId = null) {
@@ -1513,7 +1521,7 @@ function getWishlistProductPrice(item) {
         showCheckoutNotice('Out of stock', 'This product is currently unavailable.', { variant: 'error' });
         return;
       }
-      await initiateCheckout();
+      await initiateCheckout({ directToCheckout: true });
       return;
     }
 
@@ -1580,7 +1588,7 @@ function getWishlistProductPrice(item) {
   }
 
   function getMerchShippingCharge(subtotalInr = getCartTotal()) {
-    return Number(subtotalInr || 0) >= 999 ? 0 : 99;
+    return Number(subtotalInr || 0) >= 999 || Number(subtotalInr || 0) <= 1 ? 0 : 99;
   }
 
   function getIncludedGstAmount(subtotalInr = getCartTotal()) {
@@ -4038,6 +4046,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   function renderProductInfo(product) {
     const variant = state.selectedVariant;
     const offerInfo = getVariantOfferDetails(variant, product);
+    const productDescription = isBottleProduct(product)
+      ? 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 5 minutes. BPA-free, USB-C rechargeable.'
+      : product.description;
 
     // Get unique sizes and colors
     const sizes = [...new Set(product.variants.map(v => v.size).filter(Boolean))];
@@ -4059,7 +4070,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       ` : `
         <p class="detail-price">${formatPrice(variant.price)}</p>
       `}
-      <p class="detail-description">${escapeHtml(product.description)}</p>
+      <p class="detail-description">${escapeHtml(productDescription)}</p>
       ${product.isCombo && Array.isArray(product.comboItems) && product.comboItems.length ? `
         <div class="combo-product-details">
           <strong>Included in this combo</strong>
@@ -5029,12 +5040,12 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   // â”€â”€â”€ Razorpay Checkout Flow â”€â”€â”€
-  async function initiateCheckout() {
+  async function initiateCheckout({ directToCheckout = false } = {}) {
     if (!state.authResolved) {
       await loadCustomerContext();
     }
 
-    if (state.currentUser) {
+    if (state.currentUser && !directToCheckout) {
       const defaultAddress = getDefaultAddress();
       const customer = getAuthenticatedCheckoutCustomer(defaultAddress);
       if (!customer.name || !customer.email || !customer.phone) {
