@@ -8410,9 +8410,8 @@ async function sendInvoiceResponse(req, res, html, invoiceNo) {
       printBackground: true,
       margin: { top: '0', right: '0', bottom: '0', left: '0' },
     });
-    const safeInvoiceNo = sanitizeInvoiceFilenamePart(invoiceNo);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=Invoice-${safeInvoiceNo}.pdf`);
+    res.setHeader('Content-Disposition', 'attachment; filename=H2_invoice.pdf');
     return res.send(pdfBuffer);
   } catch (error) {
     console.error('Invoice PDF generation failed:', error);
