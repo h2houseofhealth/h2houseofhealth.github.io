@@ -5914,8 +5914,9 @@ h1, h2, h3 {
 
 .general-coupon-head {
   display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.16rem;
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -5923,6 +5924,8 @@ h1, h2, h3 {
 .general-coupon-head strong {
   font-size: 0.8rem;
   line-height: 1.2;
+  display: block;
+  max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

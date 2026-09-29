@@ -12817,6 +12817,8 @@ function renderGeneralCouponsForTarget({ coupons = [], container, onApply }) {
       </div>
       ${metaText ? `<small>${escapeHtml(metaText)}</small>` : ''}
     `;
+    const couponCodeLabel = card.querySelector('.general-coupon-head strong');
+    if (couponCodeLabel) couponCodeLabel.textContent = coupon.code || '';
     if (isRedeemable) {
       const applyBtn = card.querySelector('.general-coupon-apply');
       applyBtn?.addEventListener('click', () => onApply(coupon.code || ''));
