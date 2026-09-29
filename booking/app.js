@@ -2943,13 +2943,29 @@ function syncBookingModalCustomerGate() {
   setBookingCustomerInlineMessage('');
 }
 
+function isPlaceholderEmail(email) {
+  if (!email || typeof email !== 'string') return false;
+  const normalized = email.trim().toLowerCase();
+  return (
+    normalized.endsWith('@h2houseofhealth.local') ||
+    (normalized.endsWith('@h2health.local') && normalized.startsWith('customer-')) ||
+    /^customer-\d+@/i.test(normalized) ||
+    /^guest-\d+@/i.test(normalized)
+  );
+}
+
+function hasRealEmail(email) {
+  return Boolean(email && !isPlaceholderEmail(email));
+}
+
 function getCurrentUserBookingContactFallback(bookingId = '') {
   const booking = String(bookingId || '').trim()
     ? (state.bookings || []).find((entry) => String(entry?.id || '') === String(bookingId || '').trim())
     : null;
+  const rawEmail = String(state.user?.email || booking?.clientEmail || booking?.customerEmail || '').trim();
   return {
     name: String(state.user?.name || booking?.clientName || booking?.customerName || '').trim(),
-    email: String(state.user?.email || booking?.clientEmail || booking?.customerEmail || '').trim(),
+    email: hasRealEmail(rawEmail) ? rawEmail : '',
     phone: normalizeTenDigitMobile(
         state.user?.mobile ||
         state.user?.phone ||
@@ -3878,7 +3894,7 @@ function renderAdminCalendarCustomerSearchDialog() {
     item.className = 'admin-calendar-customer-result';
     item.innerHTML = `
       <strong>${escapeHtml(String(user?.name || 'Customer').trim() || 'Customer')}</strong>
-      <span>${escapeHtml(String(user?.email || '-').trim() || '-')}</span>
+      <span>${escapeHtml(hasRealEmail(user?.email) ? user.email : 'Email not provided')}</span>
       <small>${escapeHtml(String(user?.mobile || user?.phone || '-').trim() || '-')}</small>
     `;
     item.addEventListener('click', async () => {
@@ -3894,7 +3910,7 @@ function renderAdminCalendarCustomerSearchDialog() {
       state.adminResolvedCustomer = selectedCustomer;
       state.adminCustomerForm = {
         name: String(selectedCustomer?.name || '').trim(),
-        email: String(selectedCustomer?.email || '').trim(),
+        email: hasRealEmail(selectedCustomer?.email) ? String(selectedCustomer.email).trim() : '',
         phone: normalizeTenDigitMobile(selectedCustomer?.mobile || selectedCustomer?.phone || ''),
       };
       if (elements.bookingCustomerName) elements.bookingCustomerName.value = state.adminCustomerForm.name || '';
@@ -4509,7 +4525,7 @@ function renderAdminCalendar() {
   elements.adminCalendarTracker.innerHTML = `
     <div class="admin-calendar-tracker-head">
       <h3>${escapeHtml(trackedUser.name || 'User')} Users Tracking</h3>
-      <p>${escapeHtml(trackedUser.email || trackedUser.mobile || '')}</p>
+      <p>${escapeHtml((hasRealEmail(trackedUser.email) ? trackedUser.email : '') || trackedUser.mobile || '')}</p>
     </div>
     <div class="admin-calendar-tracker-grid">
       <article><span>Total</span><strong>${escapeHtml(String(summary.total))}</strong></article>
@@ -7650,7 +7666,7 @@ function getFilteredAdminUsers() {
   }
 
   return sortedUsers.filter((user) => {
-    const haystack = [user?.id, user?.name, user?.email, user?.mobile].join(' ').toLowerCase();
+    const haystack = [user?.id, user?.name, hasRealEmail(user?.email) ? user?.email : '', user?.mobile].join(' ').toLowerCase();
     return haystack.includes(query);
   });
 }
@@ -8456,7 +8472,7 @@ function renderServicePanelContext() {
       </div>
       <div class="admin-client-chip">
         <strong>Contact</strong>
-        <span>${escapeHtml(state.adminCustomerForm.phone || state.adminCustomerForm.email || '-')}</span>
+        <span>${escapeHtml(state.adminCustomerForm.phone || (hasRealEmail(state.adminCustomerForm.email) ? state.adminCustomerForm.email : '-'))}</span>
       </div>
       <div class="admin-client-chip">
         <strong>Membership</strong>
@@ -16802,7 +16818,7 @@ function getFilenameFromContentDisposition(headerValue, fallbackLabel = 'Invoice
   }
   const match = header.match(/filename="?([^";]+)"?/i);
   if (match?.[1]) return match[1];
-  return `Invoice-${String(fallbackLabel || 'Invoice').replace(/[^a-z0-9_-]+/gi, '-')}.pdf`;
+  return 'H2_invoice.pdf';
 }
 
 async function downloadPortalDocument(url, fallbackLabel = 'Invoice') {

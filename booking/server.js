@@ -1372,7 +1372,7 @@ app.post('/api/auth/login', (req, res) => {
     const authUser = {
       id: Number(authSource.id),
       name: String(authSource.name),
-      email: String(authSource.email),
+      email: authSource.email ? String(authSource.email) : '',
       role: String(authSource.role || 'user'),
       age: authSource.age ?? null,
       gender: authSource.gender || '',
@@ -1490,7 +1490,7 @@ app.post('/api/auth/verify-whatsapp-otp', (req, res) => {
   const authUser = {
     id: Number(syncedUser.id),
     name: String(syncedUser.name),
-    email: String(syncedUser.email),
+    email: syncedUser.email ? String(syncedUser.email) : '',
     role: String(syncedUser.role || 'user'),
     age: syncedUser.age ?? null,
     gender: syncedUser.gender || '',
@@ -8410,9 +8410,8 @@ async function sendInvoiceResponse(req, res, html, invoiceNo) {
       printBackground: true,
       margin: { top: '0', right: '0', bottom: '0', left: '0' },
     });
-    const safeInvoiceNo = sanitizeInvoiceFilenamePart(invoiceNo);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=Invoice-${safeInvoiceNo}.pdf`);
+    res.setHeader('Content-Disposition', 'attachment; filename=H2_invoice.pdf');
     return res.send(pdfBuffer);
   } catch (error) {
     console.error('Invoice PDF generation failed:', error);
@@ -13856,7 +13855,7 @@ function requireAuth(req, res, next) {
       req.user = {
         id: Number(user.id),
         name: String(user.name),
-        email: String(user.email),
+        email: user.email ? String(user.email) : '',
         role: String(user.role || 'user'),
         age: user.age ?? null,
         gender: user.gender || '',

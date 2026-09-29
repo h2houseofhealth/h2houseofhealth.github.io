@@ -19,6 +19,21 @@
   const AUTH_TOKEN_STORAGE_KEY = 'booking_portal_auth_token';
   const CONFIRMATION_STORAGE_KEY = 'merch_booking_confirmation';
 
+  function isPlaceholderEmail(email) {
+    if (!email || typeof email !== 'string') return false;
+    const normalized = email.trim().toLowerCase();
+    return (
+      normalized.endsWith('@h2houseofhealth.local') ||
+      (normalized.endsWith('@h2health.local') && normalized.startsWith('customer-')) ||
+      /^customer-\d+@/i.test(normalized) ||
+      /^guest-\d+@/i.test(normalized)
+    );
+  }
+
+  function hasRealEmail(email) {
+    return Boolean(email && !isPlaceholderEmail(email));
+  }
+
   function buildApiUrl(path) {
     if (/^https?:\/\//i.test(String(path || ''))) return String(path);
     const base = API_URL || window.location.origin;
@@ -1170,10 +1185,12 @@ function getWishlistProductPrice(item) {
   function getAuthenticatedCheckoutCustomer(address = null) {
     const profile = state.merchProfile || {};
     const user = state.currentUser || {};
+    const rawEmail = String(profile.email || user.email || '').trim();
+    const isReal = hasRealEmail(rawEmail);
     return {
       // Guest checkout must start empty; only signed-in users get profile autofill.
       name: state.currentUser ? String(profile.fullName || user.name || address?.recipientName || '').trim() : '',
-      email: state.currentUser ? String(profile.email || user.email || '').trim() : '',
+      email: state.currentUser && isReal ? rawEmail : '',
       phone: state.currentUser ? String(profile.mobile || user.mobile || address?.phone || '').trim() : '',
     };
   }
@@ -1995,7 +2012,9 @@ function getWishlistProductPrice(item) {
   }
 
   function BookingUpdatesCard(data = {}) {
-    const customerEmail = data?.email || '';
+    const rawCustomerEmail = data?.email || data?.customerEmail || '';
+    const isReal = hasRealEmail(rawCustomerEmail);
+    const customerEmail = isReal ? rawCustomerEmail : '';
     const customerPhone = data?.phone || '';
     const digits = customerPhone.replace(/\D/g, '');
     const phoneDisplay = digits.length >= 10 ? ` (+91 ${digits.slice(-10)})` : '';
@@ -2010,8 +2029,13 @@ function getWishlistProductPrice(item) {
             <div class="booking-update-icon booking-update-icon--email">${confirmationIcon('mail')}</div>
             <div class="booking-update-content">
               <h3>Email Confirmation</h3>
-              <strong class="booking-update-badge is-sent">✓ Sent to ${escapeHtml(customerEmail || 'your email')}</strong>
-              <p>${escapeHtml(notificationState.emailText || 'Check your inbox for order details and receipt.')}</p>
+              ${isReal ? `
+                <strong class="booking-update-badge is-sent">✓ Sent to ${escapeHtml(customerEmail)}</strong>
+                <p>${escapeHtml(notificationState.emailText || 'Check your inbox for order details and receipt.')}</p>
+              ` : `
+                <strong class="booking-update-badge is-muted">Email not provided</strong>
+                <p>No confirmation email sent. You can add an email to your account profile anytime.</p>
+              `}
             </div>
           </article>
           <article class="booking-update-item">
@@ -2335,9 +2359,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   function getMerchantProfile() {
     const profile = state.merchProfile || {};
     const user = state.currentUser || {};
+    const rawEmail = String(profile.email || user.email || '').trim();
+    const isReal = hasRealEmail(rawEmail);
     return {
       fullName: String(profile.fullName || user.name || 'House of Health Customer').trim(),
-      email: String(profile.email || user.email || '').trim(),
+      email: isReal ? rawEmail : '',
+      rawEmail,
+      hasRealEmail: isReal,
+      displayEmail: isReal ? rawEmail : 'Email not provided',
       mobile: String(profile.mobile || user.mobile || '').trim(),
       avatarUrl: String(profile.avatarUrl || user.avatarUrl || '').trim(),
     };
@@ -2376,7 +2405,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         <span class="profile-avatar${profile.avatarUrl ? ' has-image' : ''}"${avatarStyle}>${initials}</span>
         <span class="profile-meta">
           <strong>${escapeHtml(profile.fullName)}</strong>
-          <span>${escapeHtml(profile.email || 'Logged in')}</span>
+          ${profile.hasRealEmail ? `<span>${escapeHtml(profile.email)}</span>` : ''}
         </span>
       </button>
     `;
@@ -2819,7 +2848,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
               </label>
               <label class="account-field">
                 <span>Email</span>
-                <input type="email" value="${escapeHtml(profile.email || '')}" readonly aria-readonly="true" />
+                ${profile.hasRealEmail
+                  ? `<input name="email" type="email" value="${escapeHtml(profile.email)}" readonly aria-readonly="true" />`
+                  : `<input name="email" type="email" value="" placeholder="" />`}
               </label>
               <label class="account-field">
                 <span>Mobile Number</span>
@@ -2832,10 +2863,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             </form>
           ` : `
             <ul class="account-meta-list">
-              <li><span>Email</span><strong>${escapeHtml(profile.email || 'Not added yet')}</strong></li>
+              <li><span>Email</span><strong>${escapeHtml(profile.hasRealEmail ? profile.email : '—')}</strong></li>
               <li><span>Mobile Number</span><strong>${escapeHtml(formatCustomerPhone(profile.mobile))}</strong></li>
             </ul>
-            <p class="account-card__note">Email is your account identity and cannot be changed here.</p>
+            <p class="account-card__note">${profile.hasRealEmail ? 'Email is your account identity and cannot be changed here.' : 'Add your email to receive order updates and receipts.'}</p>
           `}
           ${state.accountProfileMessage ? `<p class="account-success-message">${escapeHtml(state.accountProfileMessage)}</p>` : ''}
         </div>
@@ -3474,10 +3505,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   async function handleProfileSubmit(event) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
+    const emailVal = String(formData.get('email') || '').trim();
     const payload = {
       fullName: String(formData.get('fullName') || '').trim(),
       mobile: String(formData.get('mobile') || '').trim(),
     };
+    if (emailVal && hasRealEmail(emailVal)) {
+      payload.email = emailVal;
+    }
 
     try {
       const result = await api('/api/merch/profile', {
@@ -3486,15 +3521,20 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         body: JSON.stringify(payload),
       });
       state.merchProfile = result.profile || { ...(state.merchProfile || {}), ...payload };
-    } catch {
-      state.merchProfile = { ...(state.merchProfile || {}), ...payload };
+      if (state.currentUser) {
+        state.currentUser = {
+          ...state.currentUser,
+          name: payload.fullName,
+          mobile: payload.mobile,
+          ...(payload.email ? { email: payload.email } : {}),
+        };
+      }
+      state.accountProfileEditing = false;
+      state.accountProfileMessage = 'Profile saved.';
+    } catch (err) {
+      state.accountProfileMessage = err.message || 'Unable to update profile.';
     }
 
-    if (state.currentUser) {
-      state.currentUser = { ...state.currentUser, name: payload.fullName, mobile: payload.mobile };
-    }
-    state.accountProfileEditing = false;
-    state.accountProfileMessage = 'Profile saved.';
     renderAccountTrigger();
     renderAccountDrawer();
   }
@@ -3951,11 +3991,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       <div class="gallery-main gallery-main--${escapeHtml(String(product.category || '').toLowerCase())}" tabindex="0" aria-label="${escapeHtml(product.name)} image gallery">
         <img id="galleryMainImg" src="${escapeHtml(mainImage)}" alt="${escapeHtml(product.name)}" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
         ${slides.some((slide) => slide.type === 'video') ? '<video id="galleryMainVideo" controls playsinline preload="metadata" hidden></video>' : ''}
-        <div class="gallery-magnifier" id="galleryMagnifier" aria-hidden="true"></div>
         ${slides.length > 1 ? `
           <button class="gallery-nav gallery-nav--previous" type="button" data-gallery-direction="previous" aria-label="Previous product image">&#8592;</button>
           <button class="gallery-nav gallery-nav--next" type="button" data-gallery-direction="next" aria-label="Next product image">&#8594;</button>
-        ` : ''}
+          ` : ''}
       </div>
       ${slides.length > 1 ? `
         <div class="gallery-thumbs">
@@ -3972,7 +4011,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const main = els.productGallery.querySelector('.gallery-main');
     const mainImageElement = document.getElementById('galleryMainImg');
     const mainVideoElement = document.getElementById('galleryMainVideo');
-    const magnifier = document.getElementById('galleryMagnifier');
     const setActiveSlide = (nextIndex) => {
       activeIndex = (nextIndex + slides.length) % slides.length;
       const slide = slides[activeIndex];
@@ -3988,7 +4026,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       if (!isVideo) {
         mainImageElement.src = slide.src;
         mainImageElement.alt = slide.label;
-        magnifier.style.backgroundImage = `url("${slide.src}")`;
       }
       els.productGallery.querySelectorAll('.gallery-thumb').forEach((thumb, index) => {
         thumb.classList.toggle('is-active', index === activeIndex);
@@ -4014,18 +4051,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       if (event.key === 'ArrowRight') setActiveSlide(activeIndex + 1);
       if (event.key === 'ArrowLeft') setActiveSlide(activeIndex - 1);
     });
-    main.addEventListener('pointermove', (event) => {
-      if (event.pointerType === 'touch') return;
-      const rect = main.getBoundingClientRect();
-      const x = Math.min(Math.max(((event.clientX - rect.left) / rect.width) * 100, 0), 100);
-      const y = Math.min(Math.max(((event.clientY - rect.top) / rect.height) * 100, 0), 100);
-      magnifier.style.left = `${x}%`;
-      magnifier.style.top = `${y}%`;
-      magnifier.style.backgroundPosition = `${x}% ${y}%`;
-      magnifier.classList.add('is-visible');
-    });
-    main.addEventListener('pointerleave', () => magnifier.classList.remove('is-visible'));
-    magnifier.style.backgroundImage = `url("${mainImage}")`;
   }
 
   function getProductDetailMainImage(product, variant = state.selectedVariant) {
@@ -4433,8 +4458,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const firstName = nameParts.shift() || '';
     const lastName = nameParts.join(' ');
     const phone = parseCheckoutPhone(customer?.phone || address?.phone || '');
+    const email = hasRealEmail(customer?.email) ? String(customer.email).trim() : '';
     return {
-      email: String(customer?.email || '').trim(),
+      email,
       phone: phone.localNumber,
       phoneCountryCode: phone.countryCode,
       firstName,
@@ -4497,8 +4523,13 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const digitsOnly = (value) => String(value || '').replace(/\D+/g, '');
 
-    if (!draft.email) errors.email = 'Email is required.';
-    else if (!emailPattern.test(draft.email)) errors.email = 'Enter a valid email address.';
+    if (draft.email) {
+      if (!emailPattern.test(draft.email) || isPlaceholderEmail(draft.email)) {
+        errors.email = 'Enter a valid email address.';
+      }
+    } else if (!state.currentUser && !draft.phone) {
+      errors.email = 'Email or phone number is required.';
+    }
     if (!draft.firstName) errors.firstName = 'First name is required.';
     if (!draft.lastName) errors.lastName = 'Last name is required.';
     if (!draft.country) errors.country = 'Country is required.';
@@ -4661,7 +4692,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
               <h1 id="checkoutPageTitle">Contact</h1>
               <p>Already have an account? <a href="/merch/auth.html">Sign in</a></p>
             </div>
-            ${renderCheckoutField({ name: 'email', label: 'Email', value: draft.email, type: 'email', placeholder: 'Enter your email', autocomplete: 'email', wide: true, icon: mailIcon })}
+            ${renderCheckoutField({ name: 'email', label: 'Email', value: draft.email, type: 'email', placeholder: '', autocomplete: 'email', wide: true, icon: mailIcon, required: false })}
             <label class="shopify-check"><input name="emailOffers" type="checkbox" ${draft.emailOffers ? 'checked' : ''} /><span>Email me with news and offers</span></label>
           </section>
 
@@ -4832,7 +4863,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         <div class="checkout-profile-summary">
           <p>Checking out as</p>
           <strong>${escapeHtml(customer.name)}</strong>
-          <span>${escapeHtml(customer.email)}${customer.phone ? ` · ${escapeHtml(customer.phone)}` : ''}</span>
+          <span>${customer.email && hasRealEmail(customer.email) ? `${escapeHtml(customer.email)}${customer.phone ? ' · ' : ''}` : ''}${escapeHtml(customer.phone || '')}</span>
         </div>
         <form id="checkoutAddressSelectForm" class="checkout-address-list">
           ${renderCheckoutAddressCards()}
@@ -5068,7 +5099,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     if (state.currentUser && !directToCheckout) {
       const defaultAddress = getDefaultAddress();
       const customer = getAuthenticatedCheckoutCustomer(defaultAddress);
-      if (!customer.name || !customer.email || !customer.phone) {
+      if (!customer.name || !customer.phone) {
         openCheckoutAddAddressModal({
           title: 'Complete your details',
           helpText: 'Add your name, phone, address, and pincode to continue checkout.',
@@ -5122,7 +5153,11 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         name: 'H2 House of Health',
         description: `Order ${data.orderNumber}`,
         order_id: data.razorpayOrderId,
-        prefill: { name: customer.name, email: customer.email, contact: customer.phone },
+        prefill: {
+          name: customer.name,
+          ...(hasRealEmail(customer.email) ? { email: customer.email } : {}),
+          contact: customer.phone,
+        },
         theme: { color: '#c8652d' },
         handler: async function (response) {
           // Verify payment
