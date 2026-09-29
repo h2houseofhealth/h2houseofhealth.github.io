@@ -979,7 +979,17 @@ app.get('/auth/google/callback', ensureGoogleOAuthConfigured, (req, res, next) =
 app.use('/api/auth', rateLimit({ windowMs: 60_000, max: 40 }));
 
 function getMobileVariants(mobile) {
-  return [mobile, mobile.replace(/^\+/, ''), mobile.slice(3)];
+  const norm = String(mobile || '').trim();
+  const withoutPlus = norm.replace(/^\+/, '');
+  let local = withoutPlus;
+  if (norm.startsWith('+91')) {
+    local = norm.slice(3);
+  } else if (norm.startsWith('+1')) {
+    local = norm.slice(2);
+  } else if (norm.startsWith('+44')) {
+    local = norm.slice(3);
+  }
+  return [norm, withoutPlus, local];
 }
 
 function getLatestSignupOtp(mobile) {
@@ -1400,12 +1410,11 @@ app.post('/api/auth/send-whatsapp-otp', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Enter a valid mobile number with country code.' });
   }
 
-  const mobileDigits = mobile.replace(/^\+/, '');
   const user = db
     .prepare('SELECT id, role FROM users WHERE mobile IN (?, ?, ?) ORDER BY id DESC LIMIT 1')
-    .get(mobile, mobileDigits, mobile.slice(3));
+    .get(...getMobileVariants(mobile));
   if (!user || String(user.role || 'user').toLowerCase() === 'admin') {
-    return res.status(404).json({ success: false, message: 'Account not found' });
+    return res.status(404).json({ success: false, message: 'Account not found. Please sign up first.' });
   }
 
   const otp = generateOtp();
@@ -1474,7 +1483,7 @@ app.post('/api/auth/verify-whatsapp-otp', (req, res) => {
 
   const userRow = db
     .prepare('SELECT id FROM users WHERE mobile IN (?, ?, ?) ORDER BY id DESC LIMIT 1')
-    .get(mobile, mobile.replace(/^\+/, ''), mobile.slice(3));
+    .get(...getMobileVariants(mobile));
   if (!userRow) {
     return res.status(404).json({ message: 'Account not found' });
   }
@@ -14504,10 +14513,38 @@ function hashOtp(otp) {
 
 function normalizeWhatsAppMobile(value) {
   const raw = String(value || '').trim();
-  const digits = raw.replace(/\D/g, '');
-  if (/^\+91[6-9]\d{9}$/.test(raw)) return raw;
-  if (/^91[6-9]\d{9}$/.test(digits)) return `+${digits}`;
-  if (/^[6-9]\d{9}$/.test(digits)) return `+91${digits}`;
+  if (!raw) return '';
+  if (/[^\d\s+\-]/.test(raw)) return '';
+
+  if (raw.startsWith('+')) {
+    const digits = raw.slice(1).replace(/[\s\-]/g, '');
+    if (digits.length >= 7 && digits.length <= 15) {
+      if (digits.startsWith('440')) {
+        return `+44${digits.slice(3)}`;
+      }
+      return `+${digits}`;
+    }
+    return '';
+  }
+
+  const digits = raw.replace(/[\s\-]/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) {
+    return `+${digits}`;
+  }
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return `+${digits}`;
+  }
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith('44')) {
+    let local = digits.slice(2);
+    if (local.startsWith('0')) local = local.slice(1);
+    return `+44${local}`;
+  }
+  if (/^\d{10}$/.test(digits)) {
+    return `+91${digits}`;
+  }
+  if (digits.length >= 7 && digits.length <= 15) {
+    return `+${digits}`;
+  }
   return '';
 }
 
@@ -14652,10 +14689,38 @@ function sendWhatsAppText(to, message) {
 
 function normalizeWhatsAppMobile(value) {
   const raw = String(value || '').trim();
-  const digits = raw.replace(/\D/g, '');
-  if (/^\+91[6-9]\d{9}$/.test(raw)) return raw;
-  if (/^91[6-9]\d{9}$/.test(digits)) return `+${digits}`;
-  if (/^[6-9]\d{9}$/.test(digits)) return `+91${digits}`;
+  if (!raw) return '';
+  if (/[^\d\s+\-]/.test(raw)) return '';
+
+  if (raw.startsWith('+')) {
+    const digits = raw.slice(1).replace(/[\s\-]/g, '');
+    if (digits.length >= 7 && digits.length <= 15) {
+      if (digits.startsWith('440')) {
+        return `+44${digits.slice(3)}`;
+      }
+      return `+${digits}`;
+    }
+    return '';
+  }
+
+  const digits = raw.replace(/[\s\-]/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) {
+    return `+${digits}`;
+  }
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return `+${digits}`;
+  }
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith('44')) {
+    let local = digits.slice(2);
+    if (local.startsWith('0')) local = local.slice(1);
+    return `+44${local}`;
+  }
+  if (/^\d{10}$/.test(digits)) {
+    return `+91${digits}`;
+  }
+  if (digits.length >= 7 && digits.length <= 15) {
+    return `+${digits}`;
+  }
   return '';
 }
 

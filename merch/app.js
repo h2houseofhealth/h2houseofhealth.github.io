@@ -988,6 +988,192 @@
     return String(phone || '').trim() || 'Not added yet';
   }
 
+  const CHECKOUT_PHONE_COUNTRY_CODES = [
+    { value: '+91', label: 'India (+91)' },
+    { value: '+1', label: 'US / Canada (+1)' },
+    { value: '+44', label: 'United Kingdom (+44)' },
+    { value: '+971', label: 'UAE (+971)' },
+    { value: '+65', label: 'Singapore (+65)' },
+    { value: '+61', label: 'Australia (+61)' },
+  ];
+
+  const CHECKOUT_COUNTRIES = [
+    'India',
+    'United States',
+    'United Kingdom',
+    'Canada',
+    'Australia',
+    'United Arab Emirates',
+    'Singapore',
+  ];
+
+  const CHECKOUT_REGIONS_BY_COUNTRY = {
+    India: ['Telangana', 'Andhra Pradesh', 'Karnataka', 'Maharashtra', 'Tamil Nadu', 'Delhi', 'Kerala', 'Gujarat', 'Rajasthan', 'Uttar Pradesh', 'West Bengal'],
+    'United States': ['Alabama', 'Alaska', 'Arizona', 'California', 'Colorado', 'Florida', 'Georgia', 'Illinois', 'New Jersey', 'New York', 'North Carolina', 'Ohio', 'Pennsylvania', 'Texas', 'Virginia', 'Washington'],
+    'United Kingdom': ['England', 'Scotland', 'Wales', 'Northern Ireland', 'Greater London'],
+    Canada: ['Alberta', 'British Columbia', 'Manitoba', 'New Brunswick', 'Ontario', 'Quebec'],
+    Australia: ['New South Wales', 'Victoria', 'Queensland', 'Western Australia', 'South Australia'],
+    'United Arab Emirates': ['Abu Dhabi', 'Dubai', 'Sharjah', 'Ajman'],
+    Singapore: ['Central Community Development Council', 'North East', 'North West', 'South East', 'South West'],
+  };
+
+  function normalizeCheckoutCountry(value = '') {
+    const normalized = String(value || '').trim();
+    if (/^(us|usa|u\.s\.a\.|united states|united states of america)$/i.test(normalized)) return 'United States';
+    if (/^(uk|u\.k\.|united kingdom|great britain|england)$/i.test(normalized)) return 'United Kingdom';
+    if (/^(ca|canada)$/i.test(normalized)) return 'Canada';
+    if (/^(au|australia)$/i.test(normalized)) return 'Australia';
+    if (/^(ae|uae|united arab emirates)$/i.test(normalized)) return 'United Arab Emirates';
+    if (/^(sg|singapore)$/i.test(normalized)) return 'Singapore';
+    if (/^(in|india)$/i.test(normalized)) return 'India';
+    return CHECKOUT_COUNTRIES.includes(normalized) ? normalized : (normalized || 'India');
+  }
+
+  function getCheckoutRegionOptions(country = 'India') {
+    return CHECKOUT_REGIONS_BY_COUNTRY[normalizeCheckoutCountry(country)] || CHECKOUT_REGIONS_BY_COUNTRY.India;
+  }
+
+  function isValidPostalCode(value, country = 'India') {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return false;
+    const norm = normalizeCheckoutCountry(country);
+    if (norm === 'United States') {
+      return /^\d{5}(?:-\d{4})?$/.test(trimmed);
+    }
+    if (norm === 'United Kingdom') {
+      return /^[A-Z]{1,2}[0-9][A-Z0-9]? ?[0-9][A-Z]{2}$/i.test(trimmed);
+    }
+    if (norm === 'Canada') {
+      return /^[A-Za-z]\d[A-Za-z] ?\d[A-Za-z]\d$/.test(trimmed);
+    }
+    if (norm === 'India') {
+      return /^\d{6}$/.test(trimmed);
+    }
+    return /^[A-Za-z0-9\s-]{3,10}$/.test(trimmed);
+  }
+
+  function getPostalCodeErrorMessage(country = 'India') {
+    const norm = normalizeCheckoutCountry(country);
+    if (norm === 'United States') return 'Enter a valid 5-digit ZIP code (e.g. 90210).';
+    if (norm === 'United Kingdom') return 'Enter a valid UK postcode (e.g. SW1A 1AA).';
+    if (norm === 'Canada') return 'Enter a valid Canadian postal code (e.g. K1A 0B1).';
+    if (norm === 'India') return 'Enter a 6-digit PIN code.';
+    return 'Enter a valid postal code.';
+  }
+
+  function isValidPhoneNumber(phone, countryCode = '+91') {
+    if (!phone || typeof phone !== 'string') return false;
+    const trimmed = phone.trim();
+    if (!trimmed) return false;
+    if (/[^\d\s+\-]/.test(trimmed)) return false;
+
+    if (trimmed.startsWith('+')) {
+      const digits = trimmed.slice(1).replace(/[\s\-]/g, '');
+      if (trimmed.startsWith('+91')) return /^\d{10}$/.test(digits.slice(2));
+      if (trimmed.startsWith('+1')) return /^\d{10}$/.test(digits.slice(1));
+      if (trimmed.startsWith('+44')) {
+        const local = digits.slice(2).replace(/^0/, '');
+        return /^\d{9,10}$/.test(local);
+      }
+      return digits.length >= 7 && digits.length <= 15;
+    }
+
+    const digits = trimmed.replace(/[\s\-]/g, '');
+    const code = String(countryCode || '+91').trim();
+
+    if (code === '+1') {
+      const local = (digits.length === 11 && digits.startsWith('1')) ? digits.slice(1) : digits;
+      return /^\d{10}$/.test(local);
+    }
+    if (code === '+44') {
+      let local = digits.startsWith('44') ? digits.slice(2) : digits;
+      if (local.startsWith('0')) local = local.slice(1);
+      return /^\d{9,10}$/.test(local);
+    }
+    if (code === '+91') {
+      const local = (digits.length === 12 && digits.startsWith('91')) ? digits.slice(2) : digits;
+      return /^\d{10}$/.test(local);
+    }
+
+    return digits.length >= 7 && digits.length <= 15;
+  }
+
+  function getPhoneErrorMessage(countryCode = '+91') {
+    const code = String(countryCode || '+91').trim();
+    if (code === '+91') return 'Enter a valid 10-digit mobile number for India.';
+    if (code === '+1') return 'Enter a valid 10-digit mobile number for US/Canada.';
+    if (code === '+44') return 'Enter a valid UK mobile number.';
+    return 'Enter a valid mobile number with country code.';
+  }
+
+  function formatE164Phone(phone = '', countryCode = '+91') {
+    const trimmed = String(phone || '').trim();
+    if (!trimmed) return '';
+    if (trimmed.startsWith('+')) {
+      const digits = trimmed.slice(1).replace(/\D+/g, '');
+      if (digits.startsWith('440')) {
+        return `+44${digits.slice(3)}`;
+      }
+      return `+${digits}`;
+    }
+    let digits = trimmed.replace(/\D+/g, '');
+    const prefix = countryCode.startsWith('+') ? countryCode : `+${countryCode}`;
+    if (prefix === '+44' && digits.startsWith('0')) {
+      digits = digits.slice(1);
+    } else if (prefix === '+91' && digits.length === 12 && digits.startsWith('91')) {
+      digits = digits.slice(2);
+    } else if (prefix === '+1' && digits.length === 11 && digits.startsWith('1')) {
+      digits = digits.slice(1);
+    }
+    return `${prefix}${digits}`;
+  }
+
+  function parseCheckoutPhone(value = '') {
+    const raw = String(value || '').trim();
+    if (raw.startsWith('+')) {
+      if (raw.startsWith('+91')) {
+        return { countryCode: '+91', localNumber: raw.slice(3).replace(/\D+/g, '') };
+      }
+      if (raw.startsWith('+44')) {
+        return { countryCode: '+44', localNumber: raw.slice(3).replace(/\D+/g, '') };
+      }
+      if (raw.startsWith('+971')) {
+        return { countryCode: '+971', localNumber: raw.slice(4).replace(/\D+/g, '') };
+      }
+      if (raw.startsWith('+65')) {
+        return { countryCode: '+65', localNumber: raw.slice(3).replace(/\D+/g, '') };
+      }
+      if (raw.startsWith('+61')) {
+        return { countryCode: '+61', localNumber: raw.slice(3).replace(/\D+/g, '') };
+      }
+      if (raw.startsWith('+1')) {
+        return { countryCode: '+1', localNumber: raw.slice(2).replace(/\D+/g, '') };
+      }
+      const match = raw.match(/^\+(\d{1,4})(\d+)$/);
+      if (match) {
+        return { countryCode: `+${match[1]}`, localNumber: match[2] };
+      }
+    }
+    const digits = raw.replace(/\D+/g, '');
+    if (digits.length === 12 && digits.startsWith('91')) {
+      return { countryCode: '+91', localNumber: digits.slice(2) };
+    }
+    if (digits.length === 11 && digits.startsWith('1')) {
+      return { countryCode: '+1', localNumber: digits.slice(1) };
+    }
+    if ((digits.length === 12 || digits.length === 11) && digits.startsWith('44')) {
+      return { countryCode: '+44', localNumber: digits.slice(2) };
+    }
+    return { countryCode: '+91', localNumber: digits };
+  }
+
+  function getCheckoutPhonePayload(draft = {}) {
+    const countryCode = CHECKOUT_PHONE_COUNTRY_CODES.some((option) => option.value === draft.phoneCountryCode)
+      ? draft.phoneCountryCode
+      : (draft.phoneCountryCode || '+91');
+    return formatE164Phone(draft.phone, countryCode);
+  }
+
   function getAddressId(address) {
     return String(address?.id || address?.localId || '');
   }
@@ -2999,6 +3185,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const hasActiveOrderFilter = Boolean(state.accountOrderFilterAppliedFrom && state.accountOrderFilterAppliedTo);
     const editingAddress = addresses.find((address) => getAddressId(address) === String(state.accountEditingAddressId || ''));
     const accountInitials = escapeHtml(getInitials(profile.fullName));
+    const profilePhone = parseCheckoutPhone(profile.mobile || '');
     const avatarStyle = profile.avatarUrl
       ? ` style="background-image:url('${escapeHtml(profile.avatarUrl)}')"`
       : '';
@@ -3035,7 +3222,12 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
               </label>
               <label class="account-field">
                 <span>Mobile Number</span>
-                <input name="mobile" type="tel" value="${escapeHtml(profile.mobile)}" autocomplete="tel" />
+                <div class="checkout-phone-control">
+                  <select name="mobileCountryCode" aria-label="Mobile country code" autocomplete="tel-country-code">
+                    ${CHECKOUT_PHONE_COUNTRY_CODES.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === profilePhone.countryCode ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}
+                  </select>
+                  <input name="mobile" type="tel" inputmode="numeric" maxlength="15" value="${escapeHtml(profilePhone.localNumber)}" autocomplete="tel-national" placeholder="Mobile number" />
+                </div>
               </label>
               <div class="account-form__actions">
                 <button class="btn btn-primary account-action-btn" type="submit">Save</button>
@@ -3276,6 +3468,12 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   function renderAddressForm(address = null) {
     const isEdit = state.accountAddressFormMode === 'edit';
     const value = (key, fallback = '') => escapeHtml(String(address?.[key] || fallback));
+    const phoneParsed = parseCheckoutPhone(address?.phone || '');
+    const currentCountry = normalizeCheckoutCountry(address?.country || 'India');
+    const isIndia = currentCountry === 'India';
+    const isUS = currentCountry === 'United States';
+    const postalPlaceholder = isUS ? 'ZIP code' : (isIndia ? '6-digit PIN code' : 'Postal code');
+    const postalInputMode = isIndia ? 'numeric' : 'text';
     return `
       <form class="account-form account-form--address" id="accountAddressForm">
         <div class="account-form__grid">
@@ -3289,7 +3487,12 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           </label>
           <label class="account-field">
             <span>Mobile Number</span>
-            <input name="phone" type="tel" value="${value('phone')}" autocomplete="tel" required />
+            <div class="checkout-phone-control">
+              <select name="phoneCountryCode" aria-label="Phone country code" autocomplete="tel-country-code">
+                ${CHECKOUT_PHONE_COUNTRY_CODES.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === phoneParsed.countryCode ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}
+              </select>
+              <input name="phone" type="tel" inputmode="numeric" maxlength="15" value="${escapeHtml(phoneParsed.localNumber)}" autocomplete="tel-national" placeholder="Mobile number" required />
+            </div>
           </label>
           <label class="account-field account-field--wide">
             <span>Address Line 1</span>
@@ -3309,11 +3512,13 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           </label>
           <label class="account-field">
             <span>Postal Code</span>
-            <input name="postalCode" type="text" value="${value('postalCode')}" autocomplete="postal-code" />
+            <input name="postalCode" type="text" value="${value('postalCode')}" autocomplete="postal-code" inputmode="${postalInputMode}" maxlength="10" placeholder="${postalPlaceholder}" />
           </label>
           <label class="account-field">
             <span>Country</span>
-            <input name="country" type="text" value="${value('country', 'India')}" autocomplete="country-name" />
+            <select name="country" autocomplete="country-name">
+              ${CHECKOUT_COUNTRIES.map((country) => `<option value="${escapeHtml(country)}" ${country === currentCountry ? 'selected' : ''}>${escapeHtml(country)}</option>`).join('')}
+            </select>
           </label>
         </div>
         <label class="account-check">
@@ -3329,8 +3534,13 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   function bindAccountDrawerActions() {
-    document.getElementById('accountProfileForm')?.addEventListener('submit', handleProfileSubmit);
-    document.getElementById('accountAddressForm')?.addEventListener('submit', handleAddressSubmit);
+    const profileForm = document.getElementById('accountProfileForm');
+    profileForm?.addEventListener('input', handleAddressAndNameInputs);
+    profileForm?.addEventListener('submit', handleProfileSubmit);
+
+    const addressForm = document.getElementById('accountAddressForm');
+    addressForm?.addEventListener('input', handleAddressAndNameInputs);
+    addressForm?.addEventListener('submit', handleAddressSubmit);
     document.getElementById('influencerProfileForm')?.addEventListener('submit', handleInfluencerProfileSubmit);
     document.getElementById('accountOrderFilterForm')?.addEventListener('submit', handleAccountOrderFilterSubmit);
 
@@ -3857,10 +4067,28 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     const emailVal = String(formData.get('email') || '').trim();
+    const mobileCountryCode = String(formData.get('mobileCountryCode') || '+91').trim();
+    const rawMobile = String(formData.get('mobile') || '').trim();
+    const mobile = rawMobile ? formatE164Phone(rawMobile, mobileCountryCode) : '';
     const payload = {
       fullName: String(formData.get('fullName') || '').trim(),
-      mobile: String(formData.get('mobile') || '').trim(),
+      mobile,
     };
+    if (!payload.fullName) {
+      state.accountProfileMessage = 'Full name is required.';
+      renderAccountDrawer();
+      return;
+    }
+    if (!isValidName(payload.fullName)) {
+      state.accountProfileMessage = 'Name should contain letters and spaces only.';
+      renderAccountDrawer();
+      return;
+    }
+    if (payload.mobile && !isValidPhoneNumber(payload.mobile, mobileCountryCode)) {
+      state.accountProfileMessage = getPhoneErrorMessage(mobileCountryCode);
+      renderAccountDrawer();
+      return;
+    }
     if (emailVal && hasRealEmail(emailVal)) {
       payload.email = emailVal;
     }
@@ -3946,16 +4174,22 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   function getAddressPayload(form) {
     const formData = new FormData(form);
+    const country = String(formData.get('country') || 'India').trim() || 'India';
+    const phoneCountryCode = String(formData.get('phoneCountryCode') || '').trim();
+    const rawPhone = String(formData.get('phone') || '').trim();
+    const phone = phoneCountryCode ? formatE164Phone(rawPhone, phoneCountryCode) : rawPhone;
+
     return {
       label: String(formData.get('label') || '').trim(),
       recipientName: String(formData.get('recipientName') || '').trim(),
-      phone: String(formData.get('phone') || '').trim(),
+      phone,
+      phoneCountryCode: phoneCountryCode || (parseCheckoutPhone(phone).countryCode),
       line1: String(formData.get('line1') || '').trim(),
       line2: String(formData.get('line2') || '').trim(),
       city: String(formData.get('city') || '').trim(),
       state: String(formData.get('state') || '').trim(),
       postalCode: String(formData.get('postalCode') || '').trim(),
-      country: String(formData.get('country') || 'India').trim() || 'India',
+      country,
       isDefault: formData.get('isDefault') === 'on',
     };
   }
@@ -3963,6 +4197,41 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   async function handleAddressSubmit(event) {
     event.preventDefault();
     const payload = getAddressPayload(event.currentTarget);
+    if (!payload.recipientName) {
+      state.accountAddressMessage = 'Recipient name is required.';
+      renderAccountDrawer();
+      return;
+    }
+    if (!isValidName(payload.recipientName)) {
+      state.accountAddressMessage = 'Name should contain letters and spaces only.';
+      renderAccountDrawer();
+      return;
+    }
+    if (!isValidPhoneNumber(payload.phone, payload.phoneCountryCode)) {
+      state.accountAddressMessage = getPhoneErrorMessage(payload.phoneCountryCode);
+      renderAccountDrawer();
+      return;
+    }
+    if (!payload.line1 || !isValidAddress(payload.line1)) {
+      state.accountAddressMessage = 'Enter a valid address.';
+      renderAccountDrawer();
+      return;
+    }
+    if (payload.city && !isValidCityOrState(payload.city)) {
+      state.accountAddressMessage = 'Enter a valid city name.';
+      renderAccountDrawer();
+      return;
+    }
+    if (payload.state && !isValidCityOrState(payload.state)) {
+      state.accountAddressMessage = 'Enter a valid state name.';
+      renderAccountDrawer();
+      return;
+    }
+    if (payload.postalCode && !isValidPostalCode(payload.postalCode, payload.country)) {
+      state.accountAddressMessage = getPostalCodeErrorMessage(payload.country);
+      renderAccountDrawer();
+      return;
+    }
     const isEdit = state.accountAddressFormMode === 'edit';
     const addressId = state.accountEditingAddressId;
 
@@ -4785,45 +5054,52 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     });
   }
 
-  const CHECKOUT_PHONE_COUNTRY_CODES = [
-    { value: '+91', label: 'India (+91)' },
-    { value: '+1', label: 'United States (+1)' },
-  ];
-  const CHECKOUT_COUNTRIES = ['India', 'United States'];
-  const CHECKOUT_REGIONS_BY_COUNTRY = {
-    India: ['Telangana', 'Andhra Pradesh', 'Karnataka', 'Maharashtra', 'Tamil Nadu', 'Delhi', 'Kerala', 'Gujarat', 'Rajasthan', 'Uttar Pradesh', 'West Bengal'],
-    'United States': ['Alabama', 'Alaska', 'Arizona', 'California', 'Colorado', 'Florida', 'Georgia', 'Illinois', 'New Jersey', 'New York', 'North Carolina', 'Ohio', 'Pennsylvania', 'Texas', 'Virginia', 'Washington'],
-  };
+  function handleAddressAndNameInputs(event) {
+    const target = event?.target;
+    if (!target || !target.name) return;
+    const name = target.name;
 
-  function normalizeCheckoutCountry(value = '') {
-    const normalized = String(value || '').trim();
-    if (/^(us|usa|u\.s\.a\.|united states|united states of america)$/i.test(normalized)) return 'United States';
-    if (/^(in|india)$/i.test(normalized)) return 'India';
-    return CHECKOUT_COUNTRIES.includes(normalized) ? normalized : 'India';
-  }
-
-  function getCheckoutRegionOptions(country = 'India') {
-    return CHECKOUT_REGIONS_BY_COUNTRY[normalizeCheckoutCountry(country)] || CHECKOUT_REGIONS_BY_COUNTRY.India;
-  }
-
-  function parseCheckoutPhone(value = '') {
-    const raw = String(value || '').trim();
-    const digits = raw.replace(/\D+/g, '');
-    if (digits.length === 12 && digits.startsWith('91')) {
-      return { countryCode: '+91', localNumber: digits.slice(2) };
+    if (name === 'phone' || name === 'mobile') {
+      const form = target.form;
+      const phoneCountryCode = form?.elements?.phoneCountryCode?.value || form?.elements?.mobileCountryCode?.value || state.checkoutDraft?.phoneCountryCode || '+91';
+      const maxLen = (phoneCountryCode === '+91' || phoneCountryCode === '+1') ? 10 : (phoneCountryCode === '+44' ? 11 : 15);
+      target.value = target.value.replace(/\D/g, '').slice(0, maxLen);
+    } else if (name === 'postalCode') {
+      const countryVal = target.form?.elements?.country?.value || state.checkoutDraft?.country;
+      const countryNorm = normalizeCheckoutCountry(countryVal);
+      if (countryNorm === 'United States') {
+        target.value = target.value.replace(/[^\d-]/g, '').slice(0, 10);
+      } else if (countryNorm === 'India') {
+        target.value = target.value.replace(/\D/g, '').slice(0, 6);
+      } else {
+        target.value = target.value.replace(/[^A-Za-z0-9\s-]/g, '').slice(0, 10);
+      }
+    } else if (name === 'city' || name === 'state') {
+      target.value = target.value.replace(/[0-9]/g, '');
+    } else if (name === 'firstName' || name === 'lastName' || name === 'recipientName' || name === 'fullName') {
+      target.value = target.value.replace(/[^A-Za-z\s]/g, '');
     }
-    if (digits.length === 11 && digits.startsWith('1')) {
-      return { countryCode: '+1', localNumber: digits.slice(1) };
-    }
-    return { countryCode: '+91', localNumber: digits };
   }
 
-  function getCheckoutPhonePayload(draft = {}) {
-    const countryCode = CHECKOUT_PHONE_COUNTRY_CODES.some((option) => option.value === draft.phoneCountryCode)
-      ? draft.phoneCountryCode
-      : '+91';
-    const localNumber = String(draft.phone || '').replace(/\D+/g, '');
-    return localNumber ? `${countryCode}${localNumber}` : '';
+  function isValidName(value) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return false;
+    return /^[A-Za-z]+(?:\s+[A-Za-z]+)*$/.test(trimmed);
+  }
+
+  function isValidAddress(value) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed || trimmed.length < 3) return false;
+    if (!/[A-Za-z0-9]/.test(trimmed)) return false;
+    return /^[A-Za-z0-9\s,.\-#/()':;&+]+$/.test(trimmed);
+  }
+
+  function isValidCityOrState(value) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed || trimmed.length < 2) return false;
+    if (!/[A-Za-z]/.test(trimmed)) return false;
+    if (/[0-9]/.test(trimmed)) return false;
+    return /^[A-Za-z\s.'-]+$/.test(trimmed);
   }
 
   function buildCheckoutDraft(customer = {}, address = {}) {
@@ -4903,19 +5179,46 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     } else if (!state.currentUser && !draft.phone) {
       errors.email = 'Email or phone number is required.';
     }
-    if (!draft.firstName) errors.firstName = 'First name is required.';
-    if (!draft.lastName) errors.lastName = 'Last name is required.';
-    if (!draft.country) errors.country = 'Country is required.';
-    if (!draft.line1) errors.line1 = 'Address is required.';
-    if (!draft.city) errors.city = 'City is required.';
-    if (!draft.state) errors.state = 'State is required.';
-    if (!draft.postalCode) errors.postalCode = normalizeCheckoutCountry(draft.country) === 'United States' ? 'ZIP code is required.' : 'PIN code is required.';
-    else if (normalizeCheckoutCountry(draft.country) === 'United States' && !/^\d{5}(-\d{4})?$/.test(String(draft.postalCode).trim())) errors.postalCode = 'Enter a valid ZIP code.';
-    else if (normalizeCheckoutCountry(draft.country) !== 'United States' && digitsOnly(draft.postalCode).length !== 6) errors.postalCode = 'Enter a 6-digit PIN code.';
-    if (!draft.phone) errors.phone = 'Phone is required.';
-    else if (digitsOnly(draft.phone).length !== 10) {
-      const countryLabel = draft.phoneCountryCode === '+1' ? 'United States' : 'India';
-      errors.phone = `Enter a 10-digit phone number for ${countryLabel}.`;
+    if (!draft.firstName) {
+      errors.firstName = 'First name is required.';
+    } else if (!isValidName(draft.firstName)) {
+      errors.firstName = 'Name should contain letters and spaces only.';
+    }
+    if (!draft.lastName) {
+      errors.lastName = 'Last name is required.';
+    } else if (!isValidName(draft.lastName)) {
+      errors.lastName = 'Name should contain letters and spaces only.';
+    }
+    if (!draft.country) {
+      errors.country = 'Country is required.';
+    }
+    if (!draft.line1) {
+      errors.line1 = 'Address is required.';
+    } else if (!isValidAddress(draft.line1)) {
+      errors.line1 = 'Enter a valid address.';
+    }
+    if (draft.line2 && !isValidAddress(draft.line2)) {
+      errors.line2 = 'Enter a valid address.';
+    }
+    if (!draft.city) {
+      errors.city = 'City is required.';
+    } else if (!isValidCityOrState(draft.city)) {
+      errors.city = 'Enter a valid city name.';
+    }
+    if (!draft.state) {
+      errors.state = 'State is required.';
+    } else if (!isValidCityOrState(draft.state)) {
+      errors.state = 'Enter a valid state name.';
+    }
+    if (!draft.postalCode) {
+      errors.postalCode = normalizeCheckoutCountry(draft.country) === 'United States' ? 'ZIP code is required.' : (normalizeCheckoutCountry(draft.country) === 'India' ? 'PIN code is required.' : 'Postal code is required.');
+    } else if (!isValidPostalCode(draft.postalCode, draft.country)) {
+      errors.postalCode = getPostalCodeErrorMessage(draft.country);
+    }
+    if (!draft.phone) {
+      errors.phone = 'Phone is required.';
+    } else if (!isValidPhoneNumber(draft.phone, draft.phoneCountryCode)) {
+      errors.phone = getPhoneErrorMessage(draft.phoneCountryCode);
     }
 
     return errors;
@@ -4926,12 +5229,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     return message ? `<span class="checkout-field-error" id="checkout-${name}-error">${escapeHtml(message)}</span>` : '';
   }
 
-  function renderCheckoutField({ name, label, value = '', type = 'text', placeholder = '', autocomplete = '', wide = false, icon = '', required = true }) {
+  function renderCheckoutField({ name, label, value = '', type = 'text', placeholder = '', autocomplete = '', wide = false, icon = '', required = true, inputmode = '', maxlength = '' }) {
     const error = state.checkoutErrors?.[name];
+    const inputmodeAttr = inputmode ? ` inputmode="${escapeHtml(inputmode)}"` : '';
+    const maxlengthAttr = maxlength ? ` maxlength="${escapeHtml(String(maxlength))}"` : '';
     return `
       <label class="shopify-field${wide ? ' shopify-field--wide' : ''}${error ? ' has-error' : ''}">
         <span>${escapeHtml(label)}</span>
-        <input name="${escapeHtml(name)}" type="${escapeHtml(type)}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" autocomplete="${escapeHtml(autocomplete)}" ${required ? 'required' : ''} ${error ? `aria-describedby="checkout-${escapeHtml(name)}-error"` : ''} />
+        <input name="${escapeHtml(name)}" type="${escapeHtml(type)}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" autocomplete="${escapeHtml(autocomplete)}"${inputmodeAttr}${maxlengthAttr} ${required ? 'required' : ''} ${error ? `aria-describedby="checkout-${escapeHtml(name)}-error"` : ''} />
         ${icon ? `<span class="shopify-field__icon" aria-hidden="true">${icon}</span>` : ''}
         ${fieldError(name)}
       </label>
@@ -4956,6 +5261,11 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const selectedCode = CHECKOUT_PHONE_COUNTRY_CODES.some((option) => option.value === draft.phoneCountryCode)
       ? draft.phoneCountryCode
       : '+91';
+    const isIndiaOrUS = selectedCode === '+91' || selectedCode === '+1';
+    const maxLen = isIndiaOrUS ? 10 : (selectedCode === '+44' ? 11 : 15);
+    const placeholder = selectedCode === '+91'
+      ? '10-digit mobile number'
+      : (selectedCode === '+1' ? '10-digit mobile number' : (selectedCode === '+44' ? 'UK mobile number' : 'Mobile number'));
     return `
       <label class="shopify-field shopify-field--wide checkout-phone-field${error ? ' has-error' : ''}">
         <span>Phone</span>
@@ -4963,7 +5273,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           <select name="phoneCountryCode" aria-label="Phone country code" autocomplete="tel-country-code">
             ${CHECKOUT_PHONE_COUNTRY_CODES.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === selectedCode ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}
           </select>
-          <input name="phone" type="tel" value="${escapeHtml(draft.phone || '')}" placeholder="10-digit mobile number" autocomplete="tel-national" required ${error ? 'aria-describedby="checkout-phone-error"' : ''} />
+          <input name="phone" type="tel" inputmode="numeric" maxlength="${maxLen}" value="${escapeHtml(draft.phone || '')}" placeholder="${placeholder}" autocomplete="tel-national" required ${error ? 'aria-describedby="checkout-phone-error"' : ''} />
         </div>
         ${fieldError('phone')}
       </label>
@@ -5052,8 +5362,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const shippingReady = Boolean(draft.line1 && draft.city && draft.state && draft.postalCode);
     const country = normalizeCheckoutCountry(draft.country || 'India');
     const regionOptions = getCheckoutRegionOptions(country);
-    const regionLabel = country === 'United States' ? 'State' : 'State';
-    const postalLabel = country === 'United States' ? 'ZIP code' : 'PIN code';
+    const regionLabel = country === 'United States' ? 'State' : (country === 'Canada' ? 'Province' : 'State / Region');
+    const postalLabel = country === 'United States' ? 'ZIP code' : (country === 'India' ? 'PIN code' : 'Postal code');
     const mailIcon = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.6 2.6 0 1 1 4.2 2c-.9.6-1.7 1.2-1.7 2.5"/><path d="M12 17h.01"/></svg>';
     const searchIcon = '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>';
 
@@ -5079,7 +5389,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
               ${renderCheckoutField({ name: 'line2', label: 'Apartment, suite, etc. (optional)', value: draft.line2, placeholder: 'Apartment, suite, building, floor, etc.', autocomplete: 'address-line2', wide: true, required: false })}
               ${renderCheckoutField({ name: 'city', label: 'City', value: draft.city, placeholder: 'City', autocomplete: 'address-level2' })}
               ${renderCheckoutSelect({ name: 'state', label: regionLabel, value: draft.state || regionOptions[0], options: regionOptions })}
-              ${renderCheckoutField({ name: 'postalCode', label: postalLabel, value: draft.postalCode, placeholder: postalLabel, autocomplete: 'postal-code', inputmode: 'numeric' })}
+              ${renderCheckoutField({ name: 'postalCode', label: postalLabel, value: draft.postalCode, placeholder: postalLabel, autocomplete: 'postal-code', inputmode: country === 'India' ? 'numeric' : 'text', maxlength: country === 'India' ? 6 : 10 })}
               ${renderCheckoutPhoneField(draft)}
             </div>
             <label class="shopify-check"><input name="saveInformation" type="checkbox" ${draft.saveInformation ? 'checked' : ''} /><span>Save this information for next time</span></label>
@@ -5140,7 +5450,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   function bindCheckoutPageEvents() {
     const form = els.checkoutPage?.querySelector('#shopifyCheckoutForm');
     if (!form) return;
-    form.addEventListener('input', () => {
+    form.addEventListener('input', (event) => {
+      handleAddressAndNameInputs(event);
       state.checkoutDraft = getCheckoutDraftFromForm(form);
       if (Object.keys(state.checkoutErrors || {}).length) {
         state.checkoutErrors = validateCheckoutDraft(state.checkoutDraft);
@@ -5270,7 +5581,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   function renderCheckoutAddressForm(options = {}) {
     const profile = options.profile || getMerchantProfile();
     const fullName = String(profile.fullName || profile.name || '').trim();
-    const mobile = String(profile.mobile || profile.phone || '').trim();
+    const phoneParsed = parseCheckoutPhone(profile.mobile || profile.phone || '');
     const helpText = options.helpText || 'Fill in your name, address, phone, and pincode to continue checkout.';
 
     return `
@@ -5289,7 +5600,12 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           </label>
           <label class="account-field">
             <span>Phone Number</span>
-            <input name="phone" type="tel" value="${escapeHtml(mobile)}" autocomplete="tel" placeholder="Enter phone number" required />
+            <div class="checkout-phone-control">
+              <select name="phoneCountryCode" aria-label="Phone country code" autocomplete="tel-country-code">
+                ${CHECKOUT_PHONE_COUNTRY_CODES.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === phoneParsed.countryCode ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}
+              </select>
+              <input name="phone" type="tel" inputmode="numeric" maxlength="15" value="${escapeHtml(phoneParsed.localNumber)}" autocomplete="tel-national" placeholder="Mobile number" required />
+            </div>
           </label>
           <label class="account-field account-field--wide">
             <span>Address</span>
@@ -5308,8 +5624,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             <input name="state" type="text" autocomplete="address-level1" />
           </label>
           <label class="account-field">
-            <span>Pincode</span>
-            <input name="postalCode" type="text" autocomplete="postal-code" placeholder="Enter pincode" required />
+            <span>Pincode / Postal Code</span>
+            <input name="postalCode" type="text" autocomplete="postal-code" placeholder="Postal code" maxlength="10" required />
           </label>
           <label class="account-field">
             <span>Country</span>
@@ -5343,7 +5659,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       if (state.merchAddresses.length) openAuthenticatedCheckoutAddressModal();
       else closeMerchModal();
     });
-    modal.querySelector('#checkoutAddAddressForm')?.addEventListener('submit', handleCheckoutAddressSubmit);
+    const modalForm = modal.querySelector('#checkoutAddAddressForm');
+    modalForm?.addEventListener('input', handleAddressAndNameInputs);
+    modalForm?.addEventListener('submit', handleCheckoutAddressSubmit);
   }
 
   async function handleCheckoutAddressSubmit(event) {
@@ -5351,6 +5669,30 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const form = event.currentTarget;
     const submitButton = document.querySelector('[form="checkoutAddAddressForm"]');
     const payload = getAddressPayload(form);
+    if (!payload.recipientName || !isValidName(payload.recipientName)) {
+      showCheckoutNotice('Invalid name', 'Name should contain letters and spaces only.', { variant: 'error' });
+      return;
+    }
+    if (!isValidPhoneNumber(payload.phone, payload.phoneCountryCode)) {
+      showCheckoutNotice('Invalid phone number', getPhoneErrorMessage(payload.phoneCountryCode), { variant: 'error' });
+      return;
+    }
+    if (!payload.line1 || !isValidAddress(payload.line1)) {
+      showCheckoutNotice('Invalid address', 'Enter a valid address.', { variant: 'error' });
+      return;
+    }
+    if (payload.city && !isValidCityOrState(payload.city)) {
+      showCheckoutNotice('Invalid city', 'Enter a valid city name.', { variant: 'error' });
+      return;
+    }
+    if (payload.state && !isValidCityOrState(payload.state)) {
+      showCheckoutNotice('Invalid state', 'Enter a valid state name.', { variant: 'error' });
+      return;
+    }
+    if (payload.postalCode && !isValidPostalCode(payload.postalCode, payload.country)) {
+      showCheckoutNotice('Invalid postal code', getPostalCodeErrorMessage(payload.country), { variant: 'error' });
+      return;
+    }
     submitButton?.setAttribute('disabled', 'disabled');
 
     try {
