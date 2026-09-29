@@ -1613,6 +1613,12 @@ function getWishlistProductPrice(item) {
     return Math.max(0, Number(state.merchCouponPreview?.discountAmountInr || 0)) + getMerchBundleDiscountAmount();
   }
 
+  function getMerchCouponPayableAmount() {
+    const subtotal = getCartTotal();
+    const discount = getCheckoutDiscountAmount();
+    return Math.max(1, subtotal - discount);
+  }
+
   function clearMerchCoupon({ preserveCode = false } = {}) {
     state.merchCouponPreview = null;
     state.merchCouponError = '';
@@ -1625,6 +1631,13 @@ function getWishlistProductPrice(item) {
     return String(coupon.discountType || '').toLowerCase() === 'percentage'
       ? `${Number(coupon.discountValue || 0)}% OFF`
       : `${formatPrice(Number(coupon.discountValue || 0))} OFF`;
+  }
+
+  function isPublicMerchCoupon(coupon) {
+    if (String(coupon?.couponType || 'public').toLowerCase() !== 'public') return false;
+    if (Number(coupon?.influencerId || 0) > 0 || coupon?.influencerName || coupon?.influencer) return false;
+    // Backward-compatible guard for older API responses that do not include influencerId.
+    return !/influencer\s+merch\s+campaign\s+coupon/i.test(String(coupon?.description || ''));
   }
 
   async function loadMerchCoupons() {
@@ -1681,7 +1694,7 @@ function getWishlistProductPrice(item) {
       <strong>${escapeHtml(preview.code || '')}</strong>
       <span>${escapeHtml(preview.description || 'Coupon applied')}</span>
       <span>Discount: ${formatPrice(Number(preview.discountAmountInr || 0))}</span>
-      <span>Payable: ${formatPrice(Number(preview.payableAmountInr || 0))}</span>
+      <span>Payable: ${formatPrice(getMerchCouponPayableAmount())}</span>
     `;
   }
 
@@ -1772,7 +1785,7 @@ function getWishlistProductPrice(item) {
     }
     const cartAvailableCoupons = document.getElementById('cartAvailableCoupons');
     if (cartAvailableCoupons) {
-      const coupons = state.availableCoupons.filter((coupon) => String(coupon.couponType || 'public').toLowerCase() === 'public');
+      const coupons = state.availableCoupons.filter(isPublicMerchCoupon);
       cartAvailableCoupons.innerHTML = coupons.length ? `
         <p class="cart-available-coupons__title">Available coupons</p>
         ${coupons.map((coupon) => `
@@ -4592,7 +4605,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           <button id="checkoutCouponApplyBtn" class="shopify-coupon__apply" type="button" ${state.merchCouponLoading ? 'disabled' : ''}>${state.merchCouponLoading ? 'APPLYING' : 'APPLY'}</button>
           ${state.availableCoupons.length ? `<div class="checkout-coupon-offers" aria-label="Available coupons">
             <p class="checkout-coupon-offers__title">Available coupons</p>
-            ${state.availableCoupons.filter((coupon) => String(coupon.couponType || 'public').toLowerCase() === 'public').map((coupon) => `
+            ${state.availableCoupons.filter(isPublicMerchCoupon).map((coupon) => `
               <button type="button" class="checkout-coupon-offer${String(coupon.code) === String(state.merchCouponCode) ? ' is-selected' : ''}" data-checkout-coupon-code="${escapeHtml(coupon.code)}">
                 <span><strong>${escapeHtml(coupon.code)}</strong><small>${escapeHtml(coupon.couponCategory === 'festival' ? 'Festival coupon' : coupon.couponCategory === 'seasonal' ? 'Seasonal coupon' : 'Public coupon')}${coupon.description ? ` · ${escapeHtml(coupon.description)}` : ''}</small></span>
                 <b>${escapeHtml(getCouponDiscountLabel(coupon))}</b>

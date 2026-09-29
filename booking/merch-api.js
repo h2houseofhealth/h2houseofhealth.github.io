@@ -4113,12 +4113,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
                applies_to AS appliesTo, max_redemptions AS maxRedemptions, per_user_limit AS perUserLimit,
                active, is_active AS isActive, coupon_type AS couponType,
                valid_from AS validFrom, valid_till AS validTill, expires_at AS expiresAt,
-               festival_name AS festivalName, created_at AS createdAt
+               festival_name AS festivalName, influencer_id AS influencerId, created_at AS createdAt
         FROM coupons
         WHERE portal = 'merch'
           AND active = 1
           AND COALESCE(is_active, 1) = 1
           AND COALESCE(coupon_type, 'public') = 'public'
+          AND influencer_id IS NULL
           AND (valid_from IS NULL OR datetime(valid_from) <= datetime('now'))
           AND ((valid_till IS NOT NULL AND datetime(valid_till) > datetime('now'))
             OR (valid_till IS NULL AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))))
@@ -4131,7 +4132,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         return Boolean(match && productIds.some((id) => match[1].split(',').includes(String(id))));
       }).map((row) => {
         const campaignText = `${row.festivalName || ''} ${row.description || ''}`.toLowerCase();
-        const couponCategory = campaignText.includes('festival')
+        const couponCategory = Number(row.influencerId || 0) > 0
+          ? 'influencer'
+          : campaignText.includes('festival')
           ? 'festival'
           : campaignText.includes('seasonal') || campaignText.includes('season')
             ? 'seasonal'
@@ -4145,6 +4148,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         appliesTo: row.appliesTo || 'all',
         couponType: row.couponType || 'public',
         couponCategory,
+        influencerId: row.influencerId == null ? null : Number(row.influencerId),
         festivalName: row.festivalName || '',
         validFrom: row.validFrom || null,
         validTill: row.validTill || row.expiresAt || null,
