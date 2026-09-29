@@ -6114,6 +6114,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const commissionEarnedPaise = Math.round(Number(stats.totalCommissionEarned || 0));
     const previousPaidPaise = Math.round(Number(influencer.paidCommission ?? influencer.paid_commission ?? 0));
     const newCumulativePaidPaise = previousPaidPaise + amountPaise;
+    if (newCumulativePaidPaise > commissionEarnedPaise) {
+      return res.status(400).json({ message: `Payment cannot exceed the remaining commission balance (${Math.max(0, commissionEarnedPaise - previousPaidPaise) / 100}).` });
+    }
     const balanceRemainingPaise = Math.max(0, commissionEarnedPaise - newCumulativePaidPaise);
 
     const now = new Date();
@@ -6280,11 +6283,18 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     const newAmountPaise = Math.round(Number(req.body?.newAmountPaise ?? (Number(req.body?.newAmount || 0) * 100)));
-    if (!Number.isFinite(newAmountPaise) || newAmountPaise < 0) {
+    const payBalancePaise = Math.round(Number(req.body?.payBalancePaise ?? (Number(req.body?.payBalance || 0) * 100)));
+    if (!Number.isFinite(newAmountPaise) || newAmountPaise < 0 || !Number.isFinite(payBalancePaise) || payBalancePaise < 0) {
       return res.status(400).json({ message: 'New commission paid amount must be a non-negative number.' });
     }
 
     const prevAmountPaise = Number(influencer.paidCommission ?? influencer.paid_commission ?? 0);
+    const stats = getInfluencerStatsRows([influencerId])[0] || {};
+    const commissionEarnedPaise = Math.max(0, Math.round(Number(stats.totalCommissionEarned || 0)));
+    const cumulativePaidPaise = payBalancePaise > 0 ? prevAmountPaise + payBalancePaise : newAmountPaise;
+    if (cumulativePaidPaise > commissionEarnedPaise) {
+      return res.status(400).json({ message: `Commission paid cannot exceed earned commission (${commissionEarnedPaise / 100}).` });
+    }
     const changedBy = String(req.user?.email || req.user?.name || 'admin');
 
     const update = db.transaction(() => {
@@ -6292,13 +6302,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         INSERT INTO merch_influencer_commission_adjustments
           (influencer_id, previous_amount_paise, new_amount_paise, reason, changed_by, created_at)
         VALUES (?, ?, ?, ?, ?, datetime('now'))
-      `).run(influencerId, prevAmountPaise, newAmountPaise, reason, changedBy);
+      `).run(influencerId, prevAmountPaise, cumulativePaidPaise, reason, changedBy);
 
       db.prepare(`
         UPDATE merch_influencers
         SET paid_commission = ?, updated_at = datetime('now')
         WHERE id = ?
-      `).run(newAmountPaise, influencerId);
+      `).run(cumulativePaidPaise, influencerId);
     });
 
     try {
@@ -6314,7 +6324,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       success: true,
       message: 'Commission paid adjusted successfully.',
       prevAmountPaise,
-      newAmountPaise,
+      newAmountPaise: cumulativePaidPaise,
       changedBy,
       reason,
       influencer: updatedInfluencer,
