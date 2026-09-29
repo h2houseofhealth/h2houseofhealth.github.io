@@ -3713,7 +3713,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
                     <td class="delivery-copy" style="padding:22px 22px 22px 0;">
                       <p style="margin:0 0 7px;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:19px;line-height:25px;">Expected Delivery</p>
                       <p style="margin:0 0 8px;color:#14233b;font-weight:700;font-size:20px;line-height:27px;">${escapeHtml(expectedDelivery)}</p>
+                      ${order.trackingNumber ? `
+                      <p style="margin:0 0 6px;color:#16a34a;font-weight:700;font-size:16px;line-height:22px;">Courier Tracking AWB: ${escapeHtml(order.trackingNumber)}${order.carrier ? ` (${escapeHtml(order.carrier)})` : ''}</p>
+                      ` : `
                       <p style="margin:0;color:#14233b;font-size:16px;line-height:23px;">We'll notify you once your order is shipped.</p>
+                      `}
                       <p style="margin:10px 0 0;color:#657384;font-size:13px;line-height:19px;">Ship to: ${escapeHtml(shippingAddress)}</p>
                       <p style="margin:4px 0 0;color:#657384;font-size:13px;line-height:19px;">Email: ${escapeHtml(order.customerEmail || '')}</p>
                     </td>
@@ -4746,6 +4750,68 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     });
   });
 
+  async function autoFulfillOrderWithShiprocket(orderId) {
+    if (!shiprocket.isConfigured()) return null;
+
+    try {
+      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
+      if (!order) return null;
+
+      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+      let shipmentId = order.shiprocket_shipment_id;
+
+      // 1. Create order in Shiprocket if not yet created
+      if (!shipmentId) {
+        const createRes = await shiprocket.createOrder({ order, items });
+        shipmentId = String(createRes.shipmentId);
+        db.prepare(`
+          UPDATE merch_orders
+          SET shiprocket_order_id = ?,
+              shiprocket_shipment_id = ?,
+              shiprocket_status = ?,
+              updated_at = datetime('now')
+          WHERE id = ?
+        `).run(String(createRes.orderId), shipmentId, String(createRes.status || 'NEW'), order.id);
+      }
+
+      // 2. Automatically assign courier and generate AWB immediately
+      const awbRes = await shiprocket.assignAwb({ shipmentId });
+      let labelUrl = null;
+      try {
+        const labelRes = await shiprocket.generateLabel({ shipmentId });
+        labelUrl = labelRes.labelUrl;
+      } catch (labelErr) {
+        console.warn('[Shiprocket] Auto label generation deferred:', labelErr.message);
+      }
+
+      const awbCode = String(awbRes.awbCode || '');
+      const courierName = String(awbRes.courierName || 'Shiprocket');
+
+      db.prepare(`
+        UPDATE merch_orders
+        SET shiprocket_awb_code = ?,
+            shiprocket_courier_name = ?,
+            tracking_number = ?,
+            carrier_name = ?,
+            status = 'shipped',
+            shiprocket_status = 'AWB ASSIGNED',
+            shiprocket_label_url = COALESCE(?, shiprocket_label_url),
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(awbCode, courierName, awbCode, courierName, labelUrl, order.id);
+
+      return {
+        shipmentId,
+        awbCode,
+        courierName,
+        labelUrl,
+      };
+    } catch (err) {
+      console.warn('[Shiprocket] Instant auto-fulfillment notice:', err.message);
+      return null;
+    }
+  }
+
   // ─── PUBLIC: Verify payment after Razorpay checkout ───
   app.post('/api/merch/verify-payment', async (req, res) => {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, order_number } = req.body || {};
@@ -4802,12 +4868,22 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       }
     }
 
+    // Automatically fulfill order with Shiprocket to immediately generate Tracking ID (AWB)
+    let autoFulfill = null;
+    try {
+      autoFulfill = await autoFulfillOrderWithShiprocket(order.id);
+    } catch (fulfillErr) {
+      console.warn('[Shiprocket] Instant auto-fulfillment skipped:', fulfillErr.message);
+    }
+
     const notifications = await triggerMerchOrderConfirmationNotifications(order.id, req);
 
     res.json({
       success: true,
       message: 'Payment verified, order confirmed',
       orderId: order.id,
+      trackingNumber: autoFulfill?.awbCode || null,
+      carrierName: autoFulfill?.courierName || null,
       notifications,
     });
   });
