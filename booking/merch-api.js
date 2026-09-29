@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const express = require('express');
 const FormData = require('form-data');
+const ShiprocketService = require('./shiprocket');
 const router = express.Router();
 
 const MERCH_HYPE_LABELS = [
@@ -35,6 +36,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     validateCouponForUser,
     recordCouponRedemption,
   } = couponHelpers;
+
+  const shiprocket = new ShiprocketService();
 
   // ─── Merch Database Schema (run once) ───
   db.exec(`
@@ -627,6 +630,30 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
   if (!hasColumn('merch_orders', 'delivered_at')) {
     db.exec('ALTER TABLE merch_orders ADD COLUMN delivered_at TEXT');
+  }
+  if (!hasColumn('merch_orders', 'shiprocket_order_id')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN shiprocket_order_id TEXT');
+  }
+  if (!hasColumn('merch_orders', 'shiprocket_shipment_id')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN shiprocket_shipment_id TEXT');
+  }
+  if (!hasColumn('merch_orders', 'shiprocket_awb_code')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN shiprocket_awb_code TEXT');
+  }
+  if (!hasColumn('merch_orders', 'shiprocket_courier_name')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN shiprocket_courier_name TEXT');
+  }
+  if (!hasColumn('merch_orders', 'shiprocket_status')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN shiprocket_status TEXT');
+  }
+  if (!hasColumn('merch_orders', 'shiprocket_label_url')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN shiprocket_label_url TEXT');
+  }
+  if (!hasColumn('merch_orders', 'shiprocket_invoice_url')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN shiprocket_invoice_url TEXT');
+  }
+  if (!hasColumn('merch_orders', 'shiprocket_pickup_token')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN shiprocket_pickup_token TEXT');
   }
 
   if (!hasColumn('merch_influencers', 'avatar_url')) {
@@ -2019,8 +2046,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       razorpayPaymentId: String(order.razorpayPaymentId || order.razorpay_payment_id || ''),
       shippingAddress: shippingAddress ? formatMerchAddressLine(shippingAddress) : String(order.shippingAddress || ''),
       billingAddress: billingAddress ? formatMerchAddressLine(billingAddress) : String(order.billingAddress || order.shippingAddress || ''),
-      trackingNumber: String(order.trackingNumber || order.tracking_number || ''),
-      carrier: String(order.carrierName || order.carrier_name || ''),
+      trackingNumber: String(order.trackingNumber || order.tracking_number || order.shiprocketAwbCode || order.shiprocket_awb_code || ''),
+      carrier: String(order.carrierName || order.carrier_name || order.shiprocketCourierName || order.shiprocket_courier_name || ''),
+      shiprocketOrderId: String(order.shiprocketOrderId || order.shiprocket_order_id || ''),
+      shiprocketShipmentId: String(order.shiprocketShipmentId || order.shiprocket_shipment_id || ''),
+      shiprocketAwbCode: String(order.shiprocketAwbCode || order.shiprocket_awb_code || ''),
+      shiprocketCourierName: String(order.shiprocketCourierName || order.shiprocket_courier_name || ''),
+      shiprocketStatus: String(order.shiprocketStatus || order.shiprocket_status || ''),
+      shiprocketLabelUrl: String(order.shiprocketLabelUrl || order.shiprocket_label_url || ''),
+      shiprocketInvoiceUrl: String(order.shiprocketInvoiceUrl || order.shiprocket_invoice_url || ''),
+      shiprocketPickupToken: String(order.shiprocketPickupToken || order.shiprocket_pickup_token || ''),
       createdAt: order.createdAt || order.created_at || null,
       updatedAt: order.updatedAt || order.updated_at || null,
       deliveredAt: order.deliveredAt || order.delivered_at || (String(order.status || '').toLowerCase() === 'delivered' ? order.updatedAt || order.updated_at || null : null),
@@ -2096,6 +2131,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
              mo.razorpay_payment_id AS razorpayPaymentId, mo.shipping_address AS shippingAddress,
              mo.billing_address AS billingAddress,
              mo.tracking_number AS trackingNumber, mo.carrier_name AS carrierName,
+             mo.shiprocket_order_id AS shiprocketOrderId, mo.shiprocket_shipment_id AS shiprocketShipmentId,
+             mo.shiprocket_awb_code AS shiprocketAwbCode, mo.shiprocket_courier_name AS shiprocketCourierName,
+             mo.shiprocket_status AS shiprocketStatus, mo.shiprocket_label_url AS shiprocketLabelUrl,
+             mo.shiprocket_invoice_url AS shiprocketInvoiceUrl, mo.shiprocket_pickup_token AS shiprocketPickupToken,
              mo.created_at AS createdAt, mo.updated_at AS updatedAt,
              mo.customer_user_id AS customerUserId, mo.customer_id AS customerId
       FROM merch_orders mo
@@ -5645,6 +5684,264 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
     const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
     res.json({ success: true, order: buildMerchOrderRecord(order, items) });
+  });
+
+  // ─── ADMIN: Shiprocket Fulfillment Routes ───
+
+  // Check Shiprocket connection status
+  app.get('/api/merch/admin/shiprocket/status', requireAdmin, async (req, res) => {
+    try {
+      const configured = shiprocket.isConfigured();
+      if (!configured) {
+        return res.json({ configured: false, connected: false, message: 'Shiprocket credentials not configured in environment.' });
+      }
+      await shiprocket.getToken();
+      res.json({
+        configured: true,
+        connected: true,
+        email: shiprocket.email,
+        pickupLocation: shiprocket.pickupLocation,
+        message: 'Connected to Shiprocket API',
+      });
+    } catch (err) {
+      res.status(500).json({ configured: true, connected: false, error: err.message });
+    }
+  });
+
+  // Get available couriers and rates for an order
+  app.get('/api/merch/admin/orders/:id/shiprocket/couriers', requireAdmin, async (req, res) => {
+    try {
+      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+
+      const parsedAddr = parseMerchShippingAddress(order.shipping_address) || {};
+      const deliveryPostcode = parsedAddr.postalCode || parsedAddr.postal_code || parsedAddr.pincode || '452001';
+      const isCod = String(order.payment_method || '').toLowerCase() === 'cod';
+
+      const couriers = await shiprocket.checkServiceability({
+        deliveryPostcode,
+        weight: shiprocket.defaultWeightKg,
+        cod: isCod,
+      });
+
+      res.json({ success: true, deliveryPostcode, couriers });
+    } catch (err) {
+      res.status(500).json({ error: err.message, details: err.details || null });
+    }
+  });
+
+  // Push order to Shiprocket
+  app.post('/api/merch/admin/orders/:id/shiprocket/create', requireAdmin, async (req, res) => {
+    try {
+      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+
+      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+      const customPickupLocation = req.body?.pickupLocation || null;
+
+      const result = await shiprocket.createOrder({
+        order,
+        items,
+        customPickupLocation,
+      });
+
+      db.prepare(`
+        UPDATE merch_orders
+        SET shiprocket_order_id = ?,
+            shiprocket_shipment_id = ?,
+            shiprocket_status = ?,
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(String(result.orderId), String(result.shipmentId), String(result.status || 'NEW'), order.id);
+
+      const updated = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(order.id);
+      res.json({ success: true, result, order: buildMerchOrderRecord(updated, items) });
+    } catch (err) {
+      res.status(500).json({ error: err.message, details: err.details || null });
+    }
+  });
+
+  // Assign courier partner and generate AWB
+  app.post('/api/merch/admin/orders/:id/shiprocket/assign-awb', requireAdmin, async (req, res) => {
+    try {
+      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+
+      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+      let shipmentId = order.shiprocket_shipment_id;
+
+      // If order not yet created in Shiprocket, create it first
+      if (!shipmentId) {
+        const createRes = await shiprocket.createOrder({ order, items });
+        shipmentId = String(createRes.shipmentId);
+        db.prepare(`
+          UPDATE merch_orders
+          SET shiprocket_order_id = ?,
+              shiprocket_shipment_id = ?,
+              shiprocket_status = ?,
+              updated_at = datetime('now')
+          WHERE id = ?
+        `).run(String(createRes.orderId), shipmentId, String(createRes.status || 'NEW'), order.id);
+      }
+
+      const courierId = req.body?.courierId ? Number(req.body.courierId) : null;
+      const awbRes = await shiprocket.assignAwb({ shipmentId, courierId });
+
+      // Generate label as well
+      let labelUrl = null;
+      try {
+        const labelRes = await shiprocket.generateLabel({ shipmentId });
+        labelUrl = labelRes.labelUrl;
+      } catch (labelErr) {
+        console.warn('Auto label generation error:', labelErr.message);
+      }
+
+      db.prepare(`
+        UPDATE merch_orders
+        SET shiprocket_awb_code = ?,
+            shiprocket_courier_name = ?,
+            tracking_number = ?,
+            carrier_name = ?,
+            status = 'shipped',
+            shiprocket_status = 'AWB ASSIGNED',
+            shiprocket_label_url = COALESCE(?, shiprocket_label_url),
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(
+        String(awbRes.awbCode || ''),
+        String(awbRes.courierName || 'Shiprocket'),
+        String(awbRes.awbCode || ''),
+        String(awbRes.courierName || 'Shiprocket'),
+        labelUrl,
+        order.id
+      );
+
+      const updated = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(order.id);
+      res.json({ success: true, awbRes, labelUrl, order: buildMerchOrderRecord(updated, items) });
+    } catch (err) {
+      res.status(500).json({ error: err.message, details: err.details || null });
+    }
+  });
+
+  // Generate / Download Shipping Label
+  app.get('/api/merch/admin/orders/:id/shiprocket/label', requireAdmin, async (req, res) => {
+    try {
+      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+      if (!order.shiprocket_shipment_id) {
+        return res.status(400).json({ error: 'Order does not have a Shiprocket shipment ID yet.' });
+      }
+
+      const labelRes = await shiprocket.generateLabel({ shipmentId: order.shiprocket_shipment_id });
+      if (labelRes.labelUrl) {
+        db.prepare("UPDATE merch_orders SET shiprocket_label_url = ?, updated_at = datetime('now') WHERE id = ?").run(labelRes.labelUrl, order.id);
+      }
+      res.json({ success: true, labelUrl: labelRes.labelUrl });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Request Courier Pickup
+  app.post('/api/merch/admin/orders/:id/shiprocket/pickup', requireAdmin, async (req, res) => {
+    try {
+      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+      if (!order.shiprocket_shipment_id) {
+        return res.status(400).json({ error: 'Order does not have a Shiprocket shipment ID yet.' });
+      }
+
+      const pickupRes = await shiprocket.requestPickup({ shipmentId: order.shiprocket_shipment_id });
+      if (pickupRes.pickupTokenNumber) {
+        db.prepare("UPDATE merch_orders SET shiprocket_pickup_token = ?, shiprocket_status = 'PICKUP SCHEDULED', updated_at = datetime('now') WHERE id = ?").run(String(pickupRes.pickupTokenNumber), order.id);
+      }
+      res.json({ success: true, pickupRes });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Live Tracking Scans (Admin)
+  app.get('/api/merch/admin/orders/:id/shiprocket/track', requireAdmin, async (req, res) => {
+    try {
+      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+
+      const awb = order.shiprocket_awb_code || order.tracking_number;
+      if (!awb) return res.status(400).json({ error: 'Order does not have an AWB or tracking code yet.' });
+
+      const trackRes = await shiprocket.trackAwb(awb);
+      res.json({ success: true, track: trackRes });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Customer Live Order Tracking
+  app.get('/api/merch/orders/:id/tracking', async (req, res) => {
+    try {
+      const queryId = req.params.id;
+      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ? OR order_number = ?').get(queryId, queryId);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+
+      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+      const awb = order.shiprocket_awb_code || order.tracking_number;
+      let liveTracking = null;
+
+      if (awb && shiprocket.isConfigured()) {
+        try {
+          liveTracking = await shiprocket.trackAwb(awb);
+        } catch {
+          liveTracking = null;
+        }
+      }
+
+      res.json({
+        success: true,
+        order: buildMerchOrderRecord(order, items),
+        liveTracking,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Shiprocket Webhook (receives status updates from Shiprocket)
+  app.post('/api/merch/shiprocket/webhook', (req, res) => {
+    try {
+      const body = req.body || {};
+      const awb = body.awb || body.awb_code || body.tracking_number;
+      const currentStatus = String(body.current_status || body.status || '').toUpperCase();
+
+      if (awb) {
+        const order = db.prepare('SELECT id, status FROM merch_orders WHERE shiprocket_awb_code = ? OR tracking_number = ?').get(awb, awb);
+        if (order) {
+          let appStatus = order.status;
+          if (['DELIVERED'].includes(currentStatus)) {
+            appStatus = 'delivered';
+          } else if (['IN TRANSIT', 'OUT FOR DELIVERY', 'PICKED UP', 'SHIPPED'].includes(currentStatus)) {
+            appStatus = 'shipped';
+          } else if (['CANCELLED', 'CANCELED'].includes(currentStatus)) {
+            appStatus = 'cancelled';
+          } else if (['RTO', 'RETURNED'].includes(currentStatus)) {
+            appStatus = 'returned';
+          }
+
+          db.prepare(`
+            UPDATE merch_orders
+            SET shiprocket_status = ?,
+                status = ?,
+                delivered_at = CASE WHEN ? = 'delivered' THEN datetime('now') ELSE delivered_at END,
+                updated_at = datetime('now')
+            WHERE id = ?
+          `).run(currentStatus, appStatus, appStatus, order.id);
+        }
+      }
+      res.status(200).json({ success: true });
+    } catch (err) {
+      console.error('Shiprocket webhook error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // ─── ADMIN: Dashboard stats ───

@@ -2427,6 +2427,36 @@
             Carrier: ${escapeHtml(order.carrier || 'Not assigned')}
           </p>
         </div>
+        <div class="admin-list__item" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);border-radius:10px;padding:12px 14px;margin:10px 0;">
+          <div class="admin-list__item-head" style="margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;">
+            <p class="admin-list__item-title" style="margin:0;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;">
+              <span>🚀 Shiprocket Fulfillment</span>
+            </p>
+            ${order.shiprocketStatus ? `<span class="admin-badge admin-badge--info" style="font-size:10px;text-transform:uppercase;">${escapeHtml(order.shiprocketStatus)}</span>` : ''}
+          </div>
+          <div class="admin-list__item-sub" style="margin-bottom:10px;font-size:12px;line-height:1.6;">
+            ${order.shiprocketOrderId ? `<strong>Shiprocket Order:</strong> ${escapeHtml(order.shiprocketOrderId)}<br>` : ''}
+            ${order.shiprocketAwbCode ? `<strong>AWB Code:</strong> <code style="background:rgba(0,0,0,0.06);padding:2px 5px;border-radius:4px;font-weight:600;">${escapeHtml(order.shiprocketAwbCode)}</code> (${escapeHtml(order.shiprocketCourierName || order.carrier || 'Courier')})<br>` : ''}
+            ${order.shiprocketPickupToken ? `<strong>Pickup Token:</strong> ${escapeHtml(order.shiprocketPickupToken)}<br>` : ''}
+          </div>
+          <div class="admin-actions" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+            ${!order.shiprocketAwbCode ? `
+              <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="shiprocket-fulfill" data-id="${order.id}">🚀 Ship with Shiprocket</button>
+            ` : `
+              ${order.shiprocketLabelUrl ? `
+                <a class="admin-btn admin-btn--soft admin-btn--sm" href="${escapeHtml(order.shiprocketLabelUrl)}" target="_blank" rel="noopener">📄 Print Shipping Label</a>
+              ` : `
+                <button class="admin-btn admin-btn--soft admin-btn--sm" type="button" data-action="shiprocket-get-label" data-id="${order.id}">📄 Get Shipping Label</button>
+              `}
+              ${!order.shiprocketPickupToken ? `
+                <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-action="shiprocket-schedule-pickup" data-id="${order.id}">📦 Schedule Pickup</button>
+              ` : `
+                <span class="admin-badge admin-badge--success" style="font-size:11px;">✓ Pickup Booked</span>
+              `}
+              <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-action="shiprocket-track-live" data-id="${order.id}">📍 Live Tracking</button>
+            `}
+          </div>
+        </div>
         <div class="admin-list__item">
           <p class="admin-list__item-title">Invoice &amp; Receipt</p>
           <div class="admin-actions">
@@ -2629,6 +2659,7 @@
                   </div>
                   <div class="admin-card__foot">
                     <div class="admin-footer-actions">
+                      ${!selectedOrder?.shiprocketAwbCode ? `<button class="admin-btn admin-btn--primary" type="button" data-action="shiprocket-fulfill" data-id="${selectedOrder?.id || ''}">🚀 Ship with Shiprocket</button>` : ''}
                       <button class="admin-btn admin-btn--ghost" type="button" data-action="ship-order" data-id="${selectedOrder?.id || ''}">Ship</button>
                       <button class="admin-btn admin-btn--ghost" type="button" data-action="deliver-order" data-id="${selectedOrder?.id || ''}">Deliver</button>
                       <button class="admin-btn admin-btn--danger" type="button" data-action="cancel-order" data-id="${selectedOrder?.id || ''}" ${['pending', 'processing'].includes(normalizeOrderStatus(selectedOrder?.status)) ? '' : 'disabled title="Only pending or processing orders can be cancelled"'}>Cancel</button>
@@ -5451,6 +5482,232 @@
     }
   }
 
+  async function openShiprocketFulfillModal(order) {
+    if (!order) return;
+    openModal({
+      title: `Ship with Shiprocket — ${order.orderNumber || `Order #${order.id}`}`,
+      subtitle: `Checking courier rates and serviceability...`,
+      body: `
+        <div style="text-align:center;padding:32px 16px;">
+          <div class="admin-spinner" style="margin:0 auto 14px;width:32px;height:32px;border:3px solid rgba(59,130,246,0.2);border-top-color:#3b82f6;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+          <p style="font-weight:600;margin:0 0 4px;">Connecting to Shiprocket API...</p>
+          <p class="admin-table__muted" style="font-size:12px;margin:0;">Finding best courier rates for delivery to destination</p>
+        </div>
+      `,
+      footer: '<button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button>',
+      size: 'lg',
+    });
+
+    try {
+      const res = await apiRequest(`/api/merch/admin/orders/${encodeURIComponent(order.id)}/shiprocket/couriers`);
+      const couriers = res?.couriers || [];
+
+      if (!couriers.length) {
+        const bodyEl = els.adminModalDialog.querySelector('.admin-modal__body');
+        if (bodyEl) {
+          bodyEl.innerHTML = `
+            <div style="text-align:center;padding:24px 16px;">
+              <p style="color:#ef4444;font-weight:600;font-size:15px;margin-bottom:8px;">⚠️ No couriers currently available</p>
+              <p class="admin-table__muted" style="margin:0 0 16px;">Destination Pincode: <strong>${escapeHtml(res?.deliveryPostcode || 'Unknown')}</strong></p>
+              <p style="font-size:13px;color:#6b7280;line-height:1.5;">Please verify that the delivery pincode is valid and that you have added your Pickup Address in your Shiprocket account.</p>
+            </div>
+          `;
+        }
+        return;
+      }
+
+      const subEl = els.adminModalDialog.querySelector('.admin-modal__sub');
+      if (subEl) subEl.textContent = `Select a courier partner for delivery to ${escapeHtml(res.deliveryPostcode)}:`;
+
+      const bodyEl = els.adminModalDialog.querySelector('.admin-modal__body');
+      if (bodyEl) {
+        bodyEl.innerHTML = `
+          <form class="admin-form" data-shiprocket-fulfill-form>
+            <div style="display:flex;flex-direction:column;gap:10px;max-height:360px;overflow-y:auto;padding-right:4px;">
+              ${couriers.map((c, idx) => `
+                <label class="admin-card" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border:1.5px solid ${idx === 0 ? '#3b82f6' : 'rgba(0,0,0,0.1)'};border-radius:10px;background:${idx === 0 ? 'rgba(59,130,246,0.04)' : 'transparent'};transition:all 0.15s ease;">
+                  <div style="display:flex;align-items:center;gap:14px;">
+                    <input type="radio" name="courier_company_id" value="${c.courierCompanyId}" ${idx === 0 ? 'checked' : ''} style="width:18px;height:18px;accent-color:#3b82f6;" />
+                    <div>
+                      <div style="font-weight:600;font-size:14px;color:var(--admin-text,#1f2937);">${escapeHtml(c.courierName)}</div>
+                      <div class="admin-table__muted" style="font-size:12px;margin-top:2px;">
+                        Est. Delivery: <strong>${escapeHtml(c.estimatedDeliveryDays || '2-4')} Days</strong> ${c.etd ? `(${escapeHtml(c.etd)})` : ''} · Mode: <strong>${c.isSurface ? 'Surface' : 'Air'}</strong>
+                      </div>
+                    </div>
+                  </div>
+                  <div style="text-align:right;">
+                    <div style="font-size:17px;font-weight:700;color:#10b981;">₹${Number(c.rate || 0).toFixed(2)}</div>
+                    ${c.rating ? `<div style="font-size:11px;color:#f59e0b;font-weight:600;">★ ${escapeHtml(String(c.rating))}</div>` : ''}
+                  </div>
+                </label>
+              `).join('')}
+            </div>
+          </form>
+        `;
+      }
+
+      const footEl = els.adminModalDialog.querySelector('.admin-modal__foot');
+      if (footEl) {
+        footEl.innerHTML = `
+          <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button>
+          <button class="admin-btn admin-btn--primary" type="button" data-action="confirm-shiprocket-awb" data-id="${order.id}">🚀 Assign Courier &amp; Generate AWB</button>
+        `;
+      }
+    } catch (err) {
+      const bodyEl = els.adminModalDialog.querySelector('.admin-modal__body');
+      if (bodyEl) {
+        bodyEl.innerHTML = `
+          <div style="padding:20px;color:#ef4444;background:rgba(239,68,68,0.06);border-radius:8px;">
+            <p style="font-weight:700;margin:0 0 6px;">❌ Shiprocket Error:</p>
+            <p style="margin:0 0 12px;font-size:13px;">${escapeHtml(err.message || 'Serviceability check failed')}</p>
+            <p class="admin-table__muted" style="font-size:12px;margin:0;">Make sure you have added a Pickup Address in your Shiprocket console (Settings → Pickup Address).</p>
+          </div>
+        `;
+      }
+    }
+  }
+
+  async function confirmShiprocketAwb(orderId) {
+    const form = els.adminModalDialog.querySelector('[data-shiprocket-fulfill-form]');
+    const courierId = form?.elements?.courier_company_id?.value;
+
+    const confirmBtn = els.adminModalDialog.querySelector('[data-action="confirm-shiprocket-awb"]');
+    if (confirmBtn) {
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Generating AWB...';
+    }
+
+    try {
+      const res = await apiRequest(`/api/merch/admin/orders/${encodeURIComponent(orderId)}/shiprocket/assign-awb`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ courierId }),
+      });
+
+      closeModal();
+      const awbCode = res.awbRes?.awbCode || res.order?.shiprocketAwbCode || 'Assigned';
+      const courierName = res.awbRes?.courierName || res.order?.shiprocketCourierName || 'Courier';
+      toast('Shipment Created!', `Dispatched via ${courierName} · AWB: ${awbCode}`, 'success');
+
+      // Update local state order
+      const targetIndex = state.orders.findIndex((o) => Number(o.id) === Number(orderId));
+      if (targetIndex >= 0 && res.order) {
+        state.orders[targetIndex] = res.order;
+      }
+      renderOrders();
+
+      // Open shipping label in new tab if available
+      if (res.labelUrl) {
+        window.open(res.labelUrl, '_blank', 'noopener,noreferrer');
+      }
+    } catch (err) {
+      toast('Shiprocket Error', err.message || 'Failed to assign courier and generate AWB', 'warning');
+      if (confirmBtn) {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = '🚀 Assign Courier & Generate AWB';
+      }
+    }
+  }
+
+  async function openShiprocketTrackModal(order) {
+    if (!order) return;
+    const awb = order.shiprocketAwbCode || order.trackingNumber;
+    openModal({
+      title: `Live Shipment Tracking — ${order.orderNumber || `Order #${order.id}`}`,
+      subtitle: `AWB: ${escapeHtml(awb || 'Pending')} · Carrier: ${escapeHtml(order.shiprocketCourierName || order.carrier || 'Shiprocket')}`,
+      body: `
+        <div style="text-align:center;padding:32px 16px;">
+          <div class="admin-spinner" style="margin:0 auto 14px;width:32px;height:32px;border:3px solid rgba(59,130,246,0.2);border-top-color:#3b82f6;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+          <p style="font-weight:600;margin:0 0 4px;">Fetching live scans...</p>
+          <p class="admin-table__muted" style="font-size:12px;margin:0;">Querying Shiprocket tracking network</p>
+        </div>
+      `,
+      footer: '<button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Close</button>',
+      size: 'md',
+    });
+
+    try {
+      const res = await apiRequest(`/api/merch/admin/orders/${encodeURIComponent(order.id)}/shiprocket/track`);
+      const track = res?.track || {};
+      const activities = track.activities || [];
+
+      const bodyEl = els.adminModalDialog.querySelector('.admin-modal__body');
+      if (bodyEl) {
+        bodyEl.innerHTML = `
+          <div class="admin-list" style="margin-bottom:16px;">
+            <div class="admin-list__item" style="display:flex;justify-content:space-between;align-items:center;background:rgba(59,130,246,0.06);padding:12px 14px;border-radius:8px;">
+              <div>
+                <p class="admin-list__item-title" style="margin:0 0 2px;font-size:11px;text-transform:uppercase;color:#6b7280;">Current Status</p>
+                <p style="margin:0;font-size:16px;font-weight:700;color:#3b82f6;">${escapeHtml(track.currentStatus || 'In Transit')}</p>
+              </div>
+              ${track.edd ? `<div style="text-align:right;"><span class="admin-table__muted" style="font-size:11px;">Est. Delivery:</span><br><strong>${escapeHtml(track.edd)}</strong></div>` : ''}
+            </div>
+          </div>
+
+          <h4 style="margin:16px 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:#6b7280;">Checkpoint Timeline</h4>
+          ${activities.length ? `
+            <div class="admin-status-timeline" style="max-height:280px;overflow-y:auto;padding-right:4px;">
+              ${activities.map((act) => `
+                <div class="admin-timeline-item">
+                  <span class="admin-timeline-item__dot"></span>
+                  <div>
+                    <p class="admin-timeline-item__title" style="font-weight:600;">${escapeHtml(act.activity || act.srStatusLabel || act.status)}</p>
+                    <p class="admin-timeline-item__text" style="font-size:12px;color:#6b7280;">${escapeHtml(act.location || '')} · ${escapeHtml(act.date || '')}</p>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          ` : `
+            <p class="admin-table__muted" style="text-align:center;padding:20px 0;margin:0;">No scan activities recorded yet. Parcel is awaiting courier pickup.</p>
+          `}
+        `;
+      }
+    } catch (err) {
+      const bodyEl = els.adminModalDialog.querySelector('.admin-modal__body');
+      if (bodyEl) {
+        bodyEl.innerHTML = `
+          <div style="padding:16px;color:#ef4444;background:rgba(239,68,68,0.06);border-radius:8px;">
+            <strong>Tracking error:</strong>
+            <p style="margin:6px 0 0;font-size:13px;">${escapeHtml(err.message || 'Unable to fetch tracking info')}</p>
+          </div>
+        `;
+      }
+    }
+  }
+
+  async function handleShiprocketSchedulePickup(order) {
+    if (!order) return;
+    try {
+      const res = await apiRequest(`/api/merch/admin/orders/${encodeURIComponent(order.id)}/shiprocket/pickup`, {
+        method: 'POST',
+      });
+      const token = res?.pickupRes?.pickupTokenNumber || 'Confirmed';
+      toast('Pickup Requested!', `Courier pickup scheduled. Token: ${token}`, 'success');
+      const target = state.orders.find((o) => Number(o.id) === Number(order.id));
+      if (target) {
+        target.shiprocketPickupToken = token;
+        target.shiprocketStatus = 'PICKUP SCHEDULED';
+      }
+      renderOrders();
+    } catch (err) {
+      toast('Pickup Scheduling Failed', err.message || 'Unable to schedule pickup', 'warning');
+    }
+  }
+
+  async function handleShiprocketGetLabel(order) {
+    if (!order) return;
+    try {
+      const res = await apiRequest(`/api/merch/admin/orders/${encodeURIComponent(order.id)}/shiprocket/label`);
+      if (res?.labelUrl) {
+        window.open(res.labelUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        toast('Label Not Ready', 'Shipping label is not yet generated by the courier.', 'warning');
+      }
+    } catch (err) {
+      toast('Label Error', err.message || 'Unable to fetch shipping label', 'warning');
+    }
+  }
+
   async function handleAction(action, target) {
     const rawId = String(target?.dataset?.id || target?.closest?.('[data-id]')?.dataset?.id || '');
     const id = Number(rawId || 0);
@@ -5467,6 +5724,21 @@
     const influencer = state.influencers.find((item) => Number(item.id) === id);
 
     switch (action) {
+      case 'shiprocket-fulfill':
+        if (order) await openShiprocketFulfillModal(order);
+        return;
+      case 'confirm-shiprocket-awb':
+        await confirmShiprocketAwb(id || target?.dataset?.id);
+        return;
+      case 'shiprocket-track-live':
+        if (order) await openShiprocketTrackModal(order);
+        return;
+      case 'shiprocket-schedule-pickup':
+        if (order) await handleShiprocketSchedulePickup(order);
+        return;
+      case 'shiprocket-get-label':
+        if (order) await handleShiprocketGetLabel(order);
+        return;
       case 'toggle-notifications':
         state.notificationsExpanded = !state.notificationsExpanded;
         renderDashboard();
