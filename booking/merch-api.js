@@ -5689,6 +5689,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     });
     cancel();
 
+    if (order.shiprocket_order_id && shiprocket.isConfigured()) {
+      shiprocket.cancelOrder({ shiprocketOrderIds: [order.shiprocket_order_id] }).catch((err) => {
+        console.warn('[Shiprocket] Customer cancel - Shiprocket cancel notice:', err.message);
+      });
+      db.prepare(`UPDATE merch_orders SET shiprocket_status = 'CANCELLED' WHERE id = ?`).run(order.id);
+    }
+
     const updated = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(order.id);
     const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
     res.json({ success: true, order: buildMerchOrderRecord(updated, items) });
@@ -6676,6 +6683,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       }
     });
     save();
+
+    if (String(status).toLowerCase() === 'cancelled' && existingOrder.shiprocket_order_id && shiprocket.isConfigured()) {
+      shiprocket.cancelOrder({ shiprocketOrderIds: [existingOrder.shiprocket_order_id] }).catch((err) => {
+        console.warn('[Shiprocket] Admin cancel - Shiprocket cancel notice:', err.message);
+      });
+      db.prepare(`UPDATE merch_orders SET shiprocket_status = 'CANCELLED' WHERE id = ?`).run(existingOrder.id);
+    }
+
     const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
     const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(req.params.id);
     res.json({ success: true, order: buildMerchOrderRecord(order, items) });
