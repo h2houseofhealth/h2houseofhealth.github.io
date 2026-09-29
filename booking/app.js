@@ -5435,12 +5435,30 @@ function openDialog(booking = null) {
     if (elements.addOnTime) elements.addOnTime.innerHTML = '';
   }
   if (state.user?.role === 'admin') {
+    if (booking && !hasAdminCustomerDetails()) {
+      state.adminCustomerForm = {
+        ...state.adminCustomerForm,
+        name: String(booking.clientName || booking.customerName || '').trim(),
+        email: hasRealEmail(booking.clientEmail || booking.customerEmail)
+          ? String(booking.clientEmail || booking.customerEmail).trim()
+          : '',
+        phone: normalizeTenDigitMobile(
+          booking.clientMobile || booking.clientPhone || booking.customerPhone || booking.mobile || ''
+        ),
+      };
+    }
     if (elements.bookingCustomerName) elements.bookingCustomerName.value = String(state.adminCustomerForm.name || '');
     if (elements.bookingCustomerEmail) elements.bookingCustomerEmail.value = String(state.adminCustomerForm.email || '');
     if (elements.bookingCustomerPhone) elements.bookingCustomerPhone.value = String(state.adminCustomerForm.phone || '');
     syncAdminCustomerFromBookingModal();
     renderServicePanelContext();
   } else {
+    if (booking) {
+      const contact = getCurrentUserBookingContactFallback(booking.id);
+      if (elements.bookingCustomerName) elements.bookingCustomerName.value = contact.name;
+      if (elements.bookingCustomerEmail) elements.bookingCustomerEmail.value = contact.email;
+      if (elements.bookingCustomerPhone) elements.bookingCustomerPhone.value = contact.phone;
+    }
     syncBookingModalCustomerGate();
   }
   const submitBtn = elements.bookingForm?.querySelector('button[type="submit"]');
