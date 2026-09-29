@@ -73,7 +73,6 @@
        url("../cdn/fonts/dm_sans/dmsans_n4.87bdd914d8a61247b911147ae68e754d695c58a6.woff") format("woff");
 }
 
-			Liquid error (layout/theme line 88): font_face can only be used with a font drop
 			@font-face {
   font-family: "Roboto Mono";
   font-weight: 500;
@@ -1907,8 +1906,7 @@
     <div
       id="menu-drawer"
       class="menu-drawer motion-reduce color-background-1"
-      tabind
-      ex="-1"
+      tabindex="-1"
     >
       <div class="menu-drawer__inner-container">
         <div class="menu-drawer__navigation-container"><nav class="menu-drawer__navigation">
@@ -2116,7 +2114,7 @@
 		"@type": "Organization",
 		"name": "House of Health",
 		
-			"logo": "https:files\/H2_Logo.png",
+			"logo": "https:\/\/h2houseofhealth.com\/cdn\/shop\/files\/H2_Logo.png",
 		
 		"sameAs": [
 			"",
@@ -2166,13 +2164,14 @@
 
 	calcHeader();
 </script>
+<main id="MainContent" class="content-for-layout focus-none background" role="main" tabindex="-1">
 <section class="self-host-contact-section">
   <div class="self-host-contact-container">
     <div class="self-host-contact-grid">
       <div class="self-host-contact-form-wrapper">
         <h2 class="self-host-contact-heading">Get in touch</h2>
         <p class="self-host-contact-description">Have a question? We'd love to hear from you. Send us a message and we'll respond as soon as possible.</p>
-        <form method="post" action="" id="contact_form" accept-charset="UTF-8" class="contact-form" data-static-form="contact">
+        <form method="post" action="/api/contact" id="contact_form" accept-charset="UTF-8" class="contact-form" data-static-form="contact">
           <div class="self-host-contact-form">
             <label class="self-host-contact-field">Name*<input type="text" name="name" placeholder="Your name" required></label>
             <label class="self-host-contact-field">Email*<input type="email" name="email" placeholder="your@email.com" autocomplete="email" required></label>
@@ -2183,7 +2182,7 @@
         </form>
       </div>
       <div class="self-host-contact-map-wrapper">
-        <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3806.7844874378425!2d78.40762699999999!3d17.422127200000002!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3bcb96c563119391%3A0xf6249beeb4d3cf70!2sBeautyme!5e0!3m2!1sen!2sin!4v1770385053334!5m2!1sen!2sin" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen title="Location map"></iframe>
+        <iframe src="https://www.google.com/maps?q=H2+-+House+of+Health%2C+17.4221107%2C78.4076474&amp;z=17&amp;output=embed" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen title="H2 - House of Health location map"></iframe>
       </div>
     </div>
   </div>
