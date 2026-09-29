@@ -16818,7 +16818,7 @@ function getFilenameFromContentDisposition(headerValue, fallbackLabel = 'Invoice
   }
   const match = header.match(/filename="?([^";]+)"?/i);
   if (match?.[1]) return match[1];
-  return `Invoice-${String(fallbackLabel || 'Invoice').replace(/[^a-z0-9_-]+/gi, '-')}.pdf`;
+  return 'H2_invoice.pdf';
 }
 
 async function downloadPortalDocument(url, fallbackLabel = 'Invoice') {

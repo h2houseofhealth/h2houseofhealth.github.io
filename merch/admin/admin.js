@@ -5624,7 +5624,7 @@
     }
     const match = header.match(/filename="?([^";]+)"?/i);
     if (match?.[1]) return match[1];
-    return `Invoice-Merch-${String(orderId || 'Order').replace(/[^a-z0-9_-]+/gi, '-')}.pdf`;
+    return 'H2_invoice.pdf';
   }
 
   async function openOrderInvoice(orderId) {
