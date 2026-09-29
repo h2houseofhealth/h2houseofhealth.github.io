@@ -3586,6 +3586,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     `;
 
     const footerHtml = `
+      ${canCancelMerchOrder(order) ? `<button type="button" class="btn btn-outline" style="color: #dc2626; border-color: #fca5a5;" data-order-modal-action="cancel" data-order-id="${escapeHtml(String(order.id || ''))}">Cancel Order</button>` : ''}
       <button type="button" class="btn btn-outline" data-order-modal-action="invoice" data-order-id="${escapeHtml(String(order.id || ''))}">Invoice</button>
       <button type="button" class="btn btn-primary" data-order-modal-action="track" data-order-id="${escapeHtml(String(order.id || ''))}">Track Order</button>
     `;
@@ -3596,6 +3597,11 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       body: bodyHtml,
       footer: footerHtml,
       panelClass: 'merch-order-details-modal',
+    });
+
+    modal.querySelector('[data-order-modal-action="cancel"]')?.addEventListener('click', async () => {
+      closeMerchModal();
+      await cancelMerchOrder(order);
     });
 
     modal.querySelector('[data-order-modal-action="invoice"]')?.addEventListener('click', async () => {
