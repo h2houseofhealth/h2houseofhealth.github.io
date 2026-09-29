@@ -82,6 +82,7 @@
   const state = {
     products: [],
     cart: [],
+    cartOwnerId: null,
     selectedCategory: 'all',
     sortBy: 'newest',
     searchQuery: '',
@@ -668,7 +669,10 @@
   function clearMerchBundleDiscount() {
     state.merchBundleCode = '';
     state.merchBundlePreview = null;
-    localStorage.removeItem('merch_bundle_code');
+    try {
+      localStorage.removeItem(getBundleStorageKey(state.cartOwnerId));
+      localStorage.removeItem('merch_bundle_code');
+    } catch {}
   }
 
   async function addMerchBundleToCart() {
@@ -681,7 +685,9 @@
 
     bundleItems.forEach(({ product, variant }) => addToCart(variant.id, 1, product, { openDrawerAfterAdd: false }));
     state.merchBundleCode = 'H2BUNDLE15';
-    localStorage.setItem('merch_bundle_code', state.merchBundleCode);
+    try {
+      localStorage.setItem(getBundleStorageKey(state.cartOwnerId), state.merchBundleCode);
+    } catch {}
     state.merchBundlePreview = {
       code: state.merchBundleCode,
       description: 'Bundle & Save — 15% off Bottle + Mist',
@@ -893,9 +899,11 @@
       orderNumber: confirmation.bookingId,
       customerEmail: confirmation.email,
       email: confirmation.email,
-      status: 'processing',
+      status: confirmation.trackingNumber ? 'shipped' : 'processing',
       createdAt: confirmation.createdAt,
       updatedAt: confirmation.createdAt,
+      trackingNumber: confirmation.trackingNumber || '',
+      carrier: confirmation.carrierName || confirmation.carrier || '',
       totalAmount: confirmation.totalAmount,
       items: (Array.isArray(confirmation.items) ? confirmation.items : []).map((item) => ({
         name: item.productName,
@@ -1463,21 +1471,120 @@ function getWishlistProductPrice(item) {
     accountDrawerContent: document.getElementById('accountDrawerContent'),
   };
 
-  // â”€â”€â”€ Cart (localStorage for now) â”€â”€â”€
-  function loadCart() {
+  // ─── Cart (Account-Isolated Storage & Backend Sync) ───
+  function getCartStorageKey(userId = state.cartOwnerId) {
+    return userId ? `merch_cart_user_${userId}` : 'merch_cart_guest';
+  }
+
+  function getBundleStorageKey(userId = state.cartOwnerId) {
+    return userId ? `merch_bundle_user_${userId}` : 'merch_bundle_guest';
+  }
+
+  function getCouponStorageKey(userId = state.cartOwnerId) {
+    return userId ? `merch_coupon_user_${userId}` : 'merch_coupon_guest';
+  }
+
+  function cleanupLegacySharedCartStorage() {
     try {
-      const saved = localStorage.getItem('merch_cart');
+      localStorage.removeItem('merch_cart');
+      localStorage.removeItem('merch_bundle_code');
+    } catch {}
+  }
+
+  function loadCart(user = state.currentUser) {
+    cleanupLegacySharedCartStorage();
+    const targetUserId = user?.id || null;
+    state.cartOwnerId = targetUserId;
+    try {
+      const key = getCartStorageKey(targetUserId);
+      const saved = localStorage.getItem(key);
       state.cart = saved ? JSON.parse(saved) : [];
-      state.merchBundleCode = localStorage.getItem('merch_bundle_code') || '';
+      const bundleKey = getBundleStorageKey(targetUserId);
+      state.merchBundleCode = localStorage.getItem(bundleKey) || '';
+      const couponKey = getCouponStorageKey(targetUserId);
+      state.merchCouponCode = localStorage.getItem(couponKey) || '';
     } catch {
       state.cart = [];
       state.merchBundleCode = '';
+      state.merchCouponCode = '';
+    }
+    renderCartBadge();
+    if (state.cartDrawerOpen) {
+      renderCart();
+    }
+  }
+
+  let cartSyncTimeout = null;
+  function syncCartToBackend(items) {
+    if (!state.currentUser?.id) return;
+    if (cartSyncTimeout) clearTimeout(cartSyncTimeout);
+    cartSyncTimeout = setTimeout(async () => {
+      try {
+        await api('/api/merch/cart', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: (items || []).map(item => ({ variantId: item.variantId, quantity: item.quantity })) }),
+        });
+      } catch (err) {
+        console.warn('[Merch] Failed to sync cart to backend:', err?.message || err);
+      }
+    }, 200);
+  }
+
+  async function syncCartFromBackend() {
+    if (!state.currentUser?.id) return;
+    try {
+      const res = await api('/api/merch/cart');
+      const backendItems = Array.isArray(res?.items) ? res.items : [];
+      const localKey = getCartStorageKey(state.currentUser.id);
+      const localRaw = localStorage.getItem(localKey);
+      const localItems = localRaw ? JSON.parse(localRaw) : null;
+
+      if (localItems !== null && Array.isArray(localItems) && localItems.length > 0) {
+        syncCartToBackend(localItems);
+        state.cart = localItems;
+      } else if (backendItems.length > 0) {
+        state.cart = backendItems;
+        try {
+          localStorage.setItem(localKey, JSON.stringify(state.cart));
+        } catch {}
+      } else {
+        state.cart = [];
+        try {
+          localStorage.setItem(localKey, JSON.stringify([]));
+        } catch {}
+      }
+      renderCartBadge();
+      if (state.cartDrawerOpen) renderCart();
+    } catch (err) {
+      console.warn('[Merch] Failed to fetch backend cart:', err?.message || err);
     }
   }
 
   function saveCart() {
-    localStorage.setItem('merch_cart', JSON.stringify(state.cart));
+    cleanupLegacySharedCartStorage();
+    try {
+      const key = getCartStorageKey(state.cartOwnerId);
+      localStorage.setItem(key, JSON.stringify(state.cart));
+      const bundleKey = getBundleStorageKey(state.cartOwnerId);
+      if (state.merchBundleCode) {
+        localStorage.setItem(bundleKey, state.merchBundleCode);
+      } else {
+        localStorage.removeItem(bundleKey);
+      }
+      const couponKey = getCouponStorageKey(state.cartOwnerId);
+      if (state.merchCouponCode) {
+        localStorage.setItem(couponKey, state.merchCouponCode);
+      } else {
+        localStorage.removeItem(couponKey);
+      }
+    } catch (err) {
+      console.warn('Unable to persist cart locally:', err);
+    }
     renderCartBadge();
+    if (state.currentUser?.id) {
+      syncCartToBackend(state.cart);
+    }
   }
 
   function addToCart(variantId, quantity, product, options = {}) {
@@ -1924,6 +2031,8 @@ function getWishlistProductPrice(item) {
     return {
       bookingId: String(order?.orderNumber || verifyResult?.orderNumber || 'BK20260717001'),
       orderId: verifyResult?.orderId || order?.orderId || null,
+      trackingNumber: verifyResult?.trackingNumber || order?.trackingNumber || null,
+      carrierName: verifyResult?.carrierName || order?.carrierName || null,
       createdAt,
       dateLabel: formatConfirmationDate(createdAt),
       timeLabel: `${formatConfirmationTime(createdAt)} - Order received`,
@@ -1977,6 +2086,7 @@ function getWishlistProductPrice(item) {
   }
 
   function BookingIdCard(data) {
+    const hasTracking = Boolean(data.trackingNumber);
     return `
       <div class="booking-id-card">
         <span>Order Number</span>
@@ -1985,6 +2095,15 @@ function getWishlistProductPrice(item) {
           ${confirmationIcon('copy')}
         </button>
       </div>
+      ${hasTracking ? `
+        <div class="booking-id-card" style="margin-top: 10px; background: rgba(34, 197, 94, 0.08); border-color: rgba(34, 197, 94, 0.35);">
+          <span>Courier Tracking AWB (${escapeHtml(data.carrierName || 'Shiprocket')})</span>
+          <strong style="color: #16a34a; font-family: monospace; letter-spacing: 0.5px;">${escapeHtml(data.trackingNumber)}</strong>
+          <button class="booking-copy-btn" type="button" data-confirmation-action="copy-awb" aria-label="Copy tracking AWB">
+            ${confirmationIcon('copy')}
+          </button>
+        </div>
+      ` : ''}
     `;
   }
 
@@ -2068,14 +2187,16 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   month: 'short',
   year: 'numeric',
 });
-        const details = [
+    const details = [
       { icon: 'calendar', label: 'Date & Time', lines: [data.dateLabel, data.timeLabel] },
       { icon: 'user', label: 'Service', lines: [data.service] },
       { icon: 'map', label: data.locationTitle || 'Location', lines: [data.location] },
       {
         icon: 'truck',
-        label: 'Estimated Delivery Date',
-        lines: [estimatedDelivery, "We'll notify you once your order is shipped."],
+        label: data.trackingNumber ? `Shipment Assigned (${data.carrierName || 'Shiprocket'})` : 'Estimated Delivery Date',
+        lines: data.trackingNumber
+          ? [`Tracking AWB: ${data.trackingNumber}`, 'Live tracking code generated instantly upon order confirmation.']
+          : [estimatedDelivery, "We'll notify you once your order is shipped."],
         isDelivery: true,
       },
     ];
@@ -2165,6 +2286,16 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           }
           return;
         }
+        if (action === 'copy-awb') {
+          try {
+            await navigator.clipboard?.writeText(data.trackingNumber);
+            button.classList.add('is-copied');
+            setTimeout(() => button.classList.remove('is-copied'), 1200);
+          } catch {
+            showCheckoutNotice('Copy unavailable', `Tracking AWB: ${data.trackingNumber}`);
+          }
+          return;
+        }
         if (action === 'home') {
           window.location.href = '/';
           return;
@@ -2243,7 +2374,17 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   function getTrackingOrderIdFromHash() {
     const match = String(window.location.hash || '').match(/^#track-order\/([^/?#]+)/);
-    return match ? decodeURIComponent(match[1]) : '';
+    if (match) return decodeURIComponent(match[1]);
+    const urlParams = new URLSearchParams(window.location.search);
+    const queryOrder = urlParams.get('track') || urlParams.get('orderId') || urlParams.get('order');
+    if (queryOrder) {
+      const decoded = decodeURIComponent(queryOrder);
+      if (window.location.hash !== `#track-order/${encodeURIComponent(decoded)}`) {
+        window.location.hash = `track-order/${encodeURIComponent(decoded)}`;
+      }
+      return decoded;
+    }
+    return '';
   }
 
   function isAdminTrackingRequest() {
@@ -2302,8 +2443,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     });
   }
 
-  function showOrderTracking(orderId) {
-    const order = getTrackingOrderById(orderId);
+  async function showOrderTracking(orderId) {
     state.currentView = 'tracking';
 
     els.productDetail.hidden = true;
@@ -2312,14 +2452,55 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
     document.querySelector('.merch-hero').hidden = true;
     document.querySelector('.merch-categories').hidden = true;
-    if (els.orderTracking) {
-      els.orderTracking.hidden = false;
-      els.orderTracking.innerHTML = OrderTrackingPage(order);
-      bindOrderTrackingActions(order);
-    }
     closeCart();
     closeAccountDrawer();
     window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    let order = getTrackingOrderById(orderId);
+    if (order) {
+      if (els.orderTracking) {
+        els.orderTracking.hidden = false;
+        els.orderTracking.innerHTML = OrderTrackingPage(order);
+        bindOrderTrackingActions(order);
+      }
+      return;
+    }
+
+    if (els.orderTracking) {
+      els.orderTracking.hidden = false;
+      els.orderTracking.innerHTML = `
+        <div class="order-tracking__inner">
+          <div class="tracking-loading" style="text-align: center; padding: 60px 20px;">
+            <p style="color: #666; font-size: 16px;">Loading order tracking...</p>
+          </div>
+        </div>
+      `;
+    }
+
+    try {
+      const res = await api(`/api/merch/orders/${encodeURIComponent(orderId)}/tracking`);
+      if (res?.order) {
+        order = res.order;
+        if (!Array.isArray(state.merchOrders)) state.merchOrders = [];
+        const existingIdx = state.merchOrders.findIndex(
+          (o) => String(o.id) === String(order.id) || String(o.orderNumber) === String(order.orderNumber)
+        );
+        if (existingIdx >= 0) {
+          state.merchOrders[existingIdx] = order;
+        } else {
+          state.merchOrders.unshift(order);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load tracking order details:', err);
+    }
+
+    if (els.orderTracking) {
+      els.orderTracking.innerHTML = OrderTrackingPage(order);
+      if (order) {
+        bindOrderTrackingActions(order);
+      }
+    }
   }
 
   function routeFromLocation() {
@@ -3180,7 +3361,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   function getOrderById(orderId) {
-    return (Array.isArray(state.merchOrders) ? state.merchOrders : []).find((order) => String(order.id || '') === String(orderId || ''));
+    return (Array.isArray(state.merchOrders) ? state.merchOrders : []).find(
+      (order) => String(order.id || '') === String(orderId || '') || String(order.orderNumber || '') === String(orderId || '')
+    );
   }
 
   function canCancelMerchOrder(order) {
@@ -3708,6 +3891,18 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       // Clear the merch UI even if the server could not be reached.
     }
 
+    // 1. Immediately clear cart and promotional state from memory
+    state.cart = [];
+    state.cartOwnerId = null;
+    state.merchBundleCode = '';
+    state.merchCouponCode = '';
+    state.merchCouponPreview = null;
+    state.merchCouponError = '';
+    renderCartBadge();
+    if (state.cartDrawerOpen) renderCart();
+    closeCart();
+
+    // 2. Clear user state
     state.currentUser = null;
     state.merchProfile = null;
     state.merchOrders = [];
@@ -3726,6 +3921,15 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     state.accountDrawerTrigger = null;
     closeAccountDrawer();
     renderAccountTrigger();
+
+    // 3. Return to shop if on checkout page
+    if (state.currentView === 'checkout') {
+      showShop();
+    }
+
+    // 4. Load isolated guest cart
+    loadCart(null);
+
     requestAnimationFrame(() => {
       document.querySelector('#merchAuthCta a')?.focus();
     });
@@ -5239,15 +5443,42 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   async function loadCustomerContext() {
     const adminTrackingRequest = isAdminTrackingRequest();
+    const previousUserId = state.cartOwnerId;
     try {
       const authResult = await api('/api/auth/me');
       state.currentUser = authResult.user || null;
       if (state.currentUser && String(state.currentUser.role || '').toLowerCase() === 'admin' && !adminTrackingRequest) {
-    window.location.replace('/merch/admin/index.html');
-    return;
-}
+        window.location.replace('/merch/admin/index.html');
+        return;
+      }
     } catch {
       state.currentUser = null;
+    }
+
+    const currentUserId = state.currentUser?.id || null;
+    if (currentUserId !== previousUserId) {
+      state.cart = [];
+      state.merchBundleCode = '';
+      state.merchCouponCode = '';
+      state.merchCouponPreview = null;
+      state.merchCouponError = '';
+
+      loadCart(state.currentUser);
+
+      if (currentUserId) {
+        await syncCartFromBackend();
+      }
+
+      renderCartBadge();
+      if (state.cartDrawerOpen) renderCart();
+
+      if (state.currentView === 'checkout') {
+        if (!state.cart.length) {
+          showShop();
+        } else {
+          renderCheckoutPage();
+        }
+      }
     }
 
     if (state.currentUser && adminTrackingRequest) {
@@ -5425,7 +5656,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   // ─── Initialize ───
   function init() {
-    loadCart();
+    cleanupLegacySharedCartStorage();
+    loadCart(null);
     renderCartBadge();
     renderProductGrid();
     bindEvents();

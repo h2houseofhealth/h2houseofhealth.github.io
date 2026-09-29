@@ -273,14 +273,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       slug: 'h2-water-bottle',
       description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 5 minutes. BPA-free, USB-C rechargeable.',
       category: 'bottles',
-      basePrice: 2590000,
+      basePrice: 2299000,
       image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113',
       weight: 380,
       variants: [
-        ['HM-BTL-460-SLV', '460ml', 'Silver', 2590000, 50, '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113'],
-        ['HM-BTL-460-BLK', '460ml', 'Black', 2590000, 50, '/cdn/shop/files/products/bottle-black.png', ['/cdn/shop/files/products/bottle-black-interior.png', '/cdn/shop/files/products/bottle-black-portable.png', '/cdn/shop/files/products/bottle-black-cap.png']],
-        ['HM-BTL-460-GLD', '460ml', 'Gold', 2590000, 50, '/cdn/shop/files/products/bottle-gold.png', ['/cdn/shop/files/products/bottle-gold-interior.png', '/cdn/shop/files/products/bottle-gold-portable.png', '/cdn/shop/files/products/bottle-gold-cap.png']],
-        ['HM-BTL-460-BLU', '460ml', 'Blue', 2590000, 50, '/cdn/shop/files/products/bottle-blue.png', ['/cdn/shop/files/products/bottle-blue-interior.png', '/cdn/shop/files/products/bottle-blue-portable.png', '/cdn/shop/files/products/bottle-blue-cap.png']],
+        ['HM-BTL-460-SLV', '460ml', 'Silver', 2299000, 50, '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113'],
+        ['HM-BTL-460-BLK', '460ml', 'Black', 2299000, 50, '/cdn/shop/files/products/bottle-black.png', ['/cdn/shop/files/products/bottle-black-interior.png', '/cdn/shop/files/products/bottle-black-portable.png', '/cdn/shop/files/products/bottle-black-cap.png']],
+        ['HM-BTL-460-GLD', '460ml', 'Gold', 2299000, 50, '/cdn/shop/files/products/bottle-gold.png', ['/cdn/shop/files/products/bottle-gold-interior.png', '/cdn/shop/files/products/bottle-gold-portable.png', '/cdn/shop/files/products/bottle-gold-cap.png']],
+        ['HM-BTL-460-BLU', '460ml', 'Blue', 2299000, 50, '/cdn/shop/files/products/bottle-blue.png', ['/cdn/shop/files/products/bottle-blue-interior.png', '/cdn/shop/files/products/bottle-blue-portable.png', '/cdn/shop/files/products/bottle-blue-cap.png']],
       ],
     },
     {
@@ -367,7 +367,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       {
         slug: 'h2-water-bottle',
         description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 5 minutes. BPA-free, USB-C rechargeable.',
-        price: 2590000,
+        price: 2299000,
         oldSkus: ['HM-BTL-300-SLV', 'HM-BTL-500-SLV', 'HM-BTL-300-BLK', 'HM-BTL-500-BLK'],
         specifications: {
           'Product Name': 'Hydrogen-Rich Water Bottle',
@@ -2320,24 +2320,24 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
 
   function buildMerchOrderRecord(order, items = []) {
-    const shippingAddress = parseMerchShippingAddress(order.shippingAddress);
-    const billingAddress = parseMerchShippingAddress(order.billingAddress) || shippingAddress;
-    const realCustomerEmail = hasRealEmail(order.customerEmail) ? String(order.customerEmail) : '';
-    const realGuestEmail = hasRealEmail(order.guestEmail) ? String(order.guestEmail) : '';
+    const shippingAddress = parseMerchShippingAddress(order.shippingAddress || order.shipping_address);
+    const billingAddress = parseMerchShippingAddress(order.billingAddress || order.billing_address) || shippingAddress;
+    const realCustomerEmail = hasRealEmail(order.customerEmail || order.customer_email) ? String(order.customerEmail || order.customer_email) : '';
+    const realGuestEmail = hasRealEmail(order.guestEmail || order.guest_email) ? String(order.guestEmail || order.guest_email) : '';
     return {
       id: Number(order.id),
-      orderNumber: String(order.orderNumber || ''),
-      customerName: String(order.customerName || ''),
+      orderNumber: String(order.orderNumber || order.order_number || ''),
+      customerName: String(order.customerName || order.customer_name || ''),
       customerEmail: realCustomerEmail,
-      customerPhone: String(order.customerPhone || ''),
-      guestName: String(order.guestName || ''),
+      customerPhone: String(order.customerPhone || order.customer_phone || ''),
+      guestName: String(order.guestName || order.guest_name || ''),
       guestEmail: realGuestEmail,
-      guestPhone: String(order.guestPhone || ''),
-      isGuest: Number(order.isGuest || 0) === 1,
+      guestPhone: String(order.guestPhone || order.guest_phone || ''),
+      isGuest: Number(order.isGuest || order.is_guest || 0) === 1,
       email: realCustomerEmail,
       hasRealEmail: Boolean(realCustomerEmail),
       displayEmail: realCustomerEmail || 'Email not provided',
-      phone: String(order.customerPhone || ''),
+      phone: String(order.customerPhone || order.customer_phone || ''),
       status: String(order.status || 'pending'),
       subtotal: Number(order.subtotal || 0),
       gstAmount: Number(order.gstAmount || order.gst_amount || 0),
@@ -2357,8 +2357,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       paymentStatus: String(order.paymentStatus || order.payment_status || 'pending'),
       razorpayOrderId: String(order.razorpayOrderId || order.razorpay_order_id || ''),
       razorpayPaymentId: String(order.razorpayPaymentId || order.razorpay_payment_id || ''),
-      shippingAddress: shippingAddress ? formatMerchAddressLine(shippingAddress) : String(order.shippingAddress || ''),
-      billingAddress: billingAddress ? formatMerchAddressLine(billingAddress) : String(order.billingAddress || order.shippingAddress || ''),
+      shippingAddress: shippingAddress ? formatMerchAddressLine(shippingAddress) : String(order.shippingAddress || order.shipping_address || ''),
+      billingAddress: billingAddress ? formatMerchAddressLine(billingAddress) : String(order.billingAddress || order.billing_address || order.shippingAddress || order.shipping_address || ''),
       trackingNumber: String(order.trackingNumber || order.tracking_number || order.shiprocketAwbCode || order.shiprocket_awb_code || ''),
       carrier: String(order.carrierName || order.carrier_name || order.shiprocketCourierName || order.shiprocket_courier_name || ''),
       shiprocketOrderId: String(order.shiprocketOrderId || order.shiprocket_order_id || ''),
@@ -2374,11 +2374,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       deliveredAt: order.deliveredAt || order.delivered_at || (String(order.status || '').toLowerCase() === 'delivered' ? order.updatedAt || order.updated_at || null : null),
       items: items.map((item) => ({
         id: Number(item.id),
-        name: String(item.productName || item.product_name || ''),
-        qty: Number(item.quantity || 0),
-        price: Number(item.unitPrice || item.unit_price || 0),
+        name: String(item.productName || item.product_name || item.name || ''),
+        productName: String(item.productName || item.product_name || item.name || ''),
+        qty: Number(item.quantity || item.qty || 0),
+        quantity: Number(item.quantity || item.qty || 0),
+        price: Number(item.unitPrice || item.unit_price || item.price || 0),
         variantLabel: String(item.variantLabel || item.variant_label || ''),
         sku: String(item.sku || ''),
+        imageUrl: item.imageUrl || item.image_url || '',
         lineTotal: Number(item.lineTotal || item.line_total || 0),
       })),
       timeline: buildMerchOrderTimeline({
@@ -3713,7 +3716,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
                     <td class="delivery-copy" style="padding:22px 22px 22px 0;">
                       <p style="margin:0 0 7px;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:19px;line-height:25px;">Expected Delivery</p>
                       <p style="margin:0 0 8px;color:#14233b;font-weight:700;font-size:20px;line-height:27px;">${escapeHtml(expectedDelivery)}</p>
+                      ${order.trackingNumber ? `
+                      <p style="margin:0 0 6px;color:#16a34a;font-weight:700;font-size:16px;line-height:22px;">Courier Tracking AWB: ${escapeHtml(order.trackingNumber)}${order.carrier ? ` (${escapeHtml(order.carrier)})` : ''}</p>
+                      ` : `
                       <p style="margin:0;color:#14233b;font-size:16px;line-height:23px;">We'll notify you once your order is shipped.</p>
+                      `}
                       <p style="margin:10px 0 0;color:#657384;font-size:13px;line-height:19px;">Ship to: ${escapeHtml(shippingAddress)}</p>
                       <p style="margin:4px 0 0;color:#657384;font-size:13px;line-height:19px;">Email: ${escapeHtml(order.customerEmail || '')}</p>
                     </td>
@@ -4145,6 +4152,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const orderNumber = String(data.order?.orderNumber || `Order #${data.order?.id}`).trim();
     const totalAmount = formatMerchWhatsAppCurrency(data.order?.totalAmount || 0);
 
+    const trackingOrderId = String(data.order?.id || orderId);
+    const buttonComponent = {
+      type: 'button',
+      sub_type: 'url',
+      index: '0',
+      parameters: [
+        { type: 'text', text: trackingOrderId },
+      ],
+    };
+
     const payload = {
       to,
       type: 'template',
@@ -4160,6 +4177,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
               { type: 'text', text: totalAmount },
             ],
           },
+          buttonComponent,
         ],
       },
     };
@@ -4170,10 +4188,29 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       customerName,
       orderNumber,
       totalAmount,
+      trackingOrderId,
     });
 
     try {
-      const result = await sendWhatsAppGraphMessage(config, payload);
+      let result;
+      try {
+        result = await sendWhatsAppGraphMessage(config, payload);
+      } catch (sendErr) {
+        // If template doesn't yet have dynamic URL button component configured on Meta, retry without button component
+        if (payload.template.components.length > 1 && /button|parameter/i.test(sendErr.message)) {
+          console.warn('[Merch] WhatsApp sending with URL button failed, retrying without button component:', sendErr.message);
+          const fallbackPayload = {
+            ...payload,
+            template: {
+              ...payload.template,
+              components: [payload.template.components[0]],
+            },
+          };
+          result = await sendWhatsAppGraphMessage(config, fallbackPayload);
+        } else {
+          throw sendErr;
+        }
+      }
       const messageId = result?.messages?.[0]?.id || '';
       console.log('[Merch] WhatsApp order confirmation accepted by Meta:', {
         orderId,
@@ -4746,6 +4783,68 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     });
   });
 
+  async function autoFulfillOrderWithShiprocket(orderId) {
+    if (!shiprocket.isConfigured()) return null;
+
+    try {
+      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
+      if (!order) return null;
+
+      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+      let shipmentId = order.shiprocket_shipment_id;
+
+      // 1. Create order in Shiprocket if not yet created
+      if (!shipmentId) {
+        const createRes = await shiprocket.createOrder({ order, items });
+        shipmentId = String(createRes.shipmentId);
+        db.prepare(`
+          UPDATE merch_orders
+          SET shiprocket_order_id = ?,
+              shiprocket_shipment_id = ?,
+              shiprocket_status = ?,
+              updated_at = datetime('now')
+          WHERE id = ?
+        `).run(String(createRes.orderId), shipmentId, String(createRes.status || 'NEW'), order.id);
+      }
+
+      // 2. Automatically assign courier and generate AWB immediately
+      const awbRes = await shiprocket.assignAwb({ shipmentId });
+      let labelUrl = null;
+      try {
+        const labelRes = await shiprocket.generateLabel({ shipmentId });
+        labelUrl = labelRes.labelUrl;
+      } catch (labelErr) {
+        console.warn('[Shiprocket] Auto label generation deferred:', labelErr.message);
+      }
+
+      const awbCode = String(awbRes.awbCode || '');
+      const courierName = String(awbRes.courierName || 'Shiprocket');
+
+      db.prepare(`
+        UPDATE merch_orders
+        SET shiprocket_awb_code = ?,
+            shiprocket_courier_name = ?,
+            tracking_number = ?,
+            carrier_name = ?,
+            status = 'shipped',
+            shiprocket_status = 'AWB ASSIGNED',
+            shiprocket_label_url = COALESCE(?, shiprocket_label_url),
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(awbCode, courierName, awbCode, courierName, labelUrl, order.id);
+
+      return {
+        shipmentId,
+        awbCode,
+        courierName,
+        labelUrl,
+      };
+    } catch (err) {
+      console.warn('[Shiprocket] Instant auto-fulfillment notice:', err.message);
+      return null;
+    }
+  }
+
   // ─── PUBLIC: Verify payment after Razorpay checkout ───
   app.post('/api/merch/verify-payment', async (req, res) => {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, order_number } = req.body || {};
@@ -4795,12 +4894,29 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       });
     }
 
+    if (order.customerUserId) {
+      const customerProfile = db.prepare('SELECT id FROM merch_customer_profiles WHERE user_id = ?').get(order.customerUserId);
+      if (customerProfile) {
+        db.prepare('DELETE FROM merch_customer_cart_items WHERE customer_id = ?').run(customerProfile.id);
+      }
+    }
+
+    // Automatically fulfill order with Shiprocket to immediately generate Tracking ID (AWB)
+    let autoFulfill = null;
+    try {
+      autoFulfill = await autoFulfillOrderWithShiprocket(order.id);
+    } catch (fulfillErr) {
+      console.warn('[Shiprocket] Instant auto-fulfillment skipped:', fulfillErr.message);
+    }
+
     const notifications = await triggerMerchOrderConfirmationNotifications(order.id, req);
 
     res.json({
       success: true,
       message: 'Payment verified, order confirmed',
       orderId: order.id,
+      trackingNumber: autoFulfill?.awbCode || null,
+      carrierName: autoFulfill?.courierName || null,
       notifications,
     });
   });
@@ -4969,6 +5085,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       });
     }
 
+    if (customerUserId) {
+      const customerProfile = db.prepare('SELECT id FROM merch_customer_profiles WHERE user_id = ?').get(customerUserId);
+      if (customerProfile) {
+        db.prepare('DELETE FROM merch_customer_cart_items WHERE customer_id = ?').run(customerProfile.id);
+      }
+    }
+
     sendMerchOrderConfirmationEmail(orderId, req).catch((error) => {
       console.error('[Merch] Failed to send COD order confirmation email:', error?.message || error);
     });
@@ -5032,6 +5155,85 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     return res.json({ success: true, id: itemId });
+  });
+
+  // ─── CUSTOMER: Cart Endpoints (Account-isolated backend cart) ───
+  app.get('/api/merch/cart', requireMerchAuth, (req, res) => {
+    const profile = ensureMerchCustomerProfileForUser(req.user);
+    if (!profile) {
+      return res.status(404).json({ error: 'Customer profile not found' });
+    }
+
+    const rows = db.prepare(`
+      SELECT c.id, c.customer_id AS customerId, c.variant_id AS variantId, c.quantity,
+             v.product_id AS productId, v.sku, v.size, v.color, v.price, v.stock, v.image_url AS imageUrl,
+             p.name AS productName, p.slug AS productSlug, p.is_active AS productActive, v.is_active AS variantActive
+      FROM merch_customer_cart_items c
+      JOIN merch_variants v ON v.id = c.variant_id
+      JOIN merch_products p ON p.id = v.product_id
+      WHERE c.customer_id = ? AND p.deleted_at IS NULL
+      ORDER BY c.id ASC
+    `).all(profile.id);
+
+    const items = rows
+      .filter((row) => row.variantActive && row.productActive && row.stock > 0)
+      .map((row) => ({
+        variantId: Number(row.variantId),
+        productId: Number(row.productId),
+        productName: row.productName,
+        variantLabel: [row.size, row.color].filter(Boolean).join(' / '),
+        price: Number(row.price),
+        quantity: Math.min(Number(row.quantity || 1), Number(row.stock || 1)),
+        image: row.imageUrl,
+        sku: row.sku,
+      }));
+
+    return res.json({ items });
+  });
+
+  app.put('/api/merch/cart', requireMerchAuth, (req, res) => {
+    const profile = ensureMerchCustomerProfileForUser(req.user);
+    if (!profile) {
+      return res.status(404).json({ error: 'Customer profile not found' });
+    }
+
+    const incomingItems = Array.isArray(req.body?.items) ? req.body.items : [];
+
+    const sync = db.transaction(() => {
+      db.prepare('DELETE FROM merch_customer_cart_items WHERE customer_id = ?').run(profile.id);
+      const insert = db.prepare(`
+        INSERT INTO merch_customer_cart_items (customer_id, variant_id, quantity, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+      `);
+      for (const item of incomingItems) {
+        const variantId = Number(item.variantId || item.id || 0);
+        const quantity = Math.max(1, Math.min(99, Number(item.quantity || 1)));
+        if (variantId > 0) {
+          const variantExists = db.prepare('SELECT id, stock FROM merch_variants WHERE id = ? AND is_active = 1').get(variantId);
+          if (variantExists && variantExists.stock > 0) {
+            insert.run(profile.id, variantId, Math.min(quantity, variantExists.stock));
+          }
+        }
+      }
+    });
+
+    try {
+      sync();
+    } catch (err) {
+      console.error('[Merch] Failed to update customer cart:', err);
+      return res.status(500).json({ error: 'Failed to update cart' });
+    }
+
+    return res.json({ success: true, count: incomingItems.length });
+  });
+
+  app.delete('/api/merch/cart', requireMerchAuth, (req, res) => {
+    const profile = ensureMerchCustomerProfileForUser(req.user);
+    if (!profile) {
+      return res.status(404).json({ error: 'Customer profile not found' });
+    }
+    db.prepare('DELETE FROM merch_customer_cart_items WHERE customer_id = ?').run(profile.id);
+    return res.json({ success: true });
   });
 
   app.get('/api/merch/profile', requireMerchAuth, (req, res) => {
@@ -6114,6 +6316,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const commissionEarnedPaise = Math.round(Number(stats.totalCommissionEarned || 0));
     const previousPaidPaise = Math.round(Number(influencer.paidCommission ?? influencer.paid_commission ?? 0));
     const newCumulativePaidPaise = previousPaidPaise + amountPaise;
+    if (newCumulativePaidPaise > commissionEarnedPaise) {
+      return res.status(400).json({ message: `Payment cannot exceed the remaining commission balance (${Math.max(0, commissionEarnedPaise - previousPaidPaise) / 100}).` });
+    }
     const balanceRemainingPaise = Math.max(0, commissionEarnedPaise - newCumulativePaidPaise);
 
     const now = new Date();
@@ -6280,11 +6485,18 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     const newAmountPaise = Math.round(Number(req.body?.newAmountPaise ?? (Number(req.body?.newAmount || 0) * 100)));
-    if (!Number.isFinite(newAmountPaise) || newAmountPaise < 0) {
+    const payBalancePaise = Math.round(Number(req.body?.payBalancePaise ?? (Number(req.body?.payBalance || 0) * 100)));
+    if (!Number.isFinite(newAmountPaise) || newAmountPaise < 0 || !Number.isFinite(payBalancePaise) || payBalancePaise < 0) {
       return res.status(400).json({ message: 'New commission paid amount must be a non-negative number.' });
     }
 
     const prevAmountPaise = Number(influencer.paidCommission ?? influencer.paid_commission ?? 0);
+    const stats = getInfluencerStatsRows([influencerId])[0] || {};
+    const commissionEarnedPaise = Math.max(0, Math.round(Number(stats.totalCommissionEarned || 0)));
+    const cumulativePaidPaise = payBalancePaise > 0 ? prevAmountPaise + payBalancePaise : newAmountPaise;
+    if (cumulativePaidPaise > commissionEarnedPaise) {
+      return res.status(400).json({ message: `Commission paid cannot exceed earned commission (${commissionEarnedPaise / 100}).` });
+    }
     const changedBy = String(req.user?.email || req.user?.name || 'admin');
 
     const update = db.transaction(() => {
@@ -6292,13 +6504,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         INSERT INTO merch_influencer_commission_adjustments
           (influencer_id, previous_amount_paise, new_amount_paise, reason, changed_by, created_at)
         VALUES (?, ?, ?, ?, ?, datetime('now'))
-      `).run(influencerId, prevAmountPaise, newAmountPaise, reason, changedBy);
+      `).run(influencerId, prevAmountPaise, cumulativePaidPaise, reason, changedBy);
 
       db.prepare(`
         UPDATE merch_influencers
         SET paid_commission = ?, updated_at = datetime('now')
         WHERE id = ?
-      `).run(newAmountPaise, influencerId);
+      `).run(cumulativePaidPaise, influencerId);
     });
 
     try {
@@ -6314,7 +6526,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       success: true,
       message: 'Commission paid adjusted successfully.',
       prevAmountPaise,
-      newAmountPaise,
+      newAmountPaise: cumulativePaidPaise,
       changedBy,
       reason,
       influencer: updatedInfluencer,
@@ -6669,7 +6881,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const order = db.prepare('SELECT * FROM merch_orders WHERE id = ? OR order_number = ?').get(queryId, queryId);
       if (!order) return res.status(404).json({ error: 'Order not found' });
 
-      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+      const items = db.prepare(`
+        SELECT oi.*, p.image_url AS imageUrl
+        FROM merch_order_items oi
+        LEFT JOIN merch_variants v ON v.id = oi.variant_id
+        LEFT JOIN merch_products p ON p.id = v.product_id
+        WHERE oi.order_id = ?
+        ORDER BY oi.id ASC
+      `).all(order.id);
       const awb = order.shiprocket_awb_code || order.tracking_number;
       let liveTracking = null;
 
