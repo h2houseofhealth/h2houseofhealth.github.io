@@ -6164,11 +6164,14 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
   });
 
   if (!emailResult.ok) {
+    const errorDetail = String(emailResult.message || 'Unable to send payment link email.').slice(0, 500);
     markEmailDelivery.run(
       recipientEmail,
       'failed',
       'failed',
-      String(emailResult.message || 'Unable to send payment link email.').slice(0, 500),
+      errorDetail,
+      'failed',
+      errorDetail,
       bookingId
     );
     const eventAt = new Date().toISOString();
@@ -6189,7 +6192,7 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
 
   if (Number(emailResult.statusCode || 0) !== 202) {
     const detail = `Email provider did not confirm 202 acceptance (status: ${Number(emailResult.statusCode || 0) || 'unknown'}).`;
-    markEmailDelivery.run(recipientEmail, 'failed', 'failed', detail, 'failed',detail, bookingId);
+    markEmailDelivery.run(recipientEmail, 'failed', 'failed', detail, 'failed', detail, bookingId);
     const eventAt = new Date().toISOString();
     const messageId = String(emailResult.messageId || '');
     const dedupeKey = buildPaymentLinkEventDedupeKey({
@@ -6205,10 +6208,10 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
     return res.status(502).json({ message: detail });
   }
 
-  markEmailDelivery.run(recipientEmail, 'sent', 'sent', null, bookingId);
+  const acceptedDetail = 'Send request accepted by email provider (202).';
+  markEmailDelivery.run(recipientEmail, 'sent', 'sent', null, 'sent', acceptedDetail, bookingId);
   const acceptedAt = new Date().toISOString();
   const acceptedMessageId = String(emailResult.messageId || '');
-  const acceptedDetail = 'Send request accepted by email provider (202).';
   const acceptedDedupeKey = buildPaymentLinkEventDedupeKey({
     bookingId,
     eventName: 'request_accepted',
@@ -6774,7 +6777,9 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
      SET payment_link_recipient_email = ?,
          payment_link_emailed_at = CASE WHEN ? = 'sent' THEN datetime('now') ELSE payment_link_emailed_at END,
          payment_link_email_status = ?,
-         payment_link_email_error = ?
+         payment_link_email_error = ?,
+         payment_link_delivery_status = ?,
+         payment_link_delivery_detail = ?
      WHERE id = ?`
   );
   const insertBookingEmailEvent = db.prepare(
@@ -6796,11 +6801,14 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
   });
 
   if (!emailResult.ok) {
+    const errorDetail = String(emailResult.message || 'Unable to send payment link email.').slice(0, 500);
     markEmailDelivery.run(
       recipientEmail,
       'failed',
       'failed',
-      String(emailResult.message || 'Unable to send payment link email.').slice(0, 500),
+      errorDetail,
+      'failed',
+      errorDetail,
       bookingId
     );
     const eventAt = new Date().toISOString();
@@ -6821,7 +6829,7 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
 
   if (Number(emailResult.statusCode || 0) !== 202) {
     const detail = `Email provider did not confirm 202 acceptance (status: ${Number(emailResult.statusCode || 0) || 'unknown'}).`;
-    markEmailDelivery.run(recipientEmail, 'failed', 'failed', detail, bookingId);
+    markEmailDelivery.run(recipientEmail, 'failed', 'failed', detail, 'failed', detail, bookingId);
     const eventAt = new Date().toISOString();
     const messageId = String(emailResult.messageId || '');
     const dedupeKey = buildPaymentLinkEventDedupeKey({
@@ -6837,10 +6845,10 @@ app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, r
     return res.status(502).json({ message: detail });
   }
 
-  markEmailDelivery.run(recipientEmail, 'sent', 'sent', null,'accepted', 'Send request accepted by Mailgun.', bookingId);
+  const acceptedDetail = 'Send request accepted by email provider (202).';
+  markEmailDelivery.run(recipientEmail, 'sent', 'sent', null, 'sent', acceptedDetail, bookingId);
   const acceptedAt = new Date().toISOString();
   const acceptedMessageId = String(emailResult.messageId || '');
-  const acceptedDetail = 'Send request accepted by email provider (202).';
   const acceptedDedupeKey = buildPaymentLinkEventDedupeKey({
     bookingId,
     eventName: 'request_accepted',
