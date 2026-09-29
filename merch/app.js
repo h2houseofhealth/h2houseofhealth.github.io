@@ -82,6 +82,7 @@
   const state = {
     products: [],
     cart: [],
+    cartOwnerId: null,
     selectedCategory: 'all',
     sortBy: 'newest',
     searchQuery: '',
@@ -668,7 +669,10 @@
   function clearMerchBundleDiscount() {
     state.merchBundleCode = '';
     state.merchBundlePreview = null;
-    localStorage.removeItem('merch_bundle_code');
+    try {
+      localStorage.removeItem(getBundleStorageKey(state.cartOwnerId));
+      localStorage.removeItem('merch_bundle_code');
+    } catch {}
   }
 
   async function addMerchBundleToCart() {
@@ -681,7 +685,9 @@
 
     bundleItems.forEach(({ product, variant }) => addToCart(variant.id, 1, product, { openDrawerAfterAdd: false }));
     state.merchBundleCode = 'H2BUNDLE15';
-    localStorage.setItem('merch_bundle_code', state.merchBundleCode);
+    try {
+      localStorage.setItem(getBundleStorageKey(state.cartOwnerId), state.merchBundleCode);
+    } catch {}
     state.merchBundlePreview = {
       code: state.merchBundleCode,
       description: 'Bundle & Save — 15% off Bottle + Mist',
@@ -893,9 +899,11 @@
       orderNumber: confirmation.bookingId,
       customerEmail: confirmation.email,
       email: confirmation.email,
-      status: 'processing',
+      status: confirmation.trackingNumber ? 'shipped' : 'processing',
       createdAt: confirmation.createdAt,
       updatedAt: confirmation.createdAt,
+      trackingNumber: confirmation.trackingNumber || '',
+      carrier: confirmation.carrierName || confirmation.carrier || '',
       totalAmount: confirmation.totalAmount,
       items: (Array.isArray(confirmation.items) ? confirmation.items : []).map((item) => ({
         name: item.productName,
@@ -1463,21 +1471,120 @@ function getWishlistProductPrice(item) {
     accountDrawerContent: document.getElementById('accountDrawerContent'),
   };
 
-  // â”€â”€â”€ Cart (localStorage for now) â”€â”€â”€
-  function loadCart() {
+  // ─── Cart (Account-Isolated Storage & Backend Sync) ───
+  function getCartStorageKey(userId = state.cartOwnerId) {
+    return userId ? `merch_cart_user_${userId}` : 'merch_cart_guest';
+  }
+
+  function getBundleStorageKey(userId = state.cartOwnerId) {
+    return userId ? `merch_bundle_user_${userId}` : 'merch_bundle_guest';
+  }
+
+  function getCouponStorageKey(userId = state.cartOwnerId) {
+    return userId ? `merch_coupon_user_${userId}` : 'merch_coupon_guest';
+  }
+
+  function cleanupLegacySharedCartStorage() {
     try {
-      const saved = localStorage.getItem('merch_cart');
+      localStorage.removeItem('merch_cart');
+      localStorage.removeItem('merch_bundle_code');
+    } catch {}
+  }
+
+  function loadCart(user = state.currentUser) {
+    cleanupLegacySharedCartStorage();
+    const targetUserId = user?.id || null;
+    state.cartOwnerId = targetUserId;
+    try {
+      const key = getCartStorageKey(targetUserId);
+      const saved = localStorage.getItem(key);
       state.cart = saved ? JSON.parse(saved) : [];
-      state.merchBundleCode = localStorage.getItem('merch_bundle_code') || '';
+      const bundleKey = getBundleStorageKey(targetUserId);
+      state.merchBundleCode = localStorage.getItem(bundleKey) || '';
+      const couponKey = getCouponStorageKey(targetUserId);
+      state.merchCouponCode = localStorage.getItem(couponKey) || '';
     } catch {
       state.cart = [];
       state.merchBundleCode = '';
+      state.merchCouponCode = '';
+    }
+    renderCartBadge();
+    if (state.cartDrawerOpen) {
+      renderCart();
+    }
+  }
+
+  let cartSyncTimeout = null;
+  function syncCartToBackend(items) {
+    if (!state.currentUser?.id) return;
+    if (cartSyncTimeout) clearTimeout(cartSyncTimeout);
+    cartSyncTimeout = setTimeout(async () => {
+      try {
+        await api('/api/merch/cart', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: (items || []).map(item => ({ variantId: item.variantId, quantity: item.quantity })) }),
+        });
+      } catch (err) {
+        console.warn('[Merch] Failed to sync cart to backend:', err?.message || err);
+      }
+    }, 200);
+  }
+
+  async function syncCartFromBackend() {
+    if (!state.currentUser?.id) return;
+    try {
+      const res = await api('/api/merch/cart');
+      const backendItems = Array.isArray(res?.items) ? res.items : [];
+      const localKey = getCartStorageKey(state.currentUser.id);
+      const localRaw = localStorage.getItem(localKey);
+      const localItems = localRaw ? JSON.parse(localRaw) : null;
+
+      if (localItems !== null && Array.isArray(localItems) && localItems.length > 0) {
+        syncCartToBackend(localItems);
+        state.cart = localItems;
+      } else if (backendItems.length > 0) {
+        state.cart = backendItems;
+        try {
+          localStorage.setItem(localKey, JSON.stringify(state.cart));
+        } catch {}
+      } else {
+        state.cart = [];
+        try {
+          localStorage.setItem(localKey, JSON.stringify([]));
+        } catch {}
+      }
+      renderCartBadge();
+      if (state.cartDrawerOpen) renderCart();
+    } catch (err) {
+      console.warn('[Merch] Failed to fetch backend cart:', err?.message || err);
     }
   }
 
   function saveCart() {
-    localStorage.setItem('merch_cart', JSON.stringify(state.cart));
+    cleanupLegacySharedCartStorage();
+    try {
+      const key = getCartStorageKey(state.cartOwnerId);
+      localStorage.setItem(key, JSON.stringify(state.cart));
+      const bundleKey = getBundleStorageKey(state.cartOwnerId);
+      if (state.merchBundleCode) {
+        localStorage.setItem(bundleKey, state.merchBundleCode);
+      } else {
+        localStorage.removeItem(bundleKey);
+      }
+      const couponKey = getCouponStorageKey(state.cartOwnerId);
+      if (state.merchCouponCode) {
+        localStorage.setItem(couponKey, state.merchCouponCode);
+      } else {
+        localStorage.removeItem(couponKey);
+      }
+    } catch (err) {
+      console.warn('Unable to persist cart locally:', err);
+    }
     renderCartBadge();
+    if (state.currentUser?.id) {
+      syncCartToBackend(state.cart);
+    }
   }
 
   function addToCart(variantId, quantity, product, options = {}) {
@@ -1924,6 +2031,8 @@ function getWishlistProductPrice(item) {
     return {
       bookingId: String(order?.orderNumber || verifyResult?.orderNumber || 'BK20260717001'),
       orderId: verifyResult?.orderId || order?.orderId || null,
+      trackingNumber: verifyResult?.trackingNumber || order?.trackingNumber || null,
+      carrierName: verifyResult?.carrierName || order?.carrierName || null,
       createdAt,
       dateLabel: formatConfirmationDate(createdAt),
       timeLabel: `${formatConfirmationTime(createdAt)} - Order received`,
@@ -1977,6 +2086,7 @@ function getWishlistProductPrice(item) {
   }
 
   function BookingIdCard(data) {
+    const hasTracking = Boolean(data.trackingNumber);
     return `
       <div class="booking-id-card">
         <span>Order Number</span>
@@ -1985,6 +2095,15 @@ function getWishlistProductPrice(item) {
           ${confirmationIcon('copy')}
         </button>
       </div>
+      ${hasTracking ? `
+        <div class="booking-id-card" style="margin-top: 10px; background: rgba(34, 197, 94, 0.08); border-color: rgba(34, 197, 94, 0.35);">
+          <span>Courier Tracking AWB (${escapeHtml(data.carrierName || 'Shiprocket')})</span>
+          <strong style="color: #16a34a; font-family: monospace; letter-spacing: 0.5px;">${escapeHtml(data.trackingNumber)}</strong>
+          <button class="booking-copy-btn" type="button" data-confirmation-action="copy-awb" aria-label="Copy tracking AWB">
+            ${confirmationIcon('copy')}
+          </button>
+        </div>
+      ` : ''}
     `;
   }
 
@@ -2068,14 +2187,16 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   month: 'short',
   year: 'numeric',
 });
-        const details = [
+    const details = [
       { icon: 'calendar', label: 'Date & Time', lines: [data.dateLabel, data.timeLabel] },
       { icon: 'user', label: 'Service', lines: [data.service] },
       { icon: 'map', label: data.locationTitle || 'Location', lines: [data.location] },
       {
         icon: 'truck',
-        label: 'Estimated Delivery Date',
-        lines: [estimatedDelivery, "We'll notify you once your order is shipped."],
+        label: data.trackingNumber ? `Shipment Assigned (${data.carrierName || 'Shiprocket'})` : 'Estimated Delivery Date',
+        lines: data.trackingNumber
+          ? [`Tracking AWB: ${data.trackingNumber}`, 'Live tracking code generated instantly upon order confirmation.']
+          : [estimatedDelivery, "We'll notify you once your order is shipped."],
         isDelivery: true,
       },
     ];
@@ -2165,6 +2286,16 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           }
           return;
         }
+        if (action === 'copy-awb') {
+          try {
+            await navigator.clipboard?.writeText(data.trackingNumber);
+            button.classList.add('is-copied');
+            setTimeout(() => button.classList.remove('is-copied'), 1200);
+          } catch {
+            showCheckoutNotice('Copy unavailable', `Tracking AWB: ${data.trackingNumber}`);
+          }
+          return;
+        }
         if (action === 'home') {
           window.location.href = '/';
           return;
@@ -2243,7 +2374,17 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   function getTrackingOrderIdFromHash() {
     const match = String(window.location.hash || '').match(/^#track-order\/([^/?#]+)/);
-    return match ? decodeURIComponent(match[1]) : '';
+    if (match) return decodeURIComponent(match[1]);
+    const urlParams = new URLSearchParams(window.location.search);
+    const queryOrder = urlParams.get('track') || urlParams.get('orderId') || urlParams.get('order');
+    if (queryOrder) {
+      const decoded = decodeURIComponent(queryOrder);
+      if (window.location.hash !== `#track-order/${encodeURIComponent(decoded)}`) {
+        window.location.hash = `track-order/${encodeURIComponent(decoded)}`;
+      }
+      return decoded;
+    }
+    return '';
   }
 
   function isAdminTrackingRequest() {
@@ -2302,8 +2443,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     });
   }
 
-  function showOrderTracking(orderId) {
-    const order = getTrackingOrderById(orderId);
+  async function showOrderTracking(orderId) {
     state.currentView = 'tracking';
 
     els.productDetail.hidden = true;
@@ -2312,14 +2452,55 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
     document.querySelector('.merch-hero').hidden = true;
     document.querySelector('.merch-categories').hidden = true;
-    if (els.orderTracking) {
-      els.orderTracking.hidden = false;
-      els.orderTracking.innerHTML = OrderTrackingPage(order);
-      bindOrderTrackingActions(order);
-    }
     closeCart();
     closeAccountDrawer();
     window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    let order = getTrackingOrderById(orderId);
+    if (order) {
+      if (els.orderTracking) {
+        els.orderTracking.hidden = false;
+        els.orderTracking.innerHTML = OrderTrackingPage(order);
+        bindOrderTrackingActions(order);
+      }
+      return;
+    }
+
+    if (els.orderTracking) {
+      els.orderTracking.hidden = false;
+      els.orderTracking.innerHTML = `
+        <div class="order-tracking__inner">
+          <div class="tracking-loading" style="text-align: center; padding: 60px 20px;">
+            <p style="color: #666; font-size: 16px;">Loading order tracking...</p>
+          </div>
+        </div>
+      `;
+    }
+
+    try {
+      const res = await api(`/api/merch/orders/${encodeURIComponent(orderId)}/tracking`);
+      if (res?.order) {
+        order = res.order;
+        if (!Array.isArray(state.merchOrders)) state.merchOrders = [];
+        const existingIdx = state.merchOrders.findIndex(
+          (o) => String(o.id) === String(order.id) || String(o.orderNumber) === String(order.orderNumber)
+        );
+        if (existingIdx >= 0) {
+          state.merchOrders[existingIdx] = order;
+        } else {
+          state.merchOrders.unshift(order);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load tracking order details:', err);
+    }
+
+    if (els.orderTracking) {
+      els.orderTracking.innerHTML = OrderTrackingPage(order);
+      if (order) {
+        bindOrderTrackingActions(order);
+      }
+    }
   }
 
   function routeFromLocation() {
@@ -3180,7 +3361,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   function getOrderById(orderId) {
-    return (Array.isArray(state.merchOrders) ? state.merchOrders : []).find((order) => String(order.id || '') === String(orderId || ''));
+    return (Array.isArray(state.merchOrders) ? state.merchOrders : []).find(
+      (order) => String(order.id || '') === String(orderId || '') || String(order.orderNumber || '') === String(orderId || '')
+    );
   }
 
   function canCancelMerchOrder(order) {
@@ -3227,6 +3410,209 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     state.accountOrderFilterAppliedTo = to;
     state.accountOrderFilterMessage = '';
     renderAccountDrawer();
+  }
+
+  function parseOrderModalAddress(raw, fallbackName = '', fallbackPhone = '') {
+    if (!raw) return null;
+    let obj = null;
+    if (typeof raw === 'object') {
+      obj = raw;
+    } else {
+      const trimmed = String(raw).trim();
+      if (!trimmed) return null;
+      try {
+        if (trimmed.startsWith('{')) {
+          obj = JSON.parse(trimmed);
+        }
+      } catch {}
+      if (!obj) {
+        const segments = trimmed.split(/\s+-\s+/).filter(Boolean);
+        if (segments.length >= 3) {
+          const name = segments[0];
+          const phone = segments[1];
+          const addressPart = segments.slice(2).join(', ');
+          const lines = addressPart.split(/\s*,\s*/).filter(Boolean);
+          return {
+            name: name || fallbackName,
+            phone: phone || fallbackPhone,
+            lines: lines.length ? lines : [addressPart],
+          };
+        } else {
+          const lines = trimmed.split(/\s*,\s*/).filter(Boolean);
+          return {
+            name: fallbackName,
+            phone: fallbackPhone,
+            lines: lines.length ? lines : [trimmed],
+          };
+        }
+      }
+    }
+
+    if (obj) {
+      const name = obj.recipientName || obj.recipient_name || obj.name || obj.fullName || fallbackName || '';
+      const phone = obj.phone || obj.phoneNumber || fallbackPhone || '';
+      const line1 = obj.line1 || obj.addressLine1 || '';
+      const line2 = obj.line2 || obj.addressLine2 || '';
+      const city = obj.city || '';
+      const state = obj.state || '';
+      const postalCode = obj.postalCode || obj.postal_code || obj.pincode || '';
+      const country = obj.country || '';
+      const lines = [];
+      if (line1) lines.push(line1);
+      if (line2) lines.push(line2);
+      const cityStatePostal = [city, state && postalCode ? `${state} ${postalCode}` : (state || postalCode)].filter(Boolean).join(', ');
+      if (cityStatePostal) lines.push(cityStatePostal);
+      if (country) lines.push(country);
+      if (!lines.length && obj.full) {
+        lines.push(...obj.full.split(/\s*,\s*/).filter(Boolean));
+      }
+      return { name, phone, lines };
+    }
+    return null;
+  }
+
+  function formatOrderModalPhone(phone) {
+    const raw = String(phone || '').trim();
+    const digits = raw.replace(/\D/g, '');
+    if (digits.length === 10) return `+91 ${digits.slice(0, 4)} ${digits.slice(4)}`;
+    if (digits.length === 12 && digits.startsWith('91')) return `+91 ${digits.slice(2, 6)} ${digits.slice(6)}`;
+    return raw;
+  }
+
+  function showOrderDetailsModal(order) {
+    if (!order) {
+      showCheckoutNotice('Order details', 'Order details are unavailable.');
+      return;
+    }
+
+    const orderNumber = order.orderNumber || `Order #${order.id}`;
+    const statusKey = String(order.status || 'processing').toLowerCase().replace(/[\s-]+/g, '_');
+    const paymentStatusKey = String(order.paymentStatus || 'pending').toLowerCase();
+    const couponApplied = order.influencerCoupon || order.couponCode || order.coupon_code || '';
+    const items = Array.isArray(order.items) ? order.items : [];
+
+    const shippingAddressData = parseOrderModalAddress(order.shippingAddress, order.customerName || order.guestName, order.customerPhone || order.guestPhone);
+    const billingAddressData = parseOrderModalAddress(order.billingAddress, order.customerName || order.guestName, order.customerPhone || order.guestPhone);
+    const isBillingSame = !order.billingAddress ||
+      order.billingAddress === order.shippingAddress ||
+      String(order.billingAddress).trim().toLowerCase() === String(order.shippingAddress || '').trim().toLowerCase();
+
+    const bodyHtml = `
+      <div class="order-modal-status-grid">
+        <div class="order-modal-status-card">
+          <span class="order-modal-status-card__label">Order Status</span>
+          <span class="order-modal-status-pill order-modal-status-pill--${escapeHtml(statusKey)}">${escapeHtml(formatOrderStatus(order.status))}</span>
+        </div>
+        <div class="order-modal-status-card">
+          <span class="order-modal-status-card__label">Payment Status</span>
+          <span class="order-modal-status-pill order-modal-status-pill--${escapeHtml(paymentStatusKey)}">${escapeHtml(String(order.paymentStatus || 'Pending'))}</span>
+        </div>
+      </div>
+
+      <div class="order-modal-info-block">
+        <div class="order-modal-info-row">
+          <span class="order-modal-info-label">Order Date</span>
+          <strong class="order-modal-info-value">${escapeHtml(formatDateLabel(order.createdAt))}</strong>
+        </div>
+        <div class="order-modal-info-row">
+          <span class="order-modal-info-label">Customer Type</span>
+          <strong class="order-modal-info-value">${order.isGuest ? 'Guest customer' : 'Registered customer'}</strong>
+        </div>
+        <div class="order-modal-info-row">
+          <span class="order-modal-info-label">Payment Method</span>
+          <strong class="order-modal-info-value">${escapeHtml(order.paymentMethod || 'Online')}</strong>
+        </div>
+        <div class="order-modal-info-row order-modal-info-row--total">
+          <span class="order-modal-info-label">Total</span>
+          <strong class="order-modal-info-value">${order.totalAmount ? formatMoneyFromPaise(order.totalAmount) : '—'}</strong>
+        </div>
+        ${couponApplied ? `
+        <div class="order-modal-info-row">
+          <span class="order-modal-info-label">Coupon Applied</span>
+          <strong class="order-modal-info-value">${escapeHtml(couponApplied)}</strong>
+        </div>
+        ` : ''}
+        ${(order.trackingNumber || order.carrier) ? `
+        <div class="order-modal-info-row">
+          <span class="order-modal-info-label">Courier / AWB</span>
+          <strong class="order-modal-info-value">${escapeHtml([order.carrier, order.trackingNumber].filter(Boolean).join(' - '))}</strong>
+        </div>
+        ` : ''}
+      </div>
+
+      ${items.length ? `
+      <div>
+        <p class="order-modal-section-title">Items Ordered (${items.length})</p>
+        <div class="order-modal-items-block">
+          ${items.map((item) => `
+            <div class="order-modal-item-row">
+              <img src="${escapeHtml(item.imageUrl || FALLBACK_PRODUCT_IMAGE)}" alt="" class="order-modal-item-thumb" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
+              <div class="order-modal-item-meta">
+                <p class="order-modal-item-name">${escapeHtml(item.name || item.productName || 'Product')}</p>
+                <p class="order-modal-item-variant">${escapeHtml([item.variantLabel, `Qty: ${item.quantity || item.qty || 1}`].filter(Boolean).join(' • '))}</p>
+              </div>
+              <strong class="order-modal-item-price">${formatMoneyFromPaise(item.lineTotal || ((item.price || item.unitPrice || 0) * (item.quantity || item.qty || 1)) || 0)}</strong>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      ` : ''}
+
+      <div class="order-modal-addresses-grid">
+        <div class="order-modal-address-card">
+          <p class="order-modal-address-card__title">SHIPPING ADDRESS</p>
+          ${shippingAddressData ? `
+            <p class="order-modal-address-card__name">${escapeHtml(shippingAddressData.name)}</p>
+            ${shippingAddressData.phone ? `<p class="order-modal-address-card__phone">${escapeHtml(formatOrderModalPhone(shippingAddressData.phone))}</p>` : ''}
+            <div class="order-modal-address-card__lines">
+              ${shippingAddressData.lines.map((line) => `<p>${escapeHtml(line)}</p>`).join('')}
+            </div>
+          ` : `<p class="order-modal-address-card__lines">Address unavailable</p>`}
+        </div>
+
+        <div class="order-modal-address-card">
+          <p class="order-modal-address-card__title">BILLING ADDRESS</p>
+          ${isBillingSame ? `
+            <p class="order-modal-address-card__same">Same as shipping address</p>
+          ` : (billingAddressData ? `
+            <p class="order-modal-address-card__name">${escapeHtml(billingAddressData.name)}</p>
+            ${billingAddressData.phone ? `<p class="order-modal-address-card__phone">${escapeHtml(formatOrderModalPhone(billingAddressData.phone))}</p>` : ''}
+            <div class="order-modal-address-card__lines">
+              ${billingAddressData.lines.map((line) => `<p>${escapeHtml(line)}</p>`).join('')}
+            </div>
+          ` : `<p class="order-modal-address-card__lines">Address unavailable</p>`)}
+        </div>
+      </div>
+    `;
+
+    const footerHtml = `
+      ${canCancelMerchOrder(order) ? `<button type="button" class="btn btn-outline" style="color: #dc2626; border-color: #fca5a5;" data-order-modal-action="cancel" data-order-id="${escapeHtml(String(order.id || ''))}">Cancel Order</button>` : ''}
+      <button type="button" class="btn btn-outline" data-order-modal-action="invoice" data-order-id="${escapeHtml(String(order.id || ''))}">Invoice</button>
+      <button type="button" class="btn btn-primary" data-order-modal-action="track" data-order-id="${escapeHtml(String(order.id || ''))}">Track Order</button>
+    `;
+
+    const modal = showMerchModal({
+      eyebrow: 'HOUSE MERCH',
+      title: orderNumber,
+      body: bodyHtml,
+      footer: footerHtml,
+      panelClass: 'merch-order-details-modal',
+    });
+
+    modal.querySelector('[data-order-modal-action="cancel"]')?.addEventListener('click', async () => {
+      closeMerchModal();
+      await cancelMerchOrder(order);
+    });
+
+    modal.querySelector('[data-order-modal-action="invoice"]')?.addEventListener('click', async () => {
+      await openMerchInvoice(order.id);
+    });
+
+    modal.querySelector('[data-order-modal-action="track"]')?.addEventListener('click', () => {
+      closeMerchModal();
+      if (state.accountDrawerOpen) closeAccountDrawer();
+      window.location.hash = `track-order/${encodeURIComponent(order.id)}`;
+    });
   }
 
   async function handleAccountAction(button) {
@@ -3302,51 +3688,15 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     }
 
     if (action === 'view-order') {
-      const order = getOrderById(button.dataset.orderId);
-      console.log('View order:', JSON.stringify(order, null, 2));
-      showCheckoutNotice(
-        order ? (order.orderNumber || `Order #${order.id}`) : 'Order details',
-        order
-        ? `
-           <div class="order-details">
-             <div class="order-detail-row">
-               <span>Order Date</span>
-               <strong>${formatDateLabel(order.createdAt)}</strong>
-             </div>
-             <div class="order-detail-row">
-               <span>Customer Type</span>
-               <strong>${order.isGuest ? 'Guest linked to account' : 'Registered customer'}</strong>
-             </div>
-             <div class="order-detail-row">
-               <span>Order Status</span>
-               <strong>${formatOrderStatus(order.status)}</strong>
-             </div>
-             <div class="order-detail-row">
-               <span>Payment Status</span>
-               <strong>${order.paymentStatus || 'Pending'}</strong>
-             </div>
-             <div class="order-detail-row">
-               <span>Payment Method</span>
-               <strong>${order.paymentMethod || 'Online'}</strong>
-             </div>
-             ${(order.influencerCoupon || order.couponCode || order.coupon_code) ? `<div class="order-detail-row"><span>Coupon Applied</span><strong>${escapeHtml(order.influencerCoupon || order.couponCode || order.coupon_code)}</strong></div>` : ''}
-             <div class="order-detail-row">
-               <span>Shipping</span>
-               <strong>${escapeHtml(order.shippingAddress || 'Unavailable')}</strong>
-             </div>
-             <div class="order-detail-row">
-               <span>Billing</span>
-               <strong>${escapeHtml(order.billingAddress || order.shippingAddress || 'Unavailable')}</strong>
-             </div>
-             <div class="order-detail-row">
-               <span>Total</span>
-               <strong>${order.totalAmount ? formatMoneyFromPaise(order.totalAmount) : 'Unavailable'}</strong>
-             </div>
-           </div>
-         `
-        : 'Order details are unavailable.',
-       { html: true }
-      );
+      const orderId = button.dataset.orderId;
+      const order = getOrderById(orderId);
+      if (order) {
+        showOrderDetailsModal(order);
+      } else {
+        api(`/api/merch/orders/${encodeURIComponent(orderId)}/tracking`)
+          .then((res) => showOrderDetailsModal(res?.order))
+          .catch(() => showOrderDetailsModal(null));
+      }
       return;
     }
 
@@ -3708,6 +4058,18 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       // Clear the merch UI even if the server could not be reached.
     }
 
+    // 1. Immediately clear cart and promotional state from memory
+    state.cart = [];
+    state.cartOwnerId = null;
+    state.merchBundleCode = '';
+    state.merchCouponCode = '';
+    state.merchCouponPreview = null;
+    state.merchCouponError = '';
+    renderCartBadge();
+    if (state.cartDrawerOpen) renderCart();
+    closeCart();
+
+    // 2. Clear user state
     state.currentUser = null;
     state.merchProfile = null;
     state.merchOrders = [];
@@ -3726,6 +4088,15 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     state.accountDrawerTrigger = null;
     closeAccountDrawer();
     renderAccountTrigger();
+
+    // 3. Return to shop if on checkout page
+    if (state.currentView === 'checkout') {
+      showShop();
+    }
+
+    // 4. Load isolated guest cart
+    loadCart(null);
+
     requestAnimationFrame(() => {
       document.querySelector('#merchAuthCta a')?.focus();
     });
@@ -4339,14 +4710,15 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     return modal;
   }
 
-  function showMerchModal({ eyebrow = 'House Merch', title, body, footer = '' }) {
+  function showMerchModal({ eyebrow = 'House Merch', title, body, footer = '', panelClass = '' }) {
     const modal = ensureMerchModal();
     const panel = modal.querySelector('.merch-flow-modal__panel');
+    panel.className = 'merch-flow-modal__panel' + (panelClass ? ` ${panelClass}` : '');
     panel.innerHTML = `
       <div class="merch-flow-modal__header">
         <div>
           <p class="merch-flow-modal__eyebrow">${escapeHtml(eyebrow)}</p>
-          <h3>${escapeHtml(title)}</h3>
+          <h3 class="order-modal-header__title">${escapeHtml(title)}</h3>
         </div>
         <button class="drawer-close-btn" type="button" data-modal-close aria-label="Close">&#10005;</button>
       </div>
@@ -5239,15 +5611,42 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   async function loadCustomerContext() {
     const adminTrackingRequest = isAdminTrackingRequest();
+    const previousUserId = state.cartOwnerId;
     try {
       const authResult = await api('/api/auth/me');
       state.currentUser = authResult.user || null;
       if (state.currentUser && String(state.currentUser.role || '').toLowerCase() === 'admin' && !adminTrackingRequest) {
-    window.location.replace('/merch/admin/index.html');
-    return;
-}
+        window.location.replace('/merch/admin/index.html');
+        return;
+      }
     } catch {
       state.currentUser = null;
+    }
+
+    const currentUserId = state.currentUser?.id || null;
+    if (currentUserId !== previousUserId) {
+      state.cart = [];
+      state.merchBundleCode = '';
+      state.merchCouponCode = '';
+      state.merchCouponPreview = null;
+      state.merchCouponError = '';
+
+      loadCart(state.currentUser);
+
+      if (currentUserId) {
+        await syncCartFromBackend();
+      }
+
+      renderCartBadge();
+      if (state.cartDrawerOpen) renderCart();
+
+      if (state.currentView === 'checkout') {
+        if (!state.cart.length) {
+          showShop();
+        } else {
+          renderCheckoutPage();
+        }
+      }
     }
 
     if (state.currentUser && adminTrackingRequest) {
@@ -5425,7 +5824,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   // ─── Initialize ───
   function init() {
-    loadCart();
+    cleanupLegacySharedCartStorage();
+    loadCart(null);
     renderCartBadge();
     renderProductGrid();
     bindEvents();

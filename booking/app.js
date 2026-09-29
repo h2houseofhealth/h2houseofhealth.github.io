@@ -5435,12 +5435,30 @@ function openDialog(booking = null) {
     if (elements.addOnTime) elements.addOnTime.innerHTML = '';
   }
   if (state.user?.role === 'admin') {
+    if (booking && !hasAdminCustomerDetails()) {
+      state.adminCustomerForm = {
+        ...state.adminCustomerForm,
+        name: String(booking.clientName || booking.customerName || '').trim(),
+        email: hasRealEmail(booking.clientEmail || booking.customerEmail)
+          ? String(booking.clientEmail || booking.customerEmail).trim()
+          : '',
+        phone: normalizeTenDigitMobile(
+          booking.clientMobile || booking.clientPhone || booking.customerPhone || booking.mobile || ''
+        ),
+      };
+    }
     if (elements.bookingCustomerName) elements.bookingCustomerName.value = String(state.adminCustomerForm.name || '');
     if (elements.bookingCustomerEmail) elements.bookingCustomerEmail.value = String(state.adminCustomerForm.email || '');
     if (elements.bookingCustomerPhone) elements.bookingCustomerPhone.value = String(state.adminCustomerForm.phone || '');
     syncAdminCustomerFromBookingModal();
     renderServicePanelContext();
   } else {
+    if (booking) {
+      const contact = getCurrentUserBookingContactFallback(booking.id);
+      if (elements.bookingCustomerName) elements.bookingCustomerName.value = contact.name;
+      if (elements.bookingCustomerEmail) elements.bookingCustomerEmail.value = contact.email;
+      if (elements.bookingCustomerPhone) elements.bookingCustomerPhone.value = contact.phone;
+    }
     syncBookingModalCustomerGate();
   }
   const submitBtn = elements.bookingForm?.querySelector('button[type="submit"]');
@@ -12817,6 +12835,8 @@ function renderGeneralCouponsForTarget({ coupons = [], container, onApply }) {
       </div>
       ${metaText ? `<small>${escapeHtml(metaText)}</small>` : ''}
     `;
+    const couponCodeLabel = card.querySelector('.general-coupon-head strong');
+    if (couponCodeLabel) couponCodeLabel.textContent = coupon.code || '';
     if (isRedeemable) {
       const applyBtn = card.querySelector('.general-coupon-apply');
       applyBtn?.addEventListener('click', () => onApply(coupon.code || ''));
@@ -13205,18 +13225,12 @@ function compareBookingsByScheduleDesc(a, b) {
 
 function getUserRescheduleEligibility(row, options = {}) {
   const booking = row?.booking || row;
-  const enforceRescheduleLimit = options?.enforceRescheduleLimit !== false;
   const status = String(booking?.status || '').trim().toLowerCase();
   if (status === 'completed' || status === 'cancelled') {
     return { allowed: false, message: 'Completed or cancelled bookings cannot be rescheduled.' };
   }
   if (status === 'schedule_later') {
     return { allowed: true, message: '' };
-  }
-  const rescheduleCount = Number(booking?.rescheduleCount || 0);
-  const hasUserRescheduleHistory = rescheduleCount >= 1;
-  if (enforceRescheduleLimit && hasUserRescheduleHistory) {
-    return { allowed: false, message: 'Reschedule limit reached. Further rescheduling can be done only by admin.' };
   }
   const slotStart = getBookingStartTime(booking);
   if (!Number.isFinite(slotStart)) {

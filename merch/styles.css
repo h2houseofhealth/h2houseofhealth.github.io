@@ -6256,33 +6256,341 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
   color: rgba(255, 255, 255, 0.4);
   margin: 0;
 }
-.order-details{
-    display:flex;
-    flex-direction:column;
-    gap:14px;
+/* ==========================================================================
+   Order Details Modal Redesign
+   ========================================================================== */
+.merch-flow-modal__panel.merch-order-details-modal {
+  width: min(540px, 94vw);
+  max-height: min(88vh, 740px);
+  border-radius: 16px;
+  background: #ffffff;
+  border: 1px solid #ece4dc;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.12);
 }
 
-.order-detail-row{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    padding:10px 0;
-    border-bottom:1px solid #ece7e2;
+.merch-order-details-modal .merch-flow-modal__header {
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid #f0e9e2;
+  background: #faf8f5;
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
 }
 
-.order-detail-row:last-child{
-    border-bottom:none;
+.merch-order-details-modal .merch-flow-modal__eyebrow {
+  margin: 0 0 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #a44d29;
 }
 
-.order-detail-row span{
-    color:#777;
-    font-size:14px;
+.merch-order-details-modal .order-modal-header__title {
+  margin: 0;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: #1f1f1f;
+  letter-spacing: 0.02em;
 }
 
-.order-detail-row strong{
-    color:#222;
-    font-weight:600;
-    text-align:right;
+.merch-order-details-modal .merch-flow-modal__body {
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background: #ffffff;
+  overflow-y: auto;
+}
+
+/* Status Summary Grid */
+.order-modal-status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.order-modal-status-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #faf7f4;
+  border: 1px solid #ece4dc;
+}
+
+.order-modal-status-card__label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: #8c827a;
+}
+
+.order-modal-status-pill {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.order-modal-status-pill--processing,
+.order-modal-status-pill--shipped,
+.order-modal-status-pill--pending,
+.order-modal-status-pill--packed,
+.order-modal-status-pill--out_for_delivery {
+  background: #fdf2ec;
+  color: #a44d29;
+  border: 1px solid rgba(164, 77, 41, 0.22);
+}
+
+.order-modal-status-pill--delivered,
+.order-modal-status-pill--paid {
+  background: #eaf6ed;
+  color: #1c7c42;
+  border: 1px solid #c8ebd2;
+}
+
+.order-modal-status-pill--cancelled {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.order-modal-status-pill--refunded {
+  background: #f3f4f6;
+  color: #4b5563;
+  border: 1px solid #e5e7eb;
+}
+
+/* Section titles */
+.order-modal-section-title {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8c827a;
+}
+
+/* Order Information Block */
+.order-modal-info-block {
+  border-radius: 12px;
+  background: #faf7f4;
+  border: 1px solid #ece4dc;
+  padding: 4px 14px;
+}
+
+.order-modal-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 9px 0;
+  border-bottom: 1px solid #f0e9e2;
+  font-size: 13.5px;
+}
+
+.order-modal-info-row:last-child {
+  border-bottom: none;
+}
+
+.order-modal-info-label {
+  color: #736b63;
+  font-weight: 400;
+}
+
+.order-modal-info-value {
+  color: #1f1f1f;
+  font-weight: 600;
+  text-align: right;
+}
+
+.order-modal-info-row--total .order-modal-info-label {
+  font-weight: 600;
+  color: #1f1f1f;
+}
+
+.order-modal-info-row--total .order-modal-info-value {
+  font-size: 16px;
+  color: #a44d29;
+  font-weight: 700;
+}
+
+/* Items List Block */
+.order-modal-items-block {
+  border-radius: 12px;
+  background: #faf7f4;
+  border: 1px solid #ece4dc;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.order-modal-item-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.order-modal-item-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #ffffff;
+  border: 1px solid #ece4dc;
+  flex-shrink: 0;
+}
+
+.order-modal-item-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.order-modal-item-name {
+  margin: 0 0 2px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #1f1f1f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.order-modal-item-variant {
+  margin: 0;
+  font-size: 12px;
+  color: #736b63;
+}
+
+.order-modal-item-price {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #1f1f1f;
+  white-space: nowrap;
+}
+
+/* Addresses Section */
+.order-modal-addresses-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.order-modal-address-card {
+  border-radius: 12px;
+  background: #faf7f4;
+  border: 1px solid #ece4dc;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.order-modal-address-card__title {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8c827a;
+}
+
+.order-modal-address-card__name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #1f1f1f;
+  margin: 0;
+}
+
+.order-modal-address-card__phone {
+  font-size: 12.5px;
+  color: #55504a;
+  margin: 0;
+}
+
+.order-modal-address-card__lines {
+  font-size: 12.5px;
+  color: #55504a;
+  line-height: 1.45;
+}
+
+.order-modal-address-card__lines p {
+  margin: 0;
+}
+
+.order-modal-address-card__same {
+  margin: 0;
+  font-size: 13px;
+  color: #736b63;
+  font-style: italic;
+  padding: 4px 0;
+}
+
+/* Footer Actions */
+.merch-order-details-modal .merch-flow-modal__footer {
+  padding: 14px 24px 18px;
+  border-top: 1px solid #f0e9e2;
+  background: #faf8f5;
+  border-bottom-left-radius: 16px;
+  border-bottom-right-radius: 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.merch-order-details-modal .merch-flow-modal__footer .btn {
+  min-height: 38px;
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.merch-order-details-modal .merch-flow-modal__footer .btn-primary {
+  background: #a44d29;
+  color: #ffffff;
+  border: 1px solid #a44d29;
+}
+
+.merch-order-details-modal .merch-flow-modal__footer .btn-primary:hover {
+  background: #8e3f1e;
+  border-color: #8e3f1e;
+}
+
+.merch-order-details-modal .merch-flow-modal__footer .btn-outline {
+  background: #ffffff;
+  color: #2f2b27;
+  border: 1px solid #d9d0c7;
+}
+
+.merch-order-details-modal .merch-flow-modal__footer .btn-outline:hover {
+  background: #f7f4f0;
+  border-color: #c4b9ad;
+}
+
+@media (max-width: 600px) {
+  .order-modal-status-grid,
+  .order-modal-addresses-grid {
+    grid-template-columns: 1fr;
+  }
+  .merch-order-details-modal .merch-flow-modal__header,
+  .merch-order-details-modal .merch-flow-modal__body,
+  .merch-order-details-modal .merch-flow-modal__footer {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
 }
 .order-status-group{
   display:flex;

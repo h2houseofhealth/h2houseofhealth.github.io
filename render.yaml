@@ -53,3 +53,9 @@ services:
         sync: false
       - key: SES_API_SESSION_TOKEN
         sync: false
+      - key: SHIPROCKET_EMAIL
+        sync: false
+      - key: SHIPROCKET_PASSWORD
+        sync: false
+      - key: SHIPROCKET_PICKUP_LOCATION
+        value: work

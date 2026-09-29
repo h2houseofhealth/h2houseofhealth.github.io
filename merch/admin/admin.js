@@ -752,6 +752,8 @@
   function renderCommissionCorrectionModal(influencer) {
     if (!influencer) return;
     const currentPaid = Number(influencer.paidCommission || 0);
+    const commissionEarned = Math.max(0, Number(influencer.commission || 0));
+    const balanceRemaining = Math.max(0, commissionEarned - currentPaid);
 
     openModal({
       title: `Adjust Commission: ${influencer.name}`,
@@ -764,7 +766,7 @@
             <p style="margin:4px 0 0;font-size:12px;color:#b91c1c;line-height:1.45;">Commission Paid is locked after payment. Any correction must be accompanied by an audit reason and admin password verification.</p>
           </div>
 
-          <form class="admin-form" id="commissionCorrectionForm" data-influencer-id="${escapeHtml(influencer.id)}" onsubmit="return false;">
+          <form class="admin-form" id="commissionCorrectionForm" data-influencer-id="${escapeHtml(influencer.id)}" data-current-paid-paise="${currentPaid}" onsubmit="return false;">
             <div class="admin-form__grid">
               <label class="admin-field admin-field--wide">
                 <span>Current Commission Paid</span>
@@ -772,9 +774,15 @@
               </label>
 
               <label class="admin-field admin-field--wide">
-                <span>Corrected Amount (₹) <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
-                <input class="admin-input" name="newAmount" type="number" min="0" step="1" value="${Math.round(currentPaid / 100)}" placeholder="0" required />
-                <small class="admin-field__hint">Enter the new correct cumulative Commission Paid in Rupees.</small>
+                <span>Corrected Amount (₹)</span>
+                <input class="admin-input" name="newAmount" type="number" min="0" max="${Math.floor(commissionEarned / 100)}" step="1" value="${Math.round(currentPaid / 100)}" placeholder="0" />
+                <small class="admin-field__hint">Use this for a manual cumulative correction. Leave it unchanged when using Pay Balance Amount.</small>
+              </label>
+
+              <label class="admin-field admin-field--wide">
+                <span>Pay Balance Amount (₹)</span>
+                <input class="admin-input" name="balanceAmount" type="number" min="0" max="${Math.floor(balanceRemaining / 100)}" step="1" value="0" placeholder="0" />
+                <small class="admin-field__hint">Adds this amount to the current Commission Paid. Remaining balance: ${money(balanceRemaining)}.</small>
               </label>
 
               <label class="admin-field admin-field--wide">
@@ -804,16 +812,26 @@
     if (!form) return;
 
     const newAmountInput = form.querySelector('[name="newAmount"]');
+    const balanceAmountInput = form.querySelector('[name="balanceAmount"]');
     const reasonInput = form.querySelector('[name="correctionReason"]');
     const passwordInput = form.querySelector('[name="adminPassword"]');
 
     const newAmount = Number(newAmountInput?.value);
+    const balanceAmount = Number(balanceAmountInput?.value || 0);
     const reason = String(reasonInput?.value || '').trim();
     const password = String(passwordInput?.value || '').trim();
 
-    if (isNaN(newAmount) || newAmount < 0) {
+    if (isNaN(newAmount) || newAmount < 0 || !Number.isFinite(balanceAmount) || balanceAmount < 0) {
       toast('Invalid amount', 'Enter a valid non-negative amount in Rupees.', 'warning');
       newAmountInput?.focus();
+      return;
+    }
+
+    const currentPaid = Number(form.dataset.currentPaidPaise || 0) / 100;
+    const cumulativeAmount = balanceAmount > 0 ? currentPaid + balanceAmount : newAmount;
+    const earnedAmount = Number(influencerId && state.influencers.find((item) => Number(item.id) === Number(influencerId))?.commission || 0) / 100;
+    if (cumulativeAmount > earnedAmount) {
+      toast('Amount exceeds commission earned', `Commission Paid cannot be greater than the earned commission of ${money(Math.round(earnedAmount * 100))}.`, 'warning');
       return;
     }
 
@@ -840,13 +858,14 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          newAmountPaise: Math.round(newAmount * 100),
+          newAmountPaise: balanceAmount > 0 ? Math.round(currentPaid * 100) : Math.round(newAmount * 100),
+          payBalancePaise: Math.round(balanceAmount * 100),
           reason,
           password,
         }),
       });
 
-      toast('Commission Adjusted', `Commission paid updated to ${money(Math.round(newAmount * 100))} and logged.`, 'success');
+      toast('Commission Adjusted', `Commission paid updated to ${money(Math.round(cumulativeAmount * 100))} and logged.`, 'success');
       closeModal();
       await loadInfluencerData();
       await loadReportData();
@@ -5579,9 +5598,9 @@
     };
   }
 
-  function updateSettingsFromForm(form) {
+  async function updateSettingsFromForm(form) {
     const fd = new FormData(form);
-    state.settings = {
+    const settings = {
       storeName: String(fd.get('storeName') || '').trim(),
       supportEmail: String(fd.get('supportEmail') || '').trim(),
       supportPhone: String(fd.get('supportPhone') || '').trim(),
@@ -5594,8 +5613,34 @@
       permissions: String(fd.get('permissions') || '').trim(),
       notifications: String(fd.get('notifications') || '').trim(),
     };
-    toast('Settings saved', 'The placeholder settings have been updated.', 'success');
-    renderAll();
+    const submitButton = form.querySelector('button[type="submit"]');
+    if (submitButton) submitButton.disabled = true;
+    try {
+      const result = await apiRequest('/api/merch/admin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings }),
+      });
+      state.settings = { ...state.settings, ...(result.settings || settings) };
+      toast('Settings saved', 'Store settings have been saved successfully.', 'success');
+      renderAll();
+    } catch (error) {
+      toast('Settings not saved', error.message || 'Unable to save store settings.', 'danger');
+    } finally {
+      if (submitButton) submitButton.disabled = false;
+    }
+  }
+
+  async function loadSettingsData() {
+    try {
+      const result = await apiRequest('/api/merch/admin/settings');
+      if (result.settings && typeof result.settings === 'object') {
+        state.settings = { ...state.settings, ...result.settings };
+        renderSettings();
+      }
+    } catch (error) {
+      toast('Settings unavailable', error.message || 'Unable to load store settings.', 'warning');
+    }
   }
 
   async function loadCouponData() {
@@ -7962,6 +8007,7 @@
     loadInfluencerData();
     loadCouponData();
     loadReportData();
+    loadSettingsData();
     loadOffers();
     setInterval(() => {
       if (document.hidden) return;
