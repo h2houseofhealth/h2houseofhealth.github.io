@@ -8,3 +8,4 @@ booking/data/*.db-shm
 booking/data/*.db-wal
 booking/uploads/*
 !booking/uploads/.gitkeep
+booking/auth-load-test.js
