@@ -3951,11 +3951,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       <div class="gallery-main gallery-main--${escapeHtml(String(product.category || '').toLowerCase())}" tabindex="0" aria-label="${escapeHtml(product.name)} image gallery">
         <img id="galleryMainImg" src="${escapeHtml(mainImage)}" alt="${escapeHtml(product.name)}" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
         ${slides.some((slide) => slide.type === 'video') ? '<video id="galleryMainVideo" controls playsinline preload="metadata" hidden></video>' : ''}
-        <div class="gallery-magnifier" id="galleryMagnifier" aria-hidden="true"></div>
         ${slides.length > 1 ? `
           <button class="gallery-nav gallery-nav--previous" type="button" data-gallery-direction="previous" aria-label="Previous product image">&#8592;</button>
           <button class="gallery-nav gallery-nav--next" type="button" data-gallery-direction="next" aria-label="Next product image">&#8594;</button>
-        ` : ''}
+          ` : ''}
       </div>
       ${slides.length > 1 ? `
         <div class="gallery-thumbs">
@@ -3972,7 +3971,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const main = els.productGallery.querySelector('.gallery-main');
     const mainImageElement = document.getElementById('galleryMainImg');
     const mainVideoElement = document.getElementById('galleryMainVideo');
-    const magnifier = document.getElementById('galleryMagnifier');
     const setActiveSlide = (nextIndex) => {
       activeIndex = (nextIndex + slides.length) % slides.length;
       const slide = slides[activeIndex];
@@ -3988,7 +3986,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       if (!isVideo) {
         mainImageElement.src = slide.src;
         mainImageElement.alt = slide.label;
-        magnifier.style.backgroundImage = `url("${slide.src}")`;
       }
       els.productGallery.querySelectorAll('.gallery-thumb').forEach((thumb, index) => {
         thumb.classList.toggle('is-active', index === activeIndex);
@@ -4014,18 +4011,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       if (event.key === 'ArrowRight') setActiveSlide(activeIndex + 1);
       if (event.key === 'ArrowLeft') setActiveSlide(activeIndex - 1);
     });
-    main.addEventListener('pointermove', (event) => {
-      if (event.pointerType === 'touch') return;
-      const rect = main.getBoundingClientRect();
-      const x = Math.min(Math.max(((event.clientX - rect.left) / rect.width) * 100, 0), 100);
-      const y = Math.min(Math.max(((event.clientY - rect.top) / rect.height) * 100, 0), 100);
-      magnifier.style.left = `${x}%`;
-      magnifier.style.top = `${y}%`;
-      magnifier.style.backgroundPosition = `${x}% ${y}%`;
-      magnifier.classList.add('is-visible');
-    });
-    main.addEventListener('pointerleave', () => magnifier.classList.remove('is-visible'));
-    magnifier.style.backgroundImage = `url("${mainImage}")`;
   }
 
   function getProductDetailMainImage(product, variant = state.selectedVariant) {
