@@ -2320,24 +2320,24 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
 
   function buildMerchOrderRecord(order, items = []) {
-    const shippingAddress = parseMerchShippingAddress(order.shippingAddress);
-    const billingAddress = parseMerchShippingAddress(order.billingAddress) || shippingAddress;
-    const realCustomerEmail = hasRealEmail(order.customerEmail) ? String(order.customerEmail) : '';
-    const realGuestEmail = hasRealEmail(order.guestEmail) ? String(order.guestEmail) : '';
+    const shippingAddress = parseMerchShippingAddress(order.shippingAddress || order.shipping_address);
+    const billingAddress = parseMerchShippingAddress(order.billingAddress || order.billing_address) || shippingAddress;
+    const realCustomerEmail = hasRealEmail(order.customerEmail || order.customer_email) ? String(order.customerEmail || order.customer_email) : '';
+    const realGuestEmail = hasRealEmail(order.guestEmail || order.guest_email) ? String(order.guestEmail || order.guest_email) : '';
     return {
       id: Number(order.id),
-      orderNumber: String(order.orderNumber || ''),
-      customerName: String(order.customerName || ''),
+      orderNumber: String(order.orderNumber || order.order_number || ''),
+      customerName: String(order.customerName || order.customer_name || ''),
       customerEmail: realCustomerEmail,
-      customerPhone: String(order.customerPhone || ''),
-      guestName: String(order.guestName || ''),
+      customerPhone: String(order.customerPhone || order.customer_phone || ''),
+      guestName: String(order.guestName || order.guest_name || ''),
       guestEmail: realGuestEmail,
-      guestPhone: String(order.guestPhone || ''),
-      isGuest: Number(order.isGuest || 0) === 1,
+      guestPhone: String(order.guestPhone || order.guest_phone || ''),
+      isGuest: Number(order.isGuest || order.is_guest || 0) === 1,
       email: realCustomerEmail,
       hasRealEmail: Boolean(realCustomerEmail),
       displayEmail: realCustomerEmail || 'Email not provided',
-      phone: String(order.customerPhone || ''),
+      phone: String(order.customerPhone || order.customer_phone || ''),
       status: String(order.status || 'pending'),
       subtotal: Number(order.subtotal || 0),
       gstAmount: Number(order.gstAmount || order.gst_amount || 0),
@@ -2357,8 +2357,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       paymentStatus: String(order.paymentStatus || order.payment_status || 'pending'),
       razorpayOrderId: String(order.razorpayOrderId || order.razorpay_order_id || ''),
       razorpayPaymentId: String(order.razorpayPaymentId || order.razorpay_payment_id || ''),
-      shippingAddress: shippingAddress ? formatMerchAddressLine(shippingAddress) : String(order.shippingAddress || ''),
-      billingAddress: billingAddress ? formatMerchAddressLine(billingAddress) : String(order.billingAddress || order.shippingAddress || ''),
+      shippingAddress: shippingAddress ? formatMerchAddressLine(shippingAddress) : String(order.shippingAddress || order.shipping_address || ''),
+      billingAddress: billingAddress ? formatMerchAddressLine(billingAddress) : String(order.billingAddress || order.billing_address || order.shippingAddress || order.shipping_address || ''),
       trackingNumber: String(order.trackingNumber || order.tracking_number || order.shiprocketAwbCode || order.shiprocket_awb_code || ''),
       carrier: String(order.carrierName || order.carrier_name || order.shiprocketCourierName || order.shiprocket_courier_name || ''),
       shiprocketOrderId: String(order.shiprocketOrderId || order.shiprocket_order_id || ''),
@@ -2374,11 +2374,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       deliveredAt: order.deliveredAt || order.delivered_at || (String(order.status || '').toLowerCase() === 'delivered' ? order.updatedAt || order.updated_at || null : null),
       items: items.map((item) => ({
         id: Number(item.id),
-        name: String(item.productName || item.product_name || ''),
-        qty: Number(item.quantity || 0),
-        price: Number(item.unitPrice || item.unit_price || 0),
+        name: String(item.productName || item.product_name || item.name || ''),
+        productName: String(item.productName || item.product_name || item.name || ''),
+        qty: Number(item.quantity || item.qty || 0),
+        quantity: Number(item.quantity || item.qty || 0),
+        price: Number(item.unitPrice || item.unit_price || item.price || 0),
         variantLabel: String(item.variantLabel || item.variant_label || ''),
         sku: String(item.sku || ''),
+        imageUrl: item.imageUrl || item.image_url || '',
         lineTotal: Number(item.lineTotal || item.line_total || 0),
       })),
       timeline: buildMerchOrderTimeline({
@@ -4145,6 +4148,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const orderNumber = String(data.order?.orderNumber || `Order #${data.order?.id}`).trim();
     const totalAmount = formatMerchWhatsAppCurrency(data.order?.totalAmount || 0);
 
+    const trackingOrderId = String(data.order?.id || orderId);
+    const buttonComponent = {
+      type: 'button',
+      sub_type: 'url',
+      index: '0',
+      parameters: [
+        { type: 'text', text: trackingOrderId },
+      ],
+    };
+
     const payload = {
       to,
       type: 'template',
@@ -4160,6 +4173,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
               { type: 'text', text: totalAmount },
             ],
           },
+          buttonComponent,
         ],
       },
     };
@@ -4170,10 +4184,29 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       customerName,
       orderNumber,
       totalAmount,
+      trackingOrderId,
     });
 
     try {
-      const result = await sendWhatsAppGraphMessage(config, payload);
+      let result;
+      try {
+        result = await sendWhatsAppGraphMessage(config, payload);
+      } catch (sendErr) {
+        // If template doesn't yet have dynamic URL button component configured on Meta, retry without button component
+        if (payload.template.components.length > 1 && /button|parameter/i.test(sendErr.message)) {
+          console.warn('[Merch] WhatsApp sending with URL button failed, retrying without button component:', sendErr.message);
+          const fallbackPayload = {
+            ...payload,
+            template: {
+              ...payload.template,
+              components: [payload.template.components[0]],
+            },
+          };
+          result = await sendWhatsAppGraphMessage(config, fallbackPayload);
+        } else {
+          throw sendErr;
+        }
+      }
       const messageId = result?.messages?.[0]?.id || '';
       console.log('[Merch] WhatsApp order confirmation accepted by Meta:', {
         orderId,
@@ -6762,7 +6795,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const order = db.prepare('SELECT * FROM merch_orders WHERE id = ? OR order_number = ?').get(queryId, queryId);
       if (!order) return res.status(404).json({ error: 'Order not found' });
 
-      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+      const items = db.prepare(`
+        SELECT oi.*, p.image_url AS imageUrl
+        FROM merch_order_items oi
+        LEFT JOIN merch_variants v ON v.id = oi.variant_id
+        LEFT JOIN merch_products p ON p.id = v.product_id
+        WHERE oi.order_id = ?
+        ORDER BY oi.id ASC
+      `).all(order.id);
       const awb = order.shiprocket_awb_code || order.tracking_number;
       let liveTracking = null;
 
