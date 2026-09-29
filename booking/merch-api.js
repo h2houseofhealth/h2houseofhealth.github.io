@@ -82,6 +82,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS merch_store_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      settings_json TEXT NOT NULL DEFAULT '{}',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Product specifications are optional so existing databases continue to work.
@@ -6981,6 +6987,33 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   });
 
   // ─── ADMIN: Promotional HYPE configuration ───
+  app.get('/api/merch/admin/settings', requireAdmin, (req, res) => {
+    const row = db.prepare('SELECT settings_json AS settingsJson FROM merch_store_settings WHERE id = 1').get();
+    let settings = {};
+    try {
+      settings = row?.settingsJson ? JSON.parse(row.settingsJson) : {};
+    } catch {
+      settings = {};
+    }
+    res.json({ settings: settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : {} });
+  });
+
+  app.put('/api/merch/admin/settings', requireAdmin, (req, res) => {
+    const submitted = req.body?.settings;
+    if (!submitted || typeof submitted !== 'object' || Array.isArray(submitted)) {
+      return res.status(400).json({ message: 'settings must be an object.' });
+    }
+    const settings = Object.fromEntries(
+      Object.entries(submitted).map(([key, value]) => [key, String(value ?? '').trim()])
+    );
+    db.prepare(`
+      INSERT INTO merch_store_settings (id, settings_json, updated_at)
+      VALUES (1, ?, datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at
+    `).run(JSON.stringify(settings));
+    res.json({ settings });
+  });
+
   app.get('/api/merch/admin/hype', requireAdmin, (req, res) => {
     res.json({ labels: MERCH_HYPE_LABELS, hypes: getMerchHypeRows({ includeInactive: true }) });
   });

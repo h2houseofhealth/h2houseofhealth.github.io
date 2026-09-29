@@ -5598,9 +5598,9 @@
     };
   }
 
-  function updateSettingsFromForm(form) {
+  async function updateSettingsFromForm(form) {
     const fd = new FormData(form);
-    state.settings = {
+    const settings = {
       storeName: String(fd.get('storeName') || '').trim(),
       supportEmail: String(fd.get('supportEmail') || '').trim(),
       supportPhone: String(fd.get('supportPhone') || '').trim(),
@@ -5613,8 +5613,34 @@
       permissions: String(fd.get('permissions') || '').trim(),
       notifications: String(fd.get('notifications') || '').trim(),
     };
-    toast('Settings saved', 'The placeholder settings have been updated.', 'success');
-    renderAll();
+    const submitButton = form.querySelector('button[type="submit"]');
+    if (submitButton) submitButton.disabled = true;
+    try {
+      const result = await apiRequest('/api/merch/admin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings }),
+      });
+      state.settings = { ...state.settings, ...(result.settings || settings) };
+      toast('Settings saved', 'Store settings have been saved successfully.', 'success');
+      renderAll();
+    } catch (error) {
+      toast('Settings not saved', error.message || 'Unable to save store settings.', 'danger');
+    } finally {
+      if (submitButton) submitButton.disabled = false;
+    }
+  }
+
+  async function loadSettingsData() {
+    try {
+      const result = await apiRequest('/api/merch/admin/settings');
+      if (result.settings && typeof result.settings === 'object') {
+        state.settings = { ...state.settings, ...result.settings };
+        renderSettings();
+      }
+    } catch (error) {
+      toast('Settings unavailable', error.message || 'Unable to load store settings.', 'warning');
+    }
   }
 
   async function loadCouponData() {
@@ -7981,6 +8007,7 @@
     loadInfluencerData();
     loadCouponData();
     loadReportData();
+    loadSettingsData();
     loadOffers();
     setInterval(() => {
       if (document.hidden) return;
