@@ -493,7 +493,7 @@ const MEMBERSHIP_PLANS = [
     id: 'h2_single',
     name: '1 Person Membership',
     peopleCount: 1,
-    priceInr: 84000,
+    priceInr: 1,
     validityDays: 90,
     h2SessionsIncluded: 16,
     perks:
@@ -521,7 +521,7 @@ const MEMBERSHIP_PLANS = [
     id: 'h2_add_person',
     name: 'Add Person',
     peopleCount: 1,
-    priceInr: 78000,
+    priceInr: 1,
     validityDays: 90,
     h2SessionsIncluded: 16,
     perks:
