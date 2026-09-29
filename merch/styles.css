@@ -2041,7 +2041,11 @@ body.is-auth-loading .merch-auth-cta {
   width: 58px;
   height: 58px;
   border-radius: 14px;
-  object-fit: cover;
+  /* Product photos have different aspect ratios; keep the whole product visible. */
+  object-fit: contain;
+  object-position: center;
+  padding: 4px;
+  box-sizing: border-box;
   background: #f5eee8;
 }
 
@@ -2115,7 +2119,11 @@ body.is-auth-loading .merch-auth-cta {
   width: 58px;
   height: 58px;
   border-radius: 14px;
-  object-fit: cover;
+  /* Do not crop tall bottles or full-body product shots in the bundle. */
+  object-fit: contain;
+  object-position: center;
+  padding: 4px;
+  box-sizing: border-box;
   background: #f5eee8;
 }
 
