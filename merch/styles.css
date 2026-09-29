@@ -2630,6 +2630,13 @@ body.is-auth-loading .merch-auth-cta {
   line-height: 1.3;
 }
 
+.shopify-summary-product__right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
 .shopify-summary-product__price {
   align-self: center;
   color: #111;
@@ -2637,6 +2644,26 @@ body.is-auth-loading .merch-auth-cta {
   line-height: 1.2;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.shopify-summary-product__remove {
+  background: transparent;
+  border: none;
+  color: #999;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 16px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.shopify-summary-product__remove:hover {
+  color: #d32f2f;
+  background-color: rgba(211, 47, 47, 0.08);
 }
 
 .shopify-coupon {
@@ -6795,9 +6822,10 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
     height: 76px;
   }
 
-  .shopify-summary-product__price {
+  .shopify-summary-product__right {
     grid-column: 2;
-    justify-self: start;
+    width: 100%;
+    justify-content: space-between;
   }
 
   .shopify-coupon {
@@ -6938,8 +6966,10 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
     font-size: 12px;
   }
 
-  .shopify-summary-product__price {
+  .shopify-summary-product__right {
     grid-column: 2;
+    width: 100%;
+    justify-content: space-between;
   }
 
   .shopify-coupon {
