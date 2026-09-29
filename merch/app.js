@@ -1504,7 +1504,7 @@ function getWishlistProductPrice(item) {
       return;
     }
 
-    await initiateCheckout();
+    await initiateCheckout({ directToCheckout: true });
   }
 
   async function handleProductCardAction(action, product, variantId = null) {
@@ -1521,7 +1521,7 @@ function getWishlistProductPrice(item) {
         showCheckoutNotice('Out of stock', 'This product is currently unavailable.', { variant: 'error' });
         return;
       }
-      await initiateCheckout();
+      await initiateCheckout({ directToCheckout: true });
       return;
     }
 
@@ -5040,12 +5040,12 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   // â”€â”€â”€ Razorpay Checkout Flow â”€â”€â”€
-  async function initiateCheckout() {
+  async function initiateCheckout({ directToCheckout = false } = {}) {
     if (!state.authResolved) {
       await loadCustomerContext();
     }
 
-    if (state.currentUser) {
+    if (state.currentUser && !directToCheckout) {
       const defaultAddress = getDefaultAddress();
       const customer = getAuthenticatedCheckoutCustomer(defaultAddress);
       if (!customer.name || !customer.email || !customer.phone) {
