@@ -18,6 +18,7 @@
   const API_URL = resolveApiUrl();
   const AUTH_TOKEN_STORAGE_KEY = 'booking_portal_auth_token';
   const CONFIRMATION_STORAGE_KEY = 'merch_booking_confirmation';
+  const CHECKOUT_DETAILS_STORAGE_KEY = 'merch_checkout_details_v1';
 
   function isPlaceholderEmail(email) {
     if (!email || typeof email !== 'string') return false;
@@ -5102,32 +5103,73 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     return /^[A-Za-z\s.'-]+$/.test(trimmed);
   }
 
+  function getSavedGuestCheckoutDetails() {
+    try {
+      const saved = JSON.parse(window.localStorage?.getItem(CHECKOUT_DETAILS_STORAGE_KEY) || 'null');
+      return saved && typeof saved === 'object' ? saved : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveGuestCheckoutDetails(draft = {}) {
+    const details = {
+      email: String(draft.email || '').trim(),
+      phone: String(draft.phone || '').trim(),
+      phoneCountryCode: String(draft.phoneCountryCode || '+91').trim(),
+      firstName: String(draft.firstName || '').trim(),
+      lastName: String(draft.lastName || '').trim(),
+      country: normalizeCheckoutCountry(draft.country || 'India'),
+      line1: String(draft.line1 || '').trim(),
+      line2: String(draft.line2 || '').trim(),
+      city: String(draft.city || '').trim(),
+      state: String(draft.state || '').trim(),
+      postalCode: String(draft.postalCode || '').trim(),
+      emailOffers: Boolean(draft.emailOffers),
+      saveInformation: true,
+    };
+    try {
+      window.localStorage?.setItem(CHECKOUT_DETAILS_STORAGE_KEY, JSON.stringify(details));
+    } catch {
+      // Storage can be unavailable in private browsing; checkout can continue normally.
+    }
+  }
+
   function buildCheckoutDraft(customer = {}, address = {}) {
-    const nameParts = String(customer?.name || address?.recipientName || '').trim().split(/\s+/).filter(Boolean);
+    const savedGuestDetails = !state.currentUser && !Object.keys(address || {}).length
+      ? getSavedGuestCheckoutDetails()
+      : {};
+    const sourceAddress = Object.keys(address || {}).length ? address : savedGuestDetails;
+    const savedName = [savedGuestDetails.firstName, savedGuestDetails.lastName].filter(Boolean).join(' ');
+    const nameParts = String(customer?.name || address?.recipientName || savedName).trim().split(/\s+/).filter(Boolean);
     const firstName = nameParts.shift() || '';
     const lastName = nameParts.join(' ');
-    const phone = parseCheckoutPhone(customer?.phone || address?.phone || '');
-    const email = hasRealEmail(customer?.email) ? String(customer.email).trim() : '';
+    const phone = parseCheckoutPhone(customer?.phone || address?.phone || savedGuestDetails.phone || '');
+    const email = hasRealEmail(customer?.email)
+      ? String(customer.email).trim()
+      : (hasRealEmail(savedGuestDetails.email) ? String(savedGuestDetails.email).trim() : '');
     return {
       email,
       phone: phone.localNumber,
       phoneCountryCode: phone.countryCode,
       firstName,
       lastName,
-      country: normalizeCheckoutCountry(address?.country || 'India'),
-      line1: String(address?.line1 || address?.full || '').trim(),
-      line2: String(address?.line2 || '').trim(),
-      city: String(address?.city || '').trim(),
-      state: String(address?.state || '').trim(),
-      postalCode: String(address?.postalCode || '').trim(),
-      emailOffers: true,
-      saveInformation: Boolean(address?.isDefault),
+      addressId: sourceAddress?.id || null,
+      country: normalizeCheckoutCountry(sourceAddress?.country || 'India'),
+      line1: String(sourceAddress?.line1 || sourceAddress?.full || '').trim(),
+      line2: String(sourceAddress?.line2 || '').trim(),
+      city: String(sourceAddress?.city || '').trim(),
+      state: String(sourceAddress?.state || '').trim(),
+      postalCode: String(sourceAddress?.postalCode || '').trim(),
+      emailOffers: savedGuestDetails.emailOffers ?? true,
+      saveInformation: Boolean(sourceAddress?.isDefault || savedGuestDetails.saveInformation),
     };
   }
 
   function getCheckoutDraftFromForm(form) {
     const formData = new FormData(form);
     return {
+      addressId: state.checkoutDraft?.addressId || null,
       email: String(formData.get('email') || '').trim(),
       phone: String(formData.get('phone') || '').trim(),
       phoneCountryCode: String(formData.get('phoneCountryCode') || '+91').trim(),
@@ -5153,6 +5195,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         phone: getCheckoutPhonePayload(draft),
       },
       address: {
+        id: draft.addressId || null,
         recipientName: fullName,
         phone: getCheckoutPhonePayload(draft),
         line1: String(draft.line1 || '').trim(),
@@ -5165,6 +5208,27 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         full: [draft.line1, draft.line2, draft.city, draft.state, draft.postalCode, draft.country].filter(Boolean).join(', '),
       },
     };
+  }
+
+  async function persistCheckoutDetails(draft = state.checkoutDraft || {}) {
+    if (state.currentUser) {
+      const { address } = getCheckoutPayloadFromDraft(draft);
+      const endpoint = address.id
+        ? `/api/merch/addresses/${encodeURIComponent(address.id)}`
+        : '/api/merch/addresses';
+      const result = await api(endpoint, {
+        method: address.id ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(address),
+      });
+      state.merchAddresses = Array.isArray(result.addresses) ? result.addresses : state.merchAddresses;
+      syncCheckoutProfileDetails(address);
+      return;
+    }
+
+    // Keep the last valid delivery details available for the next order. They
+    // remain editable in the checkout form and can be replaced at any time.
+    saveGuestCheckoutDetails(draft);
   }
 
   function validateCheckoutDraft(draft = {}) {
@@ -5503,6 +5567,12 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     }
 
     const { customer, address } = getCheckoutPayloadFromDraft(state.checkoutDraft);
+    try {
+      await persistCheckoutDetails(state.checkoutDraft);
+    } catch (error) {
+      showCheckoutNotice('Details not saved', error.message || 'Unable to save your delivery details. Please try again.', { variant: 'error' });
+      return;
+    }
     state.checkoutSubmitting = true;
     renderCheckoutPage();
     await startRazorpayCheckout(customer, address);
