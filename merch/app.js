@@ -1580,7 +1580,7 @@ function getWishlistProductPrice(item) {
   }
 
   function getMerchShippingCharge(subtotalInr = getCartTotal()) {
-    return Number(subtotalInr || 0) >= 999 ? 0 : 99;
+    return Number(subtotalInr || 0) >= 999 || Number(subtotalInr || 0) <= 1 ? 0 : 99;
   }
 
   function getIncludedGstAmount(subtotalInr = getCartTotal()) {
