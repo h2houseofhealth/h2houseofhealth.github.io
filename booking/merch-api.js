@@ -4224,12 +4224,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       });
       return finish('sent', { ok: true, messageId, to });
     } catch (error) {
-      console.error('[Merch] Failed to send WhatsApp order confirmation:', error?.message || error);
+      let friendlyMessage = error?.message || String(error);
+      if (/132001/i.test(friendlyMessage)) {
+        friendlyMessage = `Template "${config.orderTemplate}" is still pending approval in Meta WhatsApp Manager (or language code "${config.templateLanguage}" was not approved).`;
+      }
+      console.error('[Merch] Failed to send WhatsApp order confirmation:', friendlyMessage);
       updateMerchWhatsAppMessageLog(logId, {
         status: 'failed',
-        errorMessage: error?.message || String(error),
+        errorMessage: friendlyMessage,
       });
-      return finish('failed', { ok: false, message: error?.message || 'Failed to send WhatsApp message' });
+      return finish('failed', { ok: false, message: friendlyMessage });
     }
   }
 
