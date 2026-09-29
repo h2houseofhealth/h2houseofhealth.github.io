@@ -264,7 +264,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     {
       name: 'H2 Molecular Hydrogen Water Bottle',
       slug: 'h2-water-bottle',
-      description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 3 minutes. BPA-free, USB-C rechargeable.',
+      description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 5 minutes. BPA-free, USB-C rechargeable.',
       category: 'bottles',
       basePrice: 2590000,
       image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113',
@@ -359,7 +359,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const corrections = [
       {
         slug: 'h2-water-bottle',
-        price: 100, // Temporary test price: 100 paise = Rs. 1 (original: 2590000)
+        description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 5 minutes. BPA-free, USB-C rechargeable.',
+        price: 2590000,
         oldSkus: ['HM-BTL-300-SLV', 'HM-BTL-500-SLV', 'HM-BTL-300-BLK', 'HM-BTL-500-BLK'],
         specifications: {
           'Product Name': 'Hydrogen-Rich Water Bottle',
@@ -408,8 +409,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     for (const correction of corrections) {
       const product = db.prepare('SELECT id FROM merch_products WHERE slug = ? AND deleted_at IS NULL').get(correction.slug);
       if (!product) continue;
-      db.prepare('UPDATE merch_products SET base_price = ?, specifications_json = ?, updated_at = datetime(\'now\') WHERE id = ?')
-        .run(correction.price, JSON.stringify(correction.specifications), product.id);
+      db.prepare('UPDATE merch_products SET description = COALESCE(?, description), base_price = ?, specifications_json = ?, updated_at = datetime(\'now\') WHERE id = ?')
+        .run(correction.description || null, correction.price, JSON.stringify(correction.specifications), product.id);
       const oldPlaceholders = correction.oldSkus.map(() => '?').join(', ');
       db.prepare(`UPDATE merch_variants SET is_active = 0 WHERE product_id = ? AND sku IN (${oldPlaceholders})`)
         .run(product.id, ...correction.oldSkus);
@@ -1797,7 +1798,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       id: Number(product.id),
       name: String(product.name || ''),
       slug: String(product.slug || ''),
-      description: String(product.description || ''),
+      description: String(product.slug || '').toLowerCase() === 'h2-water-bottle'
+        ? 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 5 minutes. BPA-free, USB-C rechargeable.'
+        : String(product.description || ''),
       specifications: parseMerchSpecifications(product.specifications_json),
       category: String(product.category || ''),
       basePrice: minPrice,

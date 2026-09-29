@@ -333,13 +333,21 @@
   }
 
   function getBottleFeatureSlides(variant, product = null) {
-    const primaryImage = getVariantImageSources(variant, product)[0];
+    const variantImages = getVariantImageSources(variant, product);
+    const variantGalleryImages = (Array.isArray(variant?.images) ? variant.images : [])
+      .map(normalizeProductImageUrl)
+      .filter(Boolean);
+    if (variantGalleryImages.length) {
+      return variantImages.map((src, index) => ({
+        src,
+        label: `${product?.name || 'Hydrogen water bottle'} ${variant?.color || ''} view ${index + 1}`.trim(),
+      }));
+    }
+    const primaryImage = variantImages[0];
     const featureSlides = BOTTLE_DETAIL_FEATURE_SLIDES.map((slide) => ({ ...slide }));
-    if (!primaryImage) return featureSlides;
-    return [
-      { src: primaryImage, label: `${product?.name || 'Hydrogen water bottle'} ${variant?.color || ''} product view`.trim() },
-      ...featureSlides,
-    ];
+    return primaryImage
+      ? [{ src: primaryImage, label: `${product?.name || 'Hydrogen water bottle'} ${variant?.color || ''} product view`.trim() }, ...featureSlides]
+      : featureSlides;
   }
 
   function getProductGallerySlides(product, variant = state.selectedVariant) {
@@ -4038,6 +4046,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   function renderProductInfo(product) {
     const variant = state.selectedVariant;
     const offerInfo = getVariantOfferDetails(variant, product);
+    const productDescription = isBottleProduct(product)
+      ? 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 5 minutes. BPA-free, USB-C rechargeable.'
+      : product.description;
 
     // Get unique sizes and colors
     const sizes = [...new Set(product.variants.map(v => v.size).filter(Boolean))];
@@ -4059,7 +4070,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       ` : `
         <p class="detail-price">${formatPrice(variant.price)}</p>
       `}
-      <p class="detail-description">${escapeHtml(product.description)}</p>
+      <p class="detail-description">${escapeHtml(productDescription)}</p>
       ${product.isCombo && Array.isArray(product.comboItems) && product.comboItems.length ? `
         <div class="combo-product-details">
           <strong>Included in this combo</strong>
