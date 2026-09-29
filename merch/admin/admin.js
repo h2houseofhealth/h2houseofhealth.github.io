@@ -16,6 +16,7 @@
   };
 
   const APP_TIME_ZONE = 'Asia/Kolkata';
+  const FIXED_ADMIN_EMAIL = 'h2houseofhealth@gmail.com';
 
   function getAppToday() {
     const parts = new Intl.DateTimeFormat('en-CA', {
@@ -571,6 +572,437 @@
     }).join('')}</div>`;
   }
 
+  function isValidInfluencerEmail(email) {
+    const val = String(email || '').trim().toLowerCase();
+    if (!val) return false;
+    if (val.endsWith('@h2houseofhealth.local') || val.endsWith('@h2health.local')) return false;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val);
+  }
+
+  function renderPayCommissionModal(influencer) {
+    if (!influencer) return;
+    const stats = getMonthStats(influencer);
+    const commissionEarned = Math.max(0, Number(stats.commission || 0));
+    const commissionPaid = Math.max(0, Number(influencer.paidCommission || 0));
+    const commissionBalance = Math.max(0, commissionEarned - commissionPaid);
+    const couponList = getInfluencerCouponRecords(influencer).map((c) => c.code).join(', ') || 'None';
+    const prefillEmail = String(influencer.email || '').trim();
+
+    openModal({
+      title: `Pay Commission: ${influencer.name}`,
+      subtitle: 'Influencer Commission Payout & Invoice',
+      size: 'lg',
+      body: `
+        <div class="admin-commission-pay-modal">
+          <div class="admin-grid admin-grid--stats" style="grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px;margin-bottom:16px;">
+            <article class="admin-stat"><p class="admin-stat__label">Commission Earned</p><p class="admin-stat__value">${money(commissionEarned)}</p></article>
+            <article class="admin-stat"><p class="admin-stat__label">Already Paid</p><p class="admin-stat__value">${money(commissionPaid)} <span style="font-size:10px;" class="admin-badge admin-badge--neutral">🔒 Locked</span></p></article>
+            <article class="admin-stat"><p class="admin-stat__label">Balance Due</p><p class="admin-stat__value" style="color:var(--admin-primary);">${money(commissionBalance)}</p></article>
+            <article class="admin-stat"><p class="admin-stat__label">Coupons</p><p class="admin-stat__value" style="font-size:13px;word-break:break-word;">${escapeHtml(couponList)}</p></article>
+          </div>
+
+          <form class="admin-form" id="commissionPaymentForm" data-influencer-id="${escapeHtml(influencer.id)}" onsubmit="return false;">
+            <div class="admin-form__grid">
+              <label class="admin-field admin-field--wide">
+                <span>Influencer Email <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
+                <input class="admin-input" name="influencerEmail" type="email" value="${escapeHtml(prefillEmail)}" placeholder="influencer@example.com" required />
+                <small class="admin-field__hint">Required. The official payment invoice and receipt will be emailed to this address upon confirmation.</small>
+              </label>
+
+              <label class="admin-field admin-field--wide">
+                <span>Business Admin Recipient (Fixed Copy)</span>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <input class="admin-input" type="text" value="${FIXED_ADMIN_EMAIL}" readonly disabled style="background:var(--admin-surface-subtle);cursor:not-allowed;" />
+                  <span class="admin-badge admin-badge--neutral" style="font-size:11px;padding:6px 10px;white-space:nowrap;">Fixed Business Admin</span>
+                </div>
+                <small class="admin-field__hint">The admin invoice copy is permanently routed to ${FIXED_ADMIN_EMAIL} and cannot be altered.</small>
+              </label>
+
+              <label class="admin-field">
+                <span>Payment Amount (₹) <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
+                <input class="admin-input" name="paymentAmount" type="number" min="1" step="any" value="${commissionBalance > 0 ? (commissionBalance / 100) : ''}" placeholder="0.00" required />
+                <small class="admin-field__hint">Amount in Rupees (₹) to disburse now.</small>
+              </label>
+
+              <label class="admin-field">
+                <span>Payment Method <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
+                <select class="admin-input" name="paymentMethod">
+                  <option value="Bank Transfer (NEFT/RTGS/IMPS)">Bank Transfer (NEFT/RTGS/IMPS)</option>
+                  <option value="UPI / GPay / PhonePe">UPI / GPay / PhonePe</option>
+                  <option value="Razorpay Payout">Razorpay Payout</option>
+                  <option value="Cheque">Cheque</option>
+                  <option value="Cash">Cash</option>
+                  <option value="Other">Other</option>
+                </select>
+              </label>
+
+              <label class="admin-field admin-field--wide">
+                <span>Payment / Reference ID <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
+                <input class="admin-input" name="referenceNumber" type="text" placeholder="e.g. UTR12345678 or TXN-98765" required />
+                <small class="admin-field__hint">Bank UTR, UPI transaction ID, or payment gateway reference number.</small>
+              </label>
+
+              <label class="admin-field admin-field--wide">
+                <span>Payment Notes / Remarks</span>
+                <input class="admin-input" name="paymentNote" type="text" placeholder="e.g. Commission payout for recent referral sales" />
+              </label>
+
+              <label class="admin-check admin-field--wide" style="margin-top:10px;background:var(--admin-surface-subtle);padding:12px;border-radius:8px;border:1px solid var(--admin-border);">
+                <input type="checkbox" name="confirmPayment" required />
+                <span><strong>I confirm that this commission payment has been executed and verified.</strong> Upon submission, Commission Paid will be permanently locked and the official payment invoice/receipt will be generated and emailed to both the influencer and ${FIXED_ADMIN_EMAIL}.</span>
+              </label>
+            </div>
+          </form>
+        </div>
+      `,
+      footer: `
+        <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button>
+        <button class="admin-btn admin-btn--primary" type="button" data-action="submit-commission-payment" data-id="${escapeHtml(influencer.id)}">Confirm Payment &amp; Send Invoice</button>
+      `,
+    });
+  }
+
+  async function handlePayCommissionSubmit(influencerId) {
+    const form = document.getElementById('commissionPaymentForm');
+    if (!form) return;
+
+    const emailInput = form.querySelector('[name="influencerEmail"]');
+    const amountInput = form.querySelector('[name="paymentAmount"]');
+    const methodSelect = form.querySelector('[name="paymentMethod"]');
+    const refInput = form.querySelector('[name="referenceNumber"]');
+    const noteInput = form.querySelector('[name="paymentNote"]');
+    const confirmCheckbox = form.querySelector('[name="confirmPayment"]');
+
+    const influencerEmail = String(emailInput?.value || '').trim();
+    const paymentAmount = Number(amountInput?.value || 0);
+    const paymentMethod = String(methodSelect?.value || 'Bank Transfer').trim();
+    const referenceNumber = String(refInput?.value || '').trim();
+    const note = String(noteInput?.value || '').trim();
+    const isConfirmed = Boolean(confirmCheckbox?.checked);
+
+    if (!influencerEmail || !isValidInfluencerEmail(influencerEmail)) {
+      toast('Invalid Influencer Email', 'Please enter a valid influencer email address. The invoice cannot be sent without it.', 'danger');
+      emailInput?.focus();
+      return;
+    }
+
+    if (!paymentAmount || paymentAmount <= 0) {
+      toast('Invalid Amount', 'Payment amount must be greater than 0.', 'warning');
+      amountInput?.focus();
+      return;
+    }
+
+    if (!referenceNumber) {
+      toast('Reference ID required', 'Please provide a payment reference number or transaction ID.', 'warning');
+      refInput?.focus();
+      return;
+    }
+
+    if (!isConfirmed) {
+      toast('Confirmation required', 'Please check the confirmation box to confirm this payment has been verified.', 'warning');
+      confirmCheckbox?.focus();
+      return;
+    }
+
+    const submitBtn = els.adminModalDialog.querySelector('[data-action="submit-commission-payment"]');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Processing & Sending Invoice...';
+    }
+
+    try {
+      const result = await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencerId)}/payments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          influencerEmail,
+          amountPaise: Math.round(paymentAmount * 100),
+          paymentMethod,
+          referenceNumber,
+          note,
+          confirmed: true,
+        }),
+      });
+
+      toast(
+        'Payment Confirmed',
+        `Payment recorded! Invoice ${result.invoiceNumber} emailed to ${influencerEmail} and ${FIXED_ADMIN_EMAIL}.`,
+        'success'
+      );
+
+      await loadInfluencerData();
+      await loadReportData();
+
+      renderInvoiceReceiptModal({
+        invoiceHtml: result.invoiceHtml,
+        invoiceNumber: result.invoiceNumber,
+        influencerEmail,
+        adminEmail: FIXED_ADMIN_EMAIL,
+        emailResults: result.emailResults,
+      });
+    } catch (error) {
+      toast('Payment Failed', error.message || 'Unable to record commission payment.', 'danger');
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Confirm Payment & Send Invoice';
+      }
+    }
+  }
+
+  function renderCommissionCorrectionModal(influencer) {
+    if (!influencer) return;
+    const currentPaid = Number(influencer.paidCommission || 0);
+
+    openModal({
+      title: `Adjust Commission: ${influencer.name}`,
+      subtitle: 'Security Authorization Required',
+      size: 'md',
+      body: `
+        <div class="admin-commission-correction-modal">
+          <div style="background:#fef2f2;border:1px solid #fecaca;padding:12px 14px;border-radius:8px;margin-bottom:16px;">
+            <p style="margin:0;font-size:13px;color:#991b1b;font-weight:600;">🔒 Secured Admin Authorization Required</p>
+            <p style="margin:4px 0 0;font-size:12px;color:#b91c1c;line-height:1.45;">Commission Paid is locked after payment. Any correction must be accompanied by an audit reason and admin password verification.</p>
+          </div>
+
+          <form class="admin-form" id="commissionCorrectionForm" data-influencer-id="${escapeHtml(influencer.id)}" onsubmit="return false;">
+            <div class="admin-form__grid">
+              <label class="admin-field admin-field--wide">
+                <span>Current Commission Paid</span>
+                <input class="admin-input" type="text" value="${money(currentPaid)}" readonly disabled style="background:var(--admin-surface-subtle);cursor:not-allowed;" />
+              </label>
+
+              <label class="admin-field admin-field--wide">
+                <span>Corrected Amount (₹) <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
+                <input class="admin-input" name="newAmount" type="number" min="0" step="1" value="${Math.round(currentPaid / 100)}" placeholder="0" required />
+                <small class="admin-field__hint">Enter the new correct cumulative Commission Paid in Rupees.</small>
+              </label>
+
+              <label class="admin-field admin-field--wide">
+                <span>Reason for Correction <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
+                <textarea class="admin-textarea" name="correctionReason" rows="3" placeholder="Provide a detailed explanation for this manual correction..." required></textarea>
+                <small class="admin-field__hint">Required for accounting and compliance audit logging.</small>
+              </label>
+
+              <label class="admin-field admin-field--wide">
+                <span>Admin Security Password <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
+                <input class="admin-input" name="adminPassword" type="password" placeholder="Enter admin password to authorize" required autocomplete="current-password" />
+                <small class="admin-field__hint">Enter your admin password to authorize this correction.</small>
+              </label>
+            </div>
+          </form>
+        </div>
+      `,
+      footer: `
+        <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button>
+        <button class="admin-btn admin-btn--danger" type="button" data-action="submit-commission-correction" data-id="${escapeHtml(influencer.id)}">Authorize &amp; Update Amount</button>
+      `,
+    });
+  }
+
+  async function handleCommissionCorrectionSubmit(influencerId) {
+    const form = document.getElementById('commissionCorrectionForm');
+    if (!form) return;
+
+    const newAmountInput = form.querySelector('[name="newAmount"]');
+    const reasonInput = form.querySelector('[name="correctionReason"]');
+    const passwordInput = form.querySelector('[name="adminPassword"]');
+
+    const newAmount = Number(newAmountInput?.value);
+    const reason = String(reasonInput?.value || '').trim();
+    const password = String(passwordInput?.value || '').trim();
+
+    if (isNaN(newAmount) || newAmount < 0) {
+      toast('Invalid amount', 'Enter a valid non-negative amount in Rupees.', 'warning');
+      newAmountInput?.focus();
+      return;
+    }
+
+    if (!reason || reason.length < 3) {
+      toast('Reason required', 'Please provide a specific reason for this commission correction.', 'warning');
+      reasonInput?.focus();
+      return;
+    }
+
+    if (!password) {
+      toast('Password required', 'Please enter your admin password to authorize this change.', 'warning');
+      passwordInput?.focus();
+      return;
+    }
+
+    const submitBtn = els.adminModalDialog.querySelector('[data-action="submit-commission-correction"]');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Verifying Authorization...';
+    }
+
+    try {
+      await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencerId)}/commission-correction`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          newAmountPaise: Math.round(newAmount * 100),
+          reason,
+          password,
+        }),
+      });
+
+      toast('Commission Adjusted', `Commission paid updated to ${money(Math.round(newAmount * 100))} and logged.`, 'success');
+      closeModal();
+      await loadInfluencerData();
+      await loadReportData();
+    } catch (error) {
+      toast('Authorization Failed', error.message || 'Invalid admin password or authorization failure.', 'danger');
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Authorize & Update Amount';
+      }
+    }
+  }
+
+  async function renderPaymentHistoryModal(influencer) {
+    if (!influencer) return;
+    openModal({
+      title: `${influencer.name} — Payment History`,
+      subtitle: 'Commission Payouts & Audit Records',
+      size: 'lg',
+      body: renderEmptyState('Loading history', 'Fetching commission payments and audit logs...'),
+    });
+
+    try {
+      const data = await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencer.id)}/payment-history`);
+      const payments = Array.isArray(data.payments) ? data.payments : [];
+      const adjustments = Array.isArray(data.adjustments) ? data.adjustments : [];
+
+      openModal({
+        title: `${influencer.name} — Payment & Adjustment History`,
+        subtitle: `${escapeHtml(influencer.handle || 'Influencer')} &bull; Cumulative Paid: ${money(influencer.paidCommission || 0)} (🔒 Locked)`,
+        size: 'lg',
+        body: `
+          <div class="admin-commission-history">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+              <h4 style="margin:0;font-size:15px;font-weight:700;">Recorded Commission Payments</h4>
+              <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="pay-influencer-commission" data-id="${escapeHtml(influencer.id)}">Pay Commission</button>
+            </div>
+
+            <div class="admin-table-wrap" style="margin-bottom:24px;">
+              <table class="admin-table">
+                <thead>
+                  <tr>
+                    <th>Receipt / Invoice</th>
+                    <th>Date</th>
+                    <th>Amount</th>
+                    <th>Method</th>
+                    <th>Reference ID</th>
+                    <th>Recipient Email</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${payments.length ? payments.map((p) => `
+                    <tr>
+                      <td><strong>${escapeHtml(p.invoiceNumber || `Payment #${p.id}`)}</strong></td>
+                      <td>${escapeHtml(dateLabel(p.paidAt || p.createdAt))}</td>
+                      <td><strong style="color:var(--admin-primary);">${money(p.amountPaise)}</strong></td>
+                      <td>${escapeHtml(p.paymentMethod || 'Direct')}</td>
+                      <td><code>${escapeHtml(p.referenceNumber || 'N/A')}</code></td>
+                      <td>${escapeHtml(p.influencerEmail || 'N/A')}</td>
+                      <td>
+                        <button class="admin-btn admin-btn--soft admin-btn--sm" type="button" data-action="view-payment-invoice" data-influencer-id="${escapeHtml(influencer.id)}" data-payment-id="${escapeHtml(p.id)}">View Invoice</button>
+                      </td>
+                    </tr>
+                  `).join('') : '<tr><td colspan="7"><p class="admin-table__muted">No commission payments recorded yet.</p></td></tr>'}
+                </tbody>
+              </table>
+            </div>
+
+            ${adjustments.length ? `
+              <div style="margin-top:20px;">
+                <h4 style="margin:0 0 10px;font-size:14px;font-weight:700;color:var(--admin-muted);">Security Authorized Adjustments Audit Trail</h4>
+                <div class="admin-table-wrap">
+                  <table class="admin-table">
+                    <thead>
+                      <tr>
+                        <th>Timestamp</th>
+                        <th>Previous Amount</th>
+                        <th>Adjusted Amount</th>
+                        <th>Reason</th>
+                        <th>Authorized By</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${adjustments.map((adj) => `
+                        <tr>
+                          <td>${escapeHtml(dateLabel(adj.createdAt))}</td>
+                          <td>${money(adj.previousAmountPaise)}</td>
+                          <td><strong>${money(adj.newAmountPaise)}</strong></td>
+                          <td>${escapeHtml(adj.reason)}</td>
+                          <td><span class="admin-badge admin-badge--neutral">${escapeHtml(adj.changedBy || 'Admin')}</span></td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ` : ''}
+          </div>
+        `,
+        footer: '<button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Close</button>',
+      });
+    } catch (err) {
+      toast('History error', err.message || 'Unable to load payment history.', 'danger');
+      closeModal();
+    }
+  }
+
+  async function viewPaymentInvoice(influencerId, paymentId) {
+    openModal({
+      title: 'Loading Invoice',
+      subtitle: 'Fetching invoice document...',
+      body: renderEmptyState('Loading invoice', 'Preparing invoice document...'),
+    });
+
+    try {
+      const data = await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencerId)}/payments/${encodeURIComponent(paymentId)}/invoice`);
+      renderInvoiceReceiptModal({
+        invoiceHtml: data.invoiceHtml,
+        invoiceNumber: data.invoiceNumber || 'H2-INV-COM',
+        influencerEmail: data.payment?.influencerEmail || 'Influencer',
+        adminEmail: FIXED_ADMIN_EMAIL,
+      });
+    } catch (err) {
+      toast('Invoice error', err.message || 'Unable to load invoice.', 'danger');
+      closeModal();
+    }
+  }
+
+  function renderInvoiceReceiptModal({ invoiceHtml, invoiceNumber, influencerEmail, adminEmail }) {
+    const blob = new Blob([invoiceHtml], { type: 'text/html' });
+    const blobUrl = URL.createObjectURL(blob);
+
+    openModal({
+      title: `Payment Invoice: ${invoiceNumber}`,
+      subtitle: 'Official Commission Payment Receipt',
+      size: 'lg',
+      body: `
+        <div class="admin-invoice-modal-content">
+          <div style="background:#ecfdf5;border:1px solid #a7f3d0;padding:12px 16px;border-radius:8px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+            <div>
+              <p style="margin:0;font-size:13px;font-weight:700;color:#065f46;">✓ Payment Confirmed &amp; Invoices Dispatched</p>
+              <p style="margin:2px 0 0;font-size:12px;color:#047857;">Sent to Influencer: <strong>${escapeHtml(influencerEmail)}</strong> &bull; Admin Copy: <strong>${escapeHtml(adminEmail)}</strong></p>
+            </div>
+            <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="print-invoice">Print / Save Invoice</button>
+          </div>
+
+          <iframe class="admin-invoice-preview-frame" src="${blobUrl}" style="width:100%;height:520px;border:1px solid var(--admin-border);border-radius:8px;background:#f8fafc;" title="Invoice Preview"></iframe>
+        </div>
+      `,
+      footer: `
+        <button class="admin-btn admin-btn--primary" type="button" data-action="print-invoice">Print / Save PDF</button>
+        <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Done</button>
+      `,
+    });
+  }
+
   function renderInfluencerActionLinks(influencer) {
     const id = influencer?.id || '';
     const canEmail = Boolean(String(influencer?.email || '').trim());
@@ -578,6 +1010,8 @@
     const emailDisabled = canEmail ? '' : ' disabled';
 
     return `
+      <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="pay-influencer-commission" data-id="${id}" style="margin-right:4px;">Pay Commission</button>
+      <button class="admin-action-link" type="button" data-action="view-commission-history" data-id="${id}">Payment History</button>
       <button class="admin-action-link" type="button" data-action="edit-influencer" data-id="${id}">Edit Influencer</button>
       <button class="admin-action-link" type="button" data-action="view-influencer-report" data-id="${id}">View Report</button>
       <button class="admin-action-link" type="button" data-action="download-influencer-report" data-id="${id}">Download Report</button>
@@ -3421,14 +3855,15 @@
 
           <div class="admin-table-wrap">
             <table class="admin-table admin-influencer-table">
-              <thead><tr><th><input type="checkbox" data-action="toggle-influencers-page-selection" aria-label="Select visible influencers" /> Influencer</th><th>Contact</th><th>Status</th><th>Coupons</th><th>Orders</th><th>Revenue</th><th>Commission Earned</th><th>Commission Paid</th><th>Balance Commission</th></tr></thead>
+              <thead><tr><th><input type="checkbox" data-action="toggle-influencers-page-selection" aria-label="Select visible influencers" /> Influencer</th><th>Contact</th><th>Status</th><th>Coupons</th><th>Orders</th><th>Revenue</th><th>Commission Earned</th><th>Commission Paid</th><th>Balance Commission</th><th>Action</th></tr></thead>
               <tbody>${visibleInfluencers.length ? visibleInfluencers.map((influencer) => { const stats = getMonthStats(influencer); const commissionBalance = Math.max(0, Number(stats.commission || 0) - Number(influencer.paidCommission || 0)); return `<tr data-action="select-influencer" data-id="${influencer.id}">
                 <td><input type="checkbox" data-action="toggle-influencer-selection" data-id="${influencer.id}" ${state.selectedInfluencerIds.includes(Number(influencer.id)) ? 'checked' : ''} aria-label="Select ${escapeHtml(influencer.name || 'influencer')}" /> <button class="admin-action-link" type="button" data-action="select-influencer" data-id="${influencer.id}">${escapeHtml(influencer.name || 'Unnamed')}</button><br><span class="admin-table__muted">${escapeHtml(influencer.handle || '')}</span></td>
                 <td>${escapeHtml(influencer.email || 'Not added yet')}<br><span class="admin-table__muted">${escapeHtml(influencer.phone || 'Not added yet')}</span></td>
                 <td><span class="admin-badge ${influencer.active ? 'admin-badge--active' : 'admin-badge--inactive'}">${influencer.active ? 'Active' : 'Inactive'}</span></td>
                 <td>${formatCount(getAssignedCouponCount(influencer))}<br><span class="admin-table__muted">${getInfluencerCouponRecords(influencer).map((coupon) => `${escapeHtml(coupon.code)} — ${escapeHtml(couponDiscountLabel(coupon))}`).join('<br>') || 'None'}</span></td>
-                <td>${formatCount(stats.orders)}</td><td>${money(stats.revenue)}</td><td>${money(stats.commission)}</td><td>${money(influencer.paidCommission || 0)}</td><td>${money(commissionBalance)}</td>
-              </tr>`; }).join('') : `<tr><td colspan="9">${renderEmptyState('No influencers found', 'Try a different search term or add a new influencer to start managing campaigns.')}</td></tr>`}</tbody>
+                <td>${formatCount(stats.orders)}</td><td>${money(stats.revenue)}</td><td>${money(stats.commission)}</td><td>${money(influencer.paidCommission || 0)} <span class="admin-badge admin-badge--neutral" style="font-size:10px;padding:1px 4px;">🔒</span></td><td>${money(commissionBalance)}</td>
+                <td><button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="pay-influencer-commission" data-id="${influencer.id}" style="font-size:11px;padding:3px 8px;white-space:nowrap;">Pay</button></td>
+              </tr>`; }).join('') : `<tr><td colspan="10">${renderEmptyState('No influencers found', 'Try a different search term or add a new influencer to start managing campaigns.')}</td></tr>`}</tbody>
             </table>
           </div>
 
@@ -3485,6 +3920,22 @@
                     <div class="admin-list__item">
                       <p class="admin-list__item-title">No. of Coupons Assigned in Influencer</p>
                       <p class="admin-list__item-sub">${formatCount(getAssignedCouponCount(selectedInfluencer))}</p>
+                    </div>
+                    <div class="admin-list__item" style="background:var(--admin-surface-subtle);padding:14px;border-radius:10px;border:1px solid var(--admin-border);margin-top:12px;">
+                      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                        <div>
+                          <p class="admin-list__item-title" style="margin:0;font-weight:700;">Commission Status</p>
+                          <p class="admin-list__item-sub" style="margin:3px 0 0;">
+                            Earned: <strong>${money(getMonthStats(selectedInfluencer).commission)}</strong> &bull;
+                            Paid: <strong>${money(selectedInfluencer.paidCommission || 0)}</strong> <span class="admin-badge admin-badge--neutral" style="font-size:10px;padding:1px 5px;">🔒 Locked</span> &bull;
+                            Balance: <strong style="color:var(--admin-primary);">${money(Math.max(0, Number(getMonthStats(selectedInfluencer).commission || 0) - Number(selectedInfluencer.paidCommission || 0)))}</strong>
+                          </p>
+                        </div>
+                        <div style="display:flex;gap:6px;">
+                          <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="pay-influencer-commission" data-id="${selectedInfluencer.id}">Pay Commission</button>
+                          <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-action="view-commission-history" data-id="${selectedInfluencer.id}">History</button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ` : '<p class="admin-table__muted">No influencer selected.</p>'}
@@ -4657,9 +5108,20 @@
         fields: `
           <label class="admin-field"><span>Name</span><input class="admin-input" name="name" value="${escapeHtml(entity?.name || '')}" required /></label>
           <label class="admin-field"><span>Social Handle</span><input class="admin-input" name="handle" value="${escapeHtml(entity?.handle || '')}" required /></label>
-          <label class="admin-field"><span>Email</span><input class="admin-input" name="email" value="${escapeHtml(entity?.email || '')}" /></label>
+          <label class="admin-field">
+            <span>Influencer Email <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
+            <input class="admin-input" name="email" type="email" value="${escapeHtml(entity?.email || '')}" placeholder="influencer@example.com" />
+            <small class="admin-field__hint">Used to send commission payment receipts and invoices.</small>
+          </label>
           <label class="admin-field"><span>Phone</span><input class="admin-input" name="phone" value="${escapeHtml(entity?.phone || '')}" /></label>
-          <label class="admin-field"><span>Commission Paid (rupees)</span><input class="admin-input" name="paidCommission" type="number" min="0" step="1" value="${escapeHtml(Number(entity?.paidCommission || 0) / 100)}" /></label>
+          <label class="admin-field">
+            <span>Commission Paid (rupees) <span class="admin-badge admin-badge--neutral" style="font-size:11px;padding:2px 6px;">🔒 Locked</span></span>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <input class="admin-input" type="text" value="${money(entity?.paidCommission || 0)}" readonly disabled style="background:var(--admin-surface-subtle);cursor:not-allowed;" />
+              ${entity ? `<button class="admin-btn admin-btn--soft" type="button" data-action="correct-influencer-commission" data-id="${escapeHtml(entity.id)}" style="white-space:nowrap;">Adjust / Correct</button>` : ''}
+            </div>
+            <small class="admin-field__hint">Commission Paid is locked after payment. Adjustments require secured admin authorization and audit reason.</small>
+          </label>
           <div class="admin-field admin-field--wide"><span>Assigned Coupons</span>${renderAssignedCouponDetails(entity)}<div class="admin-chip-row" style="margin-top:10px;">${entity ? `<button class="admin-btn admin-btn--soft" type="button" data-action="assign-coupon" data-id="${escapeHtml(entity.id)}">Edit assignments</button>` : ''}</div><small class="admin-field__hint">Manage discount and commission in the coupon settings.</small></div>
           <label class="admin-field admin-field--wide"><span>Notes</span><textarea class="admin-textarea" name="notes">${escapeHtml(entity?.notes || '')}</textarea></label>
           <label class="admin-check"><input type="checkbox" name="active" ${entity?.active !== false ? 'checked' : ''} /><span>Active influencer</span></label>
@@ -4683,6 +5145,8 @@
     const isEditingInfluencer = type === 'influencer' && Boolean(entity);
     const influencerManagementActions = isEditingInfluencer ? `
       <div class="admin-modal__management-actions">
+        <button class="admin-btn admin-btn--primary" type="button" data-action="pay-influencer-commission" data-id="${escapeHtml(entity.id)}">Pay Commission</button>
+        <button class="admin-btn admin-btn--ghost" type="button" data-action="view-commission-history" data-id="${escapeHtml(entity.id)}">Payment History</button>
         <button class="admin-btn admin-btn--ghost" type="button" data-action="assign-coupon" data-id="${escapeHtml(entity.id)}">Assign Coupons</button>
         <button class="admin-btn ${entity.active ? 'admin-btn--danger' : 'admin-btn--ghost'}" type="button" data-action="toggle-influencer" data-id="${escapeHtml(entity.id)}">${entity.active ? 'Deactivate Influencer' : 'Activate Influencer'}</button>
       </div>
@@ -5074,7 +5538,7 @@
       phone: String(fd.get('phone') || '').trim(),
       notes: String(fd.get('notes') || '').trim(),
       commissionPerOrderPaise: Number(existing?.commissionPerOrderPaise || 0),
-      paidCommission: Math.max(0, Math.round(Number(fd.get('paidCommission') || 0) * 100)),
+      paidCommission: existing ? Number(existing.paidCommission || 0) : 0,
       coupons: existing?.coupons || [],
       totalOrders: Number(existing?.totalOrders || 0),
       revenue: Number(existing?.revenue || 0),
@@ -6611,6 +7075,51 @@
           if (action === 'bulk-influencer-view-report') await viewInfluencerReport(selectedInfluencer, month);
           if (action === 'bulk-influencer-download-report') await downloadInfluencerReport(selectedInfluencer, month);
           if (action === 'bulk-influencer-email-report') await emailInfluencerReport(selectedInfluencer, month);
+        }
+        return;
+      }
+      case 'pay-influencer-commission': {
+        const targetInfluencer = influencer || state.influencers.find((item) => Number(item.id) === Number(target?.dataset?.id));
+        if (targetInfluencer) {
+          renderPayCommissionModal(targetInfluencer);
+        }
+        return;
+      }
+      case 'submit-commission-payment':
+        await handlePayCommissionSubmit(id || Number(target?.dataset?.id));
+        return;
+      case 'correct-influencer-commission': {
+        const targetInfluencer = influencer || state.influencers.find((item) => Number(item.id) === Number(target?.dataset?.id));
+        if (targetInfluencer) {
+          renderCommissionCorrectionModal(targetInfluencer);
+        }
+        return;
+      }
+      case 'submit-commission-correction':
+        await handleCommissionCorrectionSubmit(id || Number(target?.dataset?.id));
+        return;
+      case 'view-commission-history': {
+        const targetInfluencer = influencer || state.influencers.find((item) => Number(item.id) === Number(target?.dataset?.id));
+        if (targetInfluencer) {
+          await renderPaymentHistoryModal(targetInfluencer);
+        }
+        return;
+      }
+      case 'view-payment-invoice': {
+        const paymentId = Number(target?.dataset?.paymentId);
+        const influencerId = Number(target?.dataset?.influencerId || id);
+        if (influencerId && paymentId) {
+          await viewPaymentInvoice(influencerId, paymentId);
+        }
+        return;
+      }
+      case 'print-invoice': {
+        const printFrame = els.adminModalDialog.querySelector('.admin-invoice-preview-frame');
+        if (printFrame && printFrame.contentWindow) {
+          printFrame.contentWindow.focus();
+          printFrame.contentWindow.print();
+        } else {
+          window.print();
         }
         return;
       }
