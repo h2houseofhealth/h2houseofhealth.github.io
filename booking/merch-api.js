@@ -359,7 +359,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const corrections = [
       {
         slug: 'h2-water-bottle',
-        price: 2590000,
+        price: 100, // Temporary test price: 100 paise = Rs. 1 (original: 2590000)
         oldSkus: ['HM-BTL-300-SLV', 'HM-BTL-500-SLV', 'HM-BTL-300-BLK', 'HM-BTL-500-BLK'],
         specifications: {
           'Product Name': 'Hydrogen-Rich Water Bottle',
@@ -382,7 +382,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       },
       {
         slug: 'h2-mist-spray',
-        price: 1190000,
+        price: 100, // Temporary test price: 100 paise = Rs. 1 (original: 1190000)
         oldSkus: ['HM-SPR-050-WHT', 'HM-SPR-100-WHT', 'HM-SPR-050-RSG', 'HM-SPR-100-RSG'],
         specifications: {
           'Product Name': 'Hydrogen Mist Sprayer',
@@ -4256,7 +4256,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     // Product prices are GST-inclusive; derive included GST for reporting only.
     const gstAmount = Math.max(0, subtotal - Math.round(subtotal / 1.18));
-    const shippingCharge = subtotal >= 99900 ? 0 : 9900; // Free above ₹999
+    const shippingCharge = (subtotal >= 99900 || subtotal <= 100) ? 0 : 9900; // Free above ₹999 or ₹1 test
     const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
       + getMerchBundleDiscountPaise(bundleCode, validatedItems);
     const influencerId = Number(couponResult.coupon?.influencerId || 0) > 0 ? Number(couponResult.coupon.influencerId) : null;
@@ -4452,7 +4452,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     const gstAmount = Math.max(0, subtotal - Math.round(subtotal / 1.18));
-    const shippingCharge = subtotal >= 99900 ? 0 : 9900;
+    const shippingCharge = (subtotal >= 99900 || subtotal <= 100) ? 0 : 9900;
     const codSurcharge = 5000; // ₹50
     const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
       + getMerchBundleDiscountPaise(bundleCode, validatedItems);
