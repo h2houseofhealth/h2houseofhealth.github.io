@@ -273,14 +273,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       slug: 'h2-water-bottle',
       description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 5 minutes. BPA-free, USB-C rechargeable.',
       category: 'bottles',
-      basePrice: 2590000,
+      basePrice: 2299000,
       image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113',
       weight: 380,
       variants: [
-        ['HM-BTL-460-SLV', '460ml', 'Silver', 2590000, 50, '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113'],
-        ['HM-BTL-460-BLK', '460ml', 'Black', 2590000, 50, '/cdn/shop/files/products/bottle-black.png', ['/cdn/shop/files/products/bottle-black-interior.png', '/cdn/shop/files/products/bottle-black-portable.png', '/cdn/shop/files/products/bottle-black-cap.png']],
-        ['HM-BTL-460-GLD', '460ml', 'Gold', 2590000, 50, '/cdn/shop/files/products/bottle-gold.png', ['/cdn/shop/files/products/bottle-gold-interior.png', '/cdn/shop/files/products/bottle-gold-portable.png', '/cdn/shop/files/products/bottle-gold-cap.png']],
-        ['HM-BTL-460-BLU', '460ml', 'Blue', 2590000, 50, '/cdn/shop/files/products/bottle-blue.png', ['/cdn/shop/files/products/bottle-blue-interior.png', '/cdn/shop/files/products/bottle-blue-portable.png', '/cdn/shop/files/products/bottle-blue-cap.png']],
+        ['HM-BTL-460-SLV', '460ml', 'Silver', 2299000, 50, '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113'],
+        ['HM-BTL-460-BLK', '460ml', 'Black', 2299000, 50, '/cdn/shop/files/products/bottle-black.png', ['/cdn/shop/files/products/bottle-black-interior.png', '/cdn/shop/files/products/bottle-black-portable.png', '/cdn/shop/files/products/bottle-black-cap.png']],
+        ['HM-BTL-460-GLD', '460ml', 'Gold', 2299000, 50, '/cdn/shop/files/products/bottle-gold.png', ['/cdn/shop/files/products/bottle-gold-interior.png', '/cdn/shop/files/products/bottle-gold-portable.png', '/cdn/shop/files/products/bottle-gold-cap.png']],
+        ['HM-BTL-460-BLU', '460ml', 'Blue', 2299000, 50, '/cdn/shop/files/products/bottle-blue.png', ['/cdn/shop/files/products/bottle-blue-interior.png', '/cdn/shop/files/products/bottle-blue-portable.png', '/cdn/shop/files/products/bottle-blue-cap.png']],
       ],
     },
     {
@@ -367,7 +367,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       {
         slug: 'h2-water-bottle',
         description: 'Portable PEM/SPE electrolysis bottle. Generates hydrogen-rich water in 5 minutes. BPA-free, USB-C rechargeable.',
-        price: 2590000,
+        price: 2299000,
         oldSkus: ['HM-BTL-300-SLV', 'HM-BTL-500-SLV', 'HM-BTL-300-BLK', 'HM-BTL-500-BLK'],
         specifications: {
           'Product Name': 'Hydrogen-Rich Water Bottle',
@@ -4795,6 +4795,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       });
     }
 
+    if (order.customerUserId) {
+      const customerProfile = db.prepare('SELECT id FROM merch_customer_profiles WHERE user_id = ?').get(order.customerUserId);
+      if (customerProfile) {
+        db.prepare('DELETE FROM merch_customer_cart_items WHERE customer_id = ?').run(customerProfile.id);
+      }
+    }
+
     const notifications = await triggerMerchOrderConfirmationNotifications(order.id, req);
 
     res.json({
@@ -4969,6 +4976,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       });
     }
 
+    if (customerUserId) {
+      const customerProfile = db.prepare('SELECT id FROM merch_customer_profiles WHERE user_id = ?').get(customerUserId);
+      if (customerProfile) {
+        db.prepare('DELETE FROM merch_customer_cart_items WHERE customer_id = ?').run(customerProfile.id);
+      }
+    }
+
     sendMerchOrderConfirmationEmail(orderId, req).catch((error) => {
       console.error('[Merch] Failed to send COD order confirmation email:', error?.message || error);
     });
@@ -5032,6 +5046,85 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     return res.json({ success: true, id: itemId });
+  });
+
+  // ─── CUSTOMER: Cart Endpoints (Account-isolated backend cart) ───
+  app.get('/api/merch/cart', requireMerchAuth, (req, res) => {
+    const profile = ensureMerchCustomerProfileForUser(req.user);
+    if (!profile) {
+      return res.status(404).json({ error: 'Customer profile not found' });
+    }
+
+    const rows = db.prepare(`
+      SELECT c.id, c.customer_id AS customerId, c.variant_id AS variantId, c.quantity,
+             v.product_id AS productId, v.sku, v.size, v.color, v.price, v.stock, v.image_url AS imageUrl,
+             p.name AS productName, p.slug AS productSlug, p.is_active AS productActive, v.is_active AS variantActive
+      FROM merch_customer_cart_items c
+      JOIN merch_variants v ON v.id = c.variant_id
+      JOIN merch_products p ON p.id = v.product_id
+      WHERE c.customer_id = ? AND p.deleted_at IS NULL
+      ORDER BY c.id ASC
+    `).all(profile.id);
+
+    const items = rows
+      .filter((row) => row.variantActive && row.productActive && row.stock > 0)
+      .map((row) => ({
+        variantId: Number(row.variantId),
+        productId: Number(row.productId),
+        productName: row.productName,
+        variantLabel: [row.size, row.color].filter(Boolean).join(' / '),
+        price: Number(row.price),
+        quantity: Math.min(Number(row.quantity || 1), Number(row.stock || 1)),
+        image: row.imageUrl,
+        sku: row.sku,
+      }));
+
+    return res.json({ items });
+  });
+
+  app.put('/api/merch/cart', requireMerchAuth, (req, res) => {
+    const profile = ensureMerchCustomerProfileForUser(req.user);
+    if (!profile) {
+      return res.status(404).json({ error: 'Customer profile not found' });
+    }
+
+    const incomingItems = Array.isArray(req.body?.items) ? req.body.items : [];
+
+    const sync = db.transaction(() => {
+      db.prepare('DELETE FROM merch_customer_cart_items WHERE customer_id = ?').run(profile.id);
+      const insert = db.prepare(`
+        INSERT INTO merch_customer_cart_items (customer_id, variant_id, quantity, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+      `);
+      for (const item of incomingItems) {
+        const variantId = Number(item.variantId || item.id || 0);
+        const quantity = Math.max(1, Math.min(99, Number(item.quantity || 1)));
+        if (variantId > 0) {
+          const variantExists = db.prepare('SELECT id, stock FROM merch_variants WHERE id = ? AND is_active = 1').get(variantId);
+          if (variantExists && variantExists.stock > 0) {
+            insert.run(profile.id, variantId, Math.min(quantity, variantExists.stock));
+          }
+        }
+      }
+    });
+
+    try {
+      sync();
+    } catch (err) {
+      console.error('[Merch] Failed to update customer cart:', err);
+      return res.status(500).json({ error: 'Failed to update cart' });
+    }
+
+    return res.json({ success: true, count: incomingItems.length });
+  });
+
+  app.delete('/api/merch/cart', requireMerchAuth, (req, res) => {
+    const profile = ensureMerchCustomerProfileForUser(req.user);
+    if (!profile) {
+      return res.status(404).json({ error: 'Customer profile not found' });
+    }
+    db.prepare('DELETE FROM merch_customer_cart_items WHERE customer_id = ?').run(profile.id);
+    return res.json({ success: true });
   });
 
   app.get('/api/merch/profile', requireMerchAuth, (req, res) => {
