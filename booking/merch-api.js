@@ -3577,6 +3577,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     };
   }
 
+  function formatMerchEmailPaymentStatus(status) {
+    const norm = String(status || '').trim().toLowerCase();
+    if (!norm || norm === 'paid') return 'successful';
+    if (norm === 'cod_pending') return 'COD Pending';
+    if (norm === 'refunded') return 'Refunded';
+    if (norm === 'failed') return 'Failed';
+    if (norm === 'pending') return 'Pending';
+    return norm.replace(/_/g, ' ');
+  }
+
   function buildMerchOrderConfirmationText({ order, items, expectedDelivery, links }) {
     return [
       `Hi ${order.customerName || 'there'},`,
@@ -3585,7 +3595,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       '',
       `Order ID: ${order.orderNumber || `Order #${order.id}`}`,
       `Order Date: ${formatMerchEmailDateTime(order.createdAt) || order.createdAt || ''}`,
-      `Payment Status: ${String(order.paymentStatus || 'paid').toUpperCase()}`,
+      `Payment Status: ${formatMerchEmailPaymentStatus(order.paymentStatus).toUpperCase()}`,
       `Payment Method: ${String(order.paymentMethod || 'online').toUpperCase()}`,
       `Customer Email: ${order.customerEmail || ''}`,
       '',
@@ -3668,8 +3678,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         .footer-logo-cell { border-right: 0 !important; border-bottom: 1px solid #d6a28c !important; padding: 0 0 18px !important; }
         .footer-copy-cell { padding: 18px 0 0 !important; }
         .footer-contact-cell { padding-top: 4px !important; }
-        .footer-leaf-cell { padding-top: 18px !important; text-align: center !important; }
-        .footer-leaf-cell img { margin: 0 auto !important; }
         .footer-contact { display: block !important; width: 100% !important; padding: 4px 0 !important; }
         .footer-separator { display: none !important; }
       }
@@ -3747,7 +3755,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
                     <td class="stat-cell stat-cell-last" align="center" style="width:33.33%;padding:28px 14px;color:#ffffff;">
                       <div style="font-size:32px;line-height:32px;color:#ffffff;">&#10003;</div>
                       <p style="margin:18px 0 9px;font-size:18px;line-height:23px;font-weight:500;color:#ffffff;">Payment</p>
-                      <p style="margin:0;font-size:17px;line-height:24px;color:#ffffff;">${escapeHtml(String(order.paymentStatus || 'paid').replace(/_/g, ' '))}</p>
+                      <p style="margin:0;font-size:17px;line-height:24px;color:#ffffff;">${escapeHtml(formatMerchEmailPaymentStatus(order.paymentStatus))}</p>
                     </td>
                   </tr>
                 </table>
@@ -3851,7 +3859,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
                 </table>
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:24px;">
                   <tr>
-                    <td class="mobile-stack mobile-center footer-contact-cell" valign="top" style="width:76%;">
+                    <td class="mobile-stack mobile-center footer-contact-cell" valign="top" style="width:100%;">
                       <p style="margin:0 0 8px;color:#14233b;font-size:15px;line-height:22px;">
                         <span style="color:#ad3c22;font-size:18px;line-height:18px;">&#9993;</span>
                         <span>&nbsp;&nbsp;</span>
@@ -3866,9 +3874,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
                         <span>&nbsp;&nbsp;</span>
                         H2 House of Health, Hyderabad
                       </p>
-                    </td>
-                    <td class="mobile-stack mobile-center footer-leaf-cell" valign="bottom" align="right" style="width:24%;">
-                      <img src="${escapeHtml(links.leaf)}" width="82" alt="" style="display:block;border:0;width:82px;max-width:82px;height:auto;margin-left:auto;">
                     </td>
                   </tr>
                 </table>
