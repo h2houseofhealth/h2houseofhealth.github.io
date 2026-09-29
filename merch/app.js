@@ -141,7 +141,7 @@
     activeOfferId: null,
   };
 
-  const FALLBACK_PRODUCT_IMAGE = '/booking/assets/service-hydrogen-session.jpg';
+  const FALLBACK_PRODUCT_IMAGE = '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113';
   const BOTTLE_DETAIL_FEATURE_IMAGE = '/cdn/shop/files/h2-bottle-transparent.png';
   const BOTTLE_DETAIL_FEATURE_SLIDES = [
     { src: '/cdn/shop/files/h2-bottle-product-features-front.png', label: 'Hydrogen water bottle front view' },
@@ -3691,6 +3691,35 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     return raw;
   }
 
+  function getItemImageForOrderModal(item) {
+    if (!item) return getProductFallbackImage({});
+    const rawImage = normalizeProductImageUrl(item.imageUrl || item.image || item.image_url || '');
+    if (rawImage && !rawImage.includes('service-hydrogen-session')) return rawImage;
+
+    const name = String(item.name || item.productName || '').trim();
+    const variantId = Number(item.variantId || item.variant_id || 0);
+
+    if (variantId > 0 && Array.isArray(state.products)) {
+      for (const p of state.products) {
+        const v = Array.isArray(p.variants) ? p.variants.find((v) => Number(v.id) === variantId) : null;
+        if (v) {
+          const vImg = getVariantImageUrl(v, p);
+          if (vImg) return vImg;
+        }
+      }
+    }
+
+    if (name && Array.isArray(state.products)) {
+      const p = state.products.find((entry) => String(entry.name || '').trim().toLowerCase() === name.toLowerCase());
+      if (p) {
+        const pImg = p.images?.[0] || p.imageUrl || getProductFallbackImage(p);
+        if (pImg) return normalizeProductImageUrl(pImg);
+      }
+    }
+
+    return getProductFallbackImage({ name, category: item.category });
+  }
+
   function showOrderDetailsModal(order) {
     if (!order) {
       showCheckoutNotice('Order details', 'Order details are unavailable.');
@@ -3756,16 +3785,20 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       <div>
         <p class="order-modal-section-title">Items Ordered (${items.length})</p>
         <div class="order-modal-items-block">
-          ${items.map((item) => `
+          ${items.map((item) => {
+            const itemImg = getItemImageForOrderModal(item);
+            const fallbackImg = getProductFallbackImage({ name: item.name || item.productName });
+            return `
             <div class="order-modal-item-row">
-              <img src="${escapeHtml(item.imageUrl || FALLBACK_PRODUCT_IMAGE)}" alt="" class="order-modal-item-thumb" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
+              <img src="${escapeHtml(itemImg)}" alt="" class="order-modal-item-thumb" onerror="this.onerror=null;this.src='${escapeHtml(fallbackImg)}';" />
               <div class="order-modal-item-meta">
                 <p class="order-modal-item-name">${escapeHtml(item.name || item.productName || 'Product')}</p>
                 <p class="order-modal-item-variant">${escapeHtml([item.variantLabel, `Qty: ${item.quantity || item.qty || 1}`].filter(Boolean).join(' • '))}</p>
               </div>
               <strong class="order-modal-item-price">${formatMoneyFromPaise(item.lineTotal || ((item.price || item.unitPrice || 0) * (item.quantity || item.qty || 1)) || 0)}</strong>
             </div>
-          `).join('')}
+          `;
+          }).join('')}
         </div>
       </div>
       ` : ''}
