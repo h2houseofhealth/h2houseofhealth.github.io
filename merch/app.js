@@ -2348,7 +2348,17 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   function getTrackingOrderIdFromHash() {
     const match = String(window.location.hash || '').match(/^#track-order\/([^/?#]+)/);
-    return match ? decodeURIComponent(match[1]) : '';
+    if (match) return decodeURIComponent(match[1]);
+    const urlParams = new URLSearchParams(window.location.search);
+    const queryOrder = urlParams.get('track') || urlParams.get('orderId') || urlParams.get('order');
+    if (queryOrder) {
+      const decoded = decodeURIComponent(queryOrder);
+      if (window.location.hash !== `#track-order/${encodeURIComponent(decoded)}`) {
+        window.location.hash = `track-order/${encodeURIComponent(decoded)}`;
+      }
+      return decoded;
+    }
+    return '';
   }
 
   function isAdminTrackingRequest() {
@@ -2407,8 +2417,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     });
   }
 
-  function showOrderTracking(orderId) {
-    const order = getTrackingOrderById(orderId);
+  async function showOrderTracking(orderId) {
     state.currentView = 'tracking';
 
     els.productDetail.hidden = true;
@@ -2417,14 +2426,55 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
     document.querySelector('.merch-hero').hidden = true;
     document.querySelector('.merch-categories').hidden = true;
-    if (els.orderTracking) {
-      els.orderTracking.hidden = false;
-      els.orderTracking.innerHTML = OrderTrackingPage(order);
-      bindOrderTrackingActions(order);
-    }
     closeCart();
     closeAccountDrawer();
     window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    let order = getTrackingOrderById(orderId);
+    if (order) {
+      if (els.orderTracking) {
+        els.orderTracking.hidden = false;
+        els.orderTracking.innerHTML = OrderTrackingPage(order);
+        bindOrderTrackingActions(order);
+      }
+      return;
+    }
+
+    if (els.orderTracking) {
+      els.orderTracking.hidden = false;
+      els.orderTracking.innerHTML = `
+        <div class="order-tracking__inner">
+          <div class="tracking-loading" style="text-align: center; padding: 60px 20px;">
+            <p style="color: #666; font-size: 16px;">Loading order tracking...</p>
+          </div>
+        </div>
+      `;
+    }
+
+    try {
+      const res = await api(`/api/merch/orders/${encodeURIComponent(orderId)}/tracking`);
+      if (res?.order) {
+        order = res.order;
+        if (!Array.isArray(state.merchOrders)) state.merchOrders = [];
+        const existingIdx = state.merchOrders.findIndex(
+          (o) => String(o.id) === String(order.id) || String(o.orderNumber) === String(order.orderNumber)
+        );
+        if (existingIdx >= 0) {
+          state.merchOrders[existingIdx] = order;
+        } else {
+          state.merchOrders.unshift(order);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load tracking order details:', err);
+    }
+
+    if (els.orderTracking) {
+      els.orderTracking.innerHTML = OrderTrackingPage(order);
+      if (order) {
+        bindOrderTrackingActions(order);
+      }
+    }
   }
 
   function routeFromLocation() {
@@ -3285,7 +3335,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   function getOrderById(orderId) {
-    return (Array.isArray(state.merchOrders) ? state.merchOrders : []).find((order) => String(order.id || '') === String(orderId || ''));
+    return (Array.isArray(state.merchOrders) ? state.merchOrders : []).find(
+      (order) => String(order.id || '') === String(orderId || '') || String(order.orderNumber || '') === String(orderId || '')
+    );
   }
 
   function canCancelMerchOrder(order) {
