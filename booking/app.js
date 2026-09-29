@@ -29,24 +29,22 @@ function buildApiUrl(url = '') {
 const AUTH_TOKEN_STORAGE_KEY = 'booking_portal_auth_token';
 const GUEST_SESSION_STORAGE_KEY = 'h2_guest_session_token';
 const BOOKING_AUTH_RETURN_STATE_STORAGE_KEY = 'h2_booking_auth_return_state';
+let authRefreshPromise = null;
 
 function getStoredAuthToken() {
   try {
-    return String(window.localStorage?.getItem(AUTH_TOKEN_STORAGE_KEY) || '').trim();
+    window.localStorage?.removeItem(AUTH_TOKEN_STORAGE_KEY);
   } catch {
-    return '';
+    // Ignore storage access errors.
   }
+  return '';
 }
 
 function storeAuthToken(token = '') {
   const normalized = String(token || '').trim();
   state.authToken = normalized;
   try {
-    if (normalized) {
-      window.localStorage?.setItem(AUTH_TOKEN_STORAGE_KEY, normalized);
-    } else {
-      window.localStorage?.removeItem(AUTH_TOKEN_STORAGE_KEY);
-    }
+    window.localStorage?.removeItem(AUTH_TOKEN_STORAGE_KEY);
   } catch {
     // Local storage can be unavailable in private or embedded browsing contexts.
   }
@@ -17012,6 +17010,19 @@ async function api(url, options = {}) {
 
   const targetUrl = buildApiUrl(url);
   let response;
+  const refreshAuth = async () => {
+    if (!authRefreshPromise) {
+      authRefreshPromise = fetch(buildApiUrl('/api/auth/refresh'), {
+        method: 'POST', credentials: 'include', headers: { Accept: 'application/json' },
+      }).then(async (refreshResponse) => {
+        if (!refreshResponse.ok) throw new Error('Authentication refresh failed');
+        const refreshData = await refreshResponse.json();
+        if (refreshData?.token) storeAuthToken(refreshData.token);
+        return refreshData;
+      }).finally(() => { authRefreshPromise = null; });
+    }
+    return authRefreshPromise;
+  };
   try {
     response = await fetch(targetUrl, withApiCredentials(options));
   } catch (fetchError) {
@@ -17020,6 +17031,14 @@ async function api(url, options = {}) {
     );
     networkError.cause = fetchError;
     throw networkError;
+  }
+
+  if (response.status === 401 && state.user && !String(url).startsWith('/api/auth/')) {
+    try {
+      await refreshAuth();
+      response = await fetch(targetUrl, withApiCredentials(options));
+    } catch {
+    }
   }
 
   if (response.status === 204) {
