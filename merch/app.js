@@ -966,8 +966,8 @@
               <strong>${escapeHtml(order.orderNumber || `Order #${order.id}`)}</strong>
             </div>
             <div>
-              <span>Expected Delivery</span>
-              <strong>${escapeHtml(order.status === 'delivered' ? 'Delivered' : 'Pending')}</strong>
+              <span>Courier / AWB</span>
+              <strong>${order.trackingNumber ? `${escapeHtml(order.trackingNumber)}${order.carrier ? ` (${escapeHtml(order.carrier)})` : ''}` : (order.status === 'delivered' ? 'Delivered' : 'Processing')}</strong>
             </div>
             <button class="btn btn-outline account-action-btn" type="button" data-tracking-action="invoice" data-order-id="${escapeHtml(String(order.id || ''))}">Invoice</button>
           </footer>
