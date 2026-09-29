@@ -5401,11 +5401,6 @@ app.put('/api/bookings/:id', requireAuth, (req, res) => {
     (String(payload.data.bookingDate || '').trim() !== String(existing.bookingDate || '').trim() ||
       String(payload.data.bookingTime || '').trim() !== String(existing.bookingTime || '').trim());
   if (isRescheduleAttempt && !isScheduleLaterBooking) {
-    if (Number(existing.rescheduleCount || 0) >= 1) {
-      return res.status(409).json({
-        message: 'You can reschedule only once. Please contact admin for further reschedule changes.',
-      });
-    }
     const normalizedExistingTime = normalizeSlotStartTime(String(existing.bookingTime || '').trim()) || String(existing.bookingTime || '').trim();
     const slotStart = new Date(`${String(existing.bookingDate || '').trim()}T${normalizedExistingTime}:00`).getTime();
     if (!Number.isFinite(slotStart)) {
@@ -7295,9 +7290,6 @@ app.put('/api/public/guest/bookings/:id', (req, res) => {
 
   const changedSlot = bookingDate !== String(existing.bookingDate || '') || bookingTime !== normalizeSlotStartTime(existing.bookingTime);
   if (changedSlot && existingStatus !== 'schedule_later') {
-    if (Number(existing.rescheduleCount || 0) >= 1) {
-      return res.status(409).json({ message: 'You can reschedule only once. Please contact admin for further changes.' });
-    }
     const currentTime = normalizeSlotStartTime(String(existing.bookingTime || '').trim()) || String(existing.bookingTime || '').trim();
     const slotStart = new Date(`${String(existing.bookingDate || '').trim()}T${currentTime}:00`).getTime();
     if (!Number.isFinite(slotStart) || Date.now() > slotStart - 12 * 60 * 60 * 1000) {
