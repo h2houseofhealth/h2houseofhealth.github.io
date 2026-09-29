@@ -3412,6 +3412,203 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     renderAccountDrawer();
   }
 
+  function parseOrderModalAddress(raw, fallbackName = '', fallbackPhone = '') {
+    if (!raw) return null;
+    let obj = null;
+    if (typeof raw === 'object') {
+      obj = raw;
+    } else {
+      const trimmed = String(raw).trim();
+      if (!trimmed) return null;
+      try {
+        if (trimmed.startsWith('{')) {
+          obj = JSON.parse(trimmed);
+        }
+      } catch {}
+      if (!obj) {
+        const segments = trimmed.split(/\s+-\s+/).filter(Boolean);
+        if (segments.length >= 3) {
+          const name = segments[0];
+          const phone = segments[1];
+          const addressPart = segments.slice(2).join(', ');
+          const lines = addressPart.split(/\s*,\s*/).filter(Boolean);
+          return {
+            name: name || fallbackName,
+            phone: phone || fallbackPhone,
+            lines: lines.length ? lines : [addressPart],
+          };
+        } else {
+          const lines = trimmed.split(/\s*,\s*/).filter(Boolean);
+          return {
+            name: fallbackName,
+            phone: fallbackPhone,
+            lines: lines.length ? lines : [trimmed],
+          };
+        }
+      }
+    }
+
+    if (obj) {
+      const name = obj.recipientName || obj.recipient_name || obj.name || obj.fullName || fallbackName || '';
+      const phone = obj.phone || obj.phoneNumber || fallbackPhone || '';
+      const line1 = obj.line1 || obj.addressLine1 || '';
+      const line2 = obj.line2 || obj.addressLine2 || '';
+      const city = obj.city || '';
+      const state = obj.state || '';
+      const postalCode = obj.postalCode || obj.postal_code || obj.pincode || '';
+      const country = obj.country || '';
+      const lines = [];
+      if (line1) lines.push(line1);
+      if (line2) lines.push(line2);
+      const cityStatePostal = [city, state && postalCode ? `${state} ${postalCode}` : (state || postalCode)].filter(Boolean).join(', ');
+      if (cityStatePostal) lines.push(cityStatePostal);
+      if (country) lines.push(country);
+      if (!lines.length && obj.full) {
+        lines.push(...obj.full.split(/\s*,\s*/).filter(Boolean));
+      }
+      return { name, phone, lines };
+    }
+    return null;
+  }
+
+  function formatOrderModalPhone(phone) {
+    const raw = String(phone || '').trim();
+    const digits = raw.replace(/\D/g, '');
+    if (digits.length === 10) return `+91 ${digits.slice(0, 4)} ${digits.slice(4)}`;
+    if (digits.length === 12 && digits.startsWith('91')) return `+91 ${digits.slice(2, 6)} ${digits.slice(6)}`;
+    return raw;
+  }
+
+  function showOrderDetailsModal(order) {
+    if (!order) {
+      showCheckoutNotice('Order details', 'Order details are unavailable.');
+      return;
+    }
+
+    const orderNumber = order.orderNumber || `Order #${order.id}`;
+    const statusKey = String(order.status || 'processing').toLowerCase().replace(/[\s-]+/g, '_');
+    const paymentStatusKey = String(order.paymentStatus || 'pending').toLowerCase();
+    const couponApplied = order.influencerCoupon || order.couponCode || order.coupon_code || '';
+    const items = Array.isArray(order.items) ? order.items : [];
+
+    const shippingAddressData = parseOrderModalAddress(order.shippingAddress, order.customerName || order.guestName, order.customerPhone || order.guestPhone);
+    const billingAddressData = parseOrderModalAddress(order.billingAddress, order.customerName || order.guestName, order.customerPhone || order.guestPhone);
+    const isBillingSame = !order.billingAddress ||
+      order.billingAddress === order.shippingAddress ||
+      String(order.billingAddress).trim().toLowerCase() === String(order.shippingAddress || '').trim().toLowerCase();
+
+    const bodyHtml = `
+      <div class="order-modal-status-grid">
+        <div class="order-modal-status-card">
+          <span class="order-modal-status-card__label">Order Status</span>
+          <span class="order-modal-status-pill order-modal-status-pill--${escapeHtml(statusKey)}">${escapeHtml(formatOrderStatus(order.status))}</span>
+        </div>
+        <div class="order-modal-status-card">
+          <span class="order-modal-status-card__label">Payment Status</span>
+          <span class="order-modal-status-pill order-modal-status-pill--${escapeHtml(paymentStatusKey)}">${escapeHtml(String(order.paymentStatus || 'Pending'))}</span>
+        </div>
+      </div>
+
+      <div class="order-modal-info-block">
+        <div class="order-modal-info-row">
+          <span class="order-modal-info-label">Order Date</span>
+          <strong class="order-modal-info-value">${escapeHtml(formatDateLabel(order.createdAt))}</strong>
+        </div>
+        <div class="order-modal-info-row">
+          <span class="order-modal-info-label">Customer Type</span>
+          <strong class="order-modal-info-value">${order.isGuest ? 'Guest customer' : 'Registered customer'}</strong>
+        </div>
+        <div class="order-modal-info-row">
+          <span class="order-modal-info-label">Payment Method</span>
+          <strong class="order-modal-info-value">${escapeHtml(order.paymentMethod || 'Online')}</strong>
+        </div>
+        <div class="order-modal-info-row order-modal-info-row--total">
+          <span class="order-modal-info-label">Total</span>
+          <strong class="order-modal-info-value">${order.totalAmount ? formatMoneyFromPaise(order.totalAmount) : '—'}</strong>
+        </div>
+        ${couponApplied ? `
+        <div class="order-modal-info-row">
+          <span class="order-modal-info-label">Coupon Applied</span>
+          <strong class="order-modal-info-value">${escapeHtml(couponApplied)}</strong>
+        </div>
+        ` : ''}
+        ${(order.trackingNumber || order.carrier) ? `
+        <div class="order-modal-info-row">
+          <span class="order-modal-info-label">Courier / AWB</span>
+          <strong class="order-modal-info-value">${escapeHtml([order.carrier, order.trackingNumber].filter(Boolean).join(' - '))}</strong>
+        </div>
+        ` : ''}
+      </div>
+
+      ${items.length ? `
+      <div>
+        <p class="order-modal-section-title">Items Ordered (${items.length})</p>
+        <div class="order-modal-items-block">
+          ${items.map((item) => `
+            <div class="order-modal-item-row">
+              <img src="${escapeHtml(item.imageUrl || FALLBACK_PRODUCT_IMAGE)}" alt="" class="order-modal-item-thumb" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
+              <div class="order-modal-item-meta">
+                <p class="order-modal-item-name">${escapeHtml(item.name || item.productName || 'Product')}</p>
+                <p class="order-modal-item-variant">${escapeHtml([item.variantLabel, `Qty: ${item.quantity || item.qty || 1}`].filter(Boolean).join(' • '))}</p>
+              </div>
+              <strong class="order-modal-item-price">${formatMoneyFromPaise(item.lineTotal || ((item.price || item.unitPrice || 0) * (item.quantity || item.qty || 1)) || 0)}</strong>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      ` : ''}
+
+      <div class="order-modal-addresses-grid">
+        <div class="order-modal-address-card">
+          <p class="order-modal-address-card__title">SHIPPING ADDRESS</p>
+          ${shippingAddressData ? `
+            <p class="order-modal-address-card__name">${escapeHtml(shippingAddressData.name)}</p>
+            ${shippingAddressData.phone ? `<p class="order-modal-address-card__phone">${escapeHtml(formatOrderModalPhone(shippingAddressData.phone))}</p>` : ''}
+            <div class="order-modal-address-card__lines">
+              ${shippingAddressData.lines.map((line) => `<p>${escapeHtml(line)}</p>`).join('')}
+            </div>
+          ` : `<p class="order-modal-address-card__lines">Address unavailable</p>`}
+        </div>
+
+        <div class="order-modal-address-card">
+          <p class="order-modal-address-card__title">BILLING ADDRESS</p>
+          ${isBillingSame ? `
+            <p class="order-modal-address-card__same">Same as shipping address</p>
+          ` : (billingAddressData ? `
+            <p class="order-modal-address-card__name">${escapeHtml(billingAddressData.name)}</p>
+            ${billingAddressData.phone ? `<p class="order-modal-address-card__phone">${escapeHtml(formatOrderModalPhone(billingAddressData.phone))}</p>` : ''}
+            <div class="order-modal-address-card__lines">
+              ${billingAddressData.lines.map((line) => `<p>${escapeHtml(line)}</p>`).join('')}
+            </div>
+          ` : `<p class="order-modal-address-card__lines">Address unavailable</p>`)}
+        </div>
+      </div>
+    `;
+
+    const footerHtml = `
+      <button type="button" class="btn btn-outline" data-order-modal-action="invoice" data-order-id="${escapeHtml(String(order.id || ''))}">Invoice</button>
+      <button type="button" class="btn btn-primary" data-order-modal-action="track" data-order-id="${escapeHtml(String(order.id || ''))}">Track Order</button>
+    `;
+
+    const modal = showMerchModal({
+      eyebrow: 'HOUSE MERCH',
+      title: orderNumber,
+      body: bodyHtml,
+      footer: footerHtml,
+      panelClass: 'merch-order-details-modal',
+    });
+
+    modal.querySelector('[data-order-modal-action="invoice"]')?.addEventListener('click', async () => {
+      await openMerchInvoice(order.id);
+    });
+
+    modal.querySelector('[data-order-modal-action="track"]')?.addEventListener('click', () => {
+      closeMerchModal();
+      if (state.accountDrawerOpen) closeAccountDrawer();
+      window.location.hash = `track-order/${encodeURIComponent(order.id)}`;
+    });
+  }
+
   async function handleAccountAction(button) {
     const action = button.dataset.accountAction;
 
@@ -3485,51 +3682,15 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     }
 
     if (action === 'view-order') {
-      const order = getOrderById(button.dataset.orderId);
-      console.log('View order:', JSON.stringify(order, null, 2));
-      showCheckoutNotice(
-        order ? (order.orderNumber || `Order #${order.id}`) : 'Order details',
-        order
-        ? `
-           <div class="order-details">
-             <div class="order-detail-row">
-               <span>Order Date</span>
-               <strong>${formatDateLabel(order.createdAt)}</strong>
-             </div>
-             <div class="order-detail-row">
-               <span>Customer Type</span>
-               <strong>${order.isGuest ? 'Guest linked to account' : 'Registered customer'}</strong>
-             </div>
-             <div class="order-detail-row">
-               <span>Order Status</span>
-               <strong>${formatOrderStatus(order.status)}</strong>
-             </div>
-             <div class="order-detail-row">
-               <span>Payment Status</span>
-               <strong>${order.paymentStatus || 'Pending'}</strong>
-             </div>
-             <div class="order-detail-row">
-               <span>Payment Method</span>
-               <strong>${order.paymentMethod || 'Online'}</strong>
-             </div>
-             ${(order.influencerCoupon || order.couponCode || order.coupon_code) ? `<div class="order-detail-row"><span>Coupon Applied</span><strong>${escapeHtml(order.influencerCoupon || order.couponCode || order.coupon_code)}</strong></div>` : ''}
-             <div class="order-detail-row">
-               <span>Shipping</span>
-               <strong>${escapeHtml(order.shippingAddress || 'Unavailable')}</strong>
-             </div>
-             <div class="order-detail-row">
-               <span>Billing</span>
-               <strong>${escapeHtml(order.billingAddress || order.shippingAddress || 'Unavailable')}</strong>
-             </div>
-             <div class="order-detail-row">
-               <span>Total</span>
-               <strong>${order.totalAmount ? formatMoneyFromPaise(order.totalAmount) : 'Unavailable'}</strong>
-             </div>
-           </div>
-         `
-        : 'Order details are unavailable.',
-       { html: true }
-      );
+      const orderId = button.dataset.orderId;
+      const order = getOrderById(orderId);
+      if (order) {
+        showOrderDetailsModal(order);
+      } else {
+        api(`/api/merch/orders/${encodeURIComponent(orderId)}/tracking`)
+          .then((res) => showOrderDetailsModal(res?.order))
+          .catch(() => showOrderDetailsModal(null));
+      }
       return;
     }
 
@@ -4543,14 +4704,15 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     return modal;
   }
 
-  function showMerchModal({ eyebrow = 'House Merch', title, body, footer = '' }) {
+  function showMerchModal({ eyebrow = 'House Merch', title, body, footer = '', panelClass = '' }) {
     const modal = ensureMerchModal();
     const panel = modal.querySelector('.merch-flow-modal__panel');
+    panel.className = 'merch-flow-modal__panel' + (panelClass ? ` ${panelClass}` : '');
     panel.innerHTML = `
       <div class="merch-flow-modal__header">
         <div>
           <p class="merch-flow-modal__eyebrow">${escapeHtml(eyebrow)}</p>
-          <h3>${escapeHtml(title)}</h3>
+          <h3 class="order-modal-header__title">${escapeHtml(title)}</h3>
         </div>
         <button class="drawer-close-btn" type="button" data-modal-close aria-label="Close">&#10005;</button>
       </div>
