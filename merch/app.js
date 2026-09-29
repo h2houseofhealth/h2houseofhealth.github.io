@@ -899,7 +899,7 @@
       orderNumber: confirmation.bookingId,
       customerEmail: confirmation.email,
       email: confirmation.email,
-      status: confirmation.trackingNumber ? 'shipped' : 'processing',
+      status: 'processing',
       createdAt: confirmation.createdAt,
       updatedAt: confirmation.createdAt,
       trackingNumber: confirmation.trackingNumber || '',
