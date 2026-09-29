@@ -843,8 +843,23 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return String(email || '').trim().toLowerCase();
   }
 
+  function isPlaceholderEmail(email) {
+    if (!email || typeof email !== 'string') return false;
+    const normalized = email.trim().toLowerCase();
+    return (
+      normalized.endsWith('@h2houseofhealth.local') ||
+      (normalized.endsWith('@h2health.local') && normalized.startsWith('customer-')) ||
+      /^customer-\d+@/i.test(normalized) ||
+      /^guest-\d+@/i.test(normalized)
+    );
+  }
+
+  function hasRealEmail(email) {
+    return Boolean(email && !isPlaceholderEmail(email));
+  }
+
   function isValidMerchEmail(email) {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim()) && !isPlaceholderEmail(email);
   }
 
   function getMerchReportTransporter() {
@@ -1986,17 +2001,21 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   function buildMerchOrderRecord(order, items = []) {
     const shippingAddress = parseMerchShippingAddress(order.shippingAddress);
     const billingAddress = parseMerchShippingAddress(order.billingAddress) || shippingAddress;
+    const realCustomerEmail = hasRealEmail(order.customerEmail) ? String(order.customerEmail) : '';
+    const realGuestEmail = hasRealEmail(order.guestEmail) ? String(order.guestEmail) : '';
     return {
       id: Number(order.id),
       orderNumber: String(order.orderNumber || ''),
       customerName: String(order.customerName || ''),
-      customerEmail: String(order.customerEmail || ''),
+      customerEmail: realCustomerEmail,
       customerPhone: String(order.customerPhone || ''),
       guestName: String(order.guestName || ''),
-      guestEmail: String(order.guestEmail || ''),
+      guestEmail: realGuestEmail,
       guestPhone: String(order.guestPhone || ''),
       isGuest: Number(order.isGuest || 0) === 1,
-      email: String(order.customerEmail || ''),
+      email: realCustomerEmail,
+      hasRealEmail: Boolean(realCustomerEmail),
+      displayEmail: realCustomerEmail || 'Email not provided',
       phone: String(order.customerPhone || ''),
       status: String(order.status || 'pending'),
       subtotal: Number(order.subtotal || 0),
@@ -2298,22 +2317,34 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       .slice(0, 5);
 
     const notifications = [];
-    const pushNotification = ({ id, type, title, message, time, read = false }) => {
+    const pushNotification = ({ id, type, title, message, time, read = false, ...extra }) => {
       if (!time) return;
-      notifications.push({ id: String(id), type, title, message, time, read });
+      notifications.push({ id: String(id), type, title, message, time, read, ...extra });
     };
 
     for (const product of products
       .filter((item) => !item.archived && Number(item.stock || 0) <= LOW_STOCK_THRESHOLD)
       .sort((left, right) => Number(left.stock || 0) - Number(right.stock || 0))) {
+      const isZero = Number(product.stock || 0) === 0;
+      let variantLabel = '';
+      if (Array.isArray(product.variants) && product.variants.length) {
+        const soldOutVariant = product.variants.find((v) => Number(v.stock || 0) === 0) || product.variants[0];
+        if (soldOutVariant) {
+          variantLabel = [soldOutVariant.color, soldOutVariant.size].filter(Boolean).join(' · ');
+        }
+      }
       pushNotification({
         id: `stock-${product.id}`,
-        type: Number(product.stock || 0) === 0 ? 'Out of Stock' : 'Low Stock',
-        title: Number(product.stock || 0) === 0 ? 'Out of Stock' : 'Low Stock',
-        message: Number(product.stock || 0) === 0
-          ? `${product.name} is out of stock.`
+        type: isZero ? 'Sold Out' : 'Low Stock',
+        title: isZero ? 'SOLD OUT' : 'Low Stock',
+        message: isZero
+          ? `${product.name} is sold out.`
           : `${product.name} has only ${Number(product.stock || 0)} units remaining.`,
         time: product.updatedAt || product.createdAt || new Date().toISOString(),
+        productId: product.id,
+        productName: product.name,
+        variantLabel: variantLabel || product.variantLabel || '',
+        stock: Number(product.stock || 0),
       });
     }
 
@@ -2324,6 +2355,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         title: 'New Order',
         message: `${order.orderNumber} placed by ${order.customerName || 'a customer'}.`,
         time: order.createdAt,
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        customerName: order.customerName,
+        amount: order.totalAmount,
       });
       if (order.influencerName || order.couponCode) {
         pushNotification({
@@ -2333,6 +2368,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           message: `${order.orderNumber} used ${order.couponCode || 'an assigned influencer coupon'}.`,
           time: order.createdAt,
           read: true,
+          orderId: order.id,
+          orderNumber: order.orderNumber,
         });
       }
       const paymentStatus = String(order.paymentStatus || '').toLowerCase();
@@ -2343,6 +2380,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           title: 'Payment Failed',
           message: `${order.orderNumber} payment failed.`,
           time: order.updatedAt || order.createdAt,
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          customerName: order.customerName,
+          amount: order.totalAmount,
+          paymentStatus: order.paymentStatus || 'failed',
         });
       } else if (['paid', 'cod_pending'].includes(paymentStatus)) {
         pushNotification({
@@ -2352,6 +2394,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           message: `Payment received for ${order.orderNumber}.`,
           time: order.updatedAt || order.createdAt,
           read: true,
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          customerName: order.customerName,
+          amount: order.totalAmount,
+          paymentStatus: order.paymentStatus || 'paid',
         });
       }
       const orderStatus = String(order.status || '').toLowerCase();
@@ -2363,6 +2410,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           message: `${order.orderNumber} was ${orderStatus}.`,
           time: order.updatedAt || order.createdAt,
           read: true,
+          orderId: order.id,
+          orderNumber: order.orderNumber,
         });
       }
     }
@@ -2375,6 +2424,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         message: `${customer.name} created a new merch account.`,
         time: customer.registrationDate,
         read: true,
+        customerId: customer.id,
+        customerName: customer.name,
       });
     }
 
@@ -3029,7 +3080,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     customer.merchandiseOrders = Number(customer.merchandiseOrders || 0);
     customer.lifetimeMerchSpend = Number(customer.lifetimeMerchSpend || 0);
     customer.couponDiscountTotal = Number(customer.couponDiscountTotal || 0);
-    customer.couponRedemptions = Array.isArray(customer.couponRedemptions) ? customer.couponRedemptions : [];
+    customer.hasRealEmail = hasRealEmail(customer.email);
+    customer.displayEmail = customer.hasRealEmail ? customer.email : 'Email not provided';
+    if (!customer.hasRealEmail) {
+      customer.rawEmail = customer.email;
+      customer.email = '';
+    }
     return customer;
   }
 
@@ -4200,13 +4256,44 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Cart is empty' });
     }
+    const incomingCustomerName = String(customer?.name || merchProfile?.fullName || authUser?.name || '').trim();
+    const incomingCustomerPhone = String(customer?.phone || merchProfile?.mobile || authUser?.mobile || '').trim();
+    const incomingCustomerEmail = String(customer?.email || '').trim().toLowerCase();
+
+    const hasIncomingRealEmail = hasRealEmail(incomingCustomerEmail);
+    const existingRealEmail = hasRealEmail(authUser?.email)
+      ? String(authUser.email).trim().toLowerCase()
+      : (hasRealEmail(merchProfile?.email) ? String(merchProfile.email).trim().toLowerCase() : '');
+    const realEmailToUse = hasIncomingRealEmail ? incomingCustomerEmail : existingRealEmail;
+
+    if (hasIncomingRealEmail && authUser) {
+      try {
+        const emailOwner = db
+          .prepare('SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1')
+          .get(incomingCustomerEmail, authUser.id);
+        if (!emailOwner) {
+          db.prepare('UPDATE users SET email = ? WHERE id = ?').run(incomingCustomerEmail, authUser.id);
+          db.prepare("UPDATE merch_customer_profiles SET email = ?, updated_at = datetime('now') WHERE user_id = ?").run(incomingCustomerEmail, authUser.id);
+          if (merchProfile) merchProfile.email = incomingCustomerEmail;
+          authUser.email = incomingCustomerEmail;
+        }
+      } catch (err) {
+        console.warn('[Merch] Failed to update user email during checkout:', err?.message || err);
+      }
+    }
+
+    const dbCustomerEmail = realEmailToUse || (authUser ? `customer-${authUser.id}@h2houseofhealth.local` : (incomingCustomerPhone ? `customer-${Date.now()}@h2houseofhealth.local` : ''));
     const resolvedCustomer = {
-      name: String(customer?.name || merchProfile?.fullName || authUser?.name || '').trim(),
-      email: String(customer?.email || merchProfile?.email || authUser?.email || '').trim().toLowerCase(),
-      phone: String(customer?.phone || merchProfile?.mobile || authUser?.mobile || '').trim(),
+      name: incomingCustomerName,
+      email: realEmailToUse,
+      phone: incomingCustomerPhone,
     };
-    if (!resolvedCustomer.name || !resolvedCustomer.email || !resolvedCustomer.phone) {
-      return res.status(400).json({ error: 'Customer name, email, and phone required' });
+
+    if (!resolvedCustomer.name || !resolvedCustomer.phone) {
+      return res.status(400).json({ error: 'Customer name and phone number required' });
+    }
+    if (!authUser && !resolvedCustomer.phone && !realEmailToUse) {
+      return res.status(400).json({ error: 'Customer phone or email required' });
     }
 
     // Validate items and calculate totals
@@ -4290,8 +4377,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'online', 'pending', ?, ?, ?)
       `);
       const result = insertOrder.run(
-        orderNumber, resolvedCustomer.name, resolvedCustomer.email, resolvedCustomer.phone,
-        guestName, guestEmail, guestPhone, isGuestCheckout ? 1 : 0, authUser?.id || null, merchProfile?.id || null,
+        orderNumber, resolvedCustomer.name, dbCustomerEmail, resolvedCustomer.phone,
+        guestName, isGuestCheckout ? (realEmailToUse || null) : null, guestPhone, isGuestCheckout ? 1 : 0, authUser?.id || null, merchProfile?.id || null,
         subtotal, gstAmount, shippingCharge, discountAmount, couponResult.coupon?.id || null, couponResult.couponCode || null, influencerId, commissionSnapshot.total, totalAmount,
         rpOrder.id, JSON.stringify(shippingAddressPayload || {}), JSON.stringify(billingAddressPayload || shippingAddressPayload || {})
       );
@@ -4423,12 +4510,43 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Cart is empty' });
     }
+    const incomingCustomerName = String(customer?.name || merchProfile?.fullName || authUser?.name || '').trim();
+    const incomingCustomerPhone = String(customer?.phone || merchProfile?.mobile || authUser?.mobile || '').trim();
+    const incomingCustomerEmail = String(customer?.email || '').trim().toLowerCase();
+
+    const hasIncomingRealEmail = hasRealEmail(incomingCustomerEmail);
+    const existingRealEmail = hasRealEmail(authUser?.email)
+      ? String(authUser.email).trim().toLowerCase()
+      : (hasRealEmail(merchProfile?.email) ? String(merchProfile.email).trim().toLowerCase() : '');
+    const realEmailToUse = hasIncomingRealEmail ? incomingCustomerEmail : existingRealEmail;
+
+    if (hasIncomingRealEmail && authUser) {
+      try {
+        const emailOwner = db
+          .prepare('SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1')
+          .get(incomingCustomerEmail, authUser.id);
+        if (!emailOwner) {
+          db.prepare('UPDATE users SET email = ? WHERE id = ?').run(incomingCustomerEmail, authUser.id);
+          db.prepare("UPDATE merch_customer_profiles SET email = ?, updated_at = datetime('now') WHERE user_id = ?").run(incomingCustomerEmail, authUser.id);
+          if (merchProfile) merchProfile.email = incomingCustomerEmail;
+          authUser.email = incomingCustomerEmail;
+        }
+      } catch (err) {
+        console.warn('[Merch] Failed to update user email during COD checkout:', err?.message || err);
+      }
+    }
+
+    const dbCustomerEmail = realEmailToUse || (authUser ? `customer-${authUser.id}@h2houseofhealth.local` : (incomingCustomerPhone ? `customer-${Date.now()}@h2houseofhealth.local` : ''));
     const resolvedCustomer = {
-      name: String(customer?.name || merchProfile?.fullName || authUser?.name || '').trim(),
-      email: String(customer?.email || merchProfile?.email || authUser?.email || '').trim().toLowerCase(),
-      phone: String(customer?.phone || merchProfile?.mobile || authUser?.mobile || '').trim(),
+      name: incomingCustomerName,
+      email: realEmailToUse,
+      phone: incomingCustomerPhone,
     };
-    if (!resolvedCustomer.name || !resolvedCustomer.email || !resolvedCustomer.phone) {
+
+    if (!resolvedCustomer.name || !resolvedCustomer.phone) {
+      return res.status(400).json({ error: 'Customer name and phone number required' });
+    }
+    if (!authUser && !resolvedCustomer.phone && !realEmailToUse) {
       return res.status(400).json({ error: 'Customer details required' });
     }
 
@@ -4480,10 +4598,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     `).run(
       orderNumber,
       resolvedCustomer.name,
-      resolvedCustomer.email,
+      dbCustomerEmail,
       resolvedCustomer.phone,
       guestName,
-      guestEmail,
+      isGuestCheckout ? (realEmailToUse || null) : null,
       guestPhone,
       isGuestCheckout ? 1 : 0,
       authUser?.id || null,
@@ -4639,7 +4757,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         createdAt: order.createdAt || null,
       }));
 
-    res.json({ profile, addresses, cartItems, wishlistItems, orders, couponHistory });
+    const isReal = hasRealEmail(profile.email);
+    const safeProfile = {
+      ...profile,
+      email: isReal ? profile.email : '',
+      rawEmail: profile.email,
+      hasRealEmail: isReal,
+      displayEmail: isReal ? profile.email : 'Email not provided',
+    };
+
+    res.json({ profile: safeProfile, addresses, cartItems, wishlistItems, orders, couponHistory });
   });
 
   app.get('/api/merch/influencer-dashboard', requireMerchAuth, (req, res) => {
@@ -4673,9 +4800,21 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const hasMobileField =
       Object.prototype.hasOwnProperty.call(req.body || {}, 'mobile') ||
       Object.prototype.hasOwnProperty.call(req.body || {}, 'phone');
+    const hasEmailField = Object.prototype.hasOwnProperty.call(req.body || {}, 'email');
 
     if (mobile && !/^[0-9+\-\s()]{7,20}$/.test(mobile)) {
       return res.status(400).json({ message: 'invalid mobile number' });
+    }
+    if (hasEmailField && email) {
+      if (!isValidMerchEmail(email)) {
+        return res.status(400).json({ message: 'invalid email address' });
+      }
+      const existingEmailOwner = db
+        .prepare('SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1')
+        .get(email, req.user.id);
+      if (existingEmailOwner) {
+        return res.status(409).json({ message: 'Email address already in use' });
+      }
     }
 
     const updates = [];
@@ -4684,7 +4823,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       updates.push('full_name = ?');
       params.push(fullName);
     }
-    if (email) {
+    if (hasEmailField && email && hasRealEmail(email)) {
       updates.push('email = ?');
       params.push(email);
     }
@@ -4704,9 +4843,21 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (hasMobileField && mobile) {
       db.prepare('UPDATE users SET mobile = ? WHERE id = ?').run(mobile, req.user.id);
     }
+    if (hasEmailField && email && hasRealEmail(email)) {
+      db.prepare('UPDATE users SET email = ? WHERE id = ?').run(email, req.user.id);
+      req.user.email = email;
+    }
 
     const nextProfile = getMerchCustomerProfileByUserId(req.user.id);
-    res.json({ profile: nextProfile || profile });
+    const nextIsReal = hasRealEmail(nextProfile?.email);
+    const safeNextProfile = nextProfile ? {
+      ...nextProfile,
+      email: nextIsReal ? nextProfile.email : '',
+      rawEmail: nextProfile.email,
+      hasRealEmail: nextIsReal,
+      displayEmail: nextIsReal ? nextProfile.email : 'Email not provided',
+    } : null;
+    res.json({ profile: safeNextProfile || profile });
   });
 
   app.patch('/api/merch/influencer-profile', requireMerchAuth, (req, res) => {

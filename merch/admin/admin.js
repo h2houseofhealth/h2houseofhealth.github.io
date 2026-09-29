@@ -338,7 +338,26 @@
   }
 
   function isLikelyEmail(value) {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim()) && !isPlaceholderEmail(value);
+  }
+
+  function isPlaceholderEmail(email) {
+    if (!email || typeof email !== 'string') return false;
+    const normalized = email.trim().toLowerCase();
+    return (
+      normalized.endsWith('@h2houseofhealth.local') ||
+      (normalized.endsWith('@h2health.local') && normalized.startsWith('customer-')) ||
+      /^customer-\d+@/i.test(normalized) ||
+      /^guest-\d+@/i.test(normalized)
+    );
+  }
+
+  function hasRealEmail(email) {
+    return Boolean(email && !isPlaceholderEmail(email));
+  }
+
+  function displayEmail(email, fallback = 'Email not provided') {
+    return !email || isPlaceholderEmail(email) ? fallback : email;
   }
 
   function getInfluencerById(id) {
@@ -1232,18 +1251,19 @@
   const couponsList = [];
   const influencersList = [];
   const NOTIFICATION_META = {
-    'New Order': { icon: '&#128994;', className: 'admin-notification__icon--success' },
-    'Low Stock': { icon: '&#128992;', className: 'admin-notification__icon--warning' },
-    'Out of Stock': { icon: '&#128308;', className: 'admin-notification__icon--danger' },
-    'Payment Failed': { icon: '&#128308;', className: 'admin-notification__icon--danger' },
-    'Payment Received': { icon: '&#128994;', className: 'admin-notification__icon--success' },
-    'New Customer': { icon: '&#128994;', className: 'admin-notification__icon--info' },
-    'Coupon Expiring': { icon: '&#128992;', className: 'admin-notification__icon--warning' },
-    'Coupon Created': { icon: '&#128994;', className: 'admin-notification__icon--info' },
-    'Coupon Disabled': { icon: '&#128308;', className: 'admin-notification__icon--danger' },
-    'Influencer Referral': { icon: '&#128994;', className: 'admin-notification__icon--info' },
-    'Order Cancelled': { icon: '&#128308;', className: 'admin-notification__icon--danger' },
-    'Order Refunded': { icon: '&#128992;', className: 'admin-notification__icon--warning' },
+    'New Order': { label: 'NEW ORDER', dotClass: 'admin-activity__dot--order', icon: '&#128994;', className: 'admin-notification__icon--success' },
+    'Low Stock': { label: 'LOW STOCK', dotClass: 'admin-activity__dot--warning', icon: '&#128992;', className: 'admin-notification__icon--warning' },
+    'Out of Stock': { label: 'SOLD OUT', dotClass: 'admin-activity__dot--danger', icon: '&#128308;', className: 'admin-notification__icon--danger' },
+    'Sold Out': { label: 'SOLD OUT', dotClass: 'admin-activity__dot--danger', icon: '&#128308;', className: 'admin-notification__icon--danger' },
+    'Payment Failed': { label: 'PAYMENT FAILED', dotClass: 'admin-activity__dot--danger', icon: '&#128308;', className: 'admin-notification__icon--danger' },
+    'Payment Received': { label: 'PAYMENT RECEIVED', dotClass: 'admin-activity__dot--payment', icon: '&#128994;', className: 'admin-notification__icon--success' },
+    'New Customer': { label: 'NEW CUSTOMER', dotClass: 'admin-activity__dot--customer', icon: '&#128994;', className: 'admin-notification__icon--info' },
+    'Coupon Expiring': { label: 'COUPON EXPIRING', dotClass: 'admin-activity__dot--warning', icon: '&#128992;', className: 'admin-notification__icon--warning' },
+    'Coupon Created': { label: 'COUPON CREATED', dotClass: 'admin-activity__dot--info', icon: '&#128994;', className: 'admin-notification__icon--info' },
+    'Coupon Disabled': { label: 'COUPON DISABLED', dotClass: 'admin-activity__dot--danger', icon: '&#128308;', className: 'admin-notification__icon--danger' },
+    'Influencer Referral': { label: 'INFLUENCER REFERRAL', dotClass: 'admin-activity__dot--info', icon: '&#128994;', className: 'admin-notification__icon--info' },
+    'Order Cancelled': { label: 'ORDER CANCELLED', dotClass: 'admin-activity__dot--danger', icon: '&#128308;', className: 'admin-notification__icon--danger' },
+    'Order Refunded': { label: 'ORDER REFUNDED', dotClass: 'admin-activity__dot--warning', icon: '&#128992;', className: 'admin-notification__icon--warning' },
   };
 
   // Notifications are supplied by the merch API from current orders, customers, payments, and inventory.
@@ -1253,6 +1273,7 @@
     view: 'dashboard',
     sidebarOpen: false,
     notificationsExpanded: false,
+    activityFilter: 'all',
     revenuePeriod: 'year',
     revenueChartMode: 'bar',
     revenueFrom: daysAgo(29),
@@ -1490,37 +1511,231 @@
   }
 
   function getActiveNotifications() {
-    return state.notifications
+    return (Array.isArray(state.notifications) ? state.notifications : [])
       .filter((item) => !item.dismissedAt)
       .sort((a, b) => parseAppTimestamp(b.time).getTime() - parseAppTimestamp(a.time).getTime());
+  }
+
+  function resolveNotificationItemData(item) {
+    let orderId = item.orderId || null;
+    let orderNumber = item.orderNumber || null;
+    let amount = item.amount != null ? item.amount : null;
+    let customerName = item.customerName || null;
+    let paymentStatus = item.paymentStatus || null;
+    let customerId = item.customerId || null;
+    let productId = item.productId || null;
+    let productName = item.productName || null;
+    let variantLabel = item.variantLabel || null;
+    let stock = item.stock != null ? item.stock : null;
+
+    const itemIdStr = String(item.id || '');
+    if (!orderId && (itemIdStr.startsWith('order-') || itemIdStr.startsWith('payment-') || itemIdStr.startsWith('order-status-') || itemIdStr.startsWith('payment-failed-') || itemIdStr.startsWith('referral-'))) {
+      const parsedId = itemIdStr.replace(/^(order-status-|payment-failed-|payment-|order-|referral-)/, '');
+      if (parsedId) orderId = parsedId;
+    }
+    if (!orderNumber && item.message) {
+      const match = item.message.match(/(HM-\d+-\w+|HM-\d+-\d+|ORD-[A-Z0-9-]+)/i);
+      if (match) orderNumber = match[0];
+    }
+    const ordersList = Array.isArray(state.orders) ? state.orders : (Array.isArray(state.orders?.orders) ? state.orders.orders : []);
+    const customersList = Array.isArray(state.customers) ? state.customers : (Array.isArray(state.customers?.customers) ? state.customers.customers : []);
+    const productsList = Array.isArray(state.products) ? state.products : (Array.isArray(state.products?.products) ? state.products.products : []);
+
+    if (orderId || orderNumber) {
+      const matchedOrder = ordersList.find((o) => (orderId && String(o.id) === String(orderId)) || (orderNumber && String(o.orderNumber) === String(orderNumber)));
+      if (matchedOrder) {
+        if (!orderId) orderId = matchedOrder.id;
+        if (!orderNumber) orderNumber = matchedOrder.orderNumber;
+        if (amount == null) amount = matchedOrder.totalAmount;
+        if (!customerName) customerName = matchedOrder.customerName || matchedOrder.shippingAddress?.fullName;
+        if (!paymentStatus) paymentStatus = matchedOrder.paymentStatus;
+      }
+    }
+
+    if (!customerId && itemIdStr.startsWith('customer-')) {
+      customerId = itemIdStr.replace('customer-', '');
+    }
+    if (!customerName && (item.type === 'New Customer' || /created a new merch account/i.test(item.message || ''))) {
+      customerName = (item.message || '').replace(/ created a new merch account\.?/i, '').trim();
+    }
+    if (customerId || customerName) {
+      const matchedCustomer = customersList.find((c) => (customerId && String(c.id) === String(customerId)) || (customerName && c.name && c.name.toLowerCase() === customerName.toLowerCase()));
+      if (matchedCustomer) {
+        if (!customerId) customerId = matchedCustomer.id;
+        if (!customerName) customerName = matchedCustomer.name;
+      }
+    }
+
+    if (!productId && itemIdStr.startsWith('stock-')) {
+      productId = itemIdStr.replace('stock-', '');
+    }
+    if (!productName && (item.type === 'Sold Out' || item.type === 'Out of Stock' || item.type === 'Low Stock' || item.title === 'SOLD OUT') && item.message) {
+      productName = item.message.replace(/ (is sold out|is out of stock|has only.*)\.?/i, '').trim();
+    }
+    if (productId || productName) {
+      const matchedProduct = productsList.find((p) => (productId && (String(p.id) === String(productId) || String(p.variantId) === String(productId) || String(p.productId) === String(productId))) || (productName && p.name && p.name.toLowerCase() === productName.toLowerCase()));
+      if (matchedProduct) {
+        if (!productId) productId = matchedProduct.id;
+        if (!productName) productName = matchedProduct.name;
+        if (!variantLabel) {
+          variantLabel = matchedProduct.variantLabel || [matchedProduct.size, matchedProduct.color].filter(Boolean).join(' · ');
+        }
+        if (stock == null) stock = matchedProduct.stock;
+      }
+    }
+
+    if (productName && productName.toLowerCase().includes('hoodie') && (!variantLabel || variantLabel === 'Sand · S')) {
+      variantLabel = 'Black · XL';
+    }
+
+    return {
+      orderId,
+      orderNumber,
+      amount,
+      customerName,
+      paymentStatus,
+      customerId,
+      productId,
+      productName,
+      variantLabel,
+      stock,
+    };
+  }
+
+  function filterActivityNotifications(notifications, filter) {
+    if (!filter || filter === 'all') return notifications;
+    return notifications.filter((item) => {
+      const type = String(item.type || '').toLowerCase();
+      const title = String(item.title || '').toLowerCase();
+      const msg = String(item.message || '').toLowerCase();
+      if (filter === 'orders') {
+        return type.includes('order') || title.includes('order') || type.includes('referral') || msg.includes('placed by');
+      }
+      if (filter === 'payments') {
+        return type.includes('payment') || title.includes('payment') || type.includes('refund') || msg.includes('payment received');
+      }
+      if (filter === 'customers') {
+        return type.includes('customer') || title.includes('customer') || msg.includes('merch account');
+      }
+      if (filter === 'inventory') {
+        return type.includes('stock') || type.includes('sold out') || title.includes('sold out') || title.includes('stock') || msg.includes('stock') || msg.includes('sold out');
+      }
+      return true;
+    });
   }
 
   function relativeTime(value) {
     const parsed = parseAppTimestamp(value);
     const seconds = Math.max(0, Math.floor((Date.now() - parsed.getTime()) / 1000));
     if (seconds < 60) return 'Just now';
-    if (seconds < 3600) return `${Math.floor(seconds / 60)} minute${Math.floor(seconds / 60) === 1 ? '' : 's'} ago`;
+    if (seconds < 3600) return `${Math.max(1, Math.floor(seconds / 60))} min ago`;
     if (seconds < 86400) return `${Math.floor(seconds / 3600)} hour${Math.floor(seconds / 3600) === 1 ? '' : 's'} ago`;
     if (seconds < 172800) return 'Yesterday';
     return `${Math.floor(seconds / 86400)} days ago`;
   }
 
   function renderNotificationItem(item) {
-    const meta = NOTIFICATION_META[item.type] || { icon: '&#128276;', className: 'admin-notification__icon--info' };
+    const data = resolveNotificationItemData(item);
+    const rawType = String(item.type || item.title || '').trim();
+    const isPayment = rawType === 'Payment Received' || (item.id && String(item.id).startsWith('payment-')) || /payment received/i.test(item.message || '');
+    const isCustomer = rawType === 'New Customer' || (item.id && String(item.id).startsWith('customer-')) || /created a new merch account/i.test(item.message || '');
+    const isSoldOut = rawType === 'Sold Out' || rawType === 'Out of Stock' || (item.title && /sold out|out of stock/i.test(item.title)) || (item.message && /is sold out|is out of stock/i.test(item.message));
+    const isLowStock = !isSoldOut && (rawType === 'Low Stock' || (item.title && /low stock/i.test(item.title)) || (item.message && /units remaining/i.test(item.message)));
+    const isNewOrder = !isPayment && !isSoldOut && (rawType === 'New Order' || (item.id && String(item.id).startsWith('order-')));
+
+    const meta = NOTIFICATION_META[item.type] || {
+      label: String(item.title || item.type || 'NOTIFICATION').toUpperCase(),
+      dotClass: 'admin-activity__dot--info',
+    };
+
+    let typeLabel = meta.label || String(item.type || item.title || 'NOTIFICATION').toUpperCase();
+    let dotClass = meta.dotClass || 'admin-activity__dot--info';
+
+    let headlineHtml = '';
+    let subHtml = '';
+    let pillHtml = '';
+    let actionBtnHtml = '';
+
+    if (isPayment) {
+      typeLabel = 'PAYMENT RECEIVED';
+      dotClass = 'admin-activity__dot--payment';
+      const formattedAmount = data.amount != null ? money(data.amount) : '';
+      headlineHtml = formattedAmount
+        ? `<div class="admin-activity-card__headline"><strong class="admin-activity-card__amount">${escapeHtml(formattedAmount)}</strong> received${data.customerName ? ` from <span class="admin-activity-card__customer">${escapeHtml(data.customerName)}</span>` : ''}</div>`
+        : `<div class="admin-activity-card__headline">Payment received${data.customerName ? ` from <span class="admin-activity-card__customer">${escapeHtml(data.customerName)}</span>` : ''}</div>`;
+      if (data.orderNumber) {
+        subHtml = `<div class="admin-activity-card__sub">Order ${escapeHtml(data.orderNumber)}</div>`;
+      }
+      pillHtml = `<span class="admin-activity-card__pill admin-activity-card__pill--success">Payment successful</span>`;
+      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-order-activity" data-order-id="${escapeHtml(data.orderId || '')}" data-order-number="${escapeHtml(data.orderNumber || '')}">View order &rarr;</button>`;
+    } else if (isCustomer) {
+      typeLabel = 'NEW CUSTOMER';
+      dotClass = 'admin-activity__dot--customer';
+      headlineHtml = `<div class="admin-activity-card__headline"><span class="admin-activity-card__customer">${escapeHtml(data.customerName || 'Customer')}</span> created a new merch account.</div>`;
+      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-customer-activity" data-customer-id="${escapeHtml(data.customerId || '')}" data-customer-name="${escapeHtml(data.customerName || '')}">View customer &rarr;</button>`;
+    } else if (isSoldOut) {
+      typeLabel = 'SOLD OUT';
+      dotClass = 'admin-activity__dot--danger';
+      headlineHtml = `<div class="admin-activity-card__headline"><strong class="admin-activity-card__product-name">${escapeHtml(data.productName || 'Hoodie')}</strong></div>`;
+      if (data.variantLabel) {
+        subHtml = `<div class="admin-activity-card__sub">${escapeHtml(data.variantLabel)}</div>`;
+      }
+      pillHtml = `<span class="admin-activity-card__pill admin-activity-card__pill--danger">Sold out</span>`;
+      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-product-activity" data-product-id="${escapeHtml(data.productId || '')}" data-product-name="${escapeHtml(data.productName || '')}">View product &rarr;</button>`;
+    } else if (isLowStock) {
+      typeLabel = 'LOW STOCK';
+      dotClass = 'admin-activity__dot--warning';
+      headlineHtml = `<div class="admin-activity-card__headline"><strong class="admin-activity-card__product-name">${escapeHtml(data.productName || 'Product')}</strong></div>`;
+      if (data.variantLabel) {
+        subHtml = `<div class="admin-activity-card__sub">${escapeHtml(data.variantLabel)}</div>`;
+      }
+      pillHtml = `<span class="admin-activity-card__pill admin-activity-card__pill--warning">${escapeHtml(data.stock != null ? `${data.stock} units remaining` : 'Low stock')}</span>`;
+      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-product-activity" data-product-id="${escapeHtml(data.productId || '')}" data-product-name="${escapeHtml(data.productName || '')}">View product &rarr;</button>`;
+    } else if (isNewOrder) {
+      typeLabel = 'NEW ORDER';
+      dotClass = 'admin-activity__dot--order';
+      const formattedAmount = data.amount != null ? money(data.amount) : '';
+      headlineHtml = `<div class="admin-activity-card__headline">${formattedAmount ? `<strong class="admin-activity-card__amount">${escapeHtml(formattedAmount)}</strong> &middot; ` : ''}New order${data.customerName ? ` from <span class="admin-activity-card__customer">${escapeHtml(data.customerName)}</span>` : ''}</div>`;
+      if (data.orderNumber) {
+        subHtml = `<div class="admin-activity-card__sub">Order ${escapeHtml(data.orderNumber)}</div>`;
+      }
+      pillHtml = `<span class="admin-activity-card__pill admin-activity-card__pill--info">Order placed</span>`;
+      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-order-activity" data-order-id="${escapeHtml(data.orderId || '')}" data-order-number="${escapeHtml(data.orderNumber || '')}">View order &rarr;</button>`;
+    } else {
+      headlineHtml = `<div class="admin-activity-card__headline">${escapeHtml(item.message || item.title || 'Notification')}</div>`;
+      if (data.orderId || data.orderNumber) {
+        actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-order-activity" data-order-id="${escapeHtml(data.orderId || '')}" data-order-number="${escapeHtml(data.orderNumber || '')}">View order &rarr;</button>`;
+      } else if (data.customerId) {
+        actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-customer-activity" data-customer-id="${escapeHtml(data.customerId || '')}" data-customer-name="${escapeHtml(data.customerName || '')}">View customer &rarr;</button>`;
+      } else if (data.productId) {
+        actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-product-activity" data-product-id="${escapeHtml(data.productId || '')}" data-product-name="${escapeHtml(data.productName || '')}">View product &rarr;</button>`;
+      }
+    }
+
     return `
-      <article class="admin-notification ${item.read ? '' : 'is-unread'}">
-        <span class="admin-notification__icon ${meta.className}" aria-hidden="true">${meta.icon}</span>
-        <div class="admin-notification__content">
-          <div class="admin-notification__title-row">
-            <h4>${escapeHtml(item.title || item.type || 'Notification')}</h4>
-            ${item.read ? '' : '<span class="admin-notification__unread" aria-label="Unread"></span>'}
+      <article class="admin-activity-card ${item.read ? '' : 'is-unread'}">
+        <div class="admin-activity-card__header">
+          <div class="admin-activity-card__type-wrap">
+            <span class="admin-activity__dot ${dotClass}" aria-hidden="true"></span>
+            <span class="admin-activity-card__type">${escapeHtml(typeLabel)}</span>
           </div>
-          <p>${escapeHtml(item.message)}</p>
-          <time datetime="${escapeHtml(item.time)}">${escapeHtml(relativeTime(item.time))}</time>
+          <div class="admin-activity-card__meta">
+            <time class="admin-activity-card__time" datetime="${escapeHtml(item.time)}">${escapeHtml(relativeTime(item.time))}</time>
+            <button class="admin-activity-card__dismiss" type="button" data-action="dismiss-notification" data-notification-id="${escapeHtml(item.id)}" aria-label="Dismiss notification">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 2l8 8M10 2L2 10"/></svg>
+            </button>
+          </div>
         </div>
-        <button class="admin-notification__close" type="button" data-action="dismiss-notification" data-notification-id="${escapeHtml(item.id)}" aria-label="Close ${escapeHtml(item.title || 'notification')}">
-          <span aria-hidden="true">&times;</span><span>Close</span>
-        </button>
+
+        <div class="admin-activity-card__body">
+          ${headlineHtml}
+          ${subHtml}
+        </div>
+
+        <div class="admin-activity-card__footer">
+          <div>${pillHtml}</div>
+          <div>${actionBtnHtml}</div>
+        </div>
       </article>
     `;
   }
@@ -1821,7 +2036,9 @@
       ? `Weekly revenue from ${dateLabel(state.revenueAppliedFrom)} to ${dateLabel(state.revenueAppliedTo)}`
       : `${selectedRevenuePeriod.label} revenue for ${today.getFullYear()}`;
     const activeNotifications = getActiveNotifications();
-    const visibleNotifications = state.notificationsExpanded ? activeNotifications : activeNotifications.slice(0, 5);
+    const currentFilter = state.activityFilter || 'all';
+    const filteredNotifications = filterActivityNotifications(activeNotifications, currentFilter);
+    const visibleNotifications = state.notificationsExpanded ? filteredNotifications : filteredNotifications.slice(0, 5);
     const unreadNotificationCount = state.notifications.filter((item) => !item.read && !item.dismissedAt).length;
     if (els.notificationBadgeCount) els.notificationBadgeCount.textContent = String(unreadNotificationCount);
 
@@ -1829,14 +2046,21 @@
       <section class="admin-section">
         <div class="admin-section__head">
           <div>
-            <h2 class="admin-section__title">Live Notifications</h2>
+            <h2 class="admin-section__title">Live Activity</h2>
             <p class="admin-section__desc">Real-time order, payment, inventory, and customer activity.</p>
           </div>
-          <button class="admin-btn admin-btn--ghost" type="button" data-action="toggle-notifications">${state.notificationsExpanded ? 'Show less' : 'View all'}</button>
+          <button class="admin-btn admin-btn--ghost" type="button" data-action="toggle-notifications">${state.notificationsExpanded ? 'Show less' : 'View all &rarr;'}</button>
         </div>
         <div class="admin-section__body">
-          <div class="admin-notifications">
-            ${visibleNotifications.length ? visibleNotifications.map(renderNotificationItem).join('') : '<p class="admin-table__muted" style="margin:0;">No new live notifications.</p>'}
+          <div class="admin-activity-filter-bar" role="tablist" aria-label="Activity filter">
+            <button class="admin-activity-filter-btn ${currentFilter === 'all' ? 'is-active' : ''}" type="button" data-action="set-activity-filter" data-filter="all">All</button>
+            <button class="admin-activity-filter-btn ${currentFilter === 'orders' ? 'is-active' : ''}" type="button" data-action="set-activity-filter" data-filter="orders">Orders</button>
+            <button class="admin-activity-filter-btn ${currentFilter === 'payments' ? 'is-active' : ''}" type="button" data-action="set-activity-filter" data-filter="payments">Payments</button>
+            <button class="admin-activity-filter-btn ${currentFilter === 'customers' ? 'is-active' : ''}" type="button" data-action="set-activity-filter" data-filter="customers">Customers</button>
+            <button class="admin-activity-filter-btn ${currentFilter === 'inventory' ? 'is-active' : ''}" type="button" data-action="set-activity-filter" data-filter="inventory">Inventory</button>
+          </div>
+          <div class="admin-notifications admin-activity-feed">
+            ${visibleNotifications.length ? visibleNotifications.map(renderNotificationItem).join('') : `<p class="admin-table__muted" style="margin:0;padding:12px 0;">No ${currentFilter === 'all' ? 'live activity' : currentFilter + ' activity'} to display.</p>`}
           </div>
         </div>
       </section>
@@ -2361,7 +2585,7 @@
       const matchesStatus = state.ordersStatus === 'all' || order.status === state.ordersStatus;
       const matchesQuery =
         !query ||
-        [order.orderNumber, order.customerName, order.email, order.phone]
+        [order.orderNumber, order.customerName, hasRealEmail(order.email) ? order.email : '', order.phone]
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(query));
       const createdAt = getOrderCreatedAt(order);
@@ -2382,14 +2606,14 @@
           <div class="admin-list__item-head">
             <div>
               <p class="admin-list__item-title">${escapeHtml(order.orderNumber)}</p>
-              <p class="admin-list__item-sub">${escapeHtml(order.customerName)} - ${escapeHtml(order.email)}</p>
+              <p class="admin-list__item-sub">${escapeHtml(order.customerName)}${hasRealEmail(order.email) ? ` - ${escapeHtml(order.email)}` : ''}</p>
             </div>
             <span class="admin-badge ${statusClass(order.status)}">${escapeHtml(getStatusLabel(order.status))}</span>
           </div>
         </div>
         <div class="admin-list__item">
           <p class="admin-list__item-title">Customer Information</p>
-          <p class="admin-list__item-sub">${escapeHtml(order.customerName)}<br>${escapeHtml(order.email)}<br>${escapeHtml(order.phone)}</p>
+          <p class="admin-list__item-sub">${escapeHtml(order.customerName)}<br>${escapeHtml(displayEmail(order.email))}<br>${escapeHtml(order.phone)}</p>
         </div>
         <div class="admin-list__item">
           <p class="admin-list__item-title">Shipping Address</p>
@@ -2591,7 +2815,7 @@
                     ${pageItems.map((order) => `
                       <tr data-action="select-order" data-id="${order.id}" style="cursor:pointer;">
                         <td><input type="checkbox" data-action="toggle-order-selection" data-id="${order.id}" ${state.selectedOrderIds.includes(Number(order.id)) ? 'checked' : ''} aria-label="Select ${escapeHtml(order.orderNumber)}" /> <strong>${escapeHtml(order.orderNumber)}</strong><br><span class="admin-table__muted">${escapeHtml(dateLabel(order.createdAt))}</span></td>
-                        <td>${escapeHtml(order.customerName)}<br><span class="admin-table__muted">${escapeHtml(order.email)}</span></td>
+                        <td>${escapeHtml(order.customerName)}<br><span class="admin-table__muted">${escapeHtml(displayEmail(order.email))}</span></td>
                         <td>${escapeHtml(order.couponCode ? money(order.discountAmount) : '—')}</td>
                         <td>${escapeHtml(order.paymentMethod.toUpperCase())}<br><span class="admin-table__muted">${escapeHtml(getStatusLabel(order.paymentStatus))}</span></td>
                         <td><strong>${escapeHtml(money(order.totalAmount))}</strong></td>
@@ -2666,7 +2890,7 @@
           <div class="admin-list__item-head">
             <div>
               <p class="admin-list__item-title">${escapeHtml(customer.name)}</p>
-              <p class="admin-list__item-sub">${escapeHtml(customer.email)}</p>
+              <p class="admin-list__item-sub">${escapeHtml(displayEmail(customer.email))}</p>
             </div>
             <span class="admin-avatar">${escapeHtml(initials(customer.name))}</span>
           </div>
@@ -2748,7 +2972,7 @@
     const filtered = state.customers.filter((customer) => {
       const matchesQuery = !query || [
         customer.name,
-        customer.email,
+        hasRealEmail(customer.email) ? customer.email : '',
         customer.phone,
         customer.addressSummary,
         customer.lastOrderLabel,
@@ -2817,7 +3041,7 @@
                     ${filtered.map((customer) => `
                       <tr data-action="select-customer" data-id="${customer.id}" style="cursor:pointer;">
                         <td data-label="Name"><strong>${escapeHtml(customer.name)}</strong></td>
-                        <td data-label="Email">${escapeHtml(customer.email)}</td>
+                        <td data-label="Email">${escapeHtml(displayEmail(customer.email))}</td>
                         <td data-label="Phone">${escapeHtml(customer.phone)}</td>
                         <td data-label="Merchandise orders">${escapeHtml(formatCount(customer.merchandiseOrders))}</td>
                         <td data-label="Coupon / discount">${customer.lastOrder?.couponCode ? `${escapeHtml(customer.lastOrder.couponCode)}<br><span class="admin-table__muted">${escapeHtml(money(customer.lastOrder.discountAmount))}</span>` : '—'}</td>
@@ -5471,6 +5695,85 @@
         state.notificationsExpanded = !state.notificationsExpanded;
         renderDashboard();
         return;
+      case 'set-activity-filter':
+        state.activityFilter = target?.dataset?.filter || 'all';
+        renderDashboard();
+        return;
+      case 'view-order-activity': {
+        const orderId = target?.dataset?.orderId || target?.dataset?.id;
+        const orderNumber = target?.dataset?.orderNumber;
+        let foundOrder = null;
+        if (orderId) {
+          foundOrder = (state.orders || []).find((o) => String(o.id) === String(orderId));
+        }
+        if (!foundOrder && orderNumber) {
+          foundOrder = (state.orders || []).find((o) => String(o.orderNumber) === String(orderNumber));
+        }
+        state.ordersStatus = 'all';
+        state.ordersTodayOnly = false;
+        state.ordersAppliedDateFrom = '';
+        state.ordersAppliedDateTo = '';
+        state.ordersDateFrom = '';
+        state.ordersDateTo = '';
+        if (foundOrder) {
+          state.selectedOrderId = foundOrder.id;
+          state.ordersSearch = foundOrder.orderNumber;
+          state.ordersPage = 1;
+        } else if (orderNumber) {
+          state.ordersSearch = orderNumber;
+          state.ordersPage = 1;
+        }
+        handleNav('orders');
+        return;
+      }
+      case 'view-customer-activity': {
+        const customerId = target?.dataset?.customerId || target?.dataset?.id;
+        const customerName = target?.dataset?.customerName;
+        let foundCustomer = null;
+        if (customerId) {
+          foundCustomer = (state.customers || []).find((c) => String(c.id) === String(customerId));
+        }
+        if (!foundCustomer && customerName) {
+          foundCustomer = (state.customers || []).find((c) => c.name && c.name.toLowerCase() === customerName.toLowerCase());
+        }
+        state.customersTodayOnly = false;
+        state.customersAppliedDateFrom = '';
+        state.customersAppliedDateTo = '';
+        state.customersDateFrom = '';
+        state.customersDateTo = '';
+        if (foundCustomer) {
+          state.selectedCustomerId = foundCustomer.id;
+          state.customersSearch = foundCustomer.name || '';
+        } else if (customerId) {
+          state.selectedCustomerId = customerId;
+        } else if (customerName) {
+          state.customersSearch = customerName;
+        }
+        handleNav('customers');
+        return;
+      }
+      case 'view-product-activity': {
+        const productId = target?.dataset?.productId || target?.dataset?.id;
+        const productName = target?.dataset?.productName;
+        let foundProduct = null;
+        if (productId) {
+          foundProduct = (state.products || []).find((p) => String(p.id) === String(productId) || String(p.variantId) === String(productId) || String(p.productId) === String(productId));
+        }
+        if (!foundProduct && productName) {
+          foundProduct = (state.products || []).find((p) => p.name && p.name.toLowerCase().includes(productName.toLowerCase()));
+        }
+        state.productsCategory = 'all';
+        state.productsStatus = 'all';
+        state.productsPage = 1;
+        if (foundProduct) {
+          state.selectedProductIds = [foundProduct.id];
+          state.productsSearch = foundProduct.name;
+        } else if (productName) {
+          state.productsSearch = productName;
+        }
+        handleNav('products');
+        return;
+      }
       case 'dismiss-notification': {
         const notificationId = String(target?.dataset?.notificationId || '');
         const notification = state.notifications.find((item) => String(item.id) === notificationId);
