@@ -5368,7 +5368,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
                 <small>${escapeHtml(item.variantLabel || 'Default')}</small>
                 <small>${escapeHtml(`${item.quantity} Piece${Number(item.quantity) === 1 ? '' : 's'}`)}</small>
               </div>
-              <strong class="shopify-summary-product__price">${formatCheckoutMoney(item.price * item.quantity)}</strong>
+              <div class="shopify-summary-product__right">
+                <strong class="shopify-summary-product__price">${formatCheckoutMoney(item.price * item.quantity)}</strong>
+                <button type="button" class="shopify-summary-product__remove" data-checkout-remove-variant="${item.variantId}" title="Remove item" aria-label="Remove ${escapeHtml(item.productName)}">✕</button>
+              </div>
             </div>
           `).join('')}
         </div>
@@ -5544,6 +5547,17 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         if (input) input.value = code;
         state.merchCouponCode = code;
         await applyMerchCouponFromCheckout();
+      });
+    });
+    els.checkoutPage?.querySelectorAll('[data-checkout-remove-variant]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const variantId = Number(button.dataset.checkoutRemoveVariant);
+        removeFromCart(variantId);
+        if (!state.cart.length) {
+          showShop();
+        } else {
+          renderCheckoutPage();
+        }
       });
     });
   }
