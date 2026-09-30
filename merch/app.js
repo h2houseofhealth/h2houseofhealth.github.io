@@ -848,14 +848,12 @@
     if (normalized === 'shipped') return 'shipped';
     if (normalized === 'out_for_delivery') return 'out_for_delivery';
     if (normalized === 'delivered') return 'delivered';
+    if (normalized === 'cancelled' || normalized === 'canceled') return 'cancelled';
     return normalized === 'processing' ? 'processing' : normalized;
   }
 
   function getTrackingSteps(order) {
-    const statusOrder = ['processing', 'packed', 'shipped', 'out_for_delivery', 'delivered'];
-    const labels = ['Order Placed', 'Packed', 'Shipped', 'Out for Delivery', 'Delivered'];
     const status = normalizeTrackingStatus(order?.status);
-    const currentIndex = Math.max(0, statusOrder.indexOf(status));
     const createdAt = order?.createdAt || null;
     const updatedAt = order?.updatedAt || createdAt;
     const backendTimeline = Array.isArray(order?.timeline) ? order.timeline : [];
@@ -863,6 +861,72 @@
       const match = backendTimeline.find((entry) => String(entry?.label || '').toLowerCase().includes(label));
       return match?.time || null;
     };
+
+    // When an order is cancelled, show an Amazon-style cancellation flow:
+    // Order Placed -> (Optional: Packed if previously packed) -> Order Cancelled
+    // Do NOT show remaining forward delivery steps (Packed, Shipped, Out for Delivery, Delivered)
+    if (status === 'cancelled') {
+      const cancelledBy = String(order?.cancelledBy || order?.cancelled_by || '').toLowerCase();
+      let cancelledNote = 'Order Cancelled';
+      if (cancelledBy === 'customer') {
+        cancelledNote = 'Cancelled by you';
+      } else if (cancelledBy === 'admin' || cancelledBy === 'seller' || cancelledBy === 'merchant') {
+        cancelledNote = 'Cancelled by seller';
+      } else {
+        const cancelEntry = backendTimeline.find((e) => String(e?.label || '').toLowerCase().includes('cancel'));
+        if (cancelEntry?.note) {
+          if (cancelEntry.note.toLowerCase().includes('customer')) {
+            cancelledNote = 'Cancelled by you';
+          } else if (cancelEntry.note.toLowerCase().includes('admin') || cancelEntry.note.toLowerCase().includes('seller') || cancelEntry.note.toLowerCase().includes('merchant')) {
+            cancelledNote = 'Cancelled by seller';
+          } else {
+            cancelledNote = cancelEntry.note;
+          }
+        } else {
+          cancelledNote = 'Cancelled';
+        }
+      }
+
+      const cancelTime = order?.cancelledAt || order?.cancelled_at || timelineTime('cancel') || updatedAt;
+
+      const steps = [
+        {
+          label: 'Order Placed',
+          time: createdAt,
+          isComplete: true,
+          isCurrent: false,
+          isCancelled: false,
+          note: '',
+        },
+      ];
+
+      const packTime = timelineTime('pack');
+      if (packTime) {
+        steps.push({
+          label: 'Packed',
+          time: packTime,
+          isComplete: true,
+          isCurrent: false,
+          isCancelled: false,
+          note: '',
+        });
+      }
+
+      steps.push({
+        label: 'Order Cancelled',
+        time: cancelTime,
+        isComplete: true,
+        isCurrent: true,
+        isCancelled: true,
+        note: cancelledNote,
+      });
+
+      return steps;
+    }
+
+    const statusOrder = ['processing', 'packed', 'shipped', 'out_for_delivery', 'delivered'];
+    const labels = ['Order Placed', 'Packed', 'Shipped', 'Out for Delivery', 'Delivered'];
+    const currentIndex = Math.max(0, statusOrder.indexOf(status));
     const fallbackTimes = [
       createdAt,
       currentIndex >= 1 ? timelineTime('pack') || addTrackingOffset(createdAt, 6) || updatedAt : null,
@@ -876,6 +940,7 @@
       time: fallbackTimes[index],
       isComplete: index <= currentIndex,
       isCurrent: index === currentIndex,
+      isCancelled: false,
       note: index === 2 && (order?.carrier || order?.carrierName || order?.trackingNumber)
         ? [order.carrier || order.carrierName, order.trackingNumber].filter(Boolean).join(' - ')
         : '',
@@ -937,15 +1002,16 @@
   }
 
   function renderTrackingTimeline(order) {
+    const isCancelled = String(order?.status || '').toLowerCase() === 'cancelled';
     return `
-      <div class="tracking-timeline" aria-label="Order tracking timeline">
+      <div class="tracking-timeline${isCancelled ? ' is-cancelled-flow' : ''}" aria-label="Order tracking timeline">
         ${getTrackingSteps(order).map((step) => `
-          <article class="tracking-step${step.isComplete ? ' is-complete' : ''}${step.isCurrent ? ' is-current' : ''}">
-            <div class="tracking-step__marker" aria-hidden="true">${step.isComplete ? confirmationIcon('check') : ''}</div>
+          <article class="tracking-step${step.isComplete ? ' is-complete' : ''}${step.isCurrent ? ' is-current' : ''}${step.isCancelled ? ' is-cancelled' : ''}">
+            <div class="tracking-step__marker" aria-hidden="true">${step.isCancelled ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>' : (step.isComplete ? confirmationIcon('check') : '')}</div>
             <div class="tracking-step__body">
               <h3>${escapeHtml(step.label)}</h3>
               <p>${escapeHtml(formatTrackingDateTime(step.time))}</p>
-              ${step.note ? `<small>${escapeHtml(step.note)}</small>` : ''}
+              ${step.note ? `<small class="${step.isCancelled ? 'tracking-step__cancelled-note' : ''}">${escapeHtml(step.note)}</small>` : ''}
             </div>
           </article>
         `).join('')}
@@ -970,7 +1036,8 @@
     }
 
     const product = getTrackingProductSummary(order);
-    const statusLabel = formatOrderStatus(order.status || 'processing');
+    const isCancelled = String(order.status || '').toLowerCase() === 'cancelled';
+    const statusLabel = isCancelled ? 'Cancelled' : formatOrderStatus(order.status || 'processing');
     return `
       <div class="order-tracking__inner">
         ${trackingBackButton}
@@ -982,7 +1049,7 @@
               <p>${escapeHtml([product.variantLabel, `Qty: ${product.quantity}`].filter(Boolean).join(' - '))}</p>
               ${product.extraCount ? `<small>+${product.extraCount} more item${product.extraCount > 1 ? 's' : ''}</small>` : ''}
             </div>
-            <span class="tracking-status-badge">${escapeHtml(statusLabel)}</span>
+            <span class="tracking-status-badge ${isCancelled ? 'tracking-status-badge--cancelled' : ''}">${escapeHtml(statusLabel)}</span>
           </header>
           ${renderTrackingTimeline(order)}
           <footer class="tracking-details">
@@ -992,7 +1059,7 @@
             </div>
             <div>
               <span>Courier / AWB</span>
-              <strong>${order.trackingNumber ? `${escapeHtml(order.trackingNumber)}${order.carrier ? ` (${escapeHtml(order.carrier)})` : ''}` : (order.status === 'delivered' ? 'Delivered' : 'Processing')}</strong>
+              <strong>${isCancelled ? 'Order Cancelled' : (order.trackingNumber ? `${escapeHtml(order.trackingNumber)}${order.carrier ? ` (${escapeHtml(order.carrier)})` : ''}` : (order.status === 'delivered' ? 'Delivered' : 'Processing'))}</strong>
             </div>
             <button class="btn btn-outline account-action-btn" type="button" data-tracking-action="invoice" data-order-id="${escapeHtml(String(order.id || ''))}">Invoice</button>
           </footer>

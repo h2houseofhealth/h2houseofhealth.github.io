@@ -698,6 +698,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   if (!hasColumn('merch_orders', 'shiprocket_pickup_token')) {
     db.exec('ALTER TABLE merch_orders ADD COLUMN shiprocket_pickup_token TEXT');
   }
+  if (!hasColumn('merch_orders', 'cancelled_by')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN cancelled_by TEXT');
+  }
+  if (!hasColumn('merch_orders', 'cancelled_at')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN cancelled_at TEXT');
+  }
 
   if (!hasColumn('merch_influencers', 'avatar_url')) {
     db.exec('ALTER TABLE merch_influencers ADD COLUMN avatar_url TEXT');
@@ -2417,10 +2423,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     if (String(order.status || '').toLowerCase() === 'cancelled') {
+      const who = order.cancelledBy === 'customer'
+        ? 'Customer'
+        : (order.cancelledBy === 'admin' ? 'Merchant / Admin' : 'Customer or Merchant');
       entries.push({
-        label: 'Cancelled',
-        note: 'Order status was marked cancelled',
-        time: updatedAt,
+        label: 'Order Cancelled',
+        note: `Cancelled by ${who}`,
+        time: order.cancelledAt || updatedAt,
       });
     }
 
@@ -2432,6 +2441,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const billingAddress = parseMerchShippingAddress(order.billingAddress || order.billing_address) || shippingAddress;
     const realCustomerEmail = hasRealEmail(order.customerEmail || order.customer_email) ? String(order.customerEmail || order.customer_email) : '';
     const realGuestEmail = hasRealEmail(order.guestEmail || order.guest_email) ? String(order.guestEmail || order.guest_email) : '';
+    const isCancelled = String(order.status || '').toLowerCase() === 'cancelled';
+    const cancelledBy = order.cancelled_by || order.cancelledBy || (isCancelled ? 'admin' : null);
+    const cancelledAt = order.cancelled_at || order.cancelledAt || (isCancelled ? order.updatedAt || order.updated_at || null : null);
+
     return {
       id: Number(order.id),
       orderNumber: String(order.orderNumber || order.order_number || ''),
@@ -2447,6 +2460,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       displayEmail: realCustomerEmail || 'Email not provided',
       phone: String(order.customerPhone || order.customer_phone || ''),
       status: String(order.status || 'pending'),
+      cancelledBy,
+      cancelledAt,
       subtotal: Number(order.subtotal || 0),
       gstAmount: Number(order.gstAmount || order.gst_amount || 0),
       shippingCharge: Number(order.shippingCharge || order.shipping_charge || 0),
@@ -2500,6 +2515,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         carrierName: order.carrierName || order.carrier_name,
         createdAt: order.createdAt || order.created_at,
         updatedAt: order.updatedAt || order.updated_at,
+        cancelledBy,
+        cancelledAt,
       }),
     };
   }
@@ -5875,6 +5892,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const result = db.prepare(`
         UPDATE merch_orders
         SET status = 'cancelled',
+            cancelled_by = 'customer',
+            cancelled_at = datetime('now'),
             payment_status = CASE WHEN payment_status IN ('paid', 'cod_pending') THEN 'refunded' ELSE payment_status END,
             updated_at = datetime('now')
         WHERE id = ? AND status NOT IN ('delivered', 'returned', 'cancelled')
@@ -6862,6 +6881,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const params = [status];
     if (String(status).toLowerCase() === 'delivered' && String(existingOrder.status || '').toLowerCase() !== 'delivered') {
       updates.push("delivered_at = datetime('now')");
+    }
+    if (String(status).toLowerCase() === 'cancelled' && String(existingOrder.status || '').toLowerCase() !== 'cancelled') {
+      updates.push('cancelled_by = ?');
+      params.push('admin');
+      updates.push("cancelled_at = datetime('now')");
     }
     if (payment_status) {
       updates.push('payment_status = ?');
