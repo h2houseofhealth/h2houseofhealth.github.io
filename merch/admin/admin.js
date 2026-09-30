@@ -3291,7 +3291,7 @@
                       <th>Payment</th>
                       <th>Total</th>
                       <th>Status</th>
-                      <th>Track order</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3306,7 +3306,12 @@
                           <span class="admin-badge ${statusClass(order.status)}">${escapeHtml(getStatusLabel(order.status))}</span>
                         </td>
                         <td>
-                          <button class="admin-action-link" type="button" data-action="track-admin-order" data-id="${order.id}">Track order</button>
+                          <div style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;">
+                            ${!order.shiprocketAwbCode && !['cancelled', 'delivered', 'returned'].includes(normalizeOrderStatus(order.status)) ? `
+                              <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="shiprocket-fulfill" data-id="${order.id}" style="padding:3px 8px;font-size:11px;font-weight:600;white-space:nowrap;">🚀 Ship</button>
+                            ` : ''}
+                            <button class="admin-action-link" type="button" data-action="track-admin-order" data-id="${order.id}" style="white-space:nowrap;">Track</button>
+                          </div>
                         </td>
                       </tr>
                     `).join('')}
@@ -6489,7 +6494,7 @@
           <form class="admin-form" data-shiprocket-fulfill-form>
             <div style="display:flex;flex-direction:column;gap:10px;max-height:360px;overflow-y:auto;padding-right:4px;">
               ${couriers.map((c, idx) => `
-                <label class="admin-card" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border:1.5px solid ${idx === 0 ? '#3b82f6' : 'rgba(0,0,0,0.1)'};border-radius:10px;background:${idx === 0 ? 'rgba(59,130,246,0.04)' : 'transparent'};transition:all 0.15s ease;">
+                <label class="admin-card admin-courier-card" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border:1.5px solid ${idx === 0 ? '#3b82f6' : 'rgba(0,0,0,0.1)'};border-radius:10px;background:${idx === 0 ? 'rgba(59,130,246,0.04)' : 'transparent'};transition:all 0.15s ease;">
                   <div style="display:flex;align-items:center;gap:14px;">
                     <input type="radio" name="courier_company_id" value="${c.courierCompanyId}" ${idx === 0 ? 'checked' : ''} style="width:18px;height:18px;accent-color:#3b82f6;" />
                     <div>
@@ -6508,6 +6513,20 @@
             </div>
           </form>
         `;
+
+        const formEl = bodyEl.querySelector('[data-shiprocket-fulfill-form]');
+        formEl?.addEventListener('change', () => {
+          formEl.querySelectorAll('.admin-courier-card').forEach((card) => {
+            const radio = card.querySelector('input[type="radio"]');
+            if (radio?.checked) {
+              card.style.borderColor = '#3b82f6';
+              card.style.background = 'rgba(59,130,246,0.04)';
+            } else {
+              card.style.borderColor = 'rgba(0,0,0,0.1)';
+              card.style.background = 'transparent';
+            }
+          });
+        });
       }
 
       const footEl = els.adminModalDialog.querySelector('.admin-modal__foot');
@@ -7266,8 +7285,12 @@
       case 'toggle-order-selection':
         if (target.checked) {
           if (!state.selectedOrderIds.includes(id)) state.selectedOrderIds.push(id);
+          state.selectedOrderId = id;
         } else {
           state.selectedOrderIds = state.selectedOrderIds.filter((orderId) => orderId !== id);
+          if (Number(state.selectedOrderId) === id) {
+            state.selectedOrderId = state.selectedOrderIds.length === 1 ? state.selectedOrderIds[0] : null;
+          }
         }
         renderOrders();
         return;

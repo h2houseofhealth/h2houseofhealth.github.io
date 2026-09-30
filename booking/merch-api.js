@@ -4965,7 +4965,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
   }
 
-  async function autoFulfillOrderWithShiprocket(orderId) {
+  async function autoCreateShiprocketOrder(orderId) {
     if (!shiprocket.isConfigured()) return null;
 
     try {
@@ -4987,42 +4987,21 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
               updated_at = datetime('now')
           WHERE id = ?
         `).run(String(createRes.orderId), shipmentId, String(createRes.status || 'NEW'), order.id);
+
+        return {
+          orderId: createRes.orderId,
+          shipmentId,
+          status: createRes.status || 'NEW',
+        };
       }
-
-      // 2. Automatically assign courier and generate AWB immediately
-      const awbRes = await shiprocket.assignAwb({ shipmentId });
-      let labelUrl = null;
-      try {
-        const labelRes = await shiprocket.generateLabel({ shipmentId });
-        labelUrl = labelRes.labelUrl;
-      } catch (labelErr) {
-        console.warn('[Shiprocket] Auto label generation deferred:', labelErr.message);
-      }
-
-      const awbCode = String(awbRes.awbCode || '');
-      const courierName = String(awbRes.courierName || 'Shiprocket');
-
-      db.prepare(`
-        UPDATE merch_orders
-        SET shiprocket_awb_code = ?,
-            shiprocket_courier_name = ?,
-            tracking_number = ?,
-            carrier_name = ?,
-            status = 'processing',
-            shiprocket_status = 'AWB ASSIGNED',
-            shiprocket_label_url = COALESCE(?, shiprocket_label_url),
-            updated_at = datetime('now')
-        WHERE id = ?
-      `).run(awbCode, courierName, awbCode, courierName, labelUrl, order.id);
 
       return {
+        orderId: order.shiprocket_order_id,
         shipmentId,
-        awbCode,
-        courierName,
-        labelUrl,
+        status: order.shiprocket_status || 'NEW',
       };
     } catch (err) {
-      console.warn('[Shiprocket] Instant auto-fulfillment notice:', err.message);
+      console.warn('[Shiprocket] Auto-order creation notice:', err.message);
       return null;
     }
   }
@@ -5083,9 +5062,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       }
     }
 
-    // Instant auto-fulfillment stopped so couriers and AWBs are not auto-assigned on checkout.
-    // Merchants fulfill orders via the Admin dashboard when items are physically packed.
+    // Auto-generate order in Shiprocket for prepaid orders
     let autoFulfill = null;
+    try {
+      autoFulfill = await autoCreateShiprocketOrder(order.id);
+    } catch (fulfillErr) {
+      console.warn('[Shiprocket] Auto order generation notice:', fulfillErr.message);
+    }
 
     const notifications = await triggerMerchOrderConfirmationNotifications(order.id, req);
 
@@ -5093,6 +5076,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       success: true,
       message: 'Payment verified, order confirmed',
       orderId: order.id,
+      shiprocketOrderId: autoFulfill?.orderId || null,
+      shiprocketShipmentId: autoFulfill?.shipmentId || null,
       trackingNumber: autoFulfill?.awbCode || null,
       carrierName: autoFulfill?.courierName || null,
       notifications,

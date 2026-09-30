@@ -12,6 +12,7 @@ class ShiprocketService {
     this.email = config.email || process.env.SHIPROCKET_EMAIL || '';
     this.password = config.password || process.env.SHIPROCKET_PASSWORD || '';
     this.pickupLocation = config.pickupLocation || process.env.SHIPROCKET_PICKUP_LOCATION || 'work';
+    this.pickupPostcode = config.pickupPostcode || process.env.SHIPROCKET_PICKUP_POSTCODE || '500033';
     this.defaultWeightKg = Number(config.defaultWeightKg || process.env.SHIPROCKET_DEFAULT_WEIGHT_KG || 0.5);
     this.defaultLengthCm = Number(config.defaultLengthCm || process.env.SHIPROCKET_DEFAULT_LENGTH_CM || 20);
     this.defaultBreadthCm = Number(config.defaultBreadthCm || process.env.SHIPROCKET_DEFAULT_BREADTH_CM || 12);
@@ -36,6 +37,10 @@ class ShiprocketService {
 
   getPickupLocation() {
     return (this.pickupLocation || process.env.SHIPROCKET_PICKUP_LOCATION || 'work').trim();
+  }
+
+  getPickupPostcode() {
+    return (this.pickupPostcode || process.env.SHIPROCKET_PICKUP_POSTCODE || '500033').trim();
   }
 
   /**
@@ -259,7 +264,7 @@ class ShiprocketService {
   async checkServiceability({ pickupPostcode, deliveryPostcode, weight = 0.5, cod = false }) {
     const isCod = cod ? 1 : 0;
     const query = new URLSearchParams({
-      pickup_postcode: String(pickupPostcode || '452001'),
+      pickup_postcode: String(pickupPostcode || this.getPickupPostcode() || '500033'),
       delivery_postcode: String(deliveryPostcode),
       weight: String(weight || 0.5),
       cod: String(isCod),
