@@ -6880,8 +6880,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const rawCouponCode = String(req.body?.couponCode || '').trim();
       const rawSlug = String(req.body?.slug || '').trim();
       const campaignName = String(req.body?.name || '').trim() || `${rawSlug} Campaign`;
-      const targetProductId = Number(req.body?.targetProductId) || 11;
-      const targetVariantId = Number(req.body?.targetVariantId) || 569;
+      let targetProductId = Number(req.body?.targetProductId) || 11;
+      let targetVariantId = Number(req.body?.targetVariantId) || 569;
 
       if (!influencerId || influencerId <= 0) {
         return res.status(400).json({ error: 'Influencer is required' });
@@ -6921,9 +6921,24 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         return res.status(409).json({ error: `Campaign slug '${rawSlug}' already exists. Please choose a different slug.` });
       }
 
-      // Verify product & variant
-      const variant = db.prepare('SELECT id, product_id, sku FROM merch_variants WHERE id = ?').get(targetVariantId);
+      // Verify product & variant (lookup by SKU first to handle cross-environment DB ID differences, then fallback to ID)
+      const rawSku = String(req.body?.targetVariantSku || '').trim();
+      let variant = null;
+      if (rawSku) {
+        variant = db.prepare('SELECT id, product_id, sku FROM merch_variants WHERE sku = ? LIMIT 1').get(rawSku);
+      }
       if (!variant) {
+        variant = db.prepare('SELECT id, product_id, sku FROM merch_variants WHERE id = ?').get(targetVariantId);
+      }
+      if (!variant) {
+        variant = db.prepare('SELECT id, product_id, sku FROM merch_variants WHERE product_id = ? AND is_active = 1 LIMIT 1').get(targetProductId)
+          || db.prepare("SELECT id, product_id, sku FROM merch_variants WHERE sku LIKE '%BTL%' AND is_active = 1 LIMIT 1").get()
+          || db.prepare('SELECT id, product_id, sku FROM merch_variants WHERE is_active = 1 LIMIT 1').get();
+      }
+      if (variant) {
+        targetVariantId = variant.id;
+        targetProductId = variant.product_id;
+      } else {
         return res.status(400).json({ error: 'Target variant not found' });
       }
 
