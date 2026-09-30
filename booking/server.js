@@ -9033,7 +9033,7 @@ function getPaidBookingDiscountMeta(bookings) {
 }
 
 function merchPaiseToInr(value) {
-  return Math.max(0, Math.round(Number(value || 0) / 100));
+  return Math.max(0, Number(value || 0) / 100);
 }
 
 function parseMerchShippingAddress(value) {
@@ -9127,6 +9127,7 @@ app.get('/invoice/merch', async (req, res) => {
               gst_amount AS gstAmount,
               shipping_charge AS shippingCharge,
               discount_amount AS discountAmount,
+              coupon_code AS couponCode,
               total_amount AS totalAmount,
               payment_method AS paymentMethod,
               payment_status AS paymentStatus,
@@ -9175,7 +9176,11 @@ app.get('/invoice/merch', async (req, res) => {
   const subtotalAmountInr = merchPaiseToInr(order.subtotal);
   const discountAmountInr = merchPaiseToInr(order.discountAmount);
   const shippingAmountInr = merchPaiseToInr(order.shippingCharge);
-  const gstAmountInr = merchPaiseToInr(order.gstAmount);
+  // Derive GST on the discounted merchandise amount (prices are GST-inclusive at 18%: 9% CGST + 9% SGST)
+  const taxableMerchInr = Math.max(0, subtotalAmountInr - discountAmountInr);
+  const totalGstInr = taxableMerchInr > 0 ? (taxableMerchInr - (taxableMerchInr / 1.18)) : 0;
+  const cgstAmountInr = totalGstInr / 2;
+  const sgstAmountInr = totalGstInr / 2;
   const amountInr = merchPaiseToInr(order.totalAmount);
   const invoiceNo = `MR-${order.orderNumber || order.id}`;
   const invoiceDownloadUrl = `/invoice/merch?token=${encodeURIComponent(String(req.query.token || ''))}&format=pdf&download=1`;
@@ -9611,27 +9616,27 @@ app.get('/invoice/merch', async (req, res) => {
          </span>
        </div>
        <div class="summary-row">
-         <span>Discount</span>
-         <span>
-           - ${formatInvoiceInr(discountAmountInr)}
-         </span>
-       </div>
-       <div class="summary-row">
          <span>Shipping</span>
          <span>
            ${formatInvoiceInr(shippingAmountInr)}
          </span>
        </div>
        <div class="summary-row">
+         <span>Discount${order.couponCode ? ` (${escapeHtml(String(order.couponCode))})` : ''}</span>
+         <span>
+           - ${formatInvoiceInr(discountAmountInr)}
+         </span>
+       </div>
+       <div class="summary-row">
          <span>CGST (9%)</span>
          <span>
-           ${formatInvoiceInr((gstAmountInr || 0) / 2)}
+           ${formatInvoiceInr(cgstAmountInr)}
          </span>
        </div>
        <div class="summary-row">
          <span>SGST (9%)</span>
          <span>
-           ${formatInvoiceInr((gstAmountInr || 0) / 2)}
+           ${formatInvoiceInr(sgstAmountInr)}
          </span>
        </div>
        <div class="summary-row summary-total">
@@ -9644,13 +9649,13 @@ app.get('/invoice/merch', async (req, res) => {
     </div>
     <div class="invoice-company-footer">
       <div>
-        P: 91000 56979, 91000 86979<br>
-        E: hello@h2houseofhealth.com
+        📞 91000 56979, 91000 86979<br>
+        ✉️ hello@h2houseofhealth.com
       </div>
       <div>
-        A: 47A, Journalist Colony, Road No:70,<br>
+        📍 47A, Journalist Colony, Road No:70,<br>
         Jubilee Hills, Hyderabad - 500033<br>
-        W: www.h2houseofhealth.com
+        🌐 www.h2houseofhealth.com
       </div>
     </div>
     
@@ -10228,13 +10233,13 @@ app.get('/invoice/booking', async (req, res) => {
     </div>
     <div class="invoice-company-footer">
       <div>
-        P: 91000 56979, 91000 86979<br>
-        E: hello@h2houseofhealth.com
+        📞 91000 56979, 91000 86979<br>
+        ✉️ hello@h2houseofhealth.com
       </div>
       <div>
-        A: 47A, Journalist Colony, Road No:70,<br>
+        📍 47A, Journalist Colony, Road No:70,<br>
         Jubilee Hills, Hyderabad - 500033<br>
-        W: www.h2houseofhealth.com
+        🌐 www.h2houseofhealth.com
       </div>
     </div>
     

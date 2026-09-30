@@ -5220,11 +5220,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
     }
 
-    // Product prices are GST-inclusive; derive included GST for reporting only.
-    const gstAmount = Math.max(0, subtotal - Math.round(subtotal / 1.18));
     const shippingCharge = (subtotal >= 99900 || subtotal <= 100) ? 0 : 9900; // Free above ₹999 or ₹1 test
     const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
       + getMerchBundleDiscountPaise(bundleCode, validatedItems);
+    const discountedSubtotal = Math.max(0, subtotal - discountAmount);
+    // Product prices are GST-inclusive; derive included GST on discounted amount.
+    const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
     const { campaignId, influencerId } = resolveOrderCampaignAttribution(req, couponResult);
     const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems);
     const totalAmount = Math.max(100, subtotal + shippingCharge - discountAmount);
@@ -5587,11 +5588,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
     }
 
-    const gstAmount = Math.max(0, subtotal - Math.round(subtotal / 1.18));
     const shippingCharge = (subtotal >= 99900 || subtotal <= 100) ? 0 : 9900;
     const codSurcharge = 5000; // ₹50
     const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
       + getMerchBundleDiscountPaise(bundleCode, validatedItems);
+    const discountedSubtotal = Math.max(0, subtotal - discountAmount);
+    // Product prices are GST-inclusive; derive included GST on discounted amount.
+    const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
     const { campaignId, influencerId } = resolveOrderCampaignAttribution(req, couponResult);
     const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems);
     const totalAmount = Math.max(100, subtotal + shippingCharge + codSurcharge - discountAmount);
