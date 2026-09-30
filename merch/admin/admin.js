@@ -6754,7 +6754,7 @@
     }
     const match = header.match(/filename="?([^";]+)"?/i);
     if (match?.[1]) return match[1];
-    return 'H2_invoice.pdf';
+    return 'Merch-invoice.pdf';
   }
 
   async function openOrderInvoice(orderId) {

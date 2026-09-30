@@ -8538,7 +8538,7 @@ function prepareInvoiceHtmlForPdf(html, req) {
     .replace(/\shref="\/([^"]+)"/g, ` href="${origin}/$1"`);
 }
 
-async function sendInvoiceResponse(req, res, html, invoiceNo) {
+async function sendInvoiceResponse(req, res, html, invoiceNo, filename = 'H2_invoice.pdf') {
   if (!shouldDownloadInvoicePdf(req)) {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     return res.send(html);
@@ -8568,7 +8568,7 @@ async function sendInvoiceResponse(req, res, html, invoiceNo) {
       margin: { top: '0', right: '0', bottom: '0', left: '0' },
     });
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename=H2_invoice.pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${sanitizeInvoiceFilenamePart(filename)}"`);
     return res.send(pdfBuffer);
   } catch (error) {
     console.error('Invoice PDF generation failed:', error);
@@ -9436,7 +9436,7 @@ app.get('/invoice/merch', async (req, res) => {
   </div>
 </body>
 </html>`;
-  return sendInvoiceResponse(req, res, invoiceHtml, invoiceNo);
+  return sendInvoiceResponse(req, res, invoiceHtml, invoiceNo, 'Merch-invoice.pdf');
 });
 
 app.get('/invoice/booking', async (req, res) => {
