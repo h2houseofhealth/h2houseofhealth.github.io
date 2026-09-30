@@ -1,4 +1,4 @@
-﻿function resolveApiUrl() {
+function resolveApiUrl() {
   const configuredWindowValue =
     typeof window !== 'undefined' ? String(window.__API_URL__ || '').trim() : '';
   const configuredMetaValue =
@@ -28,24 +28,23 @@ function buildApiUrl(url = '') {
 
 const AUTH_TOKEN_STORAGE_KEY = 'booking_portal_auth_token';
 const GUEST_SESSION_STORAGE_KEY = 'h2_guest_session_token';
+const BOOKING_AUTH_RETURN_STATE_STORAGE_KEY = 'h2_booking_auth_return_state';
+let authRefreshPromise = null;
 
 function getStoredAuthToken() {
   try {
-    return String(window.localStorage?.getItem(AUTH_TOKEN_STORAGE_KEY) || '').trim();
+    window.localStorage?.removeItem(AUTH_TOKEN_STORAGE_KEY);
   } catch {
-    return '';
+    // Ignore storage access errors.
   }
+  return '';
 }
 
 function storeAuthToken(token = '') {
   const normalized = String(token || '').trim();
   state.authToken = normalized;
   try {
-    if (normalized) {
-      window.localStorage?.setItem(AUTH_TOKEN_STORAGE_KEY, normalized);
-    } else {
-      window.localStorage?.removeItem(AUTH_TOKEN_STORAGE_KEY);
-    }
+    window.localStorage?.removeItem(AUTH_TOKEN_STORAGE_KEY);
   } catch {
     // Local storage can be unavailable in private or embedded browsing contexts.
   }
@@ -213,17 +212,10 @@ const state = {
     startDate: '',
     endDate: '',
   },
-  adminBookingEmailEventsByBooking: {},
-  adminBookingEmailAnalyticsByBooking: {},
-  adminBookingEmailTimelineLoading: false,
-  adminPaymentLinkAnalytics: null,
-  adminPaymentLinkAnalyticsRows: [],
-  adminEmailAnalyticsFilters: {
-    startDate: '',
-    endDate: '',
-  },
+
   adminCalendarDate: '',
   adminCalendarCategory: 'HYDROGEN SESSION',
+  pendingAuthReturnState: null,
   adminCalendarServiceName: '',
   adminCalendarAvailability: {},
   adminCalendarHoldCounts: {},
@@ -343,21 +335,34 @@ const elements = {
   authSwitchText: document.getElementById('authSwitchText'),
   authSwitchBtn: document.getElementById('authSwitchBtn'),
   authForm: document.getElementById('authForm'),
+  signupIdentityChooser: document.getElementById('signupIdentityChooser'),
+  signupEmailOption: document.getElementById('signupEmailOption'),
+  signupMobileOption: document.getElementById('signupMobileOption'),
   authNameWrap: document.getElementById('authNameWrap'),
   authName: document.getElementById('authName'),
+  authMobileWrap: document.getElementById('authMobileWrap'),
+  authMobile: document.getElementById('authMobile'),
   authRoleWrap: document.getElementById('authRoleWrap'),
   authRole: document.getElementById('authRole'),
   authEmail: document.getElementById('authEmail'),
+  authEmailWrap: document.getElementById('authEmailWrap'),
   authPassword: document.getElementById('authPassword'),
   authPasswordToggleBtn: document.getElementById('authPasswordToggleBtn'),
   authOtpWrap: document.getElementById('authOtpWrap'),
   authOtp: document.getElementById('authOtp'),
-  authDevOtp: document.getElementById('authDevOtp'),
-  authDevOtpValue: document.getElementById('authDevOtpValue'),
+  authWhatsappOtpWrap: document.getElementById('authWhatsappOtpWrap'),
+  authWhatsappOtp: document.getElementById('authWhatsappOtp'),
   authOtpActions: document.getElementById('authOtpActions'),
   authResendOtpBtn: document.getElementById('authResendOtpBtn'),
   authResendOtpHint: document.getElementById('authResendOtpHint'),
   authSubmitBtn: document.getElementById('authSubmitBtn'),
+  mobileAuthSection: document.getElementById('mobileAuthSection'),
+  mobileAuthCountry: document.getElementById('mobileAuthCountry'),
+  mobileAuthNumber: document.getElementById('mobileAuthNumber'),
+  sendWhatsappOtpBtn: document.getElementById('sendWhatsappOtpBtn'),
+  mobileAuthOtpWrap: document.getElementById('mobileAuthOtpWrap'),
+  mobileAuthOtp: document.getElementById('mobileAuthOtp'),
+  verifyWhatsappOtpBtn: document.getElementById('verifyWhatsappOtpBtn'),
   authDivider: document.getElementById('authDivider'),
   googleAuthBtn: document.getElementById('googleAuthBtn'),
   authError: document.getElementById('authError'),
@@ -576,14 +581,7 @@ const elements = {
   confirmDialogCloseBtn: document.getElementById('confirmDialogCloseBtn'),
   confirmDialogCancelBtn: document.getElementById('confirmDialogCancelBtn'),
   confirmDialogOkBtn: document.getElementById('confirmDialogOkBtn'),
-  bookingEmailTimelineDialog: document.getElementById('bookingEmailTimelineDialog'),
-  bookingEmailTimelineCloseBtn: document.getElementById('bookingEmailTimelineCloseBtn'),
-  bookingEmailTimelineBookingId: document.getElementById('bookingEmailTimelineBookingId'),
-  bookingEmailTimelineMeta: document.getElementById('bookingEmailTimelineMeta'),
-  bookingEmailTimelineAnalytics: document.getElementById('bookingEmailTimelineAnalytics'),
-  bookingEmailTimelineList: document.getElementById('bookingEmailTimelineList'),
-  bookingEmailTimelineEmpty: document.getElementById('bookingEmailTimelineEmpty'),
-  bookingEmailTimelineResendBtn: document.getElementById('bookingEmailTimelineResendBtn'),
+
   servicesBackBtn: document.getElementById('servicesBackBtn'),
   servicesNextBtn: document.getElementById('servicesNextBtn'),
   bookingsBackBtn: document.getElementById('bookingsBackBtn'),
@@ -787,13 +785,16 @@ const elements = {
 let isRegisterMode = false;
 let isForgotPasswordMode = false;
 let signupStage = 'details';
+let signupMethod = 'email';
 let pendingSignupName = '';
 let pendingSignupEmail = '';
+let pendingSignupMobile = '';
 let forgotPasswordStage = 'email';
 let pendingForgotEmail = '';
 let signupOtpResendAvailableAt = 0;
 let forgotOtpResendAvailableAt = 0;
 let authOtpResendTicker = 0;
+let whatsappOtpSent = false;
 let profilePreviewObjectUrl = '';
 let availabilityRequestId = 0;
 let adminCustomerRefreshTimer = 0;
@@ -814,20 +815,175 @@ function getUserTabFromHash(hash) {
   return '';
 }
 
+function getSafeBookingReturnStateFromUrl(returnTo = '') {
+  const raw = String(returnTo || '').trim();
+  if (!raw) return null;
+
+  let url;
+  try {
+    url = new URL(raw, window.location.origin);
+  } catch {
+    return null;
+  }
+
+  if (url.origin !== window.location.origin || !url.pathname.startsWith('/booking')) {
+    return null;
+  }
+
+  const tabFromHash = getUserTabFromHash(url.hash);
+  const entryGuest = url.searchParams.get('entry') === 'guest';
+  return {
+    activeUserTab: tabFromHash || (entryGuest ? 'services' : ''),
+    postLoginChoice: entryGuest ? 'continue-non-member' : '',
+    hash: tabFromHash ? `#${tabFromHash}` : entryGuest ? '#services' : '',
+  };
+}
+
+function getIncomingAuthReturnState() {
+  const params = new URLSearchParams(window.location.search || '');
+  return getSafeBookingReturnStateFromUrl(params.get('returnTo') || '');
+}
+
+function getCurrentBookingReturnState(choice = '') {
+  const activeUserTab = getUserTabFromHash(window.location.hash) || state.activeUserTab || 'services';
+  return {
+    choice: String(choice || '').trim(),
+    activeUserTab,
+    postLoginChoice: state.postLoginChoice || '',
+    hash: activeUserTab ? `#${activeUserTab}` : '',
+    selectedServiceCategory: state.selectedServiceCategory || '',
+    selectedServiceDate: state.selectedServiceDate || '',
+    selectedSingleSessionServiceName: state.selectedSingleSessionServiceName || '',
+    selectedHydrogenServiceName: state.selectedHydrogenServiceName || '',
+    selectedHydrogenFlow: state.selectedHydrogenFlow || 'topup',
+    selectedHydrogenExtraSessions: Number(state.selectedHydrogenExtraSessions || 0),
+    selectedHydrogenSlots: Array.isArray(state.selectedHydrogenSlots) ? state.selectedHydrogenSlots : [],
+    selectedHydrogenAddOnServiceName: state.selectedHydrogenAddOnServiceName || '',
+    selectedHydrogenAddOnSessionIndex: Number(state.selectedHydrogenAddOnSessionIndex || 0),
+    serviceDetailSelections: state.serviceDetailSelections || {},
+    expandedServiceCategories: state.expandedServiceCategories || {},
+    ivSelections: state.ivSelections || {},
+    cart: state.isGuestUser && !state.user ? loadStoredGuestCart() : [],
+  };
+}
+
+function storePendingAuthReturnState(returnState) {
+  state.pendingAuthReturnState = returnState || null;
+  try {
+    if (returnState) {
+      window.sessionStorage?.setItem(BOOKING_AUTH_RETURN_STATE_STORAGE_KEY, JSON.stringify(returnState));
+    } else {
+      window.sessionStorage?.removeItem(BOOKING_AUTH_RETURN_STATE_STORAGE_KEY);
+    }
+  } catch {
+    // Return state is best-effort; auth still works without sessionStorage.
+  }
+}
+
+function loadPendingAuthReturnState() {
+  if (state.pendingAuthReturnState) return state.pendingAuthReturnState;
+  try {
+    const raw = window.sessionStorage?.getItem(BOOKING_AUTH_RETURN_STATE_STORAGE_KEY) || '';
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function restoreBookingReturnStateAfterAuth() {
+  const returnState = loadPendingAuthReturnState();
+  storePendingAuthReturnState(null);
+  if (!returnState || state.user?.role !== 'user') return false;
+
+  const activeUserTab = getUserTabFromHash(returnState.hash) || getUserTabFromHash(`#${returnState.activeUserTab}`) || 'services';
+  state.postLoginChoice =
+    returnState.postLoginChoice ||
+    (returnState.choice === 'join-member'
+      ? 'join-member'
+      : isCurrentUserMembershipActive()
+        ? 'continue-member'
+        : 'continue-non-member');
+  state.activeUserTab = activeUserTab;
+  state.selectedServiceCategory = String(returnState.selectedServiceCategory || '').trim() || state.selectedServiceCategory;
+  state.selectedServiceDate = String(returnState.selectedServiceDate || '').trim() || state.selectedServiceDate || getTodayIsoDate();
+  state.selectedSingleSessionServiceName = String(returnState.selectedSingleSessionServiceName || '').trim();
+  state.selectedHydrogenServiceName = String(returnState.selectedHydrogenServiceName || '').trim();
+  state.selectedHydrogenFlow = String(returnState.selectedHydrogenFlow || state.selectedHydrogenFlow || 'topup').trim();
+  state.selectedHydrogenExtraSessions = Number(returnState.selectedHydrogenExtraSessions || 0);
+  state.selectedHydrogenSlots = Array.isArray(returnState.selectedHydrogenSlots) ? returnState.selectedHydrogenSlots : [];
+  state.selectedHydrogenAddOnServiceName = String(returnState.selectedHydrogenAddOnServiceName || '').trim();
+  state.selectedHydrogenAddOnSessionIndex = Number(returnState.selectedHydrogenAddOnSessionIndex || 0);
+  state.serviceDetailSelections =
+    returnState.serviceDetailSelections && typeof returnState.serviceDetailSelections === 'object'
+      ? returnState.serviceDetailSelections
+      : state.serviceDetailSelections;
+  state.expandedServiceCategories =
+    returnState.expandedServiceCategories && typeof returnState.expandedServiceCategories === 'object'
+      ? returnState.expandedServiceCategories
+      : state.expandedServiceCategories;
+  state.ivSelections =
+    returnState.ivSelections && typeof returnState.ivSelections === 'object'
+      ? returnState.ivSelections
+      : state.ivSelections;
+  if (Array.isArray(returnState.cart) && returnState.cart.length) {
+    state.cart = normalizeGuestCartComboGroups(returnState.cart);
+    state.bookings = state.cart;
+    persistGuestCart();
+  }
+  window.location.hash = activeUserTab ? `#${activeUserTab}` : '#services';
+  return true;
+}
+
+async function promotePendingGuestCartAfterAuth() {
+  if (state.user?.role !== 'user') return;
+  const pendingCart = normalizeGuestCartComboGroups(
+    (Array.isArray(state.cart) && state.cart.length ? state.cart : loadStoredGuestCart()) || []
+  ).filter((booking) => booking?.serviceName && booking?.bookingDate && booking?.bookingTime);
+  if (!pendingCart.length) return;
+
+  const previousGuestMode = state.isGuestUser;
+  state.isGuestUser = false;
+  for (const booking of pendingCart) {
+    await api('/api/bookings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        serviceName: booking.serviceName,
+        bookingDate: booking.bookingDate,
+        bookingTime: booking.bookingTime,
+        notes: booking.notes || '',
+      }),
+    });
+  }
+  clearGuestCart();
+  state.isGuestUser = false;
+  if (previousGuestMode) {
+    state.guestSessionToken = null;
+  }
+}
+
 function openAuthFromLanding(choice = '') {
   state.pendingPreAuthChoice = String(choice || '').trim();
+  storePendingAuthReturnState(getCurrentBookingReturnState(choice));
   state.showAuthCard = true;
   isRegisterMode = false;
   isForgotPasswordMode = false;
   signupStage = 'details';
+  signupMethod = 'email';
   forgotPasswordStage = 'email';
   pendingSignupName = '';
   pendingSignupEmail = '';
+  pendingSignupMobile = '';
   pendingForgotEmail = '';
   signupOtpResendAvailableAt = 0;
   forgotOtpResendAvailableAt = 0;
   elements.authOtp.value = '';
   elements.authPassword.value = '';
+  elements.mobileAuthNumber.value = '';
+  elements.mobileAuthOtp.value = '';
+  whatsappOtpSent = false;
   renderAuthMode();
   render();
   requestAnimationFrame(() => {
@@ -852,31 +1008,42 @@ function resetServicesUiStateForUserSwitch() {
 
 
 function routeAfterAuthSuccess() {
+  if (restoreBookingReturnStateAfterAuth()) {
+    return true;
+  }
   ensurePostLoginDashboardChoice();
   if (state.user?.role === 'admin') {
     state.adminActiveTab = 'calendar';
-    return;
+    return false;
   }
   state.membershipBrowseVisible = false;
   state.activeUserTab = 'membership';
   window.location.hash = '#membership';
+  return false;
 }
 
 async function finishAuthSuccess(result) {
   resetMyBookingsViewState();
-  resetServicesUiStateForUserSwitch();
   state.user = result.user;
   storeAuthToken(result.token || result.authToken || '');
-  state.postLoginChoice = state.pendingPreAuthChoice || '';
+  const hasReturnState = Boolean(loadPendingAuthReturnState());
+  if (!hasReturnState) {
+    resetServicesUiStateForUserSwitch();
+  }
+  state.postLoginChoice = hasReturnState ? state.postLoginChoice : state.pendingPreAuthChoice || '';
   state.pendingPreAuthChoice = '';
   state.showAuthCard = false;
-  routeAfterAuthSuccess();
+  state.isGuestUser = false;
+  const restoredReturnState = routeAfterAuthSuccess();
   render();
 
   try {
     await loadProfile();
+    await promotePendingGuestCartAfterAuth();
     await loadDashboardData();
-    routeAfterAuthSuccess();
+    if (!restoredReturnState) {
+      routeAfterAuthSuccess();
+    }
   } catch (error) {
     if (Number(error?.status || 0) === 401) {
       console.warn('Dashboard data load was unauthorized after successful sign-in. Check server restart/auth cookie settings.');
@@ -894,6 +1061,14 @@ async function bootstrap() {
   consumeOAuthTokenFromHash();
   const params = new URLSearchParams(window.location.search);
   const launchGuestBooking = params.get('entry') === 'guest';
+  const requestedAuth = params.get('auth') === '1';
+  const incomingReturnState = getIncomingAuthReturnState();
+  if (incomingReturnState) {
+    storePendingAuthReturnState({
+      ...getCurrentBookingReturnState('incoming-return'),
+      ...incomingReturnState,
+    });
+  }
   if (initialTab) state.activeUserTab = initialTab;
   attachEvents()
   syncAdminRescheduleSearchPlaceholder();
@@ -922,13 +1097,24 @@ async function bootstrap() {
       state.activeUserTab = 'services';
       window.location.hash = '#services';
     }
+    if (launchGuestBooking && state.user.role === 'user') {
+      state.postLoginChoice = isCurrentUserMembershipActive() ? 'continue-member' : 'continue-non-member';
+      state.activeUserTab = 'services';
+      window.location.hash = '#services';
+    }
     if (state.user.role === 'user' && !initialTab) {
       state.membershipBrowseVisible = false;
-      state.activeUserTab = 'membership';
-      window.location.hash = '#membership';
+      if (!launchGuestBooking) {
+        state.activeUserTab = 'membership';
+        window.location.hash = '#membership';
+      }
     }
   } else {
-    if (shouldOpenGuestServices) {
+    if (requestedAuth) {
+      state.showAuthCard = true;
+      state.pendingPreAuthChoice = incomingReturnState?.postLoginChoice || '';
+      renderAuthMode();
+    } else if (shouldOpenGuestServices) {
       await enterGuestBookingMode({ scrollToServices: false });
     } else {
     const storedGuestToken = getStoredGuestSessionToken();
@@ -1004,8 +1190,10 @@ function attachEvents() {
     isRegisterMode = !isRegisterMode;
     isForgotPasswordMode = false;
     signupStage = 'details';
+    signupMethod = 'email';
     pendingSignupName = '';
     pendingSignupEmail = '';
+    pendingSignupMobile = '';
     forgotPasswordStage = 'email';
     pendingForgotEmail = '';
     signupOtpResendAvailableAt = 0;
@@ -1015,15 +1203,29 @@ function attachEvents() {
     renderAuthMode();
   });
 
+  const chooseSignupMethod = (method) => {
+    signupMethod = method === 'mobile' ? 'mobile' : 'email';
+    signupStage = 'details';
+    pendingSignupEmail = '';
+    pendingSignupMobile = '';
+    elements.authOtp.value = '';
+    elements.authWhatsappOtp.value = '';
+    renderAuthMode();
+  };
+  elements.signupEmailOption?.addEventListener('click', () => chooseSignupMethod('email'));
+  elements.signupMobileOption?.addEventListener('click', () => chooseSignupMethod('mobile'));
+
   elements.authBackToChoicesBtn?.addEventListener('click', () => {
     state.showAuthCard = false;
     state.pendingPreAuthChoice = '';
     isRegisterMode = false;
     isForgotPasswordMode = false;
     signupStage = 'details';
+    signupMethod = 'email';
     forgotPasswordStage = 'email';
     pendingSignupName = '';
     pendingSignupEmail = '';
+    pendingSignupMobile = '';
     pendingForgotEmail = '';
     signupOtpResendAvailableAt = 0;
     forgotOtpResendAvailableAt = 0;
@@ -1069,6 +1271,51 @@ function attachEvents() {
 
   elements.authResendOtpBtn?.addEventListener('click', async () => {
     await resendAuthOtp();
+  });
+
+  elements.sendWhatsappOtpBtn?.addEventListener('click', async () => {
+    const mobile = `${elements.mobileAuthCountry?.value || '+91'}${elements.mobileAuthNumber.value.replace(/\D/g, '')}`;
+    elements.authError.textContent = '';
+    elements.sendWhatsappOtpBtn.disabled = true;
+    try {
+      const result = await api('/api/auth/send-whatsapp-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobile }),
+      });
+      whatsappOtpSent = true;
+      elements.mobileAuthOtp.value = '';
+      elements.mobileAuthOtpWrap.hidden = false;
+      elements.verifyWhatsappOtpBtn.hidden = false;
+      elements.authError.textContent = result.message || 'WhatsApp OTP sent.';
+      elements.mobileAuthOtp.focus();
+    } catch (error) {
+      elements.authError.textContent = error.message || 'Unable to send WhatsApp OTP.';
+    } finally {
+      elements.sendWhatsappOtpBtn.disabled = false;
+    }
+  });
+
+  elements.verifyWhatsappOtpBtn?.addEventListener('click', async () => {
+    if (!whatsappOtpSent) return;
+    const mobile = `${elements.mobileAuthCountry?.value || '+91'}${elements.mobileAuthNumber.value.replace(/\D/g, '')}`;
+    const otp = elements.mobileAuthOtp.value.trim();
+    elements.authError.textContent = '';
+    elements.verifyWhatsappOtpBtn.disabled = true;
+    try {
+      const result = await api('/api/auth/verify-whatsapp-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobile, otp }),
+      });
+      elements.authForm.reset();
+      whatsappOtpSent = false;
+      await finishAuthSuccess(result);
+    } catch (error) {
+      elements.authError.textContent = error.message || 'Unable to verify WhatsApp OTP.';
+    } finally {
+      elements.verifyWhatsappOtpBtn.disabled = false;
+    }
   });
 
   function closeNoticeDialog() {
@@ -1182,8 +1429,10 @@ function attachEvents() {
     state.isGuestUser = true;
     isForgotPasswordMode = false;
     signupStage = 'details';
+    signupMethod = 'email';
     pendingSignupName = '';
     pendingSignupEmail = '';
+    pendingSignupMobile = '';
     forgotPasswordStage = 'email';
     pendingForgotEmail = '';
     signupOtpResendAvailableAt = 0;
@@ -1629,9 +1878,9 @@ function attachEvents() {
 
   elements.checkoutWithEmailLogin?.addEventListener('click', () => {
     elements.checkoutOptionsDialog?.close();
-    state.showAuthCard = true;
-    state.auth = { mode: 'login' };
-    render();
+    state.activeUserTab = 'cart';
+    window.location.hash = '#cart';
+    openAuthFromLanding('booking-checkout');
   });
 
   elements.checkoutAsGuest?.addEventListener('click', () => {
@@ -1855,7 +2104,7 @@ function attachEvents() {
   elements.userCouponCode?.addEventListener('input', () => {
     state.cartCouponPreview = null;
     renderCartCouponPreview();
-    renderUserCheckoutSummary(state.bookings || []);
+    renderUserCheckoutSummary(getCurrentUserCartPayableBookings());
   });
 
   elements.openBookingBtn?.addEventListener('click', () => openDialog());
@@ -2211,19 +2460,30 @@ function renderAuthMode(preserveMessage = false) {
   const authPasswordWrap = elements.authPassword?.closest?.('label') || elements.authPassword.parentElement;
 
   elements.authNameWrap.hidden = !isSignupDetailsStep;
+  const isEmailSignup = isRegisterMode && signupMethod === 'email';
+  const isMobileSignup = isRegisterMode && signupMethod === 'mobile';
+  elements.signupIdentityChooser.hidden = !isSignupDetailsStep;
+  elements.signupEmailOption.classList.toggle('is-active', isEmailSignup);
+  elements.signupMobileOption.classList.toggle('is-active', isMobileSignup);
+  elements.authEmailWrap.hidden = !isLoginStep && !isEmailSignup && !isForgotEmailStep && !isForgotOtpStep && !isForgotPasswordStep;
+  elements.authMobileWrap.hidden = !isMobileSignup;
   elements.authRoleWrap.hidden = true;
-  elements.authOtpWrap.hidden = !(isSignupOtpStep || isForgotOtpStep);
-  if (!(isSignupOtpStep || isForgotOtpStep)) showDevelopmentOtp('');
-  authPasswordWrap.hidden = !(isLoginStep || isSignupPasswordStep || isForgotPasswordStep);
+  elements.authOtpWrap.hidden = !((isSignupOtpStep && isEmailSignup) || isForgotOtpStep);
+  elements.authWhatsappOtpWrap.hidden = !(isSignupOtpStep && isMobileSignup);
+  authPasswordWrap.hidden = !(isLoginStep || (isSignupPasswordStep && isEmailSignup) || isForgotPasswordStep);
 
   elements.authName.required = isSignupDetailsStep;
-  elements.authPassword.required = isLoginStep || isSignupPasswordStep || isForgotPasswordStep;
-  elements.authOtp.required = isSignupOtpStep || isForgotOtpStep;
-  elements.authEmail.readOnly = isSignupOtpStep || isSignupPasswordStep || isForgotOtpStep || isForgotPasswordStep;
+  elements.authMobile.required = isMobileSignup;
+  elements.authEmail.required = isLoginStep || isEmailSignup || isForgotEmailStep || isForgotOtpStep || isForgotPasswordStep;
+  elements.authPassword.required = isLoginStep || (isSignupPasswordStep && isEmailSignup) || isForgotPasswordStep;
+  elements.authOtp.required = (isSignupOtpStep && isEmailSignup) || isForgotOtpStep;
+  elements.authWhatsappOtp.required = isSignupOtpStep && isMobileSignup;
+  elements.authEmail.readOnly = (isEmailSignup && (isSignupOtpStep || isSignupPasswordStep)) || isForgotOtpStep || isForgotPasswordStep;
 
-  if ((isSignupOtpStep || isSignupPasswordStep) && pendingSignupEmail) {
+  if (isEmailSignup && (isSignupOtpStep || isSignupPasswordStep) && pendingSignupEmail) {
     elements.authEmail.value = pendingSignupEmail;
   }
+  if (isMobileSignup && pendingSignupMobile) elements.authMobile.value = pendingSignupMobile;
   if ((isForgotOtpStep || isForgotPasswordStep) && pendingForgotEmail) {
     elements.authEmail.value = pendingForgotEmail;
   }
@@ -2232,9 +2492,9 @@ function renderAuthMode(preserveMessage = false) {
     elements.authTitle.textContent = 'Create your account';
     elements.authSubmitBtn.textContent = 'Send Signup OTP';
   } else if (isSignupOtpStep) {
-    elements.authTitle.textContent = 'Verify signup OTP';
+    elements.authTitle.textContent = isMobileSignup ? 'Verify WhatsApp signup OTP' : 'Verify signup OTP';
     elements.authSubmitBtn.textContent = 'Verify OTP';
-  } else if (isSignupPasswordStep) {
+  } else if (isSignupPasswordStep && isEmailSignup) {
     elements.authTitle.textContent = 'Set password';
     elements.authSubmitBtn.textContent = 'Complete Signup';
   } else if (isForgotEmailStep) {
@@ -2263,15 +2523,16 @@ function renderAuthMode(preserveMessage = false) {
   if (elements.authDivider) {
     elements.authDivider.hidden = true;
   }
+  if (elements.mobileAuthSection) {
+    elements.mobileAuthSection.hidden = !isLoginStep;
+  }
+  if (!isLoginStep) {
+    whatsappOtpSent = false;
+    if (elements.mobileAuthOtpWrap) elements.mobileAuthOtpWrap.hidden = true;
+    if (elements.verifyWhatsappOtpBtn) elements.verifyWhatsappOtpBtn.hidden = true;
+  }
 
   updateAuthOtpResendUI();
-}
-
-function showDevelopmentOtp(otp = '') {
-  if (!elements.authDevOtp || !elements.authDevOtpValue) return;
-  const value = String(otp || '').trim();
-  elements.authDevOtpValue.textContent = value;
-  elements.authDevOtp.hidden = !value;
 }
 
 function stopAuthOtpResendTicker() {
@@ -2371,16 +2632,26 @@ async function resendAuthOtp() {
 
   try {
     if (isSignupOtpStep) {
-      const email = pendingSignupEmail || elements.authEmail.value.trim();
       const name = pendingSignupName || elements.authName.value.trim() || 'User';
-      const result = await api('/api/auth/register/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email }),
-      });
-      pendingSignupEmail = email;
+      let result;
+      if (signupMethod === 'mobile') {
+        const mobile = pendingSignupMobile || elements.authMobile.value.trim();
+        result = await api('/api/auth/signup/send-whatsapp-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mobile }),
+        });
+        pendingSignupMobile = mobile;
+      } else {
+        const email = pendingSignupEmail || elements.authEmail.value.trim();
+        result = await api('/api/auth/register/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email }),
+        });
+        pendingSignupEmail = email;
+      }
       pendingSignupName = name;
-      showDevelopmentOtp(result.devOtp);
       elements.authError.textContent = result.message || 'Signup OTP resent.';
       applyAuthOtpResendCooldown({ isSignup: true });
       renderAuthMode(true);
@@ -2394,7 +2665,6 @@ async function resendAuthOtp() {
       body: JSON.stringify({ email }),
     });
     pendingForgotEmail = email;
-    showDevelopmentOtp(result.devOtp);
     elements.authError.textContent = result.message || 'Reset OTP resent.';
     applyAuthOtpResendCooldown({ isSignup: false });
     renderAuthMode(true);
@@ -2441,7 +2711,6 @@ async function submitAuth() {
         forgotPasswordStage = 'otp';
         applyAuthOtpResendCooldown({ isSignup: false });
         elements.authOtp.value = '';
-        showDevelopmentOtp(result.devOtp);
         elements.authError.textContent = result.message || 'Password reset OTP sent.';
         renderAuthMode(true);
         return;
@@ -2488,30 +2757,66 @@ async function submitAuth() {
 
     if (signupStage === 'details') {
       const name = elements.authName.value.trim();
-      const email = elements.authEmail.value.trim();
       if (!name) {
         elements.authError.textContent = 'Name is required.';
         return;
       }
-
-      const result = await api('/api/auth/register/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email }),
-      });
-
       pendingSignupName = name;
-      pendingSignupEmail = email;
+      let result;
+      if (signupMethod === 'mobile') {
+        const mobile = elements.authMobile.value.trim();
+        if (!mobile) {
+          elements.authError.textContent = 'Mobile number is required.';
+          return;
+        }
+        result = await api('/api/auth/signup/send-whatsapp-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mobile }),
+        });
+        pendingSignupMobile = mobile;
+      } else {
+        const email = elements.authEmail.value.trim();
+        if (!email) {
+          elements.authError.textContent = 'Email is required.';
+          return;
+        }
+        result = await api('/api/auth/register/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email }),
+        });
+        pendingSignupEmail = email;
+      }
       signupStage = 'otp';
       applyAuthOtpResendCooldown({ isSignup: true });
       elements.authOtp.value = '';
-      showDevelopmentOtp(result.devOtp);
+      elements.authWhatsappOtp.value = '';
       elements.authError.textContent = result.message || 'Signup OTP sent.';
       renderAuthMode(true);
       return;
     }
 
     if (signupStage === 'otp') {
+      if (signupMethod === 'mobile') {
+        const result = await api('/api/auth/signup/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: pendingSignupName || elements.authName.value.trim(),
+            mobile: pendingSignupMobile || elements.authMobile.value.trim(),
+            otp: elements.authWhatsappOtp.value.trim(),
+          }),
+        });
+        signupStage = 'details';
+        pendingSignupName = '';
+        pendingSignupMobile = '';
+        signupOtpResendAvailableAt = 0;
+        elements.authForm.reset();
+        await finishAuthSuccess(result);
+        return;
+      }
+
       const otp = elements.authOtp.value.trim();
       const result = await api('/api/auth/register/verify', {
         method: 'POST',
@@ -2542,6 +2847,8 @@ async function submitAuth() {
     signupStage = 'details';
     pendingSignupName = '';
     pendingSignupEmail = '';
+    pendingSignupMobile = '';
+    signupMethod = 'email';
     signupOtpResendAvailableAt = 0;
     elements.authForm.reset();
     await finishAuthSuccess(result);
@@ -2560,9 +2867,11 @@ async function loadCurrentUser() {
     const result = await api('/api/auth/me');
     state.user = result.user;
     syncPostLoginChoiceWithMembership();
-  } catch {
+  } catch (error) {
     state.user = null;
-    storeAuthToken('');
+    if (Number(error?.status || 0) === 401) {
+      storeAuthToken('');
+    }
   }
 }
 
@@ -2621,9 +2930,52 @@ function setBookingCustomerInlineMessage(message = '') {
 
 function syncBookingModalCustomerGate() {
   const isAdmin = state.user?.role === 'admin';
-  if (elements.bookingCustomerStep) elements.bookingCustomerStep.hidden = !isAdmin;
+  const isEditingBooking = Boolean(String(elements.bookingId?.value || '').trim());
+  const hasSavedPhone = Boolean(normalizeTenDigitMobile(
+    state.user?.mobile || state.user?.phone || state.guestCheckout?.guestPhone || ''
+  ));
+  if (elements.bookingCustomerStep) {
+    elements.bookingCustomerStep.hidden = !isAdmin && !isEditingBooking && hasSavedPhone;
+  }
   if (elements.bookingSchedulerSection) elements.bookingSchedulerSection.hidden = false;
   setBookingCustomerInlineMessage('');
+}
+
+function isPlaceholderEmail(email) {
+  if (!email || typeof email !== 'string') return false;
+  const normalized = email.trim().toLowerCase();
+  return (
+    normalized.endsWith('@h2houseofhealth.local') ||
+    (normalized.endsWith('@h2health.local') && normalized.startsWith('customer-')) ||
+    /^customer-\d+@/i.test(normalized) ||
+    /^guest-\d+@/i.test(normalized)
+  );
+}
+
+function hasRealEmail(email) {
+  return Boolean(email && !isPlaceholderEmail(email));
+}
+
+function getCurrentUserBookingContactFallback(bookingId = '') {
+  const booking = String(bookingId || '').trim()
+    ? (state.bookings || []).find((entry) => String(entry?.id || '') === String(bookingId || '').trim())
+    : null;
+  const rawEmail = String(state.user?.email || booking?.clientEmail || booking?.customerEmail || '').trim();
+  return {
+    name: String(state.user?.name || booking?.clientName || booking?.customerName || '').trim(),
+    email: hasRealEmail(rawEmail) ? rawEmail : '',
+    phone: normalizeTenDigitMobile(
+        state.user?.mobile ||
+        state.user?.phone ||
+        state.guestCheckout?.guestPhone ||
+        booking?.clientPhone ||
+        booking?.customerPhone ||
+        booking?.clientMobile ||
+        booking?.guestPhone ||
+        booking?.mobile ||
+        ''
+    ),
+  };
 }
 
 function syncAdminCustomerFromBookingModal() {
@@ -2922,6 +3274,12 @@ async function loadGuestDashboardData() {
     try {
       const result = await api(`/api/public/guest/bookings?token=${encodeURIComponent(storedGuestToken)}`);
       state.bookings = Array.isArray(result?.bookings) ? result.bookings : [];
+      state.guestCheckout = {
+        ...state.guestCheckout,
+        guestName: String(result?.guest?.name || state.guestCheckout?.guestName || '').trim(),
+        guestEmail: String(result?.guest?.email || state.guestCheckout?.guestEmail || '').trim(),
+        guestPhone: normalizeTenDigitMobile(result?.guest?.phone || state.guestCheckout?.guestPhone || ''),
+      };
     } catch (error) {
       if (Number(error?.status || 0) === 400 || Number(error?.status || 0) === 404) {
         clearStoredGuestSessionToken();
@@ -3534,7 +3892,7 @@ function renderAdminCalendarCustomerSearchDialog() {
     item.className = 'admin-calendar-customer-result';
     item.innerHTML = `
       <strong>${escapeHtml(String(user?.name || 'Customer').trim() || 'Customer')}</strong>
-      <span>${escapeHtml(String(user?.email || '-').trim() || '-')}</span>
+      <span>${escapeHtml(hasRealEmail(user?.email) ? user.email : 'Email not provided')}</span>
       <small>${escapeHtml(String(user?.mobile || user?.phone || '-').trim() || '-')}</small>
     `;
     item.addEventListener('click', async () => {
@@ -3550,7 +3908,7 @@ function renderAdminCalendarCustomerSearchDialog() {
       state.adminResolvedCustomer = selectedCustomer;
       state.adminCustomerForm = {
         name: String(selectedCustomer?.name || '').trim(),
-        email: String(selectedCustomer?.email || '').trim(),
+        email: hasRealEmail(selectedCustomer?.email) ? String(selectedCustomer.email).trim() : '',
         phone: normalizeTenDigitMobile(selectedCustomer?.mobile || selectedCustomer?.phone || ''),
       };
       if (elements.bookingCustomerName) elements.bookingCustomerName.value = state.adminCustomerForm.name || '';
@@ -4165,7 +4523,7 @@ function renderAdminCalendar() {
   elements.adminCalendarTracker.innerHTML = `
     <div class="admin-calendar-tracker-head">
       <h3>${escapeHtml(trackedUser.name || 'User')} Users Tracking</h3>
-      <p>${escapeHtml(trackedUser.email || trackedUser.mobile || '')}</p>
+      <p>${escapeHtml((hasRealEmail(trackedUser.email) ? trackedUser.email : '') || trackedUser.mobile || '')}</p>
     </div>
     <div class="admin-calendar-tracker-grid">
       <article><span>Total</span><strong>${escapeHtml(String(summary.total))}</strong></article>
@@ -4298,6 +4656,7 @@ async function proceedToGuestPayment() {
         guestEmail: state.guestCheckout.guestEmail,
         guestPhone: state.guestCheckout.guestPhone,
         bookings: state.cart,
+        couponCode: String(state.cartCouponPreview?.code || state.cartCouponCode || '').trim(),
       }),
     });
     
@@ -5074,12 +5433,30 @@ function openDialog(booking = null) {
     if (elements.addOnTime) elements.addOnTime.innerHTML = '';
   }
   if (state.user?.role === 'admin') {
+    if (booking && !hasAdminCustomerDetails()) {
+      state.adminCustomerForm = {
+        ...state.adminCustomerForm,
+        name: String(booking.clientName || booking.customerName || '').trim(),
+        email: hasRealEmail(booking.clientEmail || booking.customerEmail)
+          ? String(booking.clientEmail || booking.customerEmail).trim()
+          : '',
+        phone: normalizeTenDigitMobile(
+          booking.clientMobile || booking.clientPhone || booking.customerPhone || booking.mobile || ''
+        ),
+      };
+    }
     if (elements.bookingCustomerName) elements.bookingCustomerName.value = String(state.adminCustomerForm.name || '');
     if (elements.bookingCustomerEmail) elements.bookingCustomerEmail.value = String(state.adminCustomerForm.email || '');
     if (elements.bookingCustomerPhone) elements.bookingCustomerPhone.value = String(state.adminCustomerForm.phone || '');
     syncAdminCustomerFromBookingModal();
     renderServicePanelContext();
   } else {
+    if (booking) {
+      const contact = getCurrentUserBookingContactFallback(booking.id);
+      if (elements.bookingCustomerName) elements.bookingCustomerName.value = contact.name;
+      if (elements.bookingCustomerEmail) elements.bookingCustomerEmail.value = contact.email;
+      if (elements.bookingCustomerPhone) elements.bookingCustomerPhone.value = contact.phone;
+    }
     syncBookingModalCustomerGate();
   }
   const submitBtn = elements.bookingForm?.querySelector('button[type="submit"]');
@@ -5372,13 +5749,14 @@ async function upsertBooking() {
     payload.customerPhone = state.adminCustomerForm.phone;
   }
 
-  // For non-admin users require at least one contact (email or phone)
+  // For non-admin users phone is required; email remains optional.
   if (!isAdmin) {
-    const email = String(elements.bookingCustomerEmail?.value || '').trim();
-    const phone = normalizeTenDigitMobile(String(elements.bookingCustomerPhone?.value || ''));
-    if (!email && !phone) {
-      showNotice({ title: 'Missing contact', body: 'Please provide an email or contact number to confirm booking.' });
-      if (elements.bookingCustomerEmail) elements.bookingCustomerEmail.focus();
+    const contactFallback = getCurrentUserBookingContactFallback(elements.bookingId?.value || '');
+    const email = String(elements.bookingCustomerEmail?.value || '').trim() || contactFallback.email;
+    const phone = normalizeTenDigitMobile(String(elements.bookingCustomerPhone?.value || '')) || contactFallback.phone;
+    if (!phone) {
+      showNotice({ title: 'Missing phone', body: 'Please provide a contact number to confirm booking.' });
+      elements.bookingCustomerPhone?.focus();
       return;
     }
     if (email && !isValidEmail(email)) {
@@ -5386,18 +5764,19 @@ async function upsertBooking() {
       elements.bookingCustomerEmail?.focus();
       return;
     }
-    if (phone && phone.length !== 10) {
+    if (phone.length !== 10) {
       showNotice({ title: 'Invalid phone', body: 'Please enter a valid 10-digit contact number.' });
       elements.bookingCustomerPhone?.focus();
       return;
     }
-    payload.customerName = String(elements.bookingCustomerName?.value || '').trim();
+    payload.customerName = String(elements.bookingCustomerName?.value || '').trim() || contactFallback.name;
     payload.customerEmail = email;
     payload.customerPhone = phone;
   }
 
   const id = elements.bookingId.value;
   const isNewBooking = !id;
+  
   
   try {
     const result = await api(id ? `/api/bookings/${id}` : (isAdmin ? '/api/admin/bookings' : '/api/bookings'), {
@@ -5671,10 +6050,17 @@ async function changeStatus(id, status) {
   const bookingBefore = (Array.isArray(state.bookings) ? state.bookings : []).find((booking) => Number(booking?.id) === Number(id));
   const bookingDate = String(bookingBefore?.bookingDate || '').trim();
   const normalizedStatus = normalizeBookingStatusValue(status);
-  await api(`/api/bookings/${id}/status`, {
+  const isGuestMode = Boolean(state.isGuestUser && !state.user);
+  const statusUrl = isGuestMode
+    ? `/api/public/guest/bookings/${encodeURIComponent(id)}/status`
+    : `/api/bookings/${id}/status`;
+  await api(statusUrl, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status: normalizedStatus }),
+    body: JSON.stringify({
+      status: normalizedStatus,
+      token: isGuestMode ? String(state.guestSessionToken || getStoredGuestSessionToken() || '').trim() : undefined,
+    }),
   });
   await loadDashboardData();
   if (state.user?.role === 'admin' && bookingDate) {
@@ -7296,7 +7682,7 @@ function getFilteredAdminUsers() {
   }
 
   return sortedUsers.filter((user) => {
-    const haystack = [user?.id, user?.name, user?.email, user?.mobile].join(' ').toLowerCase();
+    const haystack = [user?.id, user?.name, hasRealEmail(user?.email) ? user?.email : '', user?.mobile].join(' ').toLowerCase();
     return haystack.includes(query);
   });
 }
@@ -7654,6 +8040,20 @@ function getAdminRescheduleViewMode() {
   return ['rescheduled', 'schedule_later'].includes(view) ? view : 'queue';
 }
 
+function getAdminRescheduleFilterSlot(booking, view = getAdminRescheduleViewMode()) {
+  const history = getAdminRescheduleHistory(booking);
+  if (view === 'rescheduled') {
+    return {
+      bookingDate: history.rescheduledDate || booking?.bookingDate || '',
+      bookingTime: history.rescheduledTime || booking?.bookingTime || '',
+    };
+  }
+  return {
+    bookingDate: booking?.bookingDate || '',
+    bookingTime: booking?.bookingTime || '',
+  };
+}
+
 function getFilteredAdminRescheduleBookings(bookings = state.bookings) {
   const query = String(state.adminRescheduleSearch || '').trim().toLowerCase();
   const selectedDate = String(state.adminRescheduleDateFilter || '').trim();
@@ -7674,15 +8074,11 @@ function getFilteredAdminRescheduleBookings(bookings = state.bookings) {
     })
     .filter((booking) => {
       if (!selectedDate) return true;
-      const history = getAdminRescheduleHistory(booking);
-      const dateToCompare = view === 'rescheduled' ? history.originalDate || booking.bookingDate : booking.bookingDate;
-      return String(dateToCompare || '').trim() === selectedDate;
+      return String(getAdminRescheduleFilterSlot(booking, view).bookingDate || '').trim() === selectedDate;
     })
     .filter((booking) => {
       if (!selectedSlot) return true;
-      const history = getAdminRescheduleHistory(booking);
-      const slotToCompare = view === 'rescheduled' ? history.originalTime || booking.bookingTime : booking.bookingTime;
-      return normalizeSlotStartTime(slotToCompare) === selectedSlot;
+      return normalizeSlotStartTime(getAdminRescheduleFilterSlot(booking, view).bookingTime) === selectedSlot;
     })
     .sort((a, b) => {
       if (view === 'rescheduled') {
@@ -7779,15 +8175,11 @@ async function openAdminRescheduleForBooking(booking) {
   if (!booking?.id) return;
   const alreadyRescheduled = isAdminRescheduledBooking(booking);
   const isScheduleLater = String(booking?.status || '').trim().toLowerCase() === 'schedule_later';
-  const history = getAdminRescheduleHistory(booking);
+  const filterSlot = getAdminRescheduleFilterSlot(booking, alreadyRescheduled ? 'rescheduled' : state.adminRescheduleView);
   state.adminActiveTab = 'rescheduled';
   state.adminRescheduleView = isScheduleLater ? 'schedule_later' : alreadyRescheduled ? 'rescheduled' : 'queue';
-  state.adminRescheduleDateFilter = String(
-    alreadyRescheduled ? history.originalDate || booking.bookingDate : booking.bookingDate || ''
-  ).trim();
-  state.adminRescheduleSlotFilter = normalizeSlotStartTime(
-    alreadyRescheduled ? history.originalTime || booking.bookingTime : booking.bookingTime || ''
-  );
+  state.adminRescheduleDateFilter = String(filterSlot.bookingDate || '').trim();
+  state.adminRescheduleSlotFilter = normalizeSlotStartTime(filterSlot.bookingTime);
   state.adminRescheduleSearch = String(booking.clientMobile || booking.clientEmail || booking.clientName || booking.id || '')
     .trim()
     .toLowerCase();
@@ -7824,14 +8216,11 @@ function renderAdminRescheduleSlotFilters() {
     })
     .filter((booking) => {
       if (!selectedDate) return true;
-      const history = getAdminRescheduleHistory(booking);
-      const dateToCompare = view === 'rescheduled' ? history.originalDate || booking.bookingDate : booking.bookingDate;
-      return String(dateToCompare || '').trim() === selectedDate;
+      return String(getAdminRescheduleFilterSlot(booking, view).bookingDate || '').trim() === selectedDate;
     });
   const counts = new Map(SLOT_OPTIONS.map((slot) => [slot.value, 0]));
   for (const booking of source) {
-    const history = getAdminRescheduleHistory(booking);
-    const slotValue = normalizeSlotStartTime(view === 'rescheduled' ? history.originalTime || booking.bookingTime : booking.bookingTime);
+    const slotValue = normalizeSlotStartTime(getAdminRescheduleFilterSlot(booking, view).bookingTime);
     if (counts.has(slotValue)) counts.set(slotValue, Number(counts.get(slotValue) || 0) + 1);
   }
 
@@ -8099,7 +8488,7 @@ function renderServicePanelContext() {
       </div>
       <div class="admin-client-chip">
         <strong>Contact</strong>
-        <span>${escapeHtml(state.adminCustomerForm.phone || state.adminCustomerForm.email || '-')}</span>
+        <span>${escapeHtml(state.adminCustomerForm.phone || (hasRealEmail(state.adminCustomerForm.email) ? state.adminCustomerForm.email : '-'))}</span>
       </div>
       <div class="admin-client-chip">
         <strong>Membership</strong>
@@ -12384,6 +12773,11 @@ function renderCartCouponPreview() {
   renderCouponPreview(state.cartCouponPreview, elements.userCouponPreview);
 }
 
+function getCurrentUserCartPayableBookings() {
+  const cartSourceBookings = state.isGuestUser ? getGuestCartBookings() : (state.bookings || []);
+  return getUserCartPayableBookings(cartSourceBookings);
+}
+
 function renderGeneralCouponsForTarget({ coupons = [], container, onApply }) {
   if (!container) return;
   const isCartOffersContainer = container === elements.userGeneralCoupons;
@@ -12439,6 +12833,8 @@ function renderGeneralCouponsForTarget({ coupons = [], container, onApply }) {
       </div>
       ${metaText ? `<small>${escapeHtml(metaText)}</small>` : ''}
     `;
+    const couponCodeLabel = card.querySelector('.general-coupon-head strong');
+    if (couponCodeLabel) couponCodeLabel.textContent = coupon.code || '';
     if (isRedeemable) {
       const applyBtn = card.querySelector('.general-coupon-apply');
       applyBtn?.addEventListener('click', () => onApply(coupon.code || ''));
@@ -12506,7 +12902,7 @@ async function previewCartCoupon() {
   if (!couponCode) {
     state.cartCouponPreview = null;
     renderCartCouponPreview();
-    renderUserCheckoutSummary(state.bookings || []);
+    renderUserCheckoutSummary(getCurrentUserCartPayableBookings());
     return;
   }
 
@@ -12514,15 +12910,18 @@ async function previewCartCoupon() {
     const result = await api('/api/payments/preview-cart-coupon', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ couponCode }),
+      body: JSON.stringify({
+        couponCode,
+        ...(state.isGuestUser && !state.user ? { bookings: getGuestCartBookings() } : {}),
+      }),
     });
     state.cartCouponPreview = result.coupon || null;
     renderCartCouponPreview();
-    renderUserCheckoutSummary(state.bookings || []);
+    renderUserCheckoutSummary(getCurrentUserCartPayableBookings());
   } catch (error) {
     state.cartCouponPreview = null;
     renderCartCouponPreview();
-    renderUserCheckoutSummary(state.bookings || []);
+    renderUserCheckoutSummary(getCurrentUserCartPayableBookings());
     showNotice({ title: 'Error', body: error.message || 'Unable to apply this coupon.' });
   }
 }
@@ -12824,18 +13223,12 @@ function compareBookingsByScheduleDesc(a, b) {
 
 function getUserRescheduleEligibility(row, options = {}) {
   const booking = row?.booking || row;
-  const enforceRescheduleLimit = options?.enforceRescheduleLimit !== false;
   const status = String(booking?.status || '').trim().toLowerCase();
   if (status === 'completed' || status === 'cancelled') {
     return { allowed: false, message: 'Completed or cancelled bookings cannot be rescheduled.' };
   }
   if (status === 'schedule_later') {
     return { allowed: true, message: '' };
-  }
-  const rescheduleCount = Number(booking?.rescheduleCount || 0);
-  const hasUserRescheduleHistory = rescheduleCount >= 1;
-  if (enforceRescheduleLimit && hasUserRescheduleHistory) {
-    return { allowed: false, message: 'Reschedule limit reached. Further rescheduling can be done only by admin.' };
   }
   const slotStart = getBookingStartTime(booking);
   if (!Number.isFinite(slotStart)) {
@@ -13480,9 +13873,10 @@ function buildUserBookingRows(bookings, allBookings = bookings) {
         sortedEntries[0];
       const comboHydrogenEntries = comboEntries.filter((entry) => getBookingCategory(entry.serviceName) === 'HYDROGEN SESSION');
       const comboNonHydrogenEntries = comboEntries.filter((entry) => getBookingCategory(entry.serviceName) !== 'HYDROGEN SESSION');
-      const comboAmountInr = comboEntries.reduce((sum, entry) => sum + Number(getBookingDisplayAmountInr(entry) || 0), 0);
+      const comboCatalogAmountInr = comboEntries.reduce((sum, entry) => sum + Number(getBookingDisplayAmountInr(entry) || 0), 0);
+      const comboAmountInr = getBookingEntriesDisplayAmountInr(comboEntries, comboCatalogAmountInr);
       const comboItemLines = comboEntries.map((entry) => {
-        const entryAmount = Number(getBookingDisplayAmountInr(entry) || 0);
+        const entryAmount = Number((getBookingPaidAmountInr(entry) ?? getBookingDisplayAmountInr(entry)) || 0);
         const entryLabel = getBookingCategoryLabel(entry.serviceName);
         const entryDateTime = formatDateTime(entry.bookingDate, entry.bookingTime);
         return `${entryLabel}: ${getServiceDisplayName(entry.serviceName)}${entryDateTime !== '-' ? ` • ${entryDateTime}` : ''}${entryAmount > 0 ? ` • Rs. ${entryAmount.toLocaleString('en-IN')}` : ''}`;
@@ -13549,7 +13943,7 @@ function buildUserBookingRows(bookings, allBookings = bookings) {
         isGroupedHydrogen: false,
         status: getDerivedBookingStatus(booking),
         paymentStatus: booking.paymentStatus || 'unpaid',
-        amountInr: getBookingDisplayAmountInr(booking),
+        amountInr: getBookingEntriesDisplayAmountInr([booking], getBookingDisplayAmountInr(booking)),
         serviceTitle: getServiceDisplayName(booking.serviceName),
         serviceMetaLines: [
           getBookingCategoryLabel(booking.serviceName),
@@ -13591,6 +13985,10 @@ function buildUserBookingRows(bookings, allBookings = bookings) {
       (entry) => entry.status !== 'cancelled' && String(entry.paymentStatus || 'unpaid').toLowerCase() !== 'paid'
     );
     const breakdown = getHydrogenGroupBreakdown(pricingHydrogenEntries, pricingAddOnEntries);
+    const displayAmountInr = getBookingEntriesDisplayAmountInr(
+      [...pricingHydrogenEntries, ...pricingAddOnEntries],
+      Number(breakdown.totalAmountInr || 0)
+    );
     const payableBreakdown = getHydrogenGroupBreakdown(payableHydrogenEntries, payableAddOnEntries);
     const addOnDetails = displayAddOnEntries.map((entry) => {
       const linkedHydrogen = groupHydrogenEntries.find(
@@ -13644,7 +14042,7 @@ function buildUserBookingRows(bookings, allBookings = bookings) {
       isGroupedHydrogen: true,
       status: summarizeGroupStatus(includedEntries),
       paymentStatus: summarizeGroupPaymentStatus(includedEntries),
-      amountInr: Number(breakdown.totalAmountInr || 0),
+      amountInr: displayAmountInr,
       serviceTitle: 'Hydrogen Package Booking',
       serviceMetaLines: [
         displayPackageName,
@@ -13657,12 +14055,12 @@ function buildUserBookingRows(bookings, allBookings = bookings) {
         { title: 'Hydrogen Sessions', lines: slotLines },
         ...rescheduleSections,
         ...(addOnDetails.length ? [{ title: 'Add-on', lines: addOnDetails }] : []),
-        ...(breakdown.totalAmountInr > 0
+        ...(displayAmountInr > 0
         ? [
               {
                 title: 'Payment',
                 lines: [
-                  `Total: Rs. ${Number(payableBreakdown.totalAmountInr || breakdown.totalAmountInr || 0).toLocaleString('en-IN')} (inclusive of all taxes)`,
+                  `Total: Rs. ${Number(payableBreakdown.totalAmountInr || displayAmountInr || 0).toLocaleString('en-IN')} (inclusive of all taxes)`,
                   ...(payableBreakdown.totalAmountInr > 0
                     ? [`Payable now: Rs. ${Number(payableBreakdown.totalAmountInr).toLocaleString('en-IN')}`]
                     : []),
@@ -15230,7 +15628,16 @@ async function setAdminCouponActive(couponId, active) {
   render();
 }
 
+let adminCouponSaveInFlight = false;
+
+function createAdminCouponRequestId() {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `coupon-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 async function saveAdminCoupon({ sendEmail = true } = {}) {
+  if (adminCouponSaveInFlight) return;
   const selectedType = String(elements.adminCouponType?.value || 'public').trim().toLowerCase();
   const couponType = selectedType === 'private' ? 'private' : 'public';
   const recipientEmail = String(elements.adminCouponRecipientEmail?.value || '').trim();
@@ -15289,6 +15696,8 @@ async function saveAdminCoupon({ sendEmail = true } = {}) {
     }
   }
 
+  adminCouponSaveInFlight = true;
+
   const originalLabel = elements.adminCouponSubmitBtn?.textContent || 'Generate & Send';
   const saveOnlyLabel = elements.adminCouponSaveOnlyBtn?.textContent || 'Save Only';
   if (elements.adminCouponSubmitBtn) {
@@ -15303,7 +15712,7 @@ async function saveAdminCoupon({ sendEmail = true } = {}) {
   try {
     const result = await api('/api/admin/coupons', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Request-ID': createAdminCouponRequestId() },
       body: JSON.stringify({
         code,
         description,
@@ -15343,6 +15752,7 @@ async function saveAdminCoupon({ sendEmail = true } = {}) {
       showNotice({ title: 'Email sent', body: `Coupon ${sentCode} sent to ${recipientEmail}.` });
     }
   } finally {
+    adminCouponSaveInFlight = false;
     if (elements.adminCouponSubmitBtn) {
       elements.adminCouponSubmitBtn.disabled = false;
       elements.adminCouponSubmitBtn.textContent = originalLabel;
@@ -15367,7 +15777,7 @@ async function resendAdminCoupon(couponId) {
   if (!ok) return;
   await api(`/api/admin/coupons/${encodeURIComponent(couponId)}/resend`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Request-ID': createAdminCouponRequestId() },
     body: JSON.stringify({}),
   });
   await loadDashboardData();
@@ -15655,6 +16065,28 @@ function getBookingDisplayAmountInr(booking) {
     return getHydrogenSingleSessionPriceInr();
   }
   return getDisplayedServicePriceInr(booking?.serviceName || '');
+}
+
+function getBookingPaidAmountInr(booking) {
+  const paymentStatus = String(booking?.paymentStatus || '').trim().toLowerCase();
+  if (paymentStatus !== 'paid') return null;
+  const rawAmount = booking?.paidAmountPaise;
+  if (rawAmount === null || rawAmount === undefined || rawAmount === '') return null;
+  const amountPaise = Number(rawAmount);
+  if (!Number.isFinite(amountPaise) || amountPaise < 0) return null;
+  return Math.round(amountPaise / 100);
+}
+
+function getBookingEntriesDisplayAmountInr(entries, fallbackAmountInr = 0) {
+  const activeEntries = (Array.isArray(entries) ? entries : []).filter(
+    (entry) => String(entry?.status || '').trim().toLowerCase() !== 'cancelled'
+  );
+  if (!activeEntries.length) return Number(fallbackAmountInr || 0);
+  const paidAmounts = activeEntries.map(getBookingPaidAmountInr);
+  if (paidAmounts.every((amount) => amount !== null)) {
+    return paidAmounts.reduce((sum, amount) => sum + Number(amount || 0), 0);
+  }
+  return Number(fallbackAmountInr || 0);
 }
 
 function canShowBookingInvoice(booking) {
@@ -16398,7 +16830,7 @@ function getFilenameFromContentDisposition(headerValue, fallbackLabel = 'Invoice
   }
   const match = header.match(/filename="?([^";]+)"?/i);
   if (match?.[1]) return match[1];
-  return `Invoice-${String(fallbackLabel || 'Invoice').replace(/[^a-z0-9_-]+/gi, '-')}.pdf`;
+  return 'H2_invoice.pdf';
 }
 
 async function downloadPortalDocument(url, fallbackLabel = 'Invoice') {
@@ -16562,11 +16994,35 @@ async function api(url, options = {}) {
     } else if (method === 'DELETE' && /^\/api\/bookings\/[^/]+$/.test(normalizedUrl)) {
       removeGuestCartBooking(decodeURIComponent(normalizedUrl.split('/').pop() || ''));
       return { ok: true };
+    } else if (method === 'PUT' && /^\/api\/bookings\/[^/]+$/.test(normalizedUrl)) {
+      const bookingId = decodeURIComponent(normalizedUrl.split('/').pop() || '');
+      const payload = JSON.parse(String(options.body || '{}'));
+      url = `/api/public/guest/bookings/${encodeURIComponent(bookingId)}`;
+      options = {
+        ...options,
+        body: JSON.stringify({
+          ...payload,
+          token: String(state.guestSessionToken || getStoredGuestSessionToken() || '').trim(),
+        }),
+      };
     }
   }
 
   const targetUrl = buildApiUrl(url);
   let response;
+  const refreshAuth = async () => {
+    if (!authRefreshPromise) {
+      authRefreshPromise = fetch(buildApiUrl('/api/auth/refresh'), {
+        method: 'POST', credentials: 'include', headers: { Accept: 'application/json' },
+      }).then(async (refreshResponse) => {
+        if (!refreshResponse.ok) throw new Error('Authentication refresh failed');
+        const refreshData = await refreshResponse.json();
+        if (refreshData?.token) storeAuthToken(refreshData.token);
+        return refreshData;
+      }).finally(() => { authRefreshPromise = null; });
+    }
+    return authRefreshPromise;
+  };
   try {
     response = await fetch(targetUrl, withApiCredentials(options));
   } catch (fetchError) {
@@ -16575,6 +17031,14 @@ async function api(url, options = {}) {
     );
     networkError.cause = fetchError;
     throw networkError;
+  }
+
+  if (response.status === 401 && state.user && !String(url).startsWith('/api/auth/')) {
+    try {
+      await refreshAuth();
+      response = await fetch(targetUrl, withApiCredentials(options));
+    } catch {
+    }
   }
 
   if (response.status === 204) {
