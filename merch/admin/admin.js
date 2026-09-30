@@ -3854,9 +3854,9 @@
                 <span class="admin-step-pill">Step 3</span>
                 <label for="campaignTargetProductSelect">Target Product</label>
               </div>
-              <input type="hidden" name="targetProductId" value="11" />
+              <input type="hidden" name="targetProductId" value="${escapeHtml(String((state.products || []).find((p) => String(p.name || '').toLowerCase().includes('bottle'))?.id || 11))}" />
               <select class="admin-select" id="campaignTargetProductSelect" disabled style="width:100%;background:#ffffff;color:var(--admin-text);opacity:0.95;cursor:default;">
-                <option value="11" selected>H2 Molecular Hydrogen Water Bottle</option>
+                <option value="11" selected>${escapeHtml((state.products || []).find((p) => String(p.name || '').toLowerCase().includes('bottle'))?.name || 'H2 Molecular Hydrogen Water Bottle')}</option>
               </select>
             </div>
 
@@ -3865,10 +3865,25 @@
                 <label for="campaignVariantSelect">Variant <span class="admin-required-star">*</span></label>
               </div>
               <select class="admin-select" name="targetVariantId" id="campaignVariantSelect" required style="width:100%;">
-                <option value="569" selected>Silver (SKU: HM-BTL-460-SLV) — ₹22,990 (Default)</option>
-                <option value="570">Black (SKU: HM-BTL-460-BLK) — ₹22,990</option>
-                <option value="571">Gold (SKU: HM-BTL-460-GLD) — ₹22,990</option>
-                <option value="572">Blue (SKU: HM-BTL-460-BLU) — ₹22,990</option>
+                ${(() => {
+                  const bProduct = (state.products || []).find((p) => String(p.name || '').toLowerCase().includes('bottle') || Number(p.id) === 11);
+                  const bVariants = Array.isArray(bProduct?.variants) && bProduct.variants.length
+                    ? bProduct.variants.filter((v) => Number(v.isActive ?? 1) === 1 && !v.deletedAt)
+                    : [];
+                  if (bVariants.length) {
+                    return bVariants.map((v, i) => `
+                      <option value="${v.id}" data-sku="${escapeHtml(v.sku || '')}" data-color="${escapeHtml(v.color || '')}" ${i === 0 ? 'selected' : ''}>
+                        ${escapeHtml(v.color || v.size || 'Bottle')} (${escapeHtml(v.sku || '')}) — ₹${(Number(v.price || 2299000) / 100).toLocaleString('en-IN')}${i === 0 ? ' (Default)' : ''}
+                      </option>
+                    `).join('');
+                  }
+                  return `
+                    <option value="569" data-sku="HM-BTL-460-SLV" data-color="Silver" selected>Silver (SKU: HM-BTL-460-SLV) — ₹22,990 (Default)</option>
+                    <option value="570" data-sku="HM-BTL-460-BLK" data-color="Black">Black (SKU: HM-BTL-460-BLK) — ₹22,990</option>
+                    <option value="571" data-sku="HM-BTL-460-GLD" data-color="Gold">Gold (SKU: HM-BTL-460-GLD) — ₹22,990</option>
+                    <option value="572" data-sku="HM-BTL-460-BLU" data-color="Blue">Blue (SKU: HM-BTL-460-BLU) — ₹22,990</option>
+                  `;
+                })()}
               </select>
             </div>
 
@@ -4066,7 +4081,15 @@
     const influencerId = Number(form.querySelector('[name="influencerId"]')?.value);
     const couponCode = String(form.querySelector('[name="couponCode"]')?.value || '').trim();
     const targetProductId = Number(form.querySelector('[name="targetProductId"]')?.value) || 11;
-    const targetVariantId = Number(form.querySelector('[name="targetVariantId"]')?.value) || 569;
+    const targetVariantSelect = form.querySelector('[name="targetVariantId"]');
+    const targetVariantId = Number(targetVariantSelect?.value) || 569;
+    const targetVariantSku = targetVariantSelect?.selectedOptions?.[0]?.dataset?.sku || {
+      569: 'HM-BTL-460-SLV',
+      570: 'HM-BTL-460-BLK',
+      571: 'HM-BTL-460-GLD',
+      572: 'HM-BTL-460-BLU',
+    }[targetVariantId] || '';
+    const selectedVariantColor = targetVariantSelect?.selectedOptions?.[0]?.dataset?.color || '';
     const slug = String(form.querySelector('[name="slug"]')?.value || '').trim();
 
     if (!influencerId) {
@@ -4120,6 +4143,7 @@
           couponCode,
           targetProductId,
           targetVariantId,
+          targetVariantSku,
           slug,
           name: `${slug} Instagram Story`,
         }),
@@ -4128,7 +4152,9 @@
       if (res?.campaign) {
         const fullUrl = `${window.location.origin}/c/${res.campaign.slug}`;
         const selectedInf = (state.influencers || []).find((i) => Number(i.id) === influencerId);
-        const variantName = { 569: 'Silver (460ml)', 570: 'Black (460ml)', 571: 'Gold (460ml)', 572: 'Blue (460ml)' }[targetVariantId] || 'Silver';
+        const variantName = selectedVariantColor
+          ? `${selectedVariantColor} (460ml)`
+          : ({ 569: 'Silver (460ml)', 570: 'Black (460ml)', 571: 'Gold (460ml)', 572: 'Blue (460ml)' }[targetVariantId] || 'Silver (460ml)');
         state.latestCreatedCampaign = {
           slug: res.campaign.slug,
           fullUrl,
@@ -6226,10 +6252,14 @@
     state.influencersLoading = true;
     renderInfluencers();
     try {
-      const [infResult] = await Promise.all([
+      const promises = [
         apiRequest('/api/merch/admin/influencers'),
         loadCampaignData(),
-      ]);
+      ];
+      if (!state.productsLoaded) {
+        promises.push(loadProductData());
+      }
+      const [infResult] = await Promise.all(promises);
       state.influencers = Array.isArray(infResult?.influencers) ? infResult.influencers : [];
       if (!state.selectedInfluencerId && state.influencers[0]) {
         state.selectedInfluencerId = state.influencers[0].id;
