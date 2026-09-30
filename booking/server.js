@@ -46,6 +46,9 @@ const PORT = process.env.PORT || 3000;
 const WEBSITE_ROOT = path.resolve(__dirname, '..');
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_super_secret_change_me';
 const IS_PRODUCTION = normalizeEnvValue(process.env.NODE_ENV).toLowerCase() === 'production';
+if (IS_PRODUCTION && !normalizeEnvValue(process.env.JWT_SECRET)) {
+  throw new Error('JWT_SECRET must be configured in production.');
+}
 const AUTH_COOKIE_SECURE_MODE = normalizeEnvValue(process.env.AUTH_COOKIE_SECURE || 'auto').toLowerCase();
 const GOOGLE_CLIENT_ID = normalizeEnvValue(process.env.GOOGLE_CLIENT_ID);
 const GOOGLE_CLIENT_SECRET = normalizeEnvValue(process.env.GOOGLE_CLIENT_SECRET);
@@ -55,6 +58,12 @@ const ALLOW_DEV_OTP_FALLBACK = normalizeEnvValue(process.env.ALLOW_DEV_OTP_FALLB
 const SHOW_DEV_OTP_OVERRIDE = parseBooleanEnv(process.env.SHOW_DEV_OTP_IN_UI, false);
 const SHOW_DEV_OTP_IN_UI = ALLOW_DEV_OTP_FALLBACK && (!IS_PRODUCTION || SHOW_DEV_OTP_OVERRIDE);
 const TOKEN_COOKIE = 'booking_portal_token';
+const REFRESH_TOKEN_COOKIE = 'booking_portal_refresh';
+const AUTH_SESSION_TTL_MINUTES = 20;
+const AUTH_SESSION_TTL_MS = AUTH_SESSION_TTL_MINUTES * 60 * 1000;
+const AUTH_SESSION_JWT_EXPIRES_IN = `${AUTH_SESSION_TTL_MINUTES}m`;
+const REFRESH_SESSION_TTL_DAYS = 30;
+const REFRESH_SESSION_TTL_MS = REFRESH_SESSION_TTL_DAYS * 24 * 60 * 60 * 1000;
 const ALLOWED_SLOT_START_TIMES = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'];
 const LEGACY_ALLOWED_SLOT_START_TIMES = ['10:30', '11:30', '12:30', '13:30', '14:30', '15:30', '16:30', '17:30', '18:30', '19:30'];
 const MAX_BOOKINGS_PER_SLOT_HYDROGEN = 8;
@@ -62,6 +71,14 @@ const MAX_BOOKINGS_PER_SLOT_IV = 1;
 const MAX_HYDROGEN_SESSIONS_PER_DAY_PER_USER = 4;
 const IV_REBOOK_COOLDOWN_DAYS = 14;
 const OTP_TTL_MINUTES = 10;
+const WHATSAPP_OTP_TTL_MINUTES = 10;
+const SIGNUP_WHATSAPP_OTP_MAX_SENDS = 3;
+const SIGNUP_WHATSAPP_OTP_WINDOW_MINUTES = 10;
+const WHATSAPP_TOKEN = normalizeEnvValue(process.env.WHATSAPP_TOKEN);
+const WHATSAPP_PHONE_NUMBER_ID = normalizeEnvValue(process.env.WHATSAPP_PHONE_NUMBER_ID);
+const WHATSAPP_API_VERSION = normalizeEnvValue(process.env.WHATSAPP_API_VERSION);
+const WHATSAPP_VERIFY_TOKEN = normalizeEnvValue(process.env.WHATSAPP_VERIFY_TOKEN);
+const WHATSAPP_APPOINTMENT_TEMPLATE = normalizeEnvValue(process.env.WHATSAPP_APPOINTMENT_TEMPLATE) || 'appointment_confirmation';
 const OTP_RESEND_COOLDOWN_SECONDS = (() => {
   const candidate = Number(process.env.OTP_RESEND_COOLDOWN_SECONDS || 30);
   if (!Number.isFinite(candidate)) return 30;
@@ -89,7 +106,7 @@ console.log('ALLOWED_CORS_ORIGINS:', ALLOWED_CORS_ORIGINS);
 const ADMIN_DISCOUNT_GATE_PASSWORD = normalizeEnvValue(process.env.ADMIN_DISCOUNT_GATE_PASSWORD || 'H2-FOUNDERS-2026');
 const RAZORPAY_KEY_ID = normalizeEnvValue(process.env.RAZORPAY_KEY_ID);
 const RAZORPAY_KEY_SECRET = normalizeEnvValue(process.env.RAZORPAY_KEY_SECRET);
-const RAZORPAY_MODE = normalizeEnvValue(process.env.RAZORPAY_MODE || 'test').toLowerCase() || 'test';
+const RAZORPAY_MODE = normalizeEnvValue(process.env.RAZORPAY_MODE || '').toLowerCase() || (RAZORPAY_KEY_ID.startsWith('rzp_live_') ? 'live' : 'test');
 const SENDGRID_API_KEY = normalizeEnvValue(process.env.SENDGRID_API_KEY);
 const SENDGRID_FROM_EMAIL = normalizeEnvValue(
   process.env.SENDGRID_FROM_EMAIL || process.env.SMTP_FROM || process.env.SMTP_USER || ''
@@ -174,20 +191,116 @@ async function sendMailgunEmail({ to, from, subject, text, html }) {
     html,
   });
 }
+async function sendSesEmail({ to, from, subject, text, html, replyTo = [], traceId = '' }) {
+  const normalizedTo = String(to || '').trim().toLowerCase();
+  const normalizedFrom = String(from || MAIL_FROM).trim();
+  const startedAt = Date.now();
+
+  if (!isValidEmail(normalizedTo)) {
+    throw new Error('Valid recipient email is required.');
+  }
+
+  if (!isValidEmail(normalizedFrom)) {
+    throw new Error('Valid sender email is required.');
+  }
+
+  if (!hasSesApiCredentials()) {
+    throw new Error('SES is not configured');
+  }
+
+  const payload = {
+    FromEmailAddress: normalizedFrom,
+    Destination: {
+      ToAddresses: [normalizedTo],
+    },
+    Content: {
+      Simple: {
+        Subject: { Data: subject },
+        Body: {
+          Text: { Data: text || '' },
+          Html: { Data: html || '' },
+        },
+      },
+    },
+  };
+
+  if (replyTo && replyTo.length) {
+    payload.ReplyToAddresses = replyTo;
+  }
+  console.log('[SES PAYLOAD]', JSON.stringify(payload, null, 2));
+  const result = await sesApiRequest(
+    'POST',
+    '/v2/email/outbound-emails',
+    payload
+  );
+  console.log('[SES] Full response:', JSON.stringify(result, null, 2));
+  if (!result.ok) {
+    console.error('[EMAIL][SES] rejected', { traceId, to: normalizedTo, subject, statusCode: result.statusCode || 500, elapsedMs: Date.now() - startedAt, message: result.message || '' });
+    throw new Error(result.message || 'SES send failed');
+  }
+
+  const messageId = String(result.data?.MessageId || result.data?.messageId || '').trim();
+  console.log('[EMAIL][SES] accepted', {
+    traceId,
+    to: normalizedTo,
+    subject,
+    statusCode: result.statusCode || 200,
+    messageId,
+    elapsedMs: Date.now() - startedAt,
+  });
+
+  return {
+    delivery: 'ses',
+    statusCode: result.statusCode || 200,
+    messageId,
+  };
+}
+async function sendConfiguredEmail({ to, from, subject, text, html, traceId = '' }) {
+  const normalizedTo = String(to || '').trim().toLowerCase();
+  const normalizedFrom = String(from || '').trim();
+  if (!normalizedTo) {
+    throw new Error('Recipient email is required');
+  }
+  if (!normalizedFrom) {
+    throw new Error('Sender email is required');
+  }
+  if (hasSesApiCredentials()) {
+    return await sendSesEmail({
+     to: normalizedTo,
+     from: normalizedFrom,
+     subject,
+     text,
+     html,
+     traceId,
+    });
+  }
+  if (mg) {
+    await sendMailgunEmail({ to: normalizedTo, from: normalizedFrom, subject, text, html });
+    return { delivery: 'mailgun' };
+  }
+
+  const transporter = getTransporter();
+  if (transporter) {
+    await transporter.sendMail({ from: normalizedFrom, to: normalizedTo, subject, text, html });
+    return { delivery: 'smtp' };
+  }
+
+  throw new Error('Email service is not configured');
+}
 const SERVICE_CATALOG = [
   {
     category: 'EXPERIENCE SESSION',
     name: 'Demo Session',
-    priceInr: 4000,
+    priceInr: 1, // Temporary test price (original: 4000)
     includes: '30 min consultation + hydrogen session',
     description: 'Demo hydrogen session for non-members with consultation.',
   },
   {
     category: 'HYDROGEN SESSION',
     name: 'H2 Single Session',
-    priceInr: 4800,
-    nonMemberPriceInr: 9500,
-    memberPriceInr: 4800,
+    priceInr: 1, // Temporary test price (original: 4800)
+    nonMemberPriceInr: 1, // Temporary test price (original: 9500)
+    memberPriceInr: 1, // Temporary test price (original: 4800)
     includes: '1 Hydrogen Session',
     description:
       'Single hydrogen session for immediate recovery and cellular wellness support. Non-member pricing: Rs. 9,500.',
@@ -269,7 +382,7 @@ const SERVICE_CATALOG = [
   {
     category: 'IV THERAPIES',
     name: 'Gym Hero',
-    priceInr: 4800,
+    priceInr: 1, // Temporary test price (original: 4800)
     includes: 'Normal saline, B1, B2, B6, B12, Vitamin C, Magnesium, Glutathione',
     description:
       'Designed for fitness enthusiasts to support muscle recovery, hydration, energy production, and antioxidant support after intense workouts.',
@@ -386,7 +499,7 @@ const MEMBERSHIP_PLANS = [
     id: 'h2_single',
     name: '1 Person Membership',
     peopleCount: 1,
-    priceInr: 84000,
+    priceInr: 1,
     validityDays: 90,
     h2SessionsIncluded: 16,
     perks:
@@ -414,7 +527,7 @@ const MEMBERSHIP_PLANS = [
     id: 'h2_add_person',
     name: 'Add Person',
     peopleCount: 1,
-    priceInr: 78000,
+    priceInr: 1,
     validityDays: 90,
     h2SessionsIncluded: 16,
     perks:
@@ -484,6 +597,8 @@ const razorpay = !razorpayConfigError
 
 if (razorpayConfigError && (RAZORPAY_KEY_ID || RAZORPAY_KEY_SECRET || process.env.RAZORPAY_MODE)) {
   console.warn(`Razorpay disabled: ${razorpayConfigError}`);
+} else if (razorpay) {
+  console.log(`Razorpay enabled in ${RAZORPAY_MODE.toUpperCase()} mode.`);
 }
 
 migrate();
@@ -716,15 +831,21 @@ function getRazorpayConfigError() {
     return 'Razorpay is not configured';
   }
 
-  if (RAZORPAY_MODE !== 'test') {
-    return 'Razorpay live mode is blocked. Set RAZORPAY_MODE=test.';
+  if (RAZORPAY_MODE === 'live') {
+    if (!RAZORPAY_KEY_ID.startsWith('rzp_live_')) {
+      return 'Invalid live key. Live mode requires rzp_live_* credentials.';
+    }
+    return null;
   }
 
-  if (!RAZORPAY_KEY_ID.startsWith('rzp_test_')) {
-    return 'Razorpay live keys are blocked. Use rzp_test_* credentials.';
+  if (RAZORPAY_MODE === 'test') {
+    if (!RAZORPAY_KEY_ID.startsWith('rzp_test_')) {
+      return 'Invalid test key. Test mode requires rzp_test_* credentials.';
+    }
+    return null;
   }
 
-  return null;
+  return 'RAZORPAY_MODE must be either "test" or "live".';
 }
 
 app.use(
@@ -775,6 +896,21 @@ app.use('/booking', express.static(path.join(__dirname)));
 app.use('/merch', express.static(path.join(WEBSITE_ROOT, 'merch')));
 app.use('/uploads', express.static(uploadsDir));
 
+const merchImageUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname || '').toLowerCase();
+      cb(null, `merch_${Date.now()}_${crypto.randomBytes(6).toString('hex')}${ext}`);
+    },
+  }),
+  limits: { fileSize: AVATAR_MAX_SIZE_BYTES },
+  fileFilter: (_req, file, cb) => {
+    const ok = ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype);
+    cb(ok ? null : new Error('Only JPG, PNG, or WEBP images are allowed'), ok);
+  },
+});
+
 // Mount Merch API routes
 const mountMerchApi = require('./merch-api');
 mountMerchApi(app, {
@@ -784,6 +920,14 @@ mountMerchApi(app, {
   RAZORPAY_KEY_SECRET,
   JWT_SECRET,
   jwt,
+  merchImageUpload,
+  sendMerchEmail: ({ to, subject, text, html }) => sendConfiguredEmail({
+    to,
+    from: MAIL_FROM,
+    subject,
+    text,
+    html,
+  }),
   couponHelpers: {
     normalizeCouponCode,
     validateCouponForUser,
@@ -832,12 +976,103 @@ app.get('/auth/google/callback', ensureGoogleOAuthConfigured, (req, res, next) =
       }
 
       const token = setAuthCookie(req, res, user);
+      app.locals.merchGuestOrderSync?.(user);
       return res.redirect(`/booking/#auth_token=${encodeURIComponent(token)}`);
     });
   })(req, res, next);
 });
 
 app.use('/api/auth', rateLimit({ windowMs: 60_000, max: 40 }));
+
+function getMobileVariants(mobile) {
+  const norm = String(mobile || '').trim();
+  const withoutPlus = norm.replace(/^\+/, '');
+  let local = withoutPlus;
+  if (norm.startsWith('+91')) {
+    local = norm.slice(3);
+  } else if (norm.startsWith('+1')) {
+    local = norm.slice(2);
+  } else if (norm.startsWith('+44')) {
+    local = norm.slice(3);
+  }
+  return [norm, withoutPlus, local];
+}
+
+function getLatestSignupOtp(mobile) {
+  return db.prepare(
+    `SELECT id, otp, expires_at AS expiresAt, verified
+     FROM login_otps
+     WHERE mobile = ? AND purpose = 'signup'
+     ORDER BY id DESC
+     LIMIT 1`
+  ).get(mobile);
+}
+
+function expireSignupOtps(mobile) {
+  db.prepare(
+    `DELETE FROM login_otps
+     WHERE mobile = ? AND purpose = 'signup' AND expires_at < ?`
+  ).run(mobile, new Date().toISOString());
+}
+
+async function issueSignupWhatsAppOtp(mobile) {
+  expireSignupOtps(mobile);
+  const recentRows = db.prepare(
+    `SELECT created_at AS createdAt
+     FROM login_otps
+     WHERE mobile = ? AND purpose = 'signup'
+     ORDER BY id DESC
+     LIMIT ?`
+  ).all(mobile, SIGNUP_WHATSAPP_OTP_MAX_SENDS);
+  const windowStart = Date.now() - SIGNUP_WHATSAPP_OTP_WINDOW_MINUTES * 60 * 1000;
+  const recentCount = recentRows.filter((row) => new Date(row.createdAt).getTime() >= windowStart).length;
+  if (recentCount >= SIGNUP_WHATSAPP_OTP_MAX_SENDS) {
+    return {
+      ok: false,
+      statusCode: 429,
+      message: 'Too many OTP requests. Please try again later.',
+    };
+  }
+
+  const otp = generateOtp();
+  const expiresAt = new Date(Date.now() + WHATSAPP_OTP_TTL_MINUTES * 60 * 1000).toISOString();
+  const result = db.prepare(
+    `INSERT INTO login_otps (mobile, otp, expires_at, verified, purpose, created_at)
+     VALUES (?, ?, ?, 0, 'signup', ?)`
+  ).run(mobile, otp, expiresAt, new Date().toISOString());
+
+  const whatsappResult = await sendWhatsAppMessage(
+    mobile,
+    'login_otp',
+    [otp],
+    [{
+      type: 'button',
+      sub_type: 'url',
+      index: '0',
+      parameters: [{ type: 'text', text: otp }],
+    }]
+  );
+  if (!whatsappResult.ok) {
+    db.prepare('DELETE FROM login_otps WHERE id = ?').run(result.lastInsertRowid);
+    return whatsappResult;
+  }
+
+  return { ok: true, otp, statusCode: whatsappResult.statusCode, messageId: whatsappResult.messageId };
+}
+
+function verifySignupWhatsAppOtp(mobile, otp) {
+  const latestOtp = getLatestSignupOtp(mobile);
+  if (!latestOtp) return { ok: false, statusCode: 400, message: 'OTP not found. Please request a new OTP.' };
+  if (Number(latestOtp.verified) === 1) return { ok: false, statusCode: 400, message: 'OTP has already been used.' };
+  if (new Date(latestOtp.expiresAt).getTime() < Date.now()) {
+    db.prepare('DELETE FROM login_otps WHERE id = ?').run(latestOtp.id);
+    return { ok: false, statusCode: 400, message: 'OTP expired. Please request a new OTP.' };
+  }
+  if (String(latestOtp.otp) !== otp) return { ok: false, statusCode: 401, message: 'Invalid OTP.' };
+  db.prepare('UPDATE login_otps SET verified = 1 WHERE id = ?').run(latestOtp.id);
+  db.prepare('DELETE FROM login_otps WHERE mobile = ? AND purpose = \'signup\' AND id <> ?').run(mobile, latestOtp.id);
+  return { ok: true, otpId: latestOtp.id };
+}
 
 app.post('/api/auth/register/start', async (req, res) => {
   const name = String(req.body?.name || '').trim();
@@ -891,7 +1126,6 @@ app.post('/api/auth/register/start', async (req, res) => {
   if (!mailResult.ok) {
     return res.status(mailResult.statusCode || 500).json({ message: mailResult.message });
   }
-
   const responsePayload = {
     message: mailResult.message || `Signup OTP sent to ${email}. It expires in ${OTP_TTL_MINUTES} minutes.`,
     otpRequired: true,
@@ -901,6 +1135,54 @@ app.post('/api/auth/register/start', async (req, res) => {
     responsePayload.devOtp = otp;
   }
   return res.status(200).json(responsePayload);
+});
+
+app.post('/api/auth/signup/send-whatsapp-otp', async (req, res) => {
+  const mobile = normalizeWhatsAppMobile(req.body?.mobile);
+  if (!mobile) {
+    return res.status(400).json({ message: 'Enter a valid mobile number with country code.' });
+  }
+
+  const existingUser = db.prepare(
+    'SELECT id FROM users WHERE mobile IN (?, ?, ?) AND mobile_verified = 1 LIMIT 1'
+  ).get(...getMobileVariants(mobile));
+  if (existingUser) {
+    return res.status(409).json({ message: 'mobile number already registered' });
+  }
+
+  const result = await issueSignupWhatsAppOtp(mobile);
+  if (!result.ok) {
+    return res.status(result.statusCode || 502).json({ message: result.message });
+  }
+  const response = { success: true, message: 'WhatsApp signup OTP sent.' };
+  if (SHOW_DEV_OTP_IN_UI) response.devOtp = result.otp;
+  return res.json(response);
+});
+
+app.post('/api/auth/signup/verify', (req, res) => {
+  const mobile = normalizeWhatsAppMobile(req.body?.mobile);
+  const otp = String(req.body?.otp || '').trim();
+  const name = String(req.body?.name || '').trim();
+  if (!mobile || !/^\d{6}$/.test(otp) || !name) {
+    return res.status(400).json({ message: 'mobile, otp, and name are required' });
+  }
+  if (db.prepare('SELECT id FROM users WHERE mobile IN (?, ?, ?) AND mobile_verified = 1 LIMIT 1').get(...getMobileVariants(mobile))) {
+    return res.status(409).json({ message: 'mobile number already registered' });
+  }
+
+  const verification = verifySignupWhatsAppOtp(mobile, otp);
+  if (!verification.ok) return res.status(verification.statusCode).json({ message: verification.message });
+
+  const passwordHash = bcrypt.hashSync(crypto.randomBytes(24).toString('hex'), 10);
+  const result = db.transaction(() => db.prepare(
+    `INSERT INTO users (name, email, mobile, mobile_verified, password_hash, role, created_at)
+     VALUES (?, NULL, ?, 1, ?, 'user', datetime('now'))`
+  ).run(name, mobile, passwordHash))();
+  const userId = Number(result.lastInsertRowid);
+  const user = syncMembershipForUser({ userId }) || { id: userId, name, email: '', mobile, role: 'user' };
+  app.locals.merchGuestOrderSync?.(user);
+  const token = setAuthCookie(req, res, user);
+  return res.status(201).json({ id: userId, user, token });
 });
 
 app.post('/api/auth/register', async (_req, res) => {
@@ -994,7 +1276,7 @@ app.post('/api/auth/register/complete', (req, res) => {
   }
 
   const pending = db.prepare(
-    `SELECT email, name, otp_verified AS otpVerified
+    `SELECT email, name, mobile, otp_verified AS otpVerified
      FROM pending_registrations
      WHERE email = ?`
   ).get(email);
@@ -1005,7 +1287,6 @@ app.post('/api/auth/register/complete', (req, res) => {
   if (Number(pending.otpVerified) !== 1) {
     return res.status(400).json({ message: 'Please verify signup OTP first.' });
   }
-
   const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
   if (existingUser) {
     db.prepare('DELETE FROM pending_registrations WHERE email = ?').run(email);
@@ -1015,8 +1296,8 @@ app.post('/api/auth/register/complete', (req, res) => {
   const passwordHash = bcrypt.hashSync(password, 10);
   const result = db
     .prepare(
-      `INSERT INTO users (name, email, password_hash, role, created_at)
-       VALUES (?, ?, ?, 'user', datetime('now'))`
+      `INSERT INTO users (name, email, mobile, mobile_verified, password_hash, role, created_at)
+       VALUES (?, ?, NULL, 0, ?, 'user', datetime('now'))`
     )
     .run(String(pending.name || '').trim() || 'User', email, passwordHash);
 
@@ -1034,6 +1315,7 @@ app.post('/api/auth/register/complete', (req, res) => {
     membershipPeopleCount: null,
     membershipSubscriptionId: null,
   };
+  app.locals.merchGuestOrderSync?.(user);
   transferGuestBookingsToUserByEmail(email, user.id);
   const token = setAuthCookie(req, res, user);
   return res.status(201).json({ user, token });
@@ -1099,13 +1381,14 @@ app.post('/api/auth/login', (req, res) => {
     } catch {
       syncedUser = null;
     }
+    app.locals.merchGuestOrderSync?.(syncedUser || user);
     transferGuestBookingsToUserByEmail(normalizedEmail, Number(user.id));
 
     const authSource = syncedUser || user;
     const authUser = {
       id: Number(authSource.id),
       name: String(authSource.name),
-      email: String(authSource.email),
+      email: authSource.email ? String(authSource.email) : '',
       role: String(authSource.role || 'user'),
       age: authSource.age ?? null,
       gender: authSource.gender || '',
@@ -1125,6 +1408,118 @@ app.post('/api/auth/login', (req, res) => {
     console.error('Login route error:', String(error?.message || error));
     return res.status(500).json({ message: 'Login failed due to a server configuration error. Check server logs.' });
   }
+});
+
+app.post('/api/auth/send-whatsapp-otp', async (req, res) => {
+  const mobile = normalizeWhatsAppMobile(req.body?.mobile);
+  if (!mobile) {
+    return res.status(400).json({ success: false, message: 'Enter a valid mobile number with country code.' });
+  }
+
+  const user = db
+    .prepare('SELECT id, role FROM users WHERE mobile IN (?, ?, ?) ORDER BY id DESC LIMIT 1')
+    .get(...getMobileVariants(mobile));
+  if (!user || String(user.role || 'user').toLowerCase() === 'admin') {
+    return res.status(404).json({ success: false, message: 'Account not found. Please sign up first.' });
+  }
+
+  const otp = generateOtp();
+  const expiresAt = new Date(Date.now() + WHATSAPP_OTP_TTL_MINUTES * 60 * 1000).toISOString();
+  db.prepare(
+    `INSERT INTO login_otps (mobile, otp, expires_at, verified, purpose, created_at)
+     VALUES (?, ?, ?, 0, 'login', ?)`
+  ).run(mobile, otp, expiresAt, new Date().toISOString());
+
+  const whatsappResult = await sendWhatsAppMessage(
+    mobile,
+    'login_otp',
+    [otp],
+    [{
+      type: 'button',
+      sub_type: 'url',
+      index: '0',
+      parameters: [{ type: 'text', text: otp }],
+    }]
+  );
+  if (!whatsappResult.ok) {
+    console.error('Failed to send WhatsApp login OTP:', whatsappResult.message);
+    return res.status(whatsappResult.statusCode || 502).json({
+      success: false,
+      message: 'Unable to send WhatsApp OTP. Please try again.',
+    });
+  }
+  console.log('WhatsApp login OTP accepted by Meta:', {
+    recipient: mobile,
+    statusCode: whatsappResult.statusCode,
+    messageId: whatsappResult.messageId || '',
+  });
+
+  return res.json({ success: true });
+});
+
+app.post('/api/auth/verify-whatsapp-otp', (req, res) => {
+  const mobile = normalizeWhatsAppMobile(req.body?.mobile);
+  const otp = String(req.body?.otp || '').trim();
+  if (!mobile || !/^\d{6}$/.test(otp)) {
+    return res.status(400).json({ message: 'Valid mobile number and 6-digit OTP are required.' });
+  }
+
+  const latestOtp = db
+    .prepare(
+      `SELECT id, otp, expires_at AS expiresAt, verified
+       FROM login_otps
+       WHERE mobile = ? AND purpose = 'login'
+       ORDER BY id DESC
+       LIMIT 1`
+    )
+    .get(mobile);
+  if (!latestOtp) {
+    return res.status(400).json({ message: 'OTP not found. Please request a new OTP.' });
+  }
+  if (Number(latestOtp.verified) === 1) {
+    return res.status(400).json({ message: 'OTP has already been used. Please request a new OTP.' });
+  }
+  if (new Date(latestOtp.expiresAt).getTime() < Date.now()) {
+    db.prepare('DELETE FROM login_otps WHERE id = ?').run(latestOtp.id);
+    return res.status(400).json({ message: 'OTP expired. Please request a new OTP.' });
+  }
+  if (String(latestOtp.otp) !== otp) {
+    return res.status(401).json({ message: 'Invalid OTP.' });
+  }
+
+  const userRow = db
+    .prepare('SELECT id FROM users WHERE mobile IN (?, ?, ?) ORDER BY id DESC LIMIT 1')
+    .get(...getMobileVariants(mobile));
+  if (!userRow) {
+    return res.status(404).json({ message: 'Account not found' });
+  }
+
+  db.prepare('UPDATE login_otps SET verified = 1 WHERE id = ?').run(latestOtp.id);
+  const syncedUser = syncMembershipForUser({ userId: Number(userRow.id) }) || getUserProfileById(Number(userRow.id));
+  if (!syncedUser || String(syncedUser.role || 'user').toLowerCase() === 'admin') {
+    return res.status(404).json({ message: 'Account not found' });
+  }
+
+  app.locals.merchGuestOrderSync?.(syncedUser);
+  transferGuestBookingsToUserByEmail(syncedUser.email, Number(syncedUser.id));
+  const authUser = {
+    id: Number(syncedUser.id),
+    name: String(syncedUser.name),
+    email: syncedUser.email ? String(syncedUser.email) : '',
+    role: String(syncedUser.role || 'user'),
+    age: syncedUser.age ?? null,
+    gender: syncedUser.gender || '',
+    mobile: syncedUser.mobile || '',
+    avatarUrl: syncedUser.avatarUrl || '',
+    membershipStatus: syncedUser.membershipStatus || 'inactive',
+    membershipPlan: syncedUser.membershipPlan || '',
+    membershipStartedAt: syncedUser.membershipStartedAt || null,
+    membershipExpiresAt: syncedUser.membershipExpiresAt || null,
+    membershipPeopleCount: syncedUser.membershipPeopleCount ?? null,
+    membershipSubscriptionId: syncedUser.membershipSubscriptionId || null,
+  };
+  const token = setAuthCookie(req, res, authUser);
+  return res.json({ user: authUser, token });
 });
 
 app.post('/api/auth/login/verify', (req, res) => {
@@ -1275,8 +1670,56 @@ app.post('/api/auth/password/reset', (req, res) => {
 });
 
 app.post('/api/auth/logout', (req, res) => {
+  const authorizationHeader = String(req.headers.authorization || '').trim();
+  const bearerToken = authorizationHeader.toLowerCase().startsWith('bearer ')
+    ? authorizationHeader.slice(7).trim()
+    : '';
+  const accessToken = String(req.cookies?.[TOKEN_COOKIE] || bearerToken).trim();
+  const refreshToken = String(req.cookies?.[REFRESH_TOKEN_COOKIE] || '').trim();
+  try {
+    const payload = accessToken ? jwt.decode(accessToken) : null;
+    if (payload?.jti) {
+      db.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL")
+        .run(new Date().toISOString(), String(payload.jti));
+    }
+  } catch {
+    // Logout remains idempotent even if the access token is malformed.
+  }
+  if (refreshToken) {
+    db.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE refresh_token_hash = ? AND revoked_at IS NULL")
+      .run(new Date().toISOString(), hashSessionToken(refreshToken));
+  }
   res.clearCookie(TOKEN_COOKIE, getAuthCookieOptions(req));
+  res.clearCookie(REFRESH_TOKEN_COOKIE, getRefreshCookieOptions(req));
   res.status(204).send();
+});
+
+app.post('/api/auth/refresh', (req, res) => {
+  const refreshToken = String(req.cookies?.[REFRESH_TOKEN_COOKIE] || '').trim();
+  if (!refreshToken) return res.status(401).json({ message: 'unauthorized' });
+
+  const existing = db.prepare(
+    `SELECT id, user_id AS userId, expires_at AS expiresAt, revoked_at AS revokedAt
+     FROM auth_sessions WHERE refresh_token_hash = ?`
+  ).get(hashSessionToken(refreshToken));
+  if (!existing || existing.revokedAt || new Date(existing.expiresAt).getTime() <= Date.now()) {
+    return res.status(401).json({ message: 'unauthorized' });
+  }
+
+  const user = getUserProfileById(Number(existing.userId));
+  if (!user) return res.status(401).json({ message: 'unauthorized' });
+  db.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL")
+    .run(new Date().toISOString(), String(existing.id));
+  const authUser = {
+    id: Number(user.id), name: String(user.name), email: user.email ? String(user.email) : '',
+    role: String(user.role || 'user'), age: user.age ?? null, gender: user.gender || '',
+    mobile: user.mobile || '', avatarUrl: user.avatarUrl || '',
+    membershipStatus: user.membershipStatus || 'inactive', membershipPlan: user.membershipPlan || '',
+    membershipStartedAt: user.membershipStartedAt || null, membershipExpiresAt: user.membershipExpiresAt || null,
+    membershipPeopleCount: user.membershipPeopleCount ?? null, membershipSubscriptionId: user.membershipSubscriptionId || null,
+  };
+  const token = issueAuthSession(req, res, authUser);
+  return res.json({ user: authUser, token });
 });
 
 app.get('/api/auth/me', requireAuth, (req, res) => {
@@ -1451,6 +1894,65 @@ app.post('/api/profile/avatar', requireAuth, (req, res) => {
   });
 });
 
+app.get('/webhooks/whatsapp', (req, res) => {
+  const mode = String(req.query['hub.mode'] || '').trim();
+  const token = String(req.query['hub.verify_token'] || '').trim();
+  const challenge = String(req.query['hub.challenge'] || '').trim();
+
+  console.log('========================');
+  console.log('Mode:', mode);
+  console.log('Token:', token);
+  console.log('Expected:', WHATSAPP_VERIFY_TOKEN);
+  console.log('Challenge:', challenge);
+  console.log('========================');
+
+  if (mode !== 'subscribe') {
+    return res.status(400).send(`Wrong mode: ${mode}`);
+  }
+
+  if (token !== WHATSAPP_VERIFY_TOKEN) {
+    return res.status(400).send(
+      `Token mismatch. Received="${token}" Expected="${WHATSAPP_VERIFY_TOKEN}"`
+    );
+  }
+
+  return res.status(200).send(challenge);
+});
+
+app.post('/webhooks/whatsapp', (req, res) => {
+  console.log(
+    'WhatsApp Webhook:',
+    JSON.stringify(req.body, null, 2)
+  );
+
+  res.sendStatus(200);
+});
+app.get('/webhooks/test', (req, res) => {
+  res.json({
+    ok: true,
+    message: 'Webhook routes are deployed',
+    time: new Date().toISOString()
+  });
+});
+app.get('/webhooks/whatsapp', (req, res) => {
+  console.log("========== WEBHOOK VERIFY ==========");
+  console.log("Query:", req.query);
+  console.log("Mode:", req.query["hub.mode"]);
+  console.log("Token from Meta:", req.query["hub.verify_token"]);
+  console.log("Token from ENV:", WHATSAPP_VERIFY_TOKEN);
+
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  if (mode === "subscribe" && token === WHATSAPP_VERIFY_TOKEN) {
+    console.log("Webhook VERIFIED");
+    return res.status(200).send(challenge);
+  }
+
+  console.log("Webhook FAILED");
+  return res.sendStatus(403);
+});
 app.post('/api/admin/ses/verify-recipient', requireAuth, requireAdmin, async (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
   if (!isValidEmail(email)) {
@@ -2337,7 +2839,31 @@ app.get('/api/membership-orders/:orderId/invoice-link', requireAuth, (req, res) 
   });
 });
 
-app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
+app.get('/api/merch/orders/:id/invoice-link', (req, res) => {
+  let authUser = null;
+  const authorizationHeader = String(req.headers.authorization || '').trim();
+  const bearerToken = authorizationHeader.toLowerCase().startsWith('bearer ')
+    ? authorizationHeader.slice(7).trim()
+    : '';
+  const tokens = [req.cookies[TOKEN_COOKIE], bearerToken]
+    .map((token) => String(token || '').trim())
+    .filter(Boolean);
+  for (const tokenValue of tokens) {
+    try {
+      const payload = jwt.verify(tokenValue, JWT_SECRET);
+      const user = getUserProfileById(Number(payload.sub));
+      if (user) {
+        authUser = user;
+        break;
+      }
+    } catch {
+      // Guest invoice access is checked against the order below.
+    }
+  }
+
+  if (authUser) {
+    app.locals.merchGuestOrderSync?.(authUser);
+  }
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId) || orderId <= 0) {
     return res.status(400).json({ message: 'order id is required' });
@@ -2347,6 +2873,9 @@ app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
     .prepare(
       `SELECT id,
               order_number AS orderNumber,
+              customer_email AS customerEmail,
+              guest_email AS guestEmail,
+              is_guest AS isGuest,
               customer_user_id AS customerUserId,
               customer_id AS customerId,
               payment_status AS paymentStatus
@@ -2358,29 +2887,55 @@ app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
     return res.status(404).json({ message: 'merch order not found' });
   }
 
+  if (!authUser) {
+    const guestEmail = String(req.query?.guestEmail || req.query?.email || '').trim().toLowerCase();
+    const orderEmail = String(order.guestEmail || order.customerEmail || '').trim().toLowerCase();
+    const isGuestOrder = Number(order.isGuest || 0) === 1 && !Number(order.customerUserId || 0);
+    if (!isGuestOrder || !guestEmail || guestEmail !== orderEmail) {
+      return res.status(401).json({ message: 'unauthorized' });
+    }
+
+    const token = createInvoiceAccessToken({
+      scope: 'merch_invoice',
+      orderId: order.id,
+      isGuest: true,
+    });
+    const invoiceUrl = `${getRequestOrigin(req)}/invoice/merch?token=${encodeURIComponent(token)}`;
+    return res.json({
+      invoiceUrl,
+      invoiceDownloadUrl: `${invoiceUrl}&format=pdf&download=1`,
+    });
+  }
+
+  const isAdmin = String(authUser?.role || '').trim().toLowerCase() === 'admin';
   let invoiceUserId = Number(order.customerUserId || 0) || 0;
-  let ownsOrder = invoiceUserId === Number(req.user.id);
+  let ownsOrder = invoiceUserId === Number(authUser.id);
   if (!ownsOrder && Number(order.customerId || 0) > 0) {
     const profile = db
       .prepare('SELECT id, user_id AS userId FROM merch_customer_profiles WHERE id = ?')
       .get(Number(order.customerId));
     if (profile) {
       invoiceUserId = Number(profile.userId || invoiceUserId || 0);
-      ownsOrder = Number(profile.userId || 0) === Number(req.user.id);
+      ownsOrder = Number(profile.userId || 0) === Number(authUser.id);
     }
   }
 
-  if (req.user.role !== 'admin' && !ownsOrder) {
+  if (!isAdmin && !ownsOrder) {
     return res.status(403).json({ message: 'forbidden' });
   }
   if (!Number.isInteger(invoiceUserId) || invoiceUserId <= 0) {
-    return res.status(409).json({ message: 'invoice is available only for linked customer accounts' });
+    if (isAdmin) {
+      invoiceUserId = Number(authUser.id);
+    } else {
+      return res.status(409).json({ message: 'invoice is available only for linked customer accounts' });
+    }
   }
 
   const token = createInvoiceAccessToken({
     scope: 'merch_invoice',
     orderId: order.id,
     userId: invoiceUserId,
+    isAdmin,
   });
 
   const invoiceUrl = `${getRequestOrigin(req)}/invoice/merch?token=${encodeURIComponent(token)}`;
@@ -2388,6 +2943,117 @@ app.get('/api/merch/orders/:id/invoice-link', requireAuth, (req, res) => {
     invoiceUrl,
     invoiceDownloadUrl: `${invoiceUrl}&format=pdf&download=1`,
   });
+});
+
+app.post('/api/merch/orders/:id/invoice-email', requireAuth, async (req, res) => {
+  app.locals.merchGuestOrderSync?.(req.user);
+  const orderId = Number(req.params.id);
+  if (!Number.isInteger(orderId) || orderId <= 0) {
+    return res.status(400).json({ message: 'order id is required' });
+  }
+
+  const order = db
+    .prepare(
+      `SELECT id,
+              order_number AS orderNumber,
+              customer_name AS customerName,
+              customer_email AS customerEmail,
+              customer_user_id AS customerUserId,
+              customer_id AS customerId,
+              payment_status AS paymentStatus
+       FROM merch_orders
+       WHERE id = ?`
+    )
+    .get(orderId);
+  if (!order) {
+    return res.status(404).json({ message: 'merch order not found' });
+  }
+
+  const isAdmin = String(req.user?.role || '').trim().toLowerCase() === 'admin';
+  let invoiceUserId = Number(order.customerUserId || 0) || 0;
+  let ownsOrder = invoiceUserId === Number(req.user.id);
+  let recipientEmail = '';
+  if (!ownsOrder && Number(order.customerId || 0) > 0) {
+    const profile = db
+      .prepare('SELECT id, user_id AS userId, email FROM merch_customer_profiles WHERE id = ?')
+      .get(Number(order.customerId));
+    if (profile) {
+      invoiceUserId = Number(profile.userId || invoiceUserId || 0);
+      ownsOrder = Number(profile.userId || 0) === Number(req.user.id);
+      recipientEmail = String(profile.email || '').trim().toLowerCase();
+    }
+  }
+  if (!recipientEmail && Number(req.user?.id || 0) === Number(invoiceUserId || 0) && !isAdmin) {
+    recipientEmail = String(req.user?.email || '').trim().toLowerCase();
+  }
+  if (!recipientEmail) {
+    recipientEmail = String(order.customerEmail || '').trim().toLowerCase();
+  }
+  if (isAdmin && String(req.body?.recipientEmail || '').trim()) {
+    recipientEmail = String(req.body.recipientEmail || '').trim().toLowerCase();
+  }
+
+  if (!isAdmin && !ownsOrder) {
+    return res.status(403).json({ message: 'forbidden' });
+  }
+  if (!recipientEmail || !isValidEmail(recipientEmail)) {
+    return res.status(400).json({ message: 'A valid recipient email is required' });
+  }
+
+  if (!Number.isInteger(invoiceUserId) || invoiceUserId <= 0) {
+    invoiceUserId = Number(req.user.id);
+  }
+
+  const token = createInvoiceAccessToken({
+    scope: 'merch_invoice',
+    orderId: order.id,
+    userId: invoiceUserId,
+    isAdmin,
+  });
+  const invoiceUrl = `${getRequestOrigin(req)}/invoice/merch?token=${encodeURIComponent(token)}`;
+  const invoiceDownloadUrl = `${invoiceUrl}&format=pdf&download=1`;
+  const subject = `${order.orderNumber || `Order #${order.id}`} invoice from H2 House of Health`;
+  const greeting = order.customerName ? `Hi ${order.customerName},` : 'Hi,';
+  const text =
+    `${greeting}\n\n` +
+    `Your invoice for ${order.orderNumber || `Order #${order.id}`} is ready.\n\n` +
+    `View invoice: ${invoiceUrl}\n` +
+    `Download PDF: ${invoiceDownloadUrl}\n\n` +
+    `If you need anything else, please reply to this email.`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #1f2937;">
+      <p style="margin: 0 0 12px;">${escapeHtml(greeting)}</p>
+      <p style="margin: 0 0 12px;">Your invoice for <strong>${escapeHtml(order.orderNumber || `Order #${order.id}`)}</strong> is ready.</p>
+      <p style="margin: 0 0 12px;">You can open the secure invoice page or download the PDF directly.</p>
+      <p style="margin: 0 0 8px;">
+        <a href="${escapeHtml(invoiceUrl)}" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#111827;color:#fff;text-decoration:none;font-weight:600;">View Invoice</a>
+      </p>
+      <p style="margin: 0 0 12px;">
+        <a href="${escapeHtml(invoiceDownloadUrl)}" style="display:inline-block;padding:10px 16px;border-radius:999px;background:#9f3e1f;color:#fff;text-decoration:none;font-weight:600;">Download PDF</a>
+      </p>
+      <p style="margin: 0; color: #6b7280;">If you need anything else, please reply to this email.</p>
+    </div>
+  `;
+
+  try {
+    await sendConfiguredEmail({
+      to: recipientEmail,
+      from: MAIL_FROM,
+      subject,
+      text,
+      html,
+    });
+    return res.json({
+      success: true,
+      message: 'Invoice email sent',
+      recipientEmail,
+      invoiceUrl,
+      invoiceDownloadUrl,
+    });
+  } catch (error) {
+    console.error('Failed to send merch invoice email:', error);
+    return res.status(500).json({ message: error.message || 'Unable to send invoice email' });
+  }
 });
 
 app.get('/api/admin/discount-phones', requireAuth, requireAdmin, (_req, res) => {
@@ -2463,6 +3129,8 @@ app.get('/api/admin/coupons', requireAuth, requireAdmin, (req, res) => {
               c.description,
               c.discount_type AS discountType,
               c.discount_value AS discountValue,
+              c.commission_per_order_paise AS commissionPerOrderPaise,
+              c.commission_by_product_json AS commissionByProductJson,
               c.applies_to AS appliesTo,
               c.max_redemptions AS maxRedemptions,
               c.per_user_limit AS perUserLimit,
@@ -2494,14 +3162,45 @@ app.get('/api/admin/coupons', requireAuth, requireAdmin, (req, res) => {
     .all(portal)
     .map((row) => {
       const stats = getCouponRedemptionStats(row.id, -1);
+      const merchDiscountStats = portal === 'merch'
+        ? db.prepare(`
+            SELECT COUNT(*) AS orderRedemptions,
+                   COALESCE(SUM(discount_amount), 0) AS totalDiscountAmount
+            FROM merch_orders
+            WHERE coupon_id = ?
+              AND discount_amount > 0
+              AND (
+                payment_status IN ('paid', 'cod_pending', 'refunded')
+                OR status IN ('processing', 'shipped', 'delivered', 'cancelled', 'returned')
+              )
+          `).get(row.id)
+        : null;
       const coupon = mapCouponRow(row);
       return {
         ...coupon,
         totalRedemptions: Number(stats.total || 0),
+        orderRedemptions: Number(merchDiscountStats?.orderRedemptions || 0),
+        totalDiscountAmount: Number(merchDiscountStats?.totalDiscountAmount || 0),
       };
     });
 
   res.json({ coupons });
+});
+
+app.get('/api/admin/coupons/generate-code', requireAuth, requireAdmin, (req, res) => {
+  const prefix = String(req.query?.prefix || 'H2')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '')
+    .slice(0, 10) || 'H2';
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    Pragma: 'no-cache',
+    Expires: '0',
+    'Surrogate-Control': 'no-store',
+  });
+  const code = generateUniqueCouponCode(prefix);
+  res.status(200).json({ code });
 });
 
 app.patch('/api/admin/coupons/:id/active', requireAuth, requireAdmin, (req, res) => {
@@ -2537,6 +3236,7 @@ app.get('/api/coupons/general', requireAuth, (req, res) => {
                 description,
                 discount_type AS discountType,
                 discount_value AS discountValue,
+                commission_per_order_paise AS commissionPerOrderPaise,
                 applies_to AS appliesTo,
                 max_redemptions AS maxRedemptions,
                 per_user_limit AS perUserLimit,
@@ -2552,7 +3252,7 @@ app.get('/api/coupons/general', requireAuth, (req, res) => {
                 created_at AS createdAt
          FROM coupons
          WHERE portal = 'booking'
-         WHERE active = 1
+           AND active = 1
            AND COALESCE(is_active, 1) = 1
            AND COALESCE(coupon_type, 'public') = 'public'
            AND (valid_from IS NULL OR datetime(valid_from) <= datetime('now'))
@@ -2637,19 +3337,36 @@ app.get('/api/coupons/general', requireAuth, (req, res) => {
 });
 
 app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
+  const requestId = String(req.headers['x-request-id'] || '').trim() || crypto.randomUUID();
   let code = normalizeCouponCode(req.body?.code);
   const description = String(req.body?.description || '').trim();
   const festivalName = String(req.body?.festivalName || '').trim();
   const discountType = 'flat';
   const discountValue = Number(req.body?.discountValue || 0);
+  const couponCategory = String(req.body?.couponCategory || '').trim().toLowerCase();
+  const commissionPerOrderPaise = couponCategory && couponCategory !== 'influencer'
+    ? 0
+    : Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
+  const commissionByProductJson = normalizeCommissionByProduct(req.body?.commissionByProduct);
   const appliesToRaw = String(req.body?.appliesTo || 'all').trim().toLowerCase();
-  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) ? appliesToRaw : 'all';
+  const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
+  const productIds = productAppliesTo
+    ? [...new Set(productAppliesTo[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
+    : [];
+  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || '').trim().toLowerCase();
   const influencerId = Number(req.body?.influencerId || req.body?.influencer_id || 0);
   const sendEmail = req.body?.sendEmail !== false;
-  const portal = String(req.body?.portal || 'booking')
+  const portalRaw = String(req.body?.portal || 'booking')
     .trim()
     .toLowerCase();
+  const portal = ['booking', 'merch'].includes(portalRaw) ? portalRaw : 'booking';
+  if (portal === 'merch' && productAppliesTo) {
+    for (const productId of productIds) {
+      const product = db.prepare('SELECT id FROM merch_products WHERE id = ?').get(productId);
+      if (!product) return res.status(400).json({ message: 'Product not found.' });
+    }
+  }
   let couponType = String(req.body?.couponType || '').trim().toLowerCase();
   if (!['public', 'private'].includes(couponType)) {
     couponType = recipientEmail ? 'private' : 'public';
@@ -2658,11 +3375,18 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   const maxRedemptionsRaw = req.body?.maxRedemptions;
   let maxRedemptions =
     maxRedemptionsRaw === '' || maxRedemptionsRaw == null ? null : Number(maxRedemptionsRaw);
+  const perUserLimitRaw = req.body?.perUserLimit ?? req.body?.sessionLimit;
+  const perUserLimit = perUserLimitRaw === '' || perUserLimitRaw == null ? 1 : Number(perUserLimitRaw);
+  const active = req.body?.active == null ? 1 : Number(req.body?.active) === 1 ? 1 : 0;
   const validFrom = String(req.body?.validFrom || '').trim();
   const validTill = String(req.body?.validTill || req.body?.expiresAt || '').trim();
 
   if (!code) {
     code = generateUniqueCouponCode();
+  }
+  const existingCouponWithCode = getCouponByCode(code);
+  if (existingCouponWithCode && String(existingCouponWithCode.portal || 'booking').trim().toLowerCase() !== portal) {
+    return res.status(409).json({ message: 'Coupon code already exists in another portal.' });
   }
   if (!Number.isFinite(discountValue) || discountValue <= 0) {
     return res.status(400).json({ message: 'discountValue must be greater than 0.' });
@@ -2687,6 +3411,9 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   }
   if (maxRedemptions != null && (!Number.isInteger(maxRedemptions) || maxRedemptions <= 0)) {
     return res.status(400).json({ message: 'maxRedemptions must be a positive integer.' });
+  }
+  if (!Number.isInteger(perUserLimit) || perUserLimit <= 0) {
+    return res.status(400).json({ message: 'perUserLimit must be a positive integer.' });
   }
   if (validFrom) {
     const parsedStart = new Date(validFrom);
@@ -2724,14 +3451,16 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
 
   db.prepare(
     `INSERT INTO coupons (
-      code, description, discount_type, discount_value, applies_to, max_redemptions, per_user_limit, expires_at, active,
+      code, description, discount_type, discount_value, commission_per_order_paise, commission_by_product_json, applies_to, max_redemptions, per_user_limit, expires_at, active,
       coupon_type, assigned_user_email, used_by, is_active, valid_from, valid_till,
       recipient_email, recipient_name, festival_name, emailed_at, email_status, email_error, portal, influencer_id, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, 1, ?, ?, '[]', 1, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(code) DO UPDATE SET
       description = excluded.description,
       discount_type = excluded.discount_type,
       discount_value = excluded.discount_value,
+      commission_per_order_paise = excluded.commission_per_order_paise,
+      commission_by_product_json = excluded.commission_by_product_json,
       applies_to = excluded.applies_to,
       max_redemptions = excluded.max_redemptions,
       per_user_limit = excluded.per_user_limit,
@@ -2747,17 +3476,22 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
       email_status = excluded.email_status,
       email_error = excluded.email_error,
       influencer_id = excluded.influencer_id,
-      active = 1`
+      active = excluded.active`
   ).run(
     code,
     description,
     discountType,
     discountValue,
+    commissionPerOrderPaise,
+    commissionByProductJson,
     appliesTo,
     maxRedemptions,
+    perUserLimit,
     validTill || null,
+    active,
     couponType,
     assignedUserEmail || null,
+    active,
     validFrom || null,
     validTill || null,
     assignedUserEmail || null,
@@ -2769,6 +3503,15 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0 ? influencerId : null
   );
 
+  console.log('[COUPON][CREATE] persisted before email', {
+    requestId,
+    code,
+    recipientEmail: assignedUserEmail || '',
+    sendEmail,
+    emailStatus: initialEmailStatus,
+    createdAt: new Date().toISOString(),
+  });
+
   let emailStatus = initialEmailStatus;
   let emailMessage = '';
   if (sendEmail && assignedUserEmail) {
@@ -2779,6 +3522,14 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
       discountValue,
       appliesTo,
       expiresAt: validTill,
+      traceId: requestId,
+    });
+    console.log('[COUPON][CREATE] send completed', {
+      requestId,
+      code,
+      ok: Boolean(emailResult.ok),
+      delivery: emailResult.delivery || '',
+      messageId: emailResult.messageId || '',
     });
     if (!emailResult.ok) {
       emailStatus = 'failed';
@@ -2803,6 +3554,7 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     code,
     emailStatus,
     emailMessage,
+    requestId,
   });
 });
 
@@ -2822,8 +3574,17 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   const festivalName = String(req.body?.festivalName || existing.festivalName || '').trim();
   const discountType = String(req.body?.discountType || existing.discountType || 'flat').trim().toLowerCase() || 'flat';
   const discountValue = Number(req.body?.discountValue ?? existing.discountValue ?? 0);
+  const couponCategory = String(req.body?.couponCategory || '').trim().toLowerCase();
+  const commissionPerOrderPaise = couponCategory && couponCategory !== 'influencer'
+    ? 0
+    : Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? existing.commissionPerOrderPaise ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
+  const commissionByProductJson = normalizeCommissionByProduct(req.body?.commissionByProduct, existing.commissionByProduct);
   const appliesToRaw = String(req.body?.appliesTo || existing.appliesTo || 'all').trim().toLowerCase();
-  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) ? appliesToRaw : 'all';
+  const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
+  const productIds = productAppliesTo
+    ? [...new Set(productAppliesTo[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
+    : [];
+  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || existing.recipientEmail || '').trim().toLowerCase();
   const recipientName = String(req.body?.recipientName || existing.recipientName || '').trim();
   const influencerIdRaw = Object.prototype.hasOwnProperty.call(req.body || {}, 'influencerId')
@@ -2832,21 +3593,44 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
       ? req.body.influencer_id
       : existing.influencerId;
   const influencerId = Number(influencerIdRaw || 0);
-  const portal = String(req.body?.portal || existing.portal || 'booking')
+  const portalRaw = String(req.body?.portal || existing.portal || 'booking')
     .trim()
     .toLowerCase();
+  const portal = ['booking', 'merch'].includes(portalRaw) ? portalRaw : 'booking';
+  if (portal === 'merch' && productAppliesTo) {
+    for (const productId of productIds) {
+      if (!db.prepare('SELECT id FROM merch_products WHERE id = ?').get(productId)) {
+        return res.status(400).json({ message: 'Product not found.' });
+      }
+    }
+  }
   let couponType = String(req.body?.couponType || existing.couponType || '').trim().toLowerCase();
   if (!['public', 'private'].includes(couponType)) {
     couponType = recipientEmail ? 'private' : 'public';
   }
   const singleUse = Boolean(req.body?.singleUse) || couponType === 'private';
+  const supportsInfluencerUnlimited = portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0;
+  const hasMaxRedemptions = supportsInfluencerUnlimited && Object.prototype.hasOwnProperty.call(req.body || {}, 'maxRedemptions');
   const maxRedemptionsRaw = req.body?.maxRedemptions;
   let maxRedemptions =
-    maxRedemptionsRaw === '' || maxRedemptionsRaw == null
+    !hasMaxRedemptions
       ? existing.maxRedemptions ?? null
+      : maxRedemptionsRaw === '' || maxRedemptionsRaw == null
+      ? null
       : Number(maxRedemptionsRaw);
+  const perUserLimitRaw = req.body?.perUserLimit ?? req.body?.sessionLimit;
+  const perUserLimit =
+    perUserLimitRaw === '' || perUserLimitRaw == null
+      ? Number(existing.perUserLimit || 1)
+      : Number(perUserLimitRaw);
   const validFrom = String(req.body?.validFrom || existing.validFrom || '').trim();
-  const validTill = String(req.body?.validTill || req.body?.expiresAt || existing.validTill || existing.expiresAt || '').trim();
+  const hasValidTill = supportsInfluencerUnlimited && (
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'validTill') ||
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'expiresAt')
+  );
+  const validTill = hasValidTill
+    ? String(req.body?.validTill ?? req.body?.expiresAt ?? '').trim()
+    : String(existing.validTill || existing.expiresAt || '').trim();
   const active = req.body?.active == null ? Number(existing.active || existing.isActive || 1) : Number(req.body?.active) === 1 ? 1 : 0;
 
   if (!code) {
@@ -2863,6 +3647,9 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   }
   if (maxRedemptions != null && (!Number.isInteger(maxRedemptions) || maxRedemptions <= 0)) {
     return res.status(400).json({ message: 'maxRedemptions must be a positive integer.' });
+  }
+  if (!Number.isInteger(perUserLimit) || perUserLimit <= 0) {
+    return res.status(400).json({ message: 'perUserLimit must be a positive integer.' });
   }
   if (validFrom && Number.isNaN(new Date(validFrom).getTime())) {
     return res.status(400).json({ message: 'validFrom must be a valid date.' });
@@ -2887,6 +3674,8 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
         description = ?,
         discount_type = ?,
         discount_value = ?,
+        commission_per_order_paise = ?,
+        commission_by_product_json = ?,
         applies_to = ?,
         max_redemptions = ?,
         coupon_type = ?,
@@ -2901,13 +3690,15 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
         active = ?,
         portal = ?,
         influencer_id = ?,
-        per_user_limit = 1
+        per_user_limit = ?
        WHERE id = ?`
     ).run(
       code,
       description,
       discountType || 'flat',
       discountValue,
+      commissionPerOrderPaise,
+      commissionByProductJson,
       appliesTo,
       maxRedemptions,
       couponType,
@@ -2922,6 +3713,7 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
       active,
       portal,
       portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0 ? influencerId : null,
+      perUserLimit,
       couponId
     );
   } catch (error) {
@@ -2949,6 +3741,7 @@ app.delete('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
 });
 
 app.post('/api/admin/coupons/:id/resend', requireAuth, requireAdmin, async (req, res) => {
+  const requestId = String(req.headers['x-request-id'] || '').trim() || crypto.randomUUID();
   const couponId = Number(req.params.id);
   if (!Number.isInteger(couponId)) {
     return res.status(400).json({ message: 'Invalid coupon id.' });
@@ -2976,6 +3769,16 @@ app.post('/api/admin/coupons/:id/resend', requireAuth, requireAdmin, async (req,
     discountValue: coupon.discountValue,
     appliesTo: coupon.appliesTo,
     expiresAt: coupon.expiresAt,
+    traceId: requestId,
+  });
+
+  console.log('[COUPON][RESEND] send completed', {
+    requestId,
+    couponId,
+    code: coupon.code,
+    ok: Boolean(emailResult.ok),
+    delivery: emailResult.delivery || '',
+    messageId: emailResult.messageId || '',
   });
 
   if (!emailResult.ok) {
@@ -2994,7 +3797,7 @@ app.post('/api/admin/coupons/:id/resend', requireAuth, requireAdmin, async (req,
      WHERE id = ?`
   ).run(recipientEmail, recipientEmail, recipientName || null, 'sent', couponId);
 
-  res.json({ message: 'Coupon emailed.', emailStatus: 'sent' });
+  res.json({ message: 'Coupon emailed.', emailStatus: 'sent', requestId, messageId: emailResult.messageId || '' });
 });
 
 app.patch('/api/admin/doctors/:id/approval', requireAuth, requireAdmin, (req, res) => {
@@ -4661,11 +5464,6 @@ app.put('/api/bookings/:id', requireAuth, (req, res) => {
     (String(payload.data.bookingDate || '').trim() !== String(existing.bookingDate || '').trim() ||
       String(payload.data.bookingTime || '').trim() !== String(existing.bookingTime || '').trim());
   if (isRescheduleAttempt && !isScheduleLaterBooking) {
-    if (Number(existing.rescheduleCount || 0) >= 1) {
-      return res.status(409).json({
-        message: 'You can reschedule only once. Please contact admin for further reschedule changes.',
-      });
-    }
     const normalizedExistingTime = normalizeSlotStartTime(String(existing.bookingTime || '').trim()) || String(existing.bookingTime || '').trim();
     const slotStart = new Date(`${String(existing.bookingDate || '').trim()}T${normalizedExistingTime}:00`).getTime();
     if (!Number.isFinite(slotStart)) {
@@ -5304,6 +6102,36 @@ app.get('/api/admin/analytics/payment-link-conversion', requireAuth, requireAdmi
   }
 
   return res.json({ analytics: totals, rows: exportRows });
+});
+
+app.post('/api/bookings/:id/send-whatsapp', requireAuth, async (req, res) => {
+  const bookingId = Number(req.params.id);
+  if (!Number.isInteger(bookingId)) {
+    return res.status(400).json({ message: 'Invalid booking id' });
+  }
+
+  const booking = getBookingForWhatsApp(bookingId);
+  if (!booking) {
+    return res.status(404).json({ message: 'Booking not found' });
+  }
+
+  if (!canAccessBooking(req.user, booking.userId)) {
+    return res.status(403).json({ message: 'forbidden' });
+  }
+
+  const result = await sendWhatsAppBookingConfirmation(booking);
+  if (!result.ok) {
+    return res.status(result.statusCode || 500).json({
+      success: false,
+      message: result.message || 'Failed to send WhatsApp confirmation',
+    });
+  }
+
+  return res.json({
+    success: true,
+    message: 'WhatsApp appointment confirmation sent',
+    messageId: result.messageId || '',
+  });
 });
 
 app.post('/api/bookings/:id/send-payment-link-email', requireAuth, async (req, res) => {
@@ -6488,10 +7316,130 @@ app.get('/api/public/guest/bookings', (req, res) => {
   });
 });
 
+app.put('/api/public/guest/bookings/:id', (req, res) => {
+  const guestAccess = verifyGuestCheckoutAccessToken(req.body?.token || req.query?.token);
+  const bookingId = Number(req.params.id);
+  if (!guestAccess || !Number.isInteger(bookingId) || !guestAccess.bookingIds.map(Number).includes(bookingId)) {
+    return res.status(403).json({ message: 'Invalid or expired guest session' });
+  }
+
+  const existing = db
+    .prepare(
+      `SELECT id, status, service_name AS serviceName, booking_date AS bookingDate,
+              booking_time AS bookingTime, notes, reschedule_count AS rescheduleCount,
+              guest_phone AS guestPhone
+       FROM bookings WHERE id = ? AND booking_type = 'guest'`
+    )
+    .get(bookingId);
+  if (!existing) return res.status(404).json({ message: 'booking not found' });
+  const existingStatus = String(existing.status || '').trim().toLowerCase();
+  if (['completed', 'cancelled'].includes(existingStatus)) {
+    return res.status(409).json({ message: 'Completed or cancelled bookings cannot be edited.' });
+  }
+
+  const bookingDate = String(req.body?.bookingDate || '').trim();
+  const bookingTime = normalizeSlotStartTime(String(req.body?.bookingTime || '').trim());
+  const selectedDate = new Date(`${bookingDate}T00:00:00`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(bookingDate) || Number.isNaN(selectedDate.getTime())) {
+    return res.status(400).json({ message: 'bookingDate is invalid' });
+  }
+  if (selectedDate < new Date(new Date().setHours(0, 0, 0, 0))) {
+    return res.status(400).json({ message: 'bookingDate cannot be in the past' });
+  }
+  if (!bookingTime) return res.status(400).json({ message: 'bookingTime must be one of the allowed 1-hour slots' });
+  if (isBookingSlotInPast(bookingDate, bookingTime)) {
+    return res.status(400).json({ message: 'bookingTime cannot be in the past for the selected date' });
+  }
+
+  const changedSlot = bookingDate !== String(existing.bookingDate || '') || bookingTime !== normalizeSlotStartTime(existing.bookingTime);
+  if (changedSlot && existingStatus !== 'schedule_later') {
+    const currentTime = normalizeSlotStartTime(String(existing.bookingTime || '').trim()) || String(existing.bookingTime || '').trim();
+    const slotStart = new Date(`${String(existing.bookingDate || '').trim()}T${currentTime}:00`).getTime();
+    if (!Number.isFinite(slotStart) || Date.now() > slotStart - 12 * 60 * 60 * 1000) {
+      return res.status(409).json({ message: 'Reschedule is allowed only up to 12 hours before slot start time.' });
+    }
+  }
+
+  const phone = String(req.body?.customerPhone || existing.guestPhone || guestAccess.guestPhone || '').replace(/\D+/g, '');
+  if (phone && !/^[6-9]\d{9}$/.test(phone)) {
+    return res.status(400).json({ message: 'Contact number must be exactly 10 digits.' });
+  }
+  const nextNotes = String(req.body?.notes || '').trim();
+  db.prepare(
+    `UPDATE bookings
+     SET booking_date = ?, booking_time = ?, notes = ?,
+         guest_phone = CASE WHEN ? <> '' THEN ? ELSE guest_phone END,
+         client_phone = CASE WHEN ? <> '' THEN ? ELSE client_phone END,
+         reschedule_count = CASE WHEN ? = 1 AND ? <> 'schedule_later' THEN COALESCE(reschedule_count, 0) + 1 ELSE reschedule_count END
+     WHERE id = ?`
+  ).run(
+    bookingDate, bookingTime, nextNotes,
+    phone, phone, phone, phone,
+    changedSlot ? 1 : 0, existingStatus,
+    bookingId
+  );
+  const booking = db.prepare(
+    `SELECT id, service_name AS serviceName, booking_date AS bookingDate, booking_time AS bookingTime,
+            status, notes, guest_phone AS guestPhone FROM bookings WHERE id = ?`
+  ).get(bookingId);
+  return res.json({ booking });
+});
+
+app.patch('/api/public/guest/bookings/:id/status', (req, res) => {
+  const guestAccess = verifyGuestCheckoutAccessToken(req.body?.token || req.query?.token);
+  const bookingId = Number(req.params.id);
+  const status = normalizeBookingStatus(req.body?.status);
+  if (!guestAccess || !Number.isInteger(bookingId) || !guestAccess.bookingIds.map(Number).includes(bookingId)) {
+    return res.status(403).json({ message: 'Invalid or expired guest session' });
+  }
+  if (!['cancelled', 'schedule_later'].includes(status)) {
+    return res.status(403).json({ message: 'Guest sessions can only be cancelled or moved to Schedule Later.' });
+  }
+
+  const existing = db
+    .prepare(
+      `SELECT id, status, payment_status AS paymentStatus, booking_date AS bookingDate,
+              booking_time AS bookingTime, notes
+       FROM bookings WHERE id = ? AND booking_type = 'guest'`
+    )
+    .get(bookingId);
+  if (!existing) return res.status(404).json({ message: 'booking not found' });
+
+  const existingStatus = String(existing.status || '').trim().toLowerCase();
+  if (['completed', 'cancelled'].includes(existingStatus)) {
+    return res.status(409).json({ message: 'Completed or cancelled bookings cannot be changed.' });
+  }
+  if (status === 'schedule_later') {
+    if (existingStatus === 'schedule_later') {
+      return res.status(409).json({ message: 'This session is already waiting to be scheduled.' });
+    }
+    if (!['booked', 'confirmed'].includes(existingStatus)) {
+      return res.status(409).json({ message: 'Only booked sessions can be moved to Schedule Later.' });
+    }
+    if (String(existing.paymentStatus || '').trim().toLowerCase() !== 'paid') {
+      return res.status(409).json({ message: 'Only paid bookings can be moved to Schedule Later.' });
+    }
+    const normalizedTime = normalizeSlotStartTime(String(existing.bookingTime || '').trim()) || String(existing.bookingTime || '').trim();
+    const slotStart = new Date(`${String(existing.bookingDate || '').trim()}T${normalizedTime}:00`).getTime();
+    if (!Number.isFinite(slotStart) || Date.now() > slotStart - 12 * 60 * 60 * 1000) {
+      return res.status(409).json({ message: 'Schedule Later can be used only up to 12 hours before slot start.' });
+    }
+    if (String(existing.notes || '').toLowerCase().includes('moved to schedule later')) {
+      return res.status(409).json({ message: 'Schedule Later can be used only once for this session.' });
+    }
+    const note = `Moved to Schedule Later by user from ${existing.bookingDate} ${existing.bookingTime}`;
+    db.prepare('UPDATE bookings SET status = ?, notes = ? WHERE id = ?')
+      .run(status, [String(existing.notes || '').trim(), note].filter(Boolean).join('\n'), bookingId);
+  } else {
+    db.prepare('UPDATE bookings SET status = ? WHERE id = ?').run(status, bookingId);
+  }
+  return res.status(204).send();
+});
+
 // Guest Checkout Endpoint
 // Allows unauthenticated users to start checkout with basic info
 app.post('/api/guest/checkout', async (req, res) => {
-  const { guestName, guestEmail, guestPhone, bookings } = req.body;
+  const { guestName, guestEmail, guestPhone, bookings, couponCode } = req.body;
 
   // Validate guest information
   if (!guestName || typeof guestName !== 'string' || guestName.trim().length < 2 || guestName.trim().length > 80) {
@@ -6589,18 +7537,6 @@ app.post('/api/guest/checkout', async (req, res) => {
       return res.status(400).json({ message: 'No valid bookings to create' });
     }
 
-    // Generate payment token for guest
-    const paymentToken = createGuestCheckoutAccessToken({
-      guestEmail: guestEmail.trim(),
-      guestPhone: guestPhone.trim(),
-      guestName: guestName.trim(),
-      bookingIds: createdBookings.map((b) => b.id),
-    });
-
-    if (!paymentToken) {
-      return res.status(500).json({ message: 'Unable to prepare guest payment token' });
-    }
-
     const pricingBookings = db
       .prepare(
         `SELECT id,
@@ -6627,6 +7563,35 @@ app.post('/api/guest/checkout', async (req, res) => {
       mobile: guestPhone.trim(),
     };
     const pricingSummary = finalizeSummaryWithGst(buildAggregatePaymentSummary(pricingBookings, guestPricingUser));
+    let guestCouponPreview = null;
+    if (String(couponCode || '').trim()) {
+      const couponResult = validateCouponForUser({
+        code: couponCode,
+        userId: null,
+        appliesTo: 'services',
+        portal: 'booking',
+        subtotalAmountPaise: Math.round(Number(pricingSummary.totalAmountInr || 0) * 100),
+        singleBookingAmountPaise: getSingleBookingCouponBasePaise(pricingSummary),
+      });
+      if (couponResult.error) {
+        db.prepare(`DELETE FROM bookings WHERE id IN (${createdBookings.map(() => '?').join(', ')})`).run(...createdBookings.map((booking) => booking.id));
+        return res.status(400).json({ message: couponResult.error });
+      }
+      guestCouponPreview = serializeCouponPreview(couponResult);
+    }
+
+    // Generate payment token for guest after coupon validation succeeds.
+    const paymentToken = createGuestCheckoutAccessToken({
+      guestEmail: guestEmail.trim(),
+      guestPhone: guestPhone.trim(),
+      guestName: guestName.trim(),
+      bookingIds: createdBookings.map((b) => b.id),
+      couponCode: String(couponCode || '').trim(),
+    });
+
+    if (!paymentToken) {
+      return res.status(500).json({ message: 'Unable to prepare guest payment token' });
+    }
 
     res.json({
       success: true,
@@ -6647,6 +7612,7 @@ app.post('/api/guest/checkout', async (req, res) => {
           bookingCount: Number(unit.bookingCount || 0),
         })),
         units: pricingSummary.units || [],
+        coupon: guestCouponPreview,
       },
     });
   } catch (error) {
@@ -6773,7 +7739,24 @@ app.post('/api/public/payments/create-order', async (req, res) => {
     return res.status(409).json({ message: error?.message || 'Unable to calculate payment total for this booking.' });
   }
 
-  const payableTotalInr = Number(paymentSummary.totalAmountInr || 0);
+  let guestCouponResult = null;
+  if (paymentContext.kind === 'guest' && paymentContext.guestAccess?.couponCode) {
+    guestCouponResult = validateCouponForUser({
+      code: paymentContext.guestAccess.couponCode,
+      userId: null,
+      appliesTo: 'services',
+      portal: 'booking',
+      subtotalAmountPaise: Math.round(Number(paymentSummary.totalAmountInr || 0) * 100),
+      singleBookingAmountPaise: getSingleBookingCouponBasePaise(paymentSummary),
+    });
+    if (guestCouponResult.error) {
+      return res.status(400).json({ message: guestCouponResult.error });
+    }
+  }
+
+  const payableTotalInr = guestCouponResult
+    ? Number(guestCouponResult.finalAmountPaise || 0) / 100
+    : Number(paymentSummary.totalAmountInr || 0);
   const amountInPaise = Math.max(0, Math.round(payableTotalInr * 100));
 
   try {
@@ -6854,6 +7837,7 @@ app.post('/api/public/payments/create-order', async (req, res) => {
             bookingIds: paymentContext.payableBookings.map((entry) => String(entry.id)).join(','),
             guestEmail: paymentContext.guestAccess?.guestEmail || '',
             guestPhone: paymentContext.guestAccess?.guestPhone || '',
+            couponCode: paymentContext.guestAccess?.couponCode || '',
           }
         : {
             bookingId: String(booking.id),
@@ -7054,17 +8038,32 @@ app.post('/api/public/payments/verify', async (req, res) => {
   });
 });
 
-app.post('/api/payments/preview-cart-coupon', requireAuth, (req, res) => {
-  if (req.user.role !== 'user') {
+app.post('/api/payments/preview-cart-coupon', (req, res) => {
+  if (req.user && req.user.role !== 'user') {
     return res.status(403).json({ message: 'forbidden' });
   }
 
-  const pricingUser = {
-    membershipStatus: req.user.membershipStatus || 'inactive',
-    membershipExpiresAt: req.user.membershipExpiresAt || null,
-    mobile: req.user.mobile || '',
-  };
-  const payableBookings = getPayableUserBookings(req.user.id);
+  const isGuestPreview = !req.user;
+  const pricingUser = isGuestPreview
+    ? { membershipStatus: 'inactive', membershipExpiresAt: null, mobile: '' }
+    : {
+        membershipStatus: req.user.membershipStatus || 'inactive',
+        membershipExpiresAt: req.user.membershipExpiresAt || null,
+        mobile: req.user.mobile || '',
+      };
+  const payableBookings = isGuestPreview
+    ? (Array.isArray(req.body?.bookings) ? req.body.bookings : [])
+        .map((booking, index) => ({
+          id: Number(booking?.id || index + 1),
+          bookingGroupId: String(booking?.bookingGroupId || booking?.booking_group_id || '').trim() || null,
+          serviceName: String(booking?.serviceName || '').trim(),
+          bookingDate: String(booking?.bookingDate || '').trim(),
+          bookingTime: String(booking?.bookingTime || '').trim(),
+          status: 'pending',
+          paymentStatus: 'unpaid',
+        }))
+        .filter((booking) => booking.serviceName)
+    : getPayableUserBookings(req.user.id);
   if (!payableBookings.length) {
     return res.status(409).json({ message: 'No unpaid payable bookings found.' });
   }
@@ -7072,7 +8071,9 @@ app.post('/api/payments/preview-cart-coupon', requireAuth, (req, res) => {
   let paymentSummary;
   try {
     paymentSummary = buildAggregatePaymentSummary(payableBookings, pricingUser);
-    paymentSummary = applyOneUseAdminPhoneDiscountToSummary(payableBookings, { ...pricingUser, mobile: req.user.mobile || '' }, paymentSummary);
+    if (!isGuestPreview) {
+      paymentSummary = applyOneUseAdminPhoneDiscountToSummary(payableBookings, { ...pricingUser, mobile: req.user.mobile || '' }, paymentSummary);
+    }
     paymentSummary = finalizeSummaryWithGst(paymentSummary);
   } catch (error) {
     return res.status(409).json({ message: error?.message || 'Unable to calculate payment total for current bookings.' });
@@ -7080,8 +8081,9 @@ app.post('/api/payments/preview-cart-coupon', requireAuth, (req, res) => {
 
   const couponResult = validateCouponForUser({
     code: req.body?.couponCode,
-    userId: req.user.id,
+    userId: req.user?.id ?? null,
     appliesTo: 'services',
+    portal: 'booking',
     subtotalAmountPaise: Math.round(Number(paymentSummary.totalAmountInr || 0) * 100),
     singleBookingAmountPaise: getSingleBookingCouponBasePaise(paymentSummary),
   });
@@ -7123,6 +8125,7 @@ app.post('/api/payments/create-cart-order', requireAuth, async (req, res) => {
     code: req.body?.couponCode,
     userId: req.user.id,
     appliesTo: 'services',
+    portal: 'booking',
     subtotalAmountPaise,
     singleBookingAmountPaise: getSingleBookingCouponBasePaise(paymentSummary),
   });
@@ -7462,9 +8465,8 @@ async function sendInvoiceResponse(req, res, html, invoiceNo) {
       printBackground: true,
       margin: { top: '0', right: '0', bottom: '0', left: '0' },
     });
-    const safeInvoiceNo = sanitizeInvoiceFilenamePart(invoiceNo);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=Invoice-${safeInvoiceNo}.pdf`);
+    res.setHeader('Content-Disposition', 'attachment; filename=H2_invoice.pdf');
     return res.send(pdfBuffer);
   } catch (error) {
     console.error('Invoice PDF generation failed:', error);
@@ -7782,7 +8784,7 @@ function buildMerchOrderInfoHtml(order) {
 app.get('/invoice/merch', async (req, res) => {
   const access = verifyInvoiceAccessToken(req.query?.token);
   const orderId = Number(access?.orderId);
-  if (!access || access.scope !== 'merch_invoice' || !Number.isInteger(orderId) || !Number.isInteger(access.userId)) {
+  if (!access || access.scope !== 'merch_invoice' || !Number.isInteger(orderId) || (!access.isGuest && !Number.isInteger(access.userId))) {
     return res.status(400).send('Invalid or expired invoice link');
   }
 
@@ -7793,6 +8795,7 @@ app.get('/invoice/merch', async (req, res) => {
               customer_name AS customerName,
               customer_email AS customerEmail,
               customer_phone AS customerPhone,
+              is_guest AS isGuest,
               customer_user_id AS customerUserId,
               customer_id AS customerId,
               status,
@@ -7814,8 +8817,13 @@ app.get('/invoice/merch', async (req, res) => {
     return res.status(404).send('Invoice not found');
   }
 
-  let ownsOrder = Number(order.customerUserId || 0) === Number(access.userId);
-  if (!ownsOrder && Number(order.customerId || 0) > 0) {
+  // Admin invoice links are intentionally scoped to the admin token created by
+  // /api/merch/orders/:id/invoice-link. They do not belong to the admin's
+  // customer account, so the normal customer ownership check must be bypassed.
+  let ownsOrder = Boolean(access.isAdmin) || (access.isGuest
+    ? Number(order.isGuest || 0) === 1 && !Number(order.customerUserId || 0)
+    : Number(order.customerUserId || 0) === Number(access.userId));
+  if (!ownsOrder && !access.isAdmin && Number(order.customerId || 0) > 0) {
     const profile = db
       .prepare('SELECT id FROM merch_customer_profiles WHERE id = ? AND user_id = ?')
       .get(Number(order.customerId), Number(access.userId));
@@ -7846,6 +8854,7 @@ app.get('/invoice/merch', async (req, res) => {
   const gstAmountInr = merchPaiseToInr(order.gstAmount);
   const amountInr = merchPaiseToInr(order.totalAmount);
   const invoiceNo = `MR-${order.orderNumber || order.id}`;
+  const invoiceDownloadUrl = `/invoice/merch?token=${encodeURIComponent(String(req.query.token || ''))}&format=pdf&download=1`;
   const invoiceDateLabel = formatInvoiceDateTime(order.updatedAt || order.createdAt || new Date()) || formatInvoiceDateTime(new Date());
   const orderSummaryHtml = buildMerchOrderSummaryHtml(items);
   const orderInfoHtml = buildMerchOrderInfoHtml(order);
@@ -7870,6 +8879,36 @@ app.get('/invoice/merch', async (req, res) => {
       background:#f3f3f7;
       -webkit-print-color-adjust:exact;
       print-color-adjust:exact;
+    }
+    .invoice-toolbar{
+      position:fixed;
+      top:18px;
+      right:18px;
+      z-index:10;
+      display:flex;
+      justify-content:flex-end;
+      pointer-events:none;
+    }
+    .invoice-download-btn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-height:42px;
+      padding:0 18px;
+      border-radius:6px;
+      background:#AE5431;
+      color:#fff;
+      text-decoration:none;
+      font-size:13px;
+      font-weight:800;
+      text-transform:uppercase;
+      letter-spacing:.04em;
+      box-shadow:0 8px 18px rgba(174,84,49,.22);
+      pointer-events:auto;
+    }
+    .invoice-download-btn:hover,
+    .invoice-download-btn:focus-visible{
+      background:#963f22;
     }
     .page{
       position:relative;
@@ -8074,6 +9113,8 @@ app.get('/invoice/merch', async (req, res) => {
     @media screen and (max-width:700px){
       html,body{height:auto;min-height:100%}
       body{background:#fff}
+      .invoice-toolbar{left:12px;right:12px;top:10px}
+      .invoice-download-btn{width:100%;box-shadow:0 8px 18px rgba(174,84,49,.18)}
       .page{
         width:100%;
         margin:0;
@@ -8115,6 +9156,7 @@ app.get('/invoice/merch', async (req, res) => {
     }
     @media print{
       body{background:#fff}
+      .invoice-toolbar{display:none}
       .page{
         width:240mm;
         margin:0;
@@ -8130,6 +9172,9 @@ app.get('/invoice/merch', async (req, res) => {
   </style>
 </head>
 <body>
+  <div class="invoice-toolbar">
+    <a class="invoice-download-btn" href="${escapeHtml(invoiceDownloadUrl)}" download>Download Invoice</a>
+  </div>
   <div class="page">
     <div class="row invoice-header">
       <div>
@@ -9156,6 +10201,12 @@ app.post('/api/payments/verify', requireAuth, async (req, res) => {
          AND payment_status <> 'paid'`
     ).run(razorpayOrderId, razorpayOrderId, razorpayPaymentId, razorpayPaymentId, paymentMethod, paymentMethod, booking.bookingGroupId);
 
+    for (const gb of groupBookings) {
+      void sendWhatsAppBookingConfirmation(gb.id).catch((err) => {
+        console.error('[WhatsApp] Group booking confirmation error:', err?.message || err);
+      });
+    }
+
     return res.json({ bookingId, paid: true, bookingCount: groupBookings.length });
   }
 
@@ -9286,6 +10337,11 @@ app.post('/api/payments/verify-cart', requireAuth, async (req, res) => {
   }
   if (matchedBookings.length) {
     consumeAdminDiscountForBooking(req.user.id, matchedBookings[0].id);
+    for (const mb of matchedBookings) {
+      void sendWhatsAppBookingConfirmation(mb.id).catch((err) => {
+        console.error('[WhatsApp] Cart booking confirmation error:', err?.message || err);
+      });
+    }
   }
 
   const paidAmountPaise = Number.isFinite(Number(cartOrder.amountPaise))
@@ -9838,7 +10894,7 @@ app.post('/api/contact', async (req, res) => {
   // Try Mailgun first, then SES API, then SMTP
   try {
     if (mg) {
-      await sendMailgunEmail({ to: CONTACT_TO_EMAIL, from: CONTACT_FROM_EMAIL, subject, text, html });
+      await sendConfiguredEmail({ to: CONTACT_TO_EMAIL, from: CONTACT_FROM_EMAIL, subject, text, html });
     } else if (hasSesApiCredentials()) {
       const sesResult = await sesApiRequest('POST', '/v2/email/outbound-emails', {
         FromEmailAddress: CONTACT_FROM_EMAIL,
@@ -10059,6 +11115,8 @@ function mapCouponRow(row) {
     description: row.description || '',
     discountType: row.discountType || 'flat',
     discountValue: Number(row.discountValue || 0),
+    commissionPerOrderPaise: Math.max(0, Number(row.commissionPerOrderPaise || 0)),
+    commissionByProduct: parseCommissionByProduct(row.commissionByProductJson),
     appliesTo: row.appliesTo || 'all',
     maxRedemptions: row.maxRedemptions == null ? null : Number(row.maxRedemptions),
     perUserLimit: Number(row.perUserLimit || 1),
@@ -10093,6 +11151,19 @@ function mapCouponRow(row) {
   };
 }
 
+function parseCommissionByProduct(value) {
+  if (!value) return {};
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).map(([id, amount]) => [id, Math.max(0, Math.round(Number(amount) || 0))]));
+  } catch { return {}; }
+}
+
+function normalizeCommissionByProduct(value, fallback = {}) {
+  return JSON.stringify(parseCommissionByProduct(value == null ? fallback : value));
+}
+
 function getCouponByCode(code) {
   const normalizedCode = normalizeCouponCode(code);
   if (!normalizedCode) return null;
@@ -10103,6 +11174,8 @@ function getCouponByCode(code) {
               c.description,
               c.discount_type AS discountType,
               c.discount_value AS discountValue,
+              c.commission_per_order_paise AS commissionPerOrderPaise,
+              c.commission_by_product_json AS commissionByProductJson,
               c.applies_to AS appliesTo,
               c.max_redemptions AS maxRedemptions,
               c.per_user_limit AS perUserLimit,
@@ -10145,6 +11218,8 @@ function getCouponById(couponId) {
               c.description,
               c.discount_type AS discountType,
               c.discount_value AS discountValue,
+              c.commission_per_order_paise AS commissionPerOrderPaise,
+              c.commission_by_product_json AS commissionByProductJson,
               c.applies_to AS appliesTo,
               c.max_redemptions AS maxRedemptions,
               c.per_user_limit AS perUserLimit,
@@ -10177,12 +11252,17 @@ function getCouponById(couponId) {
   return mapCouponRow(row);
 }
 
-function generateUniqueCouponCode() {
+function generateUniqueCouponCode(prefix = 'H2') {
+  const normalizedPrefix = String(prefix || 'H2')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '')
+    .slice(0, 10) || 'H2';
   for (let attempt = 0; attempt < 6; attempt += 1) {
-    const candidate = generateCouponCode('H2');
+    const candidate = generateCouponCode(normalizedPrefix);
     if (!getCouponByCode(candidate)) return candidate;
   }
-  return generateCouponCode(`H2${Date.now().toString(36).toUpperCase()}`);
+  return generateCouponCode(`${normalizedPrefix}${Date.now().toString(36).toUpperCase()}`);
 }
 
 function getCouponRedemptionStats(couponId, userId) {
@@ -10215,7 +11295,7 @@ function calculateCouponDiscountPaise(coupon, subtotalAmountPaise) {
   return Math.min(discountPaise, Math.max(0, subtotal - 100));
 }
 
-function validateCouponForUser({ code, userId, appliesTo, subtotalAmountPaise, singleBookingAmountPaise, portal }) {
+function validateCouponForUser({ code, userId, appliesTo, productIds = [], productLineTotals = {}, productSubtotalAmountPaise, subtotalAmountPaise, singleBookingAmountPaise, portal }) {
   const normalizedCode = normalizeCouponCode(code);
   if (!normalizedCode) {
     return {
@@ -10244,8 +11324,21 @@ function validateCouponForUser({ code, userId, appliesTo, subtotalAmountPaise, s
   if (coupon.validTill && new Date(coupon.validTill).getTime() <= Date.now()) {
     return { error: 'This coupon has expired.' };
   }
-  if (!['all', appliesTo].includes(String(coupon.appliesTo || 'all'))) {
+  const couponAppliesTo = String(coupon.appliesTo || 'all').trim().toLowerCase();
+  const productRestriction = couponAppliesTo.match(/^product:([\d,]+)$/);
+  const restrictedProductIds = productRestriction
+    ? [...new Set(productRestriction[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
+    : [];
+  const productIdSet = new Set((Array.isArray(productIds) ? productIds : [productIds]).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0));
+  const appliesToProduct = productRestriction && restrictedProductIds.some((id) => productIdSet.has(id));
+  if (!['all', appliesTo].includes(couponAppliesTo) && !appliesToProduct) {
     return { error: 'This coupon is not valid for this payment.' };
+  }
+  const restrictedProductSubtotalPaise = productRestriction
+    ? Math.max(0, Math.round(restrictedProductIds.reduce((sum, id) => sum + Number(productLineTotals?.[id] || 0), 0) || productSubtotalAmountPaise || 0))
+    : 0;
+  if (appliesToProduct && restrictedProductSubtotalPaise <= 0) {
+    return { error: 'This coupon is only valid when the selected product is in the cart.' };
   }
   const assignedEmail = String(coupon.assignedUserEmail || coupon.recipientEmail || '').trim().toLowerCase();
   if (coupon.couponType === 'private' || assignedEmail) {
@@ -10283,7 +11376,11 @@ function validateCouponForUser({ code, userId, appliesTo, subtotalAmountPaise, s
   const subtotalPaise = Math.max(0, Math.round(Number(subtotalAmountPaise || 0)));
   const discountBasePaise = Math.max(
     0,
-    Math.round(Number(isAssignedSingleBookingServiceCoupon ? singleBookingAmountPaise : subtotalPaise || 0))
+    Math.round(Number(isAssignedSingleBookingServiceCoupon
+      ? singleBookingAmountPaise
+      : appliesToProduct
+        ? restrictedProductSubtotalPaise
+        : subtotalPaise || 0))
   );
   const discountAmountPaise = calculateCouponDiscountPaise(coupon, discountBasePaise);
   if (discountAmountPaise <= 0) {
@@ -10504,6 +11601,7 @@ function createGuestCheckoutAccessToken(payload) {
       guestName: String(payload?.guestName || '').trim(),
       guestEmail: String(payload?.guestEmail || '').trim(),
       guestPhone: String(payload?.guestPhone || '').trim(),
+      couponCode: normalizeCouponCode(payload?.couponCode || ''),
     },
     JWT_SECRET,
     { expiresIn: '15m' }
@@ -10523,6 +11621,7 @@ function verifyGuestCheckoutAccessToken(token) {
       guestName: String(payload.guestName || '').trim(),
       guestEmail: String(payload.guestEmail || '').trim(),
       guestPhone: String(payload.guestPhone || '').trim(),
+      couponCode: normalizeCouponCode(payload.couponCode || ''),
     };
   } catch {
     return null;
@@ -10558,6 +11657,8 @@ function createInvoiceAccessToken(payload) {
       bookingId: payload?.bookingId != null ? Number(payload.bookingId) : undefined,
       userId: payload?.userId != null ? Number(payload.userId) : undefined,
       orderId: payload?.orderId != null ? String(payload.orderId) : undefined,
+      isAdmin: payload?.isAdmin === true,
+      isGuest: payload?.isGuest === true,
     },
     JWT_SECRET,
     { expiresIn: '30d' }
@@ -10574,6 +11675,8 @@ function verifyInvoiceAccessToken(token) {
       bookingId: payload?.bookingId != null ? Number(payload.bookingId) : null,
       userId: payload?.userId != null ? Number(payload.userId) : null,
       orderId: payload?.orderId != null ? String(payload.orderId) : '',
+      isAdmin: payload?.isAdmin === true,
+      isGuest: payload?.isGuest === true,
     };
   } catch {
     return null;
@@ -11033,6 +12136,14 @@ function createSingleBookingResponse(req, res, { targetUser, defaultNotes = '', 
        WHERE b.id = ?`
     )
     .get(result.lastInsertRowid);
+
+  void sendWhatsAppBookingConfirmation(booking).then((whatsappResult) => {
+    if (!whatsappResult.ok) {
+      console.error('Booking WhatsApp confirmation was not sent:', whatsappResult.message);
+    }
+  }).catch((error) => {
+    console.error('Booking WhatsApp confirmation failed:', String(error?.message || error));
+  });
 
   if (!includeAdminMeta) {
     return res.status(201).json({ booking });
@@ -12224,6 +13335,13 @@ function markBookingPaid(bookingId, paymentOrderId, paymentRef, paymentMethod = 
   ).run(orderId, orderId, paymentId, paymentId, method, method, paidAmountPaise, paidAmountPaise, Number(bookingId));
   if (booking) {
     consumeAdminDiscountForBooking(booking.userId, booking.id);
+    void sendWhatsAppBookingConfirmation(booking.id).then((result) => {
+      if (!result?.ok) {
+        console.warn('[WhatsApp] Booking confirmation notice:', result?.message);
+      }
+    }).catch((err) => {
+      console.error('[WhatsApp] Booking confirmation error:', err?.message || err);
+    });
   }
 }
 
@@ -12696,7 +13814,9 @@ function findOrCreateGoogleUser(profile) {
   const existingUser = getUserProfileByEmail(email);
   if (existingUser) {
     db.prepare('UPDATE users SET google_id = ? WHERE id = ?').run(googleId, Number(existingUser.id));
-    return syncMembershipForUser({ userId: Number(existingUser.id), email }) || getUserProfileById(Number(existingUser.id));
+    const user = syncMembershipForUser({ userId: Number(existingUser.id), email }) || getUserProfileById(Number(existingUser.id));
+    app.locals.merchGuestOrderSync?.(user);
+    return user;
   }
 
   const result = db
@@ -12707,19 +13827,40 @@ function findOrCreateGoogleUser(profile) {
     .run(name || 'User', email, googleId);
 
   const userId = Number(result.lastInsertRowid);
-  return syncMembershipForUser({ userId, email }) || getUserProfileById(userId);
+  const user = syncMembershipForUser({ userId, email }) || getUserProfileById(userId);
+  app.locals.merchGuestOrderSync?.(user);
+  return user;
 }
 
 function setAuthCookie(req, res, user) {
+  return issueAuthSession(req, res, user);
+}
+
+function hashSessionToken(token) {
+  return crypto.createHash('sha256').update(String(token || '')).digest('hex');
+}
+
+function issueAuthSession(req, res, user) {
+  const sessionId = crypto.randomUUID();
+  const refreshToken = crypto.randomBytes(48).toString('base64url');
+  const refreshExpiresAt = new Date(Date.now() + REFRESH_SESSION_TTL_MS).toISOString();
+  db.prepare(
+    `INSERT INTO auth_sessions (id, user_id, refresh_token_hash, expires_at, created_at)
+     VALUES (?, ?, ?, ?, ?)`
+  ).run(sessionId, Number(user.id), hashSessionToken(refreshToken), refreshExpiresAt, new Date().toISOString());
+
   const token = jwt.sign(
     { sub: user.id, name: user.name, email: user.email, role: user.role },
     JWT_SECRET,
-    { expiresIn: '7d' }
+    { expiresIn: AUTH_SESSION_JWT_EXPIRES_IN, jwtid: sessionId, algorithm: 'HS256' }
   );
 
   res.cookie(TOKEN_COOKIE, token, {
     ...getAuthCookieOptions(req),
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    maxAge: AUTH_SESSION_TTL_MS,
+  });
+  res.cookie(REFRESH_TOKEN_COOKIE, refreshToken, {
+    ...getRefreshCookieOptions(req),
   });
   return token;
 }
@@ -12732,6 +13873,16 @@ function getAuthCookieOptions(req) {
     sameSite: useCrossSiteCookie ? 'none' : 'lax',
     secure,
     path: '/',
+    maxAge: AUTH_SESSION_TTL_MS,
+  };
+}
+
+function getRefreshCookieOptions(req) {
+  return {
+    ...getAuthCookieOptions(req),
+    httpOnly: true,
+    path: '/api/auth',
+    maxAge: REFRESH_SESSION_TTL_MS,
   };
 }
 
@@ -12778,7 +13929,16 @@ function requireAuth(req, res, next) {
 
   for (const token of tokens) {
     try {
-      const payload = jwt.verify(token, JWT_SECRET);
+      const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+      if (payload?.jti) {
+        const authSession = db.prepare(
+          `SELECT id, expires_at AS expiresAt, revoked_at AS revokedAt
+           FROM auth_sessions WHERE id = ?`
+        ).get(String(payload.jti));
+        if (!authSession || authSession.revokedAt || new Date(authSession.expiresAt).getTime() <= Date.now()) {
+          continue;
+        }
+      }
       syncMembershipForUser({ userId: Number(payload.sub) });
       const user = getUserProfileById(Number(payload.sub));
 
@@ -12787,7 +13947,7 @@ function requireAuth(req, res, next) {
       req.user = {
         id: Number(user.id),
         name: String(user.name),
-        email: String(user.email),
+        email: user.email ? String(user.email) : '',
         role: String(user.role || 'user'),
         age: user.age ?? null,
         gender: user.gender || '',
@@ -13376,6 +14536,57 @@ function hasColumn(tableName, columnName) {
   return columns.some((column) => column.name === columnName);
 }
 
+function makeUsersEmailNullable() {
+  const emailColumn = db.prepare('PRAGMA table_info(users)').all().find((column) => column.name === 'email');
+  if (!emailColumn || Number(emailColumn.notnull) !== 1) return;
+
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    db.exec('BEGIN');
+    db.exec(`
+      CREATE TABLE users_nullable_email (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE,
+        age INTEGER,
+        gender TEXT,
+        mobile TEXT,
+        google_id TEXT,
+        avatar_url TEXT,
+        membership_status TEXT NOT NULL DEFAULT 'inactive',
+        membership_plan TEXT,
+        membership_started_at TEXT,
+        membership_expires_at TEXT,
+        membership_people_count INTEGER,
+        password_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'user',
+        membership_subscription_id TEXT,
+        mobile_verified INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO users_nullable_email (
+        id, name, email, age, gender, mobile, google_id, avatar_url,
+        membership_status, membership_plan, membership_started_at, membership_expires_at,
+        membership_people_count, password_hash, created_at, role,
+        membership_subscription_id, mobile_verified
+      )
+      SELECT id, name, email, age, gender, mobile, google_id, avatar_url,
+        membership_status, membership_plan, membership_started_at, membership_expires_at,
+        membership_people_count, password_hash, created_at, role,
+        membership_subscription_id, mobile_verified
+      FROM users;
+      DROP TABLE users;
+      ALTER TABLE users_nullable_email RENAME TO users;
+    `);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    throw error;
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+}
+
 function hasTable(tableName) {
   const row = db
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
@@ -13391,6 +14602,453 @@ function hashOtp(otp) {
   return crypto.createHash('sha256').update(String(otp)).digest('hex');
 }
 
+function normalizeWhatsAppMobile(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/[^\d\s+\-]/.test(raw)) return '';
+
+  if (raw.startsWith('+')) {
+    const digits = raw.slice(1).replace(/[\s\-]/g, '');
+    if (digits.length >= 7 && digits.length <= 15) {
+      if (digits.startsWith('440')) {
+        return `+44${digits.slice(3)}`;
+      }
+      return `+${digits}`;
+    }
+    return '';
+  }
+
+  const digits = raw.replace(/[\s\-]/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) {
+    return `+${digits}`;
+  }
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return `+${digits}`;
+  }
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith('44')) {
+    let local = digits.slice(2);
+    if (local.startsWith('0')) local = local.slice(1);
+    return `+44${local}`;
+  }
+  if (/^\d{10}$/.test(digits)) {
+    return `+91${digits}`;
+  }
+  if (digits.length >= 7 && digits.length <= 15) {
+    return `+${digits}`;
+  }
+  return '';
+}
+
+function sendWhatsAppMessage(to, templateName, parameters = [], extraComponents = []) {
+  const recipient = normalizeWhatsAppMobile(to);
+  const normalizedTemplateName = String(templateName || '').trim();
+  if (!recipient || !normalizedTemplateName) {
+    return Promise.resolve({ ok: false, statusCode: 400, message: 'Valid WhatsApp recipient and template are required.' });
+  }
+  if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_NUMBER_ID || !WHATSAPP_API_VERSION) {
+    return Promise.resolve({
+      ok: false,
+      statusCode: 503,
+      message: 'WhatsApp Cloud API is not configured. Set WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, and WHATSAPP_API_VERSION.',
+    });
+  }
+  console.log('==============================');
+  console.log('WhatsApp recipient:', recipient);
+  const apiRecipient = recipient.replace(/^\+/, '');
+  const languageCode = 'en';
+  console.log('WhatsApp API `to`:', apiRecipient);
+  console.log('Template:', normalizedTemplateName);
+  console.log('WhatsApp template language:', languageCode);
+  console.log('==============================');
+
+  const bodyParameters = (Array.isArray(parameters) ? parameters : [parameters]).map((parameter) => ({
+    type: 'text',
+    text: String(parameter ?? ''),
+  }));
+  const templateComponents = [
+    ...(bodyParameters.length ? [{ type: 'body', parameters: bodyParameters }] : []),
+    ...(Array.isArray(extraComponents) ? extraComponents : []),
+  ];
+  const payload = JSON.stringify({
+    messaging_product: 'whatsapp',
+    to: apiRecipient,
+    type: 'template',
+    template: {
+      name: normalizedTemplateName,
+      language: { code: languageCode },
+      components: templateComponents.length ? templateComponents : undefined,
+    },
+  });
+  const apiVersion = WHATSAPP_API_VERSION.startsWith('v') ? WHATSAPP_API_VERSION : `v${WHATSAPP_API_VERSION}`;
+
+  return new Promise((resolve) => {
+    const request = https.request(
+      {
+        hostname: 'graph.facebook.com',
+        path: `/${apiVersion}/${encodeURIComponent(WHATSAPP_PHONE_NUMBER_ID)}/messages`,
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      },
+      (response) => {
+        let responseBody = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => { responseBody += chunk; });
+        response.on('end', () => {
+          let parsed = null;
+          try { parsed = responseBody ? JSON.parse(responseBody) : null; } catch { parsed = null; }
+          const statusCode = Number(response.statusCode || 500);
+          if (statusCode >= 200 && statusCode < 300) {
+            return resolve({ ok: true, statusCode, messageId: parsed?.messages?.[0]?.id || '' });
+          }
+          console.error('WhatsApp API failure:', {
+            statusCode,
+            rawBody: responseBody,
+            error: parsed?.error || null,
+          });
+          resolve({ ok: false, statusCode, message: parsed?.error?.message || 'WhatsApp message could not be sent.' });
+        });
+      }
+    );
+    request.on('error', (error) => resolve({ ok: false, statusCode: 502, message: error.message }));
+    request.write(payload);
+    request.end();
+  });
+}
+
+function sendWhatsAppText(to, message) {
+  const recipient = normalizeWhatsAppMobile(to);
+  const text = String(message || '').trim();
+  if (!recipient || !text) {
+    return Promise.resolve({ ok: false, statusCode: 400, message: 'Valid WhatsApp recipient and message are required.' });
+  }
+  if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_NUMBER_ID || !WHATSAPP_API_VERSION) {
+    return Promise.resolve({
+      ok: false,
+      statusCode: 503,
+      message: 'WhatsApp Cloud API is not configured. Set WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, and WHATSAPP_API_VERSION.',
+    });
+  }
+
+  const payload = JSON.stringify({
+    messaging_product: 'whatsapp',
+    to: recipient,
+    type: 'text',
+    text: {
+      preview_url: false,
+      body: text,
+    },
+  });
+  const apiVersion = WHATSAPP_API_VERSION.startsWith('v') ? WHATSAPP_API_VERSION : `v${WHATSAPP_API_VERSION}`;
+
+  return new Promise((resolve) => {
+    const request = https.request(
+      {
+        hostname: 'graph.facebook.com',
+        path: `/${apiVersion}/${encodeURIComponent(WHATSAPP_PHONE_NUMBER_ID)}/messages`,
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      },
+      (response) => {
+        let responseBody = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => { responseBody += chunk; });
+        response.on('end', () => {
+          let parsed = null;
+          try { parsed = responseBody ? JSON.parse(responseBody) : null; } catch { parsed = null; }
+          const statusCode = Number(response.statusCode || 500);
+          if (statusCode >= 200 && statusCode < 300) {
+            return resolve({ ok: true, statusCode, messageId: parsed?.messages?.[0]?.id || '' });
+          }
+          resolve({ ok: false, statusCode, message: parsed?.error?.message || 'WhatsApp message could not be sent.' });
+        });
+      }
+    );
+    request.on('error', (error) => resolve({ ok: false, statusCode: 502, message: error.message }));
+    request.write(payload);
+    request.end();
+  });
+}
+
+
+function normalizeWhatsAppMobile(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/[^\d\s+\-]/.test(raw)) return '';
+
+  if (raw.startsWith('+')) {
+    const digits = raw.slice(1).replace(/[\s\-]/g, '');
+    if (digits.length >= 7 && digits.length <= 15) {
+      if (digits.startsWith('440')) {
+        return `+44${digits.slice(3)}`;
+      }
+      return `+${digits}`;
+    }
+    return '';
+  }
+
+  const digits = raw.replace(/[\s\-]/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) {
+    return `+${digits}`;
+  }
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return `+${digits}`;
+  }
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith('44')) {
+    let local = digits.slice(2);
+    if (local.startsWith('0')) local = local.slice(1);
+    return `+44${local}`;
+  }
+  if (/^\d{10}$/.test(digits)) {
+    return `+91${digits}`;
+  }
+  if (digits.length >= 7 && digits.length <= 15) {
+    return `+${digits}`;
+  }
+  return '';
+}
+
+function sendWhatsAppMessage(to, templateName, parameters = [], extraComponents = []) {
+  const recipient = normalizeWhatsAppMobile(to);
+  const normalizedTemplateName = String(templateName || '').trim();
+  if (!recipient || !normalizedTemplateName) {
+    return Promise.resolve({ ok: false, statusCode: 400, message: 'Valid WhatsApp recipient and template are required.' });
+  }
+  if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_NUMBER_ID || !WHATSAPP_API_VERSION) {
+    return Promise.resolve({
+      ok: false,
+      statusCode: 503,
+      message: 'WhatsApp Cloud API is not configured. Set WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, and WHATSAPP_API_VERSION.',
+    });
+  }
+  console.log('==============================');
+  console.log('WhatsApp recipient:', recipient);
+  const apiRecipient = recipient.replace(/^\+/, '');
+  const languageCode = 'en';
+  console.log('WhatsApp API `to`:', apiRecipient);
+  console.log('Template:', normalizedTemplateName);
+  console.log('WhatsApp template language:', languageCode);
+  console.log('==============================');
+
+  const bodyParameters = (Array.isArray(parameters) ? parameters : [parameters]).map((parameter) => ({
+    type: 'text',
+    text: String(parameter ?? ''),
+  }));
+  const templateComponents = [
+    ...(bodyParameters.length ? [{ type: 'body', parameters: bodyParameters }] : []),
+    ...(Array.isArray(extraComponents) ? extraComponents : []),
+  ];
+  const payload = JSON.stringify({
+    messaging_product: 'whatsapp',
+    to: apiRecipient,
+    type: 'template',
+    template: {
+      name: normalizedTemplateName,
+      language: { code: languageCode },
+      components: templateComponents.length ? templateComponents : undefined,
+    },
+  });
+  const apiVersion = WHATSAPP_API_VERSION.startsWith('v') ? WHATSAPP_API_VERSION : `v${WHATSAPP_API_VERSION}`;
+
+  return new Promise((resolve) => {
+    const request = https.request(
+      {
+        hostname: 'graph.facebook.com',
+        path: `/${apiVersion}/${encodeURIComponent(WHATSAPP_PHONE_NUMBER_ID)}/messages`,
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      },
+      (response) => {
+        let responseBody = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => { responseBody += chunk; });
+        response.on('end', () => {
+          let parsed = null;
+          try { parsed = responseBody ? JSON.parse(responseBody) : null; } catch { parsed = null; }
+          const statusCode = Number(response.statusCode || 500);
+          if (statusCode >= 200 && statusCode < 300) {
+            return resolve({ ok: true, statusCode, messageId: parsed?.messages?.[0]?.id || '' });
+          }
+          console.error('WhatsApp API failure:', {
+            statusCode,
+            rawBody: responseBody,
+            error: parsed?.error || null,
+          });
+          resolve({ ok: false, statusCode, message: parsed?.error?.message || 'WhatsApp message could not be sent.' });
+        });
+      }
+    );
+    request.on('error', (error) => resolve({ ok: false, statusCode: 502, message: error.message }));
+    request.write(payload);
+    request.end();
+  });
+}
+
+function sendWhatsAppText(to, message) {
+  const recipient = normalizeWhatsAppMobile(to);
+  const text = String(message || '').trim();
+  if (!recipient || !text) {
+    return Promise.resolve({ ok: false, statusCode: 400, message: 'Valid WhatsApp recipient and message are required.' });
+  }
+  if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_NUMBER_ID || !WHATSAPP_API_VERSION) {
+    return Promise.resolve({
+      ok: false,
+      statusCode: 503,
+      message: 'WhatsApp Cloud API is not configured. Set WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, and WHATSAPP_API_VERSION.',
+    });
+  }
+  console.log('==============================');
+  console.log('WhatsApp recipient:', recipient);
+  console.log('Message:', text);
+  console.log('==============================');
+  const payload = JSON.stringify({
+    messaging_product: 'whatsapp',
+    to: recipient,
+    type: 'text',
+    text: {
+      preview_url: false,
+      body: text,
+    },
+  });
+  const apiVersion = WHATSAPP_API_VERSION.startsWith('v') ? WHATSAPP_API_VERSION : `v${WHATSAPP_API_VERSION}`;
+
+  return new Promise((resolve) => {
+    const request = https.request(
+      {
+        hostname: 'graph.facebook.com',
+        path: `/${apiVersion}/${encodeURIComponent(WHATSAPP_PHONE_NUMBER_ID)}/messages`,
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      },
+      (response) => {
+        let responseBody = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => { responseBody += chunk; });
+        response.on('end', () => {
+          let parsed = null;
+          try { parsed = responseBody ? JSON.parse(responseBody) : null; } catch { parsed = null; }
+          console.log('WhatsApp API Status:', response.statusCode);
+          console.log('WhatsApp API Response:', responseBody);
+          const statusCode = Number(response.statusCode || 500);
+          if (statusCode >= 200 && statusCode < 300) {
+            return resolve({ ok: true, statusCode, messageId: parsed?.messages?.[0]?.id || '' });
+          }
+          resolve({ ok: false, statusCode, message: parsed?.error?.message || 'WhatsApp message could not be sent.' });
+        });
+      }
+    );
+    request.on('error', (error) => resolve({ ok: false, statusCode: 502, message: error.message }));
+    request.write(payload);
+    request.end();
+  });
+}
+
+function formatWhatsAppBookingDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [year, month, day] = raw.split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+    }
+  }
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  }
+  return raw;
+}
+
+function formatWhatsAppBookingTime(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/am|pm/i.test(raw)) return raw;
+  const match = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (match) {
+    let hours = parseInt(match[1], 10);
+    const minutes = match[2];
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12;
+    return `${hours}:${minutes} ${ampm}`;
+  }
+  return raw;
+}
+
+function getBookingForWhatsApp(bookingId) {
+  if (!Number.isInteger(Number(bookingId))) return null;
+  return db
+    .prepare(
+      `SELECT b.id,
+              b.user_id AS userId,
+              COALESCE(NULLIF(TRIM(b.client_name), ''), NULLIF(TRIM(u.name), ''), NULLIF(TRIM(b.guest_name), ''), 'Valued Guest') AS clientName,
+              COALESCE(NULLIF(TRIM(b.client_phone), ''), NULLIF(TRIM(u.mobile), ''), NULLIF(TRIM(b.guest_phone), ''), '') AS clientPhone,
+              b.service_name AS serviceName,
+              b.booking_date AS bookingDate,
+              b.booking_time AS bookingTime,
+              b.status,
+              b.payment_status AS paymentStatus
+       FROM bookings b
+       LEFT JOIN users u ON u.id = b.user_id
+       WHERE b.id = ?`
+    )
+    .get(Number(bookingId));
+}
+
+async function sendWhatsAppBookingConfirmation(bookingOrId) {
+  let booking = bookingOrId;
+  if (!booking || typeof booking !== 'object' || !booking.serviceName) {
+    const id = typeof bookingOrId === 'object' ? bookingOrId?.id : bookingOrId;
+    booking = getBookingForWhatsApp(id);
+  }
+  if (!booking) {
+    return { ok: false, message: 'Booking not found for WhatsApp confirmation.' };
+  }
+  const recipient = booking.clientPhone || booking.clientMobile;
+  if (!recipient) {
+    return { ok: false, message: 'No recipient mobile number found for booking.' };
+  }
+
+  const clientName = String(booking.clientName || 'Valued Guest').trim();
+  const dateFormatted = formatWhatsAppBookingDate(booking.bookingDate);
+  const timeFormatted = formatWhatsAppBookingTime(booking.bookingTime);
+  const serviceName = String(booking.serviceName || 'Consultation').trim();
+  const bookingId = booking.id ? `BK${booking.id}` : 'BK-REF';
+
+  const templateName = WHATSAPP_APPOINTMENT_TEMPLATE || 'appointment_confirmation';
+  console.log('[WhatsApp] Sending booking confirmation:', {
+    recipient,
+    templateName,
+    clientName,
+    dateFormatted,
+    timeFormatted,
+    serviceName,
+    bookingId,
+  });
+
+  return sendWhatsAppMessage(recipient, templateName, [
+    clientName,
+    dateFormatted,
+    timeFormatted,
+    serviceName,
+    bookingId,
+  ]);
+}
 function getTransporter() {
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT || 587);
@@ -13664,7 +15322,7 @@ async function sendSignupConfirmationEmail(toEmail, name) {
   }
 }
 
-async function sendCouponEmail({ toEmail, recipientName, code, discountValue, appliesTo, expiresAt }) {
+async function sendCouponEmail({ toEmail, recipientName, code, discountValue, appliesTo, expiresAt, traceId = '' }) {
   const normalizedToEmail = String(toEmail || '').trim().toLowerCase();
   if (!normalizedToEmail) {
     return { ok: false, statusCode: 400, message: 'Recipient email is required.' };
@@ -13682,36 +15340,61 @@ async function sendCouponEmail({ toEmail, recipientName, code, discountValue, ap
     `Expiry: ${expiryLabel}\n\n` +
     `Use this code at checkout. It can be redeemed only once.\n\n` +
     `If you did not expect this email, please ignore it.`;
+  // Keep the coupon body intentionally close to the OTP body. This avoids
+  // promotional markup/CSS affecting first-time Gmail delivery while keeping
+  // the complete plain-text alternative for mail clients that prefer it.
   const html = `
-    <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #1f2937;">
-      <p style="margin: 0 0 12px;">${escapeHtml(greeting)}</p>
-      <p style="margin: 0 0 12px;">Here is your single-use coupon code:</p>
-      <div style="display: inline-block; padding: 10px 14px; border-radius: 8px; background: #f3f4f6; font-size: 20px; font-weight: 700; letter-spacing: 1px;">
-        ${escapeHtml(String(code || '').trim())}
-      </div>
-      <p style="margin: 12px 0 0;">Discount: ${escapeHtml(discountLabel)} (${escapeHtml(appliesLabel)})</p>
-      <p style="margin: 6px 0 0;">Expiry: ${escapeHtml(expiryLabel)}</p>
-      <p style="margin: 12px 0 0;">Use this code at checkout. It can be redeemed only once.</p>
-      <p style="margin: 12px 0 0; color: #6b7280;">If you did not expect this email, please ignore it.</p>
-    </div>
+    <p>${escapeHtml(greeting)}</p>
+    <p>Here is your single-use coupon code:</p>
+    <p><strong>${escapeHtml(String(code || '').trim())}</strong></p>
+    <p>Discount: ${escapeHtml(discountLabel)} (${escapeHtml(appliesLabel)})</p>
+    <p>Expiry: ${escapeHtml(expiryLabel)}</p>
+    <p>Use this code at checkout. It can be redeemed only once.</p>
+    <p>If you did not expect this email, please ignore it.</p>
   `;
 
   try {
-    console.log('Coupon email about to use Mailgun', {
+    console.log('[COUPON][EMAIL] about to send', {
+      traceId,
       to: normalizedToEmail,
       from: MAIL_FROM,
       subject,
-  });
-    await sendMailgunEmail({
+      code,
+      textBytes: Buffer.byteLength(text, 'utf8'),
+      htmlBytes: Buffer.byteLength(html, 'utf8'),
+      time: new Date().toISOString(),
+    });
+    console.log('[COUPON] About to send coupon email', {
+      traceId,
+      to: normalizedToEmail,
+      code,
+      subject,
+      time: new Date().toISOString(),
+    });
+    const emailResult = await sendConfiguredEmail({
       to: normalizedToEmail,
       from: MAIL_FROM,
       subject,
       text,
       html,
+      traceId,
     });
-    return { ok: true };
+    console.log('[COUPON][EMAIL] sendConfiguredEmail completed', {
+      traceId,
+      to: normalizedToEmail,
+      code,
+      delivery: emailResult.delivery || '',
+      statusCode: emailResult.statusCode || 200,
+      messageId: emailResult.messageId || '',
+    });
+    return { ok: true, ...emailResult };
   } catch (error) {
-    console.error('Failed to send coupon email via Mailgun:', error);
+    console.error('[COUPON][EMAIL] send failed', {
+      traceId,
+      to: normalizedToEmail,
+      code,
+      error: error?.message || String(error),
+    });
     return {
       ok: false,
       statusCode: 500,
@@ -13844,7 +15527,7 @@ async function sendBookingPaymentLinkEmail({
   `;
 
   try {
-    await sendMailgunEmail({
+    await sendConfiguredEmail({
       to: normalizedToEmail,
       from: MAIL_FROM || 'noreply@h2houseofhealth.com',
       subject,
@@ -13989,27 +15672,26 @@ async function sendOtpEmail(toEmail, otp, purpose = 'signup') {
   }
 
   try {
-    const sesResult = await sesApiRequest('POST', '/v2/email/outbound-emails', {
-      FromEmailAddress: MAIL_FROM,
-      Destination: { ToAddresses: [normalizedToEmail] },
-      Content: {
-        Simple: {
-          Subject: { Data: subject },
-          Body: {
-            Text: { Data: text },
-            Html: { Data: html },
-          },
-        },
-      },
+    const traceId = `otp-${crypto.randomUUID()}`;
+    const emailResult = await sendConfiguredEmail({
+      to: normalizedToEmail,
+      from: MAIL_FROM,
+      subject,
+      text,
+      html,
+      traceId,
     });
-
-    if (!sesResult.ok) {
-      throw new Error(sesResult.message || 'SES send failed');
-    }
-
+    console.log('[OTP][EMAIL] content accepted', {
+      traceId,
+      to: normalizedToEmail,
+      subject,
+      textBytes: Buffer.byteLength(text, 'utf8'),
+      htmlBytes: Buffer.byteLength(html, 'utf8'),
+      messageId: emailResult.messageId || '',
+    });
     return {
       ok: true,
-      delivery: 'ses',
+      ...emailResult,
       message: `${isBookingReschedule ? 'Booking reschedule' : isPasswordReset ? 'Password reset' : 'Signup'} OTP sent to ${normalizedToEmail}. It expires in ${OTP_TTL_MINUTES} minutes.`,
     };
   } catch (error) {
@@ -14039,7 +15721,7 @@ function migrate() {
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      email TEXT NOT NULL UNIQUE,
+      email TEXT UNIQUE,
       age INTEGER,
       gender TEXT,
       mobile TEXT,
@@ -14053,6 +15735,18 @@ function migrate() {
       password_hash TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      refresh_token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      revoked_at TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at ON auth_sessions(expires_at);
 
     CREATE TABLE IF NOT EXISTS doctors (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -14141,6 +15835,15 @@ function migrate() {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS login_otps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      mobile TEXT NOT NULL,
+      otp TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      verified INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS pending_password_resets (
       email TEXT PRIMARY KEY,
       otp_hash TEXT NOT NULL,
@@ -14210,6 +15913,8 @@ function migrate() {
       description TEXT,
       discount_type TEXT NOT NULL,
       discount_value REAL NOT NULL,
+      commission_per_order_paise INTEGER NOT NULL DEFAULT 0,
+      commission_by_product_json TEXT NOT NULL DEFAULT '{}',
       applies_to TEXT NOT NULL DEFAULT 'all',
       max_redemptions INTEGER,
       per_user_limit INTEGER NOT NULL DEFAULT 1,
@@ -14292,6 +15997,10 @@ function migrate() {
     db.exec('ALTER TABLE users ADD COLUMN mobile TEXT');
   }
 
+  if (!hasColumn('users', 'mobile_verified')) {
+    db.exec('ALTER TABLE users ADD COLUMN mobile_verified INTEGER NOT NULL DEFAULT 0');
+  }
+
   if (!hasColumn('users', 'google_id')) {
     db.exec('ALTER TABLE users ADD COLUMN google_id TEXT');
   }
@@ -14324,6 +16033,8 @@ function migrate() {
     db.exec('ALTER TABLE users ADD COLUMN membership_subscription_id TEXT');
   }
 
+  makeUsersEmailNullable();
+
   if (!hasColumn('bookings', 'doctor_id')) {
     db.exec('ALTER TABLE bookings ADD COLUMN doctor_id INTEGER REFERENCES doctors(id)');
   }
@@ -14350,6 +16061,14 @@ function migrate() {
 
   if (!hasColumn('pending_registrations', 'otp_verified')) {
     db.exec("ALTER TABLE pending_registrations ADD COLUMN otp_verified INTEGER NOT NULL DEFAULT 0");
+  }
+
+  if (!hasColumn('pending_registrations', 'mobile')) {
+    db.exec('ALTER TABLE pending_registrations ADD COLUMN mobile TEXT');
+  }
+
+  if (!hasColumn('login_otps', 'purpose')) {
+    db.exec("ALTER TABLE login_otps ADD COLUMN purpose TEXT NOT NULL DEFAULT 'login'");
   }
 
   if (!hasColumn('pending_password_resets', 'verified')) {
@@ -14382,6 +16101,12 @@ function migrate() {
 
   if (hasTable('coupons') && !hasColumn('coupons', 'recipient_email')) {
     db.exec('ALTER TABLE coupons ADD COLUMN recipient_email TEXT');
+  }
+  if (hasTable('coupons') && !hasColumn('coupons', 'commission_per_order_paise')) {
+    db.exec('ALTER TABLE coupons ADD COLUMN commission_per_order_paise INTEGER NOT NULL DEFAULT 0');
+  }
+  if (hasTable('coupons') && !hasColumn('coupons', 'commission_by_product_json')) {
+    db.exec("ALTER TABLE coupons ADD COLUMN commission_by_product_json TEXT NOT NULL DEFAULT '{}'");
   }
   if (hasTable('coupons') && !hasColumn('coupons', 'coupon_type')) {
     db.exec("ALTER TABLE coupons ADD COLUMN coupon_type TEXT NOT NULL DEFAULT 'public'");
@@ -14653,8 +16378,13 @@ function seedDoctors() {
 }
 
 function seedAdmin() {
-  const email = 'admin@h2health.local';
-  const defaultPasswordHash = bcrypt.hashSync('Admin@12345', 10);
+  const email = normalizeEnvValue(process.env.ADMIN_LOGIN_EMAIL || 'admin@h2health.local').toLowerCase();
+  const initialPassword = normalizeEnvValue(process.env.ADMIN_INITIAL_PASSWORD);
+  if (IS_PRODUCTION && !initialPassword) {
+    console.warn('ADMIN_INITIAL_PASSWORD is not configured; skipping automatic production admin creation/reset.');
+    return;
+  }
+  const defaultPasswordHash = bcrypt.hashSync(initialPassword || 'Admin@12345', 10);
   const existing = db.prepare('SELECT id, password_hash FROM users WHERE email = ?').get(email);
 
   if (!existing) {
