@@ -307,7 +307,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       category: 'bottles',
       basePrice: 2299000,
       image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113',
-      weight: 380,
+      weight: 1000,
       variants: [
         ['HM-BTL-460-SLV', '460ml', 'Silver', 2299000, 50, '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113'],
         ['HM-BTL-460-BLK', '460ml', 'Black', 2299000, 50, '/cdn/shop/files/products/bottle-black.png', ['/cdn/shop/files/products/bottle-black-interior.png', '/cdn/shop/files/products/bottle-black-portable.png', '/cdn/shop/files/products/bottle-black-cap.png']],
@@ -5318,14 +5318,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           const deliveryPostcode = parsedAddr.postalCode || parsedAddr.postal_code || parsedAddr.pincode || '452001';
           const isCod = String(order.payment_method || '').toLowerCase() === 'cod';
 
-          const totalWeightGrams = items.reduce((sum, item) => {
-            const itemWeight = Number(item.weight_grams ?? item.weightGrams ?? 0);
-            const qty = Math.max(1, Number(item.quantity || item.units || 1));
-            return sum + (itemWeight * qty);
-          }, 0);
-          const orderWeightKg = totalWeightGrams > 0
-            ? Math.max(0.01, Number((totalWeightGrams / 1000).toFixed(3)))
-            : shiprocket.defaultWeightKg;
+          const metrics = shiprocket.calculatePackageMetrics(items);
+          const orderWeightKg = metrics.weight;
 
           const couriers = await shiprocket.checkServiceability({
             deliveryPostcode,
@@ -7574,14 +7568,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const isCod = String(order.payment_method || '').toLowerCase() === 'cod';
 
       const items = getOrderItemsWithProductDetails(order.id);
-      const totalWeightGrams = items.reduce((sum, item) => {
-        const itemWeight = Number(item.weight_grams ?? item.weightGrams ?? 0);
-        const qty = Math.max(1, Number(item.quantity || item.units || 1));
-        return sum + (itemWeight * qty);
-      }, 0);
-      const orderWeightKg = totalWeightGrams > 0
-        ? Math.max(0.01, Number((totalWeightGrams / 1000).toFixed(3)))
-        : shiprocket.defaultWeightKg;
+      const metrics = shiprocket.calculatePackageMetrics(items);
+      const orderWeightKg = metrics.weight;
 
       const couriers = await shiprocket.checkServiceability({
         deliveryPostcode,
