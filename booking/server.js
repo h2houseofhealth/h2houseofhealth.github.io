@@ -985,17 +985,51 @@ app.get('/auth/google/callback', ensureGoogleOAuthConfigured, (req, res, next) =
 app.use('/api/auth', rateLimit({ windowMs: 60_000, max: 40 }));
 
 function getMobileVariants(mobile) {
-  const norm = String(mobile || '').trim();
-  const withoutPlus = norm.replace(/^\+/, '');
-  let local = withoutPlus;
-  if (norm.startsWith('+91')) {
-    local = norm.slice(3);
-  } else if (norm.startsWith('+1')) {
-    local = norm.slice(2);
-  } else if (norm.startsWith('+44')) {
-    local = norm.slice(3);
+  const raw = String(mobile || '').trim();
+  if (!raw) return [];
+  const digits = raw.replace(/\D/g, '');
+  const withoutPlus = raw.replace(/^\+/, '').replace(/[\s\-()]/g, '');
+  let local = digits;
+  if (digits.length === 12 && digits.startsWith('91')) {
+    local = digits.slice(2);
+  } else if (digits.length === 11 && digits.startsWith('1')) {
+    local = digits.slice(1);
+  } else if ((digits.length === 12 || digits.length === 13) && digits.startsWith('44')) {
+    local = digits.slice(2);
+    if (local.startsWith('0')) local = local.slice(1);
+  } else if (digits.length === 11 && digits.startsWith('0')) {
+    local = digits.slice(1);
   }
-  return [norm, withoutPlus, local];
+
+  const variants = new Set();
+  variants.add(raw);
+  variants.add(withoutPlus);
+  variants.add(digits);
+  variants.add(local);
+  if (local.length === 10) {
+    variants.add(`+91${local}`);
+    variants.add(`91${local}`);
+    variants.add(`0${local}`);
+  }
+  return Array.from(variants).filter(Boolean);
+}
+
+function findUserByMobile(mobile, excludeUserId = null) {
+  const variants = getMobileVariants(mobile);
+  if (!variants.length) return null;
+  const placeholders = variants.map(() => '?').join(', ');
+  let sql = `SELECT * FROM users WHERE (mobile IN (${placeholders}) OR (length(replace(replace(replace(replace(mobile, ' ', ''), '-', ''), '+', ''), '(', '')) >= 10 AND substr(replace(replace(replace(replace(mobile, ' ', ''), '-', ''), '+', ''), '(', ''), -10) = ?))`;
+  const params = [...variants];
+  const digits = String(mobile || '').replace(/\D/g, '');
+  const last10 = digits.slice(-10);
+  params.push(last10.length === 10 ? last10 : digits);
+
+  if (excludeUserId) {
+    sql += ' AND id != ?';
+    params.push(Number(excludeUserId));
+  }
+  sql += ' ORDER BY CASE WHEN email IS NOT NULL AND email != \'\' AND email NOT LIKE \'%@h2houseofhealth.local\' AND email NOT LIKE \'%@h2health.local\' THEN 0 ELSE 1 END, id ASC LIMIT 1';
+  return db.prepare(sql).get(...params);
 }
 
 function getLatestSignupOtp(mobile) {
@@ -1143,9 +1177,7 @@ app.post('/api/auth/signup/send-whatsapp-otp', async (req, res) => {
     return res.status(400).json({ message: 'Enter a valid mobile number with country code.' });
   }
 
-  const existingUser = db.prepare(
-    'SELECT id FROM users WHERE mobile IN (?, ?, ?) AND mobile_verified = 1 LIMIT 1'
-  ).get(...getMobileVariants(mobile));
+  const existingUser = findUserByMobile(mobile);
   if (existingUser) {
     return res.status(409).json({ message: 'mobile number already registered' });
   }
@@ -1166,7 +1198,7 @@ app.post('/api/auth/signup/verify', (req, res) => {
   if (!mobile || !/^\d{6}$/.test(otp) || !name) {
     return res.status(400).json({ message: 'mobile, otp, and name are required' });
   }
-  if (db.prepare('SELECT id FROM users WHERE mobile IN (?, ?, ?) AND mobile_verified = 1 LIMIT 1').get(...getMobileVariants(mobile))) {
+  if (findUserByMobile(mobile)) {
     return res.status(409).json({ message: 'mobile number already registered' });
   }
 
@@ -1416,9 +1448,7 @@ app.post('/api/auth/send-whatsapp-otp', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Enter a valid mobile number with country code.' });
   }
 
-  const user = db
-    .prepare('SELECT id, role FROM users WHERE mobile IN (?, ?, ?) ORDER BY id DESC LIMIT 1')
-    .get(...getMobileVariants(mobile));
+  const user = findUserByMobile(mobile);
   if (!user || String(user.role || 'user').toLowerCase() === 'admin') {
     return res.status(404).json({ success: false, message: 'Account not found. Please sign up first.' });
   }
@@ -1487,14 +1517,13 @@ app.post('/api/auth/verify-whatsapp-otp', (req, res) => {
     return res.status(401).json({ message: 'Invalid OTP.' });
   }
 
-  const userRow = db
-    .prepare('SELECT id FROM users WHERE mobile IN (?, ?, ?) ORDER BY id DESC LIMIT 1')
-    .get(...getMobileVariants(mobile));
+  const userRow = findUserByMobile(mobile);
   if (!userRow) {
     return res.status(404).json({ message: 'Account not found' });
   }
 
   db.prepare('UPDATE login_otps SET verified = 1 WHERE id = ?').run(latestOtp.id);
+  db.prepare('UPDATE users SET mobile_verified = 1 WHERE id = ?').run(userRow.id);
   const syncedUser = syncMembershipForUser({ userId: Number(userRow.id) }) || getUserProfileById(Number(userRow.id));
   if (!syncedUser || String(syncedUser.role || 'user').toLowerCase() === 'admin') {
     return res.status(404).json({ message: 'Account not found' });
@@ -1834,8 +1863,28 @@ app.put('/api/profile', requireAuth, (req, res) => {
     return res.status(400).json({ message: 'invalid gender' });
   }
 
-  if (mobile && !/^[0-9+\-\s()]{7,20}$/.test(mobile)) {
-    return res.status(400).json({ message: 'invalid mobile number' });
+  if (mobile) {
+    if (!/^[0-9+\-\s()]{7,20}$/.test(mobile)) {
+      return res.status(400).json({ message: 'invalid mobile number' });
+    }
+    const mobileOwner = findUserByMobile(mobile, req.user.id);
+    if (mobileOwner) {
+      return res.status(409).json({ message: 'Mobile number is already linked to another account' });
+    }
+  }
+
+  const hasEmailField = Object.prototype.hasOwnProperty.call(req.body || {}, 'email');
+  const email = hasEmailField ? String(req.body?.email || '').trim().toLowerCase() : '';
+  if (hasEmailField && email) {
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ message: 'invalid email address' });
+    }
+    const emailOwner = db
+      .prepare('SELECT id FROM users WHERE lower(email) = ? AND id != ? LIMIT 1')
+      .get(email, req.user.id);
+    if (emailOwner) {
+      return res.status(409).json({ message: 'Email address is already linked to another account' });
+    }
   }
 
   if (hasAvatarField && avatarUrl && !/^https?:\/\/.+/i.test(avatarUrl) && !avatarUrl.startsWith('/uploads/')) {
@@ -1846,15 +1895,24 @@ app.put('/api/profile', requireAuth, (req, res) => {
     .prepare('SELECT avatar_url AS avatarUrl FROM users WHERE id = ?')
     .get(req.user.id);
   const nextAvatarUrl = hasAvatarField ? (avatarUrl || null) : (current?.avatarUrl || null);
+  const normalizedMobile = mobile ? (normalizeWhatsAppMobile(mobile) || mobile) : null;
+
+  const updateFields = ['name = ?', 'age = ?', 'gender = ?', 'mobile = ?', 'avatar_url = ?'];
+  const updateParams = [name, age, gender || null, normalizedMobile, nextAvatarUrl];
+  if (hasEmailField && email) {
+    updateFields.push('email = ?');
+    updateParams.push(email);
+  }
+  updateParams.push(req.user.id);
 
   db.prepare(
     `UPDATE users
-     SET name = ?, age = ?, gender = ?, mobile = ?, avatar_url = ?
+     SET ${updateFields.join(', ')}
      WHERE id = ?`
-  ).run(name, age, gender || null, mobile || null, nextAvatarUrl, req.user.id);
+  ).run(...updateParams);
 
   const profile = db.prepare(
-    `SELECT id, name, role, age, gender, mobile, avatar_url AS avatarUrl,
+    `SELECT id, name, email, role, age, gender, mobile, avatar_url AS avatarUrl,
             membership_status AS membershipStatus, membership_plan AS membershipPlan,
             membership_started_at AS membershipStartedAt, membership_expires_at AS membershipExpiresAt,
             membership_people_count AS membershipPeopleCount
@@ -2588,14 +2646,22 @@ app.patch('/api/admin/users/:id', requireAuth, requireAdmin, (req, res) => {
 
   if (nextEmail !== existing.email) {
     const emailConflict = db
-      .prepare('SELECT id FROM users WHERE email = ? AND id <> ?')
+      .prepare('SELECT id FROM users WHERE lower(email) = ? AND id <> ?')
       .get(nextEmail, userId);
     if (emailConflict) {
       return res.status(409).json({ message: 'That email is already in use.' });
     }
   }
 
-  db.prepare('UPDATE users SET email = ?, mobile = ? WHERE id = ?').run(nextEmail, nextMobile || null, userId);
+  if (nextMobile && nextMobile !== existing.mobile) {
+    const mobileConflict = findUserByMobile(nextMobile, userId);
+    if (mobileConflict) {
+      return res.status(409).json({ message: 'That mobile number is already in use.' });
+    }
+  }
+
+  const normalizedNextMobile = nextMobile ? (normalizeWhatsAppMobile(nextMobile) || nextMobile) : null;
+  db.prepare('UPDATE users SET email = ?, mobile = ? WHERE id = ?').run(nextEmail, normalizedNextMobile, userId);
 
   return res.json({
     user: {
@@ -11574,8 +11640,15 @@ function resolveAdminCustomerContext({ userId, customerName, customerEmail, cust
 
     const nextName = normalizedName || existingUser.name;
     const nextPhone = normalizedPhone || existingUser.mobile || '';
-    if (nextName !== existingUser.name || nextPhone !== (existingUser.mobile || '')) {
-      db.prepare('UPDATE users SET name = ?, mobile = ? WHERE id = ?').run(nextName, nextPhone, existingUser.id);
+    if (nextName !== existingUser.name || (nextPhone && nextPhone !== (existingUser.mobile || ''))) {
+      let finalPhone = existingUser.mobile || '';
+      if (nextPhone && nextPhone !== existingUser.mobile) {
+        const phoneConflict = findUserByMobile(nextPhone, existingUser.id);
+        if (!phoneConflict) {
+          finalPhone = nextPhone;
+        }
+      }
+      db.prepare('UPDATE users SET name = ?, mobile = ? WHERE id = ?').run(nextName, finalPhone, existingUser.id);
       existingUser = getUserById(existingUser.id);
     }
     return { user: existingUser, existingUser: true };

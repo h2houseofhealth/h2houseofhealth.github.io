@@ -1059,6 +1059,91 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return digits.length >= 7 && digits.length <= 15;
   }
 
+  function getMobileVariants(mobile) {
+    const raw = String(mobile || '').trim();
+    if (!raw) return [];
+    const digits = raw.replace(/\D/g, '');
+    const withoutPlus = raw.replace(/^\+/, '').replace(/[\s\-()]/g, '');
+    let local = digits;
+    if (digits.length === 12 && digits.startsWith('91')) {
+      local = digits.slice(2);
+    } else if (digits.length === 11 && digits.startsWith('1')) {
+      local = digits.slice(1);
+    } else if ((digits.length === 12 || digits.length === 13) && digits.startsWith('44')) {
+      local = digits.slice(2);
+      if (local.startsWith('0')) local = local.slice(1);
+    } else if (digits.length === 11 && digits.startsWith('0')) {
+      local = digits.slice(1);
+    }
+
+    const variants = new Set();
+    variants.add(raw);
+    variants.add(withoutPlus);
+    variants.add(digits);
+    variants.add(local);
+    if (local.length === 10) {
+      variants.add(`+91${local}`);
+      variants.add(`91${local}`);
+      variants.add(`0${local}`);
+    }
+    return Array.from(variants).filter(Boolean);
+  }
+
+  function normalizeWhatsAppMobile(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/[^\d\s+\-]/.test(raw)) return '';
+
+    if (raw.startsWith('+')) {
+      const digits = raw.slice(1).replace(/[\s\-]/g, '');
+      if (digits.length >= 7 && digits.length <= 15) {
+        if (digits.startsWith('440')) {
+          return `+44${digits.slice(3)}`;
+        }
+        return `+${digits}`;
+      }
+      return '';
+    }
+
+    const digits = raw.replace(/[\s\-]/g, '');
+    if (digits.length === 12 && digits.startsWith('91')) {
+      return `+${digits}`;
+    }
+    if (digits.length === 11 && digits.startsWith('1')) {
+      return `+${digits}`;
+    }
+    if ((digits.length === 12 || digits.length === 13) && digits.startsWith('44')) {
+      let local = digits.slice(2);
+      if (local.startsWith('0')) local = local.slice(1);
+      return `+44${local}`;
+    }
+    if (/^\d{10}$/.test(digits)) {
+      return `+91${digits}`;
+    }
+    if (digits.length >= 7 && digits.length <= 15) {
+      return `+${digits}`;
+    }
+    return '';
+  }
+
+  function findUserByMobile(mobile, excludeUserId = null) {
+    const variants = getMobileVariants(mobile);
+    if (!variants.length) return null;
+    const placeholders = variants.map(() => '?').join(', ');
+    let sql = `SELECT * FROM users WHERE (mobile IN (${placeholders}) OR (length(replace(replace(replace(replace(mobile, ' ', ''), '-', ''), '+', ''), '(', '')) >= 10 AND substr(replace(replace(replace(replace(mobile, ' ', ''), '-', ''), '+', ''), '(', ''), -10) = ?))`;
+    const params = [...variants];
+    const digits = String(mobile || '').replace(/\D/g, '');
+    const last10 = digits.slice(-10);
+    params.push(last10.length === 10 ? last10 : digits);
+
+    if (excludeUserId) {
+      sql += ' AND id != ?';
+      params.push(Number(excludeUserId));
+    }
+    sql += ' ORDER BY CASE WHEN email IS NOT NULL AND email != \'\' AND email NOT LIKE \'%@h2houseofhealth.local\' AND email NOT LIKE \'%@h2health.local\' THEN 0 ELSE 1 END, id ASC LIMIT 1';
+    return db.prepare(sql).get(...params);
+  }
+
   function getMerchReportTransporter() {
     const host = process.env.SMTP_HOST;
     const port = Number(process.env.SMTP_PORT || 587);
@@ -1165,8 +1250,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
              c.commission_type AS commissionType, c.commission_rate AS commissionRate,
              c.commission_per_order_paise AS commissionPerOrderPaise,
              c.active, c.is_active AS isActive, c.influencer_id AS influencerId,
-             COUNT(mo.id) AS usageCount,
-             COALESCE(SUM(CASE WHEN mo.payment_status IN ('paid', 'cod_pending') THEN mo.total_amount ELSE 0 END), 0) AS revenue
+             COUNT(CASE WHEN mo.status NOT IN ('cancelled', 'refunded', 'failed') THEN mo.id END) AS usageCount,
+             COALESCE(SUM(CASE WHEN mo.status NOT IN ('cancelled', 'refunded', 'failed') AND mo.payment_status IN ('paid', 'cod_pending') THEN mo.total_amount ELSE 0 END), 0) AS revenue
       FROM coupons c
       LEFT JOIN merch_orders mo ON mo.coupon_id = c.id AND mo.influencer_id = c.influencer_id
       WHERE c.portal = 'merch'
@@ -1185,8 +1270,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       SELECT influencer_id AS influencerId,
              COUNT(*) AS totalOrders,
              COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'cod_pending') THEN total_amount ELSE 0 END), 0) AS revenue,
-             COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'cod_pending') THEN commission_amount_paise ELSE 0 END), 0) AS totalCommissionEarned,
-             COALESCE(SUM(CASE WHEN coupon_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS couponUsage
+             COALESCE(SUM(CASE WHEN status NOT IN ('cancelled', 'refunded', 'failed') AND payment_status IN ('paid', 'cod_pending') THEN commission_amount_paise ELSE 0 END), 0) AS totalCommissionEarned,
+             COALESCE(SUM(CASE WHEN status NOT IN ('cancelled', 'refunded', 'failed') AND coupon_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS couponUsage
       FROM merch_orders
       WHERE influencer_id IN (${ids.map(() => '?').join(', ')})
         AND payment_status IN ('paid', 'cod_pending')
@@ -1670,8 +1755,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     `).all(influencerId).map((coupon) => {
       const usageStats = db.prepare(`
         SELECT COUNT(*) AS total,
-               COALESCE(SUM(CASE WHEN mo.payment_status IN ('paid', 'cod_pending') THEN mo.total_amount ELSE 0 END), 0) AS revenue,
-               COALESCE(COUNT(CASE WHEN mo.payment_status IN ('paid', 'cod_pending') THEN 1 END), 0) AS orders
+               COALESCE(SUM(CASE WHEN mo.status NOT IN ('cancelled', 'refunded', 'failed') AND mo.payment_status IN ('paid', 'cod_pending') THEN mo.total_amount ELSE 0 END), 0) AS revenue,
+               COALESCE(COUNT(CASE WHEN mo.status NOT IN ('cancelled', 'refunded', 'failed') AND mo.payment_status IN ('paid', 'cod_pending') THEN 1 END), 0) AS orders
         FROM merch_orders mo
         WHERE mo.influencer_id = ?
           AND (mo.coupon_id = ? OR LOWER(TRIM(mo.coupon_code)) = LOWER(TRIM(?)))
@@ -1730,7 +1815,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const customerEmailCounts = new Map();
     const allOrders = orderRows.map((order) => {
       const items = itemsByOrderId.get(Number(order.id)) || [];
-      const commissionEarned = Math.max(0, Number(order.commissionAmountPaise || 0));
+      const orderStatus = String(order.status || 'pending').toLowerCase();
+      const paymentStatus = String(order.paymentStatus || 'pending').toLowerCase();
+      const isActiveOrder = !['cancelled', 'refunded', 'failed'].includes(orderStatus);
+      const isCommissionableOrder = isActiveOrder && ['paid', 'cod_pending'].includes(paymentStatus);
+      const commissionEarned = isCommissionableOrder ? Math.max(0, Number(order.commissionAmountPaise || 0)) : 0;
       const productSummary = items.length
         ? items.map((item) => `${String(item.productName || 'Item')} x${Number(item.quantity || 0)}`).join(', ')
         : 'Merch order';
@@ -1738,9 +1827,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const monthKey = String(orderDate || '').slice(0, 7);
       if (monthKey) {
         const entry = monthlyMap.get(monthKey) || { sales: 0, commission: 0, orders: 0 };
-        entry.sales += Number(order.totalAmount || 0);
+        if (isCommissionableOrder) entry.sales += Number(order.totalAmount || 0);
         entry.commission += commissionEarned;
-        entry.orders += 1;
+        if (isActiveOrder) entry.orders += 1;
         monthlyMap.set(monthKey, entry);
       }
       const normalizedEmail = normalizeMerchCustomerEmail(order.customerEmail);
@@ -1763,8 +1852,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         couponUsed: String(order.couponCode || ''),
         orderAmount: Number(order.totalAmount || 0),
         commissionEarned,
-        orderStatus: String(order.status || 'pending'),
-        paymentStatus: String(order.paymentStatus || 'pending'),
+        orderStatus,
+        paymentStatus,
       };
     });
 
@@ -1791,7 +1880,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const offset = (currentPage - 1) * pageLimit;
     const pagedOrders = filteredOrders.slice(offset, offset + pageLimit);
 
-    const paidOrders = allOrders.filter((order) => ['paid', 'cod_pending'].includes(String(order.paymentStatus || '').toLowerCase()));
+    const paidOrders = allOrders.filter((order) => !['cancelled', 'refunded', 'failed'].includes(String(order.orderStatus || '').toLowerCase()) && ['paid', 'cod_pending'].includes(String(order.paymentStatus || '').toLowerCase()));
     const activeOrders = allOrders.filter((order) => !['cancelled', 'refunded'].includes(String(order.orderStatus || '').toLowerCase()));
     const salesGenerated = paidOrders.reduce((sum, order) => sum + Number(order.orderAmount || 0), 0);
     const totalOrdersReferred = activeOrders.length;
@@ -1804,7 +1893,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const commissionPaid = Math.max(commissionPaidFromPayments, commissionPaidRecorded);
     const commissionPending = Math.max(0, commissionEarned - commissionPaid);
     const activeCoupons = coupons.filter((coupon) => Number(coupon.active) === 1).length;
-    const couponUsage = allOrders.filter((order) => Boolean(order.couponUsed)).length;
+    const couponUsage = allOrders.filter((order) => !['cancelled', 'refunded', 'failed'].includes(String(order.orderStatus || '').toLowerCase()) && Boolean(order.couponUsed)).length;
     const conversionRate = totalOrdersReferred ? Math.round((paidOrders.length / totalOrdersReferred) * 1000) / 10 : 0;
     const averageOrderValue = paidOrders.length ? Math.round(salesGenerated / paidOrders.length) : 0;
     const repeatCustomerCount = [...customerEmailCounts.values()].filter((count) => count > 1).length;
@@ -2658,7 +2747,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       )
       .all();
 
-    const paidOrders = allOrders.filter((order) => String(order.paymentStatus || '').toLowerCase() === 'paid');
+    const paidOrders = allOrders.filter((order) => !['cancelled', 'refunded', 'failed'].includes(String(order.status || '').toLowerCase()) && String(order.paymentStatus || '').toLowerCase() === 'paid');
     const revenue = paidOrders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
     const refunds = allOrders.filter((order) => String(order.paymentStatus || '').toLowerCase() === 'refunded').reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
     const discounts = allOrders.reduce((sum, order) => sum + Number(order.discountAmount || 0), 0);
@@ -2717,11 +2806,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         couponUsage: 0,
       };
 
+      const orderStatus = String(order.status || '').toLowerCase();
+      const orderPaymentStatus = String(order.paymentStatus || '').toLowerCase();
+      const isActiveOrder = !['cancelled', 'refunded', 'failed'].includes(orderStatus);
+      const isCommissionableOrder = isActiveOrder && ['paid', 'cod_pending'].includes(orderPaymentStatus);
       const orderRevenue = Number(order.totalAmount || 0);
-      existing.orders += 1;
-      existing.revenue += orderRevenue;
-      existing.commission += Math.max(0, Number(order.commissionAmountPaise || 0));
-      if (String(order.couponCode || '').trim()) {
+      if (isActiveOrder) existing.orders += 1;
+      if (isCommissionableOrder) {
+        existing.revenue += orderRevenue;
+        existing.commission += Math.max(0, Number(order.commissionAmountPaise || 0));
+      }
+      if (isActiveOrder && String(order.couponCode || '').trim()) {
         existing.couponUsage += 1;
       }
       monthlyInfluencerMap.set(entryKey, existing);
@@ -5608,21 +5703,28 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (fullName && !isValidMerchName(fullName)) {
       return res.status(400).json({ message: 'Name should contain letters and spaces only' });
     }
-    if (mobile && !isValidMerchPhone(mobile)) {
-      return res.status(400).json({ message: 'Enter a valid phone number' });
+    if (hasMobileField && mobile) {
+      if (!isValidMerchPhone(mobile)) {
+        return res.status(400).json({ message: 'Enter a valid phone number' });
+      }
+      const existingMobileOwner = findUserByMobile(mobile, req.user.id);
+      if (existingMobileOwner) {
+        return res.status(409).json({ message: 'Mobile number is already linked to another account' });
+      }
     }
     if (hasEmailField && email) {
       if (!isValidMerchEmail(email)) {
         return res.status(400).json({ message: 'invalid email address' });
       }
       const existingEmailOwner = db
-        .prepare('SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1')
+        .prepare('SELECT id FROM users WHERE lower(email) = ? AND id != ? LIMIT 1')
         .get(email, req.user.id);
       if (existingEmailOwner) {
-        return res.status(409).json({ message: 'Email address already in use' });
+        return res.status(409).json({ message: 'Email address already in use by another account' });
       }
     }
 
+    const normalizedMobile = hasMobileField && mobile ? (normalizeWhatsAppMobile(mobile) || mobile) : null;
     const updates = [];
     const params = [];
     if (fullName) {
@@ -5635,7 +5737,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
     if (hasMobileField) {
       updates.push('mobile = ?');
-      params.push(mobile || null);
+      params.push(normalizedMobile || null);
     }
     if (avatarUrl) {
       updates.push('avatar_url = ?');
@@ -5646,8 +5748,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       updates.push("updated_at = datetime('now')");
       db.prepare(`UPDATE merch_customer_profiles SET ${updates.join(', ')} WHERE id = ?`).run(...params, profile.id);
     }
-    if (hasMobileField && mobile) {
-      db.prepare('UPDATE users SET mobile = ? WHERE id = ?').run(mobile, req.user.id);
+    if (hasMobileField && normalizedMobile) {
+      db.prepare('UPDATE users SET mobile = ? WHERE id = ?').run(normalizedMobile, req.user.id);
     }
     if (hasEmailField && email && hasRealEmail(email)) {
       db.prepare('UPDATE users SET email = ? WHERE id = ?').run(email, req.user.id);
@@ -5953,6 +6055,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const orders = loadMerchOrders({
       customerUserId: Number(req.user.id),
       customerId: Number(profile?.id || 0),
+      includeUnconfirmed: true,
+    }).filter((order) => {
+      const status = String(order.status || '').toLowerCase();
+      const paymentStatus = String(order.paymentStatus || '').toLowerCase();
+      if (status === 'cancelled' && paymentStatus !== 'paid' && paymentStatus !== 'refunded') {
+        return false;
+      }
+      return true;
     });
 
     res.json({ orders });
@@ -5970,6 +6080,15 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!order) return res.status(404).json({ error: 'Order not found' });
 
     const currentStatus = String(order.status || '').toLowerCase();
+    const currentPaymentStatus = String(order.payment_status || '').toLowerCase();
+
+    // If order was pending / unpaid, cancel removes it completely from orders
+    if ((currentStatus === 'pending' || currentPaymentStatus === 'pending') && currentPaymentStatus !== 'paid') {
+      db.prepare('DELETE FROM merch_order_items WHERE order_id = ?').run(order.id);
+      db.prepare('DELETE FROM merch_orders WHERE id = ?').run(order.id);
+      return res.json({ success: true, removed: true, orderId: order.id });
+    }
+
     if (currentStatus === 'cancelled') {
       const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
       return res.json({ success: true, order: buildMerchOrderRecord(order, items) });
@@ -6004,6 +6123,24 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const updated = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(order.id);
     const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
     res.json({ success: true, order: buildMerchOrderRecord(updated, items) });
+  });
+
+  app.delete('/api/merch/orders/:id', requireMerchAuth, (req, res) => {
+    const profile = syncMerchGuestOrdersForUser(req.user) || ensureMerchCustomerProfileForUser(req.user);
+    const order = db.prepare(`
+      SELECT * FROM merch_orders
+      WHERE id = ? AND (customer_user_id = ? OR customer_id = ?)
+    `).get(Number(req.params.id), Number(req.user.id), Number(profile?.id || 0));
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    const currentStatus = String(order.status || '').toLowerCase();
+    const currentPaymentStatus = String(order.payment_status || '').toLowerCase();
+
+    if ((currentStatus === 'pending' || currentPaymentStatus === 'pending') && currentPaymentStatus !== 'paid') {
+      db.prepare('DELETE FROM merch_order_items WHERE order_id = ?').run(order.id);
+      db.prepare('DELETE FROM merch_orders WHERE id = ?').run(order.id);
+      return res.json({ success: true, removed: true, orderId: order.id });
+    }
   });
 
   app.get('/api/merch/admin/orders', requireAdmin, (req, res) => {
