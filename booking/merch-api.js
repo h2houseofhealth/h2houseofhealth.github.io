@@ -11,6 +11,7 @@ const express = require('express');
 const FormData = require('form-data');
 const ShiprocketService = require('./shiprocket');
 const bcrypt = require('bcryptjs');
+const { convertInrPaiseToCurrency, normalizeCurrency, getCurrencyConfig } = require('./currency');
 const router = express.Router();
 
 const FIXED_ADMIN_EMAIL = 'h2houseofhealth@gmail.com';
@@ -710,6 +711,19 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
   if (!hasColumn('merch_orders', 'cancelled_at')) {
     db.exec('ALTER TABLE merch_orders ADD COLUMN cancelled_at TEXT');
+  }
+
+  if (!hasColumn('merch_orders', 'currency')) {
+    db.exec("ALTER TABLE merch_orders ADD COLUMN currency TEXT NOT NULL DEFAULT 'INR'");
+  }
+  if (!hasColumn('merch_orders', 'exchange_rate')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN exchange_rate REAL DEFAULT 1');
+  }
+  if (!hasColumn('merch_orders', 'original_inr_amount')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN original_inr_amount INTEGER');
+  }
+  if (!hasColumn('merch_orders', 'charged_amount')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN charged_amount REAL');
   }
 
   if (!hasColumn('merch_influencers', 'avatar_url')) {
@@ -5067,6 +5081,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return { campaignId, influencerId };
   }
 
+  app.get('/api/merch/currency-config', (_req, res) => {
+    res.json(getCurrencyConfig());
+  });
+
   app.post('/api/merch/checkout', (req, res) => {
     if (!razorpay || !RAZORPAY_KEY_SECRET) {
       return res.status(503).json({ error: 'Payment gateway not configured' });
@@ -5218,23 +5236,27 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const guestEmail = isGuestCheckout ? resolvedCustomer.email : null;
     const guestPhone = isGuestCheckout ? resolvedCustomer.phone : null;
 
+    const requestedCurrency = normalizeCurrency(req.body?.currency);
+    const convertedPayment = convertInrPaiseToCurrency(totalAmount, requestedCurrency);
+
     // Create Razorpay order
     razorpay.orders.create({
-      amount: totalAmount,
-      currency: 'INR',
+      amount: convertedPayment.razorpayAmount,
+      currency: convertedPayment.currency,
       receipt: orderNumber,
-      notes: { customerEmail: resolvedCustomer.email, orderNumber, couponCode: String(couponResult.couponCode || couponCode || ''), bundleCode },
+      notes: { customerEmail: resolvedCustomer.email, orderNumber, couponCode: String(couponResult.couponCode || couponCode || ''), bundleCode, currency: convertedPayment.currency },
     }).then(rpOrder => {
       // Save order to DB
       const insertOrder = db.prepare(`
-        INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, campaign_id, commission_amount_paise, commission_snapshot_at, total_amount, payment_method, payment_status, razorpay_order_id, shipping_address, billing_address)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'online', 'pending', ?, ?, ?)
+        INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, campaign_id, commission_amount_paise, commission_snapshot_at, total_amount, payment_method, payment_status, razorpay_order_id, shipping_address, billing_address, currency, exchange_rate, original_inr_amount, charged_amount)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'online', 'pending', ?, ?, ?, ?, ?, ?, ?)
       `);
       const result = insertOrder.run(
         orderNumber, resolvedCustomer.name, dbCustomerEmail, resolvedCustomer.phone,
         guestName, isGuestCheckout ? (realEmailToUse || null) : null, guestPhone, isGuestCheckout ? 1 : 0, authUser?.id || null, merchProfile?.id || null,
         subtotal, gstAmount, shippingCharge, discountAmount, couponResult.coupon?.id || null, couponResult.couponCode || null, influencerId, campaignId, commissionSnapshot.total, totalAmount,
-        rpOrder.id, JSON.stringify(shippingAddressPayload || {}), JSON.stringify(billingAddressPayload || shippingAddressPayload || {})
+        rpOrder.id, JSON.stringify(shippingAddressPayload || {}), JSON.stringify(billingAddressPayload || shippingAddressPayload || {}),
+        convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount
       );
       const orderId = result.lastInsertRowid;
 
@@ -5252,8 +5274,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         orderNumber,
         razorpayKeyId: RAZORPAY_KEY_ID,
         razorpayOrderId: rpOrder.id,
-        amount: totalAmount,
-        currency: 'INR',
+        amount: convertedPayment.razorpayAmount,
+        currency: convertedPayment.currency,
+        chargedAmount: convertedPayment.chargedAmount,
+        exchangeRate: convertedPayment.exchangeRate,
+        originalInrAmount: convertedPayment.originalInrAmount,
         subtotal,
         gstAmount,
         shippingCharge,
@@ -5584,9 +5609,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const guestEmail = isGuestCheckout ? resolvedCustomer.email : null;
     const guestPhone = isGuestCheckout ? resolvedCustomer.phone : null;
 
+    if (String(req.body?.currency || '').trim().toUpperCase() === 'USD') {
+      return res.status(400).json({ error: 'Cash on Delivery is only available in INR' });
+    }
+
     const result = db.prepare(`
-      INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, campaign_id, commission_amount_paise, commission_snapshot_at, total_amount, payment_method, payment_status, shipping_address, billing_address)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'cod', 'cod_pending', ?, ?)
+      INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, campaign_id, commission_amount_paise, commission_snapshot_at, total_amount, payment_method, payment_status, shipping_address, billing_address, currency, exchange_rate, original_inr_amount, charged_amount)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'cod', 'cod_pending', ?, ?, 'INR', 1, ?, ?)
     `).run(
       orderNumber,
       resolvedCustomer.name,
@@ -5609,7 +5638,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       commissionSnapshot.total,
       totalAmount,
       JSON.stringify(shippingAddressPayload || {}),
-      JSON.stringify(billingAddressPayload || shippingAddressPayload || {})
+      JSON.stringify(billingAddressPayload || shippingAddressPayload || {}),
+      totalAmount / 100,
+      totalAmount / 100
     );
 
     const orderId = result.lastInsertRowid;
@@ -5646,6 +5677,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       success: true,
       orderNumber,
       orderId,
+      currency: 'INR',
       totalAmount,
       discountAmount,
       coupon: buildMerchCouponPreview(couponResult),
