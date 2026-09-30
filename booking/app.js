@@ -6192,7 +6192,7 @@ async function payBooking(id) {
 async function payAllUserBookings() {
   const payButton = elements.bookingsPayAllBtn;
   const originalLabel = payButton?.textContent || 'Pay Now';
-  const couponCode = String(elements.userCouponCode?.value || '').trim();
+  const couponCode = state.cartCouponPreview?.code ? String(state.cartCouponPreview.code).trim() : '';
 
   if (payButton) {
     payButton.disabled = true;

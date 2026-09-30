@@ -2130,7 +2130,7 @@ function getWishlistProductPrice(item) {
       if (checkoutCoupon) checkoutCoupon.value = code;
       showCheckoutNotice('Coupon applied', `${code} is ready for checkout.`);
     } catch (error) {
-      clearMerchCoupon({ preserveCode: true });
+      clearMerchCoupon();
       state.merchCouponError = error.message || 'Unable to validate coupon.';
       showCheckoutNotice('Coupon error', state.merchCouponError, { variant: 'error' });
     } finally {
@@ -5604,7 +5604,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   function showCheckoutPage(customer = null, address = null) {
-    if (!state.cart.length) {
+    if (state.authResolved && !state.cart.length) {
       showShop();
       return;
     }
@@ -6028,7 +6028,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   async function startRazorpayCheckout(customer, address) {
     const items = state.cart.map(item => ({ variantId: item.variantId, quantity: item.quantity }));
-      const couponCode = normalizeCouponCode(state.merchCouponCode || els.cartCouponCode?.value || '');
+    const couponCode = state.merchCouponPreview?.code ? normalizeCouponCode(state.merchCouponPreview.code) : '';
 
     try {
       const res = await fetch(buildApiUrl('/api/merch/checkout'), {
@@ -6363,20 +6363,20 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   // ─── Initialize ───
-  function init() {
+  async function init() {
     cleanupLegacySharedCartStorage();
-    loadCart(null);
+    setBodyAuthLoading(true);
+    renderAccountTrigger();
+    await loadCustomerContext();
+    loadCart(state.currentUser);
     renderCartBadge();
     renderProductGrid();
     bindEvents();
     routeFromLocation();
-    setBodyAuthLoading(true);
-    renderAccountTrigger();
     loadMerchProducts();
     loadTrendingProducts();
     loadMerchOffers();
     loadMerchCoupons();
-    loadCustomerContext();
   }
 
   // Boot
