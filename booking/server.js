@@ -31,6 +31,13 @@ const Mailgun = require('mailgun.js');
 const formData = require('form-data');
 const Razorpay = require('razorpay');
 const multer = require('multer');
+// Deployments may install dependencies as root while the service runs as a
+// different user. Prefer the shared application cache when it exists so the
+// PDF browser is available to the runtime user as well.
+const sharedPuppeteerCacheDir = path.resolve(__dirname, '../.cache/puppeteer');
+if (!process.env.PUPPETEER_CACHE_DIR && fs.existsSync(sharedPuppeteerCacheDir)) {
+  process.env.PUPPETEER_CACHE_DIR = sharedPuppeteerCacheDir;
+}
 let puppeteer;
 let puppeteerLoadError;
 try {
@@ -40,7 +47,62 @@ try {
   puppeteerLoadError = error;
 }
 
+function findExecutableInDir(dir, names) {
+  try {
+    if (!fs.existsSync(dir)) return null;
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isFile()) {
+        const lower = entry.name.toLowerCase();
+        if (names.some((name) => lower === name || lower === `${name}.exe`)) {
+          return fullPath;
+        }
+      } else if (entry.isDirectory()) {
+        const found = findExecutableInDir(fullPath, names);
+        if (found) return found;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function resolvePuppeteerExecutablePath() {
+  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+  if (puppeteer && typeof puppeteer.executablePath === 'function') {
+    try {
+      const candidate = puppeteer.executablePath();
+      if (candidate && fs.existsSync(candidate)) return candidate;
+    } catch {}
+  }
+  const systemCandidates = [
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    '/snap/bin/chromium',
+  ];
+  for (const candidate of systemCandidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  const cacheCandidates = [
+    path.resolve(__dirname, '../.cache/puppeteer'),
+    '/opt/h2house-dev/.cache/puppeteer',
+    '/opt/h2house/.cache/puppeteer',
+    '/root/.cache/puppeteer',
+    path.join(process.env.HOME || '', '.cache/puppeteer'),
+  ];
+  for (const cacheDir of cacheCandidates) {
+    const found = findExecutableInDir(cacheDir, ['chrome', 'chromium']);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 loadEnvFromFile(path.join(__dirname, '.env'));
+const { convertInrPaiseToCurrency, normalizeCurrency, getCurrencyConfig } = require('./currency');
 
 const PORT = process.env.PORT || 3000;
 const WEBSITE_ROOT = path.resolve(__dirname, '..');
@@ -291,16 +353,16 @@ const SERVICE_CATALOG = [
   {
     category: 'EXPERIENCE SESSION',
     name: 'Demo Session',
-    priceInr: 1, // Temporary test price (original: 4000)
+    priceInr: 4000,
     includes: '30 min consultation + hydrogen session',
     description: 'Demo hydrogen session for non-members with consultation.',
   },
   {
     category: 'HYDROGEN SESSION',
     name: 'H2 Single Session',
-    priceInr: 1, // Temporary test price (original: 4800)
-    nonMemberPriceInr: 1, // Temporary test price (original: 9500)
-    memberPriceInr: 1, // Temporary test price (original: 4800)
+    priceInr: 4800,
+    nonMemberPriceInr: 9500,
+    memberPriceInr: 4800,
     includes: '1 Hydrogen Session',
     description:
       'Single hydrogen session for immediate recovery and cellular wellness support. Non-member pricing: Rs. 9,500.',
@@ -382,7 +444,7 @@ const SERVICE_CATALOG = [
   {
     category: 'IV THERAPIES',
     name: 'Gym Hero',
-    priceInr: 1, // Temporary test price (original: 4800)
+    priceInr: 4800,
     includes: 'Normal saline, B1, B2, B6, B12, Vitamin C, Magnesium, Glutathione',
     description:
       'Designed for fitness enthusiasts to support muscle recovery, hydration, energy production, and antioxidant support after intense workouts.',
@@ -499,7 +561,7 @@ const MEMBERSHIP_PLANS = [
     id: 'h2_single',
     name: '1 Person Membership',
     peopleCount: 1,
-    priceInr: 1,
+    priceInr: 84000,
     validityDays: 90,
     h2SessionsIncluded: 16,
     perks:
@@ -527,7 +589,7 @@ const MEMBERSHIP_PLANS = [
     id: 'h2_add_person',
     name: 'Add Person',
     peopleCount: 1,
-    priceInr: 1,
+    priceInr: 78000,
     validityDays: 90,
     h2SessionsIncluded: 16,
     perks:
@@ -921,6 +983,8 @@ mountMerchApi(app, {
   JWT_SECRET,
   jwt,
   merchImageUpload,
+  sendWhatsAppMessage,
+  normalizeWhatsAppMobile,
   sendMerchEmail: ({ to, subject, text, html }) => sendConfiguredEmail({
     to,
     from: MAIL_FROM,
@@ -994,17 +1058,51 @@ app.get('/auth/google/callback', ensureGoogleOAuthConfigured, (req, res, next) =
 app.use('/api/auth', rateLimit({ windowMs: 60_000, max: 40 }));
 
 function getMobileVariants(mobile) {
-  const norm = String(mobile || '').trim();
-  const withoutPlus = norm.replace(/^\+/, '');
-  let local = withoutPlus;
-  if (norm.startsWith('+91')) {
-    local = norm.slice(3);
-  } else if (norm.startsWith('+1')) {
-    local = norm.slice(2);
-  } else if (norm.startsWith('+44')) {
-    local = norm.slice(3);
+  const raw = String(mobile || '').trim();
+  if (!raw) return [];
+  const digits = raw.replace(/\D/g, '');
+  const withoutPlus = raw.replace(/^\+/, '').replace(/[\s\-()]/g, '');
+  let local = digits;
+  if (digits.length === 12 && digits.startsWith('91')) {
+    local = digits.slice(2);
+  } else if (digits.length === 11 && digits.startsWith('1')) {
+    local = digits.slice(1);
+  } else if ((digits.length === 12 || digits.length === 13) && digits.startsWith('44')) {
+    local = digits.slice(2);
+    if (local.startsWith('0')) local = local.slice(1);
+  } else if (digits.length === 11 && digits.startsWith('0')) {
+    local = digits.slice(1);
   }
-  return [norm, withoutPlus, local];
+
+  const variants = new Set();
+  variants.add(raw);
+  variants.add(withoutPlus);
+  variants.add(digits);
+  variants.add(local);
+  if (local.length === 10) {
+    variants.add(`+91${local}`);
+    variants.add(`91${local}`);
+    variants.add(`0${local}`);
+  }
+  return Array.from(variants).filter(Boolean);
+}
+
+function findUserByMobile(mobile, excludeUserId = null) {
+  const variants = getMobileVariants(mobile);
+  if (!variants.length) return null;
+  const placeholders = variants.map(() => '?').join(', ');
+  let sql = `SELECT * FROM users WHERE (mobile IN (${placeholders}) OR (length(replace(replace(replace(replace(mobile, ' ', ''), '-', ''), '+', ''), '(', '')) >= 10 AND substr(replace(replace(replace(replace(mobile, ' ', ''), '-', ''), '+', ''), '(', ''), -10) = ?))`;
+  const params = [...variants];
+  const digits = String(mobile || '').replace(/\D/g, '');
+  const last10 = digits.slice(-10);
+  params.push(last10.length === 10 ? last10 : digits);
+
+  if (excludeUserId) {
+    sql += ' AND id != ?';
+    params.push(Number(excludeUserId));
+  }
+  sql += ' ORDER BY CASE WHEN email IS NOT NULL AND email != \'\' AND email NOT LIKE \'%@h2houseofhealth.local\' AND email NOT LIKE \'%@h2health.local\' THEN 0 ELSE 1 END, id ASC LIMIT 1';
+  return db.prepare(sql).get(...params);
 }
 
 function getLatestSignupOtp(mobile) {
@@ -1152,9 +1250,7 @@ app.post('/api/auth/signup/send-whatsapp-otp', async (req, res) => {
     return res.status(400).json({ message: 'Enter a valid mobile number with country code.' });
   }
 
-  const existingUser = db.prepare(
-    'SELECT id FROM users WHERE mobile IN (?, ?, ?) AND mobile_verified = 1 LIMIT 1'
-  ).get(...getMobileVariants(mobile));
+  const existingUser = findUserByMobile(mobile);
   if (existingUser) {
     return res.status(409).json({ message: 'mobile number already registered' });
   }
@@ -1175,7 +1271,7 @@ app.post('/api/auth/signup/verify', (req, res) => {
   if (!mobile || !/^\d{6}$/.test(otp) || !name) {
     return res.status(400).json({ message: 'mobile, otp, and name are required' });
   }
-  if (db.prepare('SELECT id FROM users WHERE mobile IN (?, ?, ?) AND mobile_verified = 1 LIMIT 1').get(...getMobileVariants(mobile))) {
+  if (findUserByMobile(mobile)) {
     return res.status(409).json({ message: 'mobile number already registered' });
   }
 
@@ -1425,9 +1521,7 @@ app.post('/api/auth/send-whatsapp-otp', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Enter a valid mobile number with country code.' });
   }
 
-  const user = db
-    .prepare('SELECT id, role FROM users WHERE mobile IN (?, ?, ?) ORDER BY id DESC LIMIT 1')
-    .get(...getMobileVariants(mobile));
+  const user = findUserByMobile(mobile);
   if (!user || String(user.role || 'user').toLowerCase() === 'admin') {
     return res.status(404).json({ success: false, message: 'Account not found. Please sign up first.' });
   }
@@ -1496,14 +1590,13 @@ app.post('/api/auth/verify-whatsapp-otp', (req, res) => {
     return res.status(401).json({ message: 'Invalid OTP.' });
   }
 
-  const userRow = db
-    .prepare('SELECT id FROM users WHERE mobile IN (?, ?, ?) ORDER BY id DESC LIMIT 1')
-    .get(...getMobileVariants(mobile));
+  const userRow = findUserByMobile(mobile);
   if (!userRow) {
     return res.status(404).json({ message: 'Account not found' });
   }
 
   db.prepare('UPDATE login_otps SET verified = 1 WHERE id = ?').run(latestOtp.id);
+  db.prepare('UPDATE users SET mobile_verified = 1 WHERE id = ?').run(userRow.id);
   const syncedUser = syncMembershipForUser({ userId: Number(userRow.id) }) || getUserProfileById(Number(userRow.id));
   if (!syncedUser || String(syncedUser.role || 'user').toLowerCase() === 'admin') {
     return res.status(404).json({ message: 'Account not found' });
@@ -1843,8 +1936,28 @@ app.put('/api/profile', requireAuth, (req, res) => {
     return res.status(400).json({ message: 'invalid gender' });
   }
 
-  if (mobile && !/^[0-9+\-\s()]{7,20}$/.test(mobile)) {
-    return res.status(400).json({ message: 'invalid mobile number' });
+  if (mobile) {
+    if (!/^[0-9+\-\s()]{7,20}$/.test(mobile)) {
+      return res.status(400).json({ message: 'invalid mobile number' });
+    }
+    const mobileOwner = findUserByMobile(mobile, req.user.id);
+    if (mobileOwner) {
+      return res.status(409).json({ message: 'Mobile number is already linked to another account' });
+    }
+  }
+
+  const hasEmailField = Object.prototype.hasOwnProperty.call(req.body || {}, 'email');
+  const email = hasEmailField ? String(req.body?.email || '').trim().toLowerCase() : '';
+  if (hasEmailField && email) {
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ message: 'invalid email address' });
+    }
+    const emailOwner = db
+      .prepare('SELECT id FROM users WHERE lower(email) = ? AND id != ? LIMIT 1')
+      .get(email, req.user.id);
+    if (emailOwner) {
+      return res.status(409).json({ message: 'Email address is already linked to another account' });
+    }
   }
 
   if (hasAvatarField && avatarUrl && !/^https?:\/\/.+/i.test(avatarUrl) && !avatarUrl.startsWith('/uploads/')) {
@@ -1855,15 +1968,24 @@ app.put('/api/profile', requireAuth, (req, res) => {
     .prepare('SELECT avatar_url AS avatarUrl FROM users WHERE id = ?')
     .get(req.user.id);
   const nextAvatarUrl = hasAvatarField ? (avatarUrl || null) : (current?.avatarUrl || null);
+  const normalizedMobile = mobile ? (normalizeWhatsAppMobile(mobile) || mobile) : null;
+
+  const updateFields = ['name = ?', 'age = ?', 'gender = ?', 'mobile = ?', 'avatar_url = ?'];
+  const updateParams = [name, age, gender || null, normalizedMobile, nextAvatarUrl];
+  if (hasEmailField && email) {
+    updateFields.push('email = ?');
+    updateParams.push(email);
+  }
+  updateParams.push(req.user.id);
 
   db.prepare(
     `UPDATE users
-     SET name = ?, age = ?, gender = ?, mobile = ?, avatar_url = ?
+     SET ${updateFields.join(', ')}
      WHERE id = ?`
-  ).run(name, age, gender || null, mobile || null, nextAvatarUrl, req.user.id);
+  ).run(...updateParams);
 
   const profile = db.prepare(
-    `SELECT id, name, role, age, gender, mobile, avatar_url AS avatarUrl,
+    `SELECT id, name, email, role, age, gender, mobile, avatar_url AS avatarUrl,
             membership_status AS membershipStatus, membership_plan AS membershipPlan,
             membership_started_at AS membershipStartedAt, membership_expires_at AS membershipExpiresAt,
             membership_people_count AS membershipPeopleCount
@@ -2597,14 +2719,22 @@ app.patch('/api/admin/users/:id', requireAuth, requireAdmin, (req, res) => {
 
   if (nextEmail !== existing.email) {
     const emailConflict = db
-      .prepare('SELECT id FROM users WHERE email = ? AND id <> ?')
+      .prepare('SELECT id FROM users WHERE lower(email) = ? AND id <> ?')
       .get(nextEmail, userId);
     if (emailConflict) {
       return res.status(409).json({ message: 'That email is already in use.' });
     }
   }
 
-  db.prepare('UPDATE users SET email = ?, mobile = ? WHERE id = ?').run(nextEmail, nextMobile || null, userId);
+  if (nextMobile && nextMobile !== existing.mobile) {
+    const mobileConflict = findUserByMobile(nextMobile, userId);
+    if (mobileConflict) {
+      return res.status(409).json({ message: 'That mobile number is already in use.' });
+    }
+  }
+
+  const normalizedNextMobile = nextMobile ? (normalizeWhatsAppMobile(nextMobile) || nextMobile) : null;
+  db.prepare('UPDATE users SET email = ?, mobile = ? WHERE id = ?').run(nextEmail, normalizedNextMobile, userId);
 
   return res.json({
     user: {
@@ -3138,6 +3268,8 @@ app.get('/api/admin/coupons', requireAuth, requireAdmin, (req, res) => {
               c.description,
               c.discount_type AS discountType,
               c.discount_value AS discountValue,
+              c.commission_type AS commissionType,
+              c.commission_rate AS commissionRate,
               c.commission_per_order_paise AS commissionPerOrderPaise,
               c.commission_by_product_json AS commissionByProductJson,
               c.applies_to AS appliesTo,
@@ -3350,19 +3482,26 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   let code = normalizeCouponCode(req.body?.code);
   const description = String(req.body?.description || '').trim();
   const festivalName = String(req.body?.festivalName || '').trim();
-  const discountType = 'flat';
-  const discountValue = Number(req.body?.discountValue || 0);
+  const discountType = String(req.body?.discountType || 'flat').trim().toLowerCase() === 'percentage' ? 'percentage' : 'flat';
+  const discountValue = Number(req.body?.discountValue ?? req.body?.discount ?? 0);
   const couponCategory = String(req.body?.couponCategory || '').trim().toLowerCase();
+  const commissionType = String(req.body?.commissionType || 'flat').trim().toLowerCase() === 'percentage' ? 'percentage' : 'flat';
+  const commissionRate = commissionType === 'percentage'
+    ? Math.max(0, Math.min(100, Number(req.body?.commissionRate ?? req.body?.commissionValue ?? req.body?.commissionPerOrder ?? 0)))
+    : 0;
   const commissionPerOrderPaise = couponCategory && couponCategory !== 'influencer'
     ? 0
-    : Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
+    : commissionType === 'percentage'
+      ? 0
+      : Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? req.body?.commissionValue ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
   const commissionByProductJson = normalizeCommissionByProduct(req.body?.commissionByProduct);
   const appliesToRaw = String(req.body?.appliesTo || 'all').trim().toLowerCase();
   const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
+  const categoryAppliesTo = appliesToRaw.match(/^category:([a-z0-9_\-,]+)$/);
   const productIds = productAppliesTo
     ? [...new Set(productAppliesTo[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
     : [];
-  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo ? appliesToRaw : 'all';
+  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo || categoryAppliesTo ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || '').trim().toLowerCase();
   const influencerId = Number(req.body?.influencerId || req.body?.influencer_id || 0);
   const sendEmail = req.body?.sendEmail !== false;
@@ -3400,7 +3539,10 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   if (!Number.isFinite(discountValue) || discountValue <= 0) {
     return res.status(400).json({ message: 'discountValue must be greater than 0.' });
   }
-  if (discountValue > 10000000) {
+  if (discountType === 'percentage' && discountValue > 100) {
+    return res.status(400).json({ message: 'Percentage discount cannot exceed 100%.' });
+  }
+  if (discountType === 'flat' && discountValue > 10000000) {
     return res.status(400).json({ message: 'discountValue is too large.' });
   }
   if (recipientEmail && !isValidEmail(recipientEmail)) {
@@ -3460,14 +3602,16 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
 
   db.prepare(
     `INSERT INTO coupons (
-      code, description, discount_type, discount_value, commission_per_order_paise, commission_by_product_json, applies_to, max_redemptions, per_user_limit, expires_at, active,
+      code, description, discount_type, discount_value, commission_type, commission_rate, commission_per_order_paise, commission_by_product_json, applies_to, max_redemptions, per_user_limit, expires_at, active,
       coupon_type, assigned_user_email, used_by, is_active, valid_from, valid_till,
       recipient_email, recipient_name, festival_name, emailed_at, email_status, email_error, portal, influencer_id, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(code) DO UPDATE SET
       description = excluded.description,
       discount_type = excluded.discount_type,
       discount_value = excluded.discount_value,
+      commission_type = excluded.commission_type,
+      commission_rate = excluded.commission_rate,
       commission_per_order_paise = excluded.commission_per_order_paise,
       commission_by_product_json = excluded.commission_by_product_json,
       applies_to = excluded.applies_to,
@@ -3491,6 +3635,8 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     description,
     discountType,
     discountValue,
+    commissionType,
+    commissionRate,
     commissionPerOrderPaise,
     commissionByProductJson,
     appliesTo,
@@ -3581,19 +3727,26 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   let code = normalizeCouponCode(req.body?.code || existing.code);
   const description = String(req.body?.description || existing.description || '').trim();
   const festivalName = String(req.body?.festivalName || existing.festivalName || '').trim();
-  const discountType = String(req.body?.discountType || existing.discountType || 'flat').trim().toLowerCase() || 'flat';
-  const discountValue = Number(req.body?.discountValue ?? existing.discountValue ?? 0);
+  const discountType = String(req.body?.discountType || existing.discountType || 'flat').trim().toLowerCase() === 'percentage' ? 'percentage' : 'flat';
+  const discountValue = Number(req.body?.discountValue ?? req.body?.discount ?? existing.discountValue ?? 0);
   const couponCategory = String(req.body?.couponCategory || '').trim().toLowerCase();
+  const commissionType = String(req.body?.commissionType || existing.commissionType || 'flat').trim().toLowerCase() === 'percentage' ? 'percentage' : 'flat';
+  const commissionRate = commissionType === 'percentage'
+    ? Math.max(0, Math.min(100, Number(req.body?.commissionRate ?? req.body?.commissionValue ?? req.body?.commissionPerOrder ?? existing.commissionRate ?? 0)))
+    : 0;
   const commissionPerOrderPaise = couponCategory && couponCategory !== 'influencer'
     ? 0
-    : Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? existing.commissionPerOrderPaise ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
+    : commissionType === 'percentage'
+      ? 0
+      : Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? req.body?.commissionValue ?? existing.commissionPerOrderPaise ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
   const commissionByProductJson = normalizeCommissionByProduct(req.body?.commissionByProduct, existing.commissionByProduct);
   const appliesToRaw = String(req.body?.appliesTo || existing.appliesTo || 'all').trim().toLowerCase();
   const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
+  const categoryAppliesTo = appliesToRaw.match(/^category:([a-z0-9_\-,]+)$/);
   const productIds = productAppliesTo
     ? [...new Set(productAppliesTo[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
     : [];
-  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo ? appliesToRaw : 'all';
+  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo || categoryAppliesTo ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || existing.recipientEmail || '').trim().toLowerCase();
   const recipientName = String(req.body?.recipientName || existing.recipientName || '').trim();
   const influencerIdRaw = Object.prototype.hasOwnProperty.call(req.body || {}, 'influencerId')
@@ -3648,6 +3801,12 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   if (!Number.isFinite(discountValue) || discountValue <= 0) {
     return res.status(400).json({ message: 'discountValue must be greater than 0.' });
   }
+  if (discountType === 'percentage' && discountValue > 100) {
+    return res.status(400).json({ message: 'Percentage discount cannot exceed 100%.' });
+  }
+  if (discountType === 'flat' && discountValue > 10000000) {
+    return res.status(400).json({ message: 'discountValue is too large.' });
+  }
   if (couponType === 'private' && !recipientEmail) {
     return res.status(400).json({ message: 'recipientEmail is required for private coupons.' });
   }
@@ -3683,6 +3842,8 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
         description = ?,
         discount_type = ?,
         discount_value = ?,
+        commission_type = ?,
+        commission_rate = ?,
         commission_per_order_paise = ?,
         commission_by_product_json = ?,
         applies_to = ?,
@@ -3706,6 +3867,8 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
       description,
       discountType || 'flat',
       discountValue,
+      commissionType || 'flat',
+      commissionRate || 0,
       commissionPerOrderPaise,
       commissionByProductJson,
       appliesTo,
@@ -5409,6 +5572,12 @@ app.post('/api/hydrogen/verify', requireAuth, async (req, res) => {
        AND payment_order_id = ?`
   ).run(razorpayPaymentId, paymentMethod, paymentMethod, req.user.id, razorpayOrderId);
 
+  for (const b of bookings) {
+    void sendWhatsAppBookingConfirmation(b.id).then((result) => {
+      if (!result?.ok) console.warn('[WhatsApp] Hydrogen confirmation notice:', result?.message);
+    }).catch((err) => console.error('[WhatsApp] Hydrogen confirmation error:', err?.message || err));
+  }
+
   return res.json({ paid: true, bookingCount: bookings.length });
 });
 
@@ -5881,7 +6050,11 @@ app.get('/api/payments/config', requireAuth, (_req, res) => {
     return res.status(503).json({ message: RAZORPAY_UNAVAILABLE_MESSAGE });
   }
 
-  return res.json({ keyId: RAZORPAY_KEY_ID, currency: 'INR' });
+  return res.json({ keyId: RAZORPAY_KEY_ID, currency: 'INR', currencyConfig: getCurrencyConfig() });
+});
+
+app.get('/api/currency/config', (_req, res) => {
+  return res.json(getCurrencyConfig());
 });
 
 app.get('/api/bookings/:id/payment-link', requireAuth, (req, res) => {
@@ -7206,6 +7379,7 @@ app.get('/api/public/payments/booking', (req, res) => {
         holdMinutes: BOOKING_HOLD_MINUTES,
       },
       keyId: RAZORPAY_KEY_ID,
+      currencyConfig: getCurrencyConfig(),
     });
   }
 
@@ -7283,6 +7457,7 @@ app.get('/api/public/payments/booking', (req, res) => {
       holdMinutes: BOOKING_HOLD_MINUTES,
     },
     keyId: RAZORPAY_KEY_ID,
+    currencyConfig: getCurrencyConfig(),
   });
 });
 
@@ -7442,8 +7617,70 @@ app.patch('/api/public/guest/bookings/:id/status', (req, res) => {
   } else {
     db.prepare('UPDATE bookings SET status = ? WHERE id = ?').run(status, bookingId);
   }
+
+  if (status === 'cancelled' && existingStatus !== 'cancelled') {
+    const reason = req.body?.reason || req.body?.cancellationReason || 'Cancelled by client';
+    const fullBooking = getBookingForWhatsApp(bookingId) || existing;
+    triggerBookingCancellationNotifications(fullBooking, {
+      cancelledBy: 'guest',
+      reason,
+    }).catch((err) => console.error('[Booking] Guest cancellation notification error:', err?.message || err));
+  }
+
   return res.status(204).send();
 });
+
+function isValidBookingPhone(phone, country = '') {
+  if (!phone || typeof phone !== 'string') return false;
+  const trimmed = phone.trim();
+  if (!trimmed) return false;
+  if (/[^\d\s+\-]/.test(trimmed)) return false;
+
+  if (trimmed.startsWith('+')) {
+    const digits = trimmed.slice(1).replace(/[\s\-]/g, '');
+    if (trimmed.startsWith('+91')) {
+      return /^\d{10}$/.test(digits.slice(2));
+    }
+    if (trimmed.startsWith('+1')) {
+      return /^\d{10}$/.test(digits.slice(1));
+    }
+    if (trimmed.startsWith('+44')) {
+      const local = digits.slice(2).replace(/^0/, '');
+      return /^\d{9,10}$/.test(local);
+    }
+    if (trimmed.startsWith('+971')) {
+      return /^\d{8,9}$/.test(digits.slice(3));
+    }
+    if (trimmed.startsWith('+65')) {
+      return /^\d{8}$/.test(digits.slice(2));
+    }
+    if (trimmed.startsWith('+61')) {
+      return /^\d{9}$/.test(digits.slice(2));
+    }
+    return digits.length >= 7 && digits.length <= 15;
+  }
+
+  const digits = trimmed.replace(/[\s\-]/g, '');
+  const normCountry = String(country || '').trim().toLowerCase();
+
+  if (normCountry === 'united states' || normCountry === 'us' || (digits.length === 11 && digits.startsWith('1'))) {
+    const local = digits.length === 11 ? digits.slice(1) : digits;
+    return /^\d{10}$/.test(local);
+  }
+  if (normCountry === 'united kingdom' || normCountry === 'uk' || ((digits.length === 12 || digits.length === 13) && digits.startsWith('44'))) {
+    let local = digits.startsWith('44') ? digits.slice(2) : digits;
+    if (local.startsWith('0')) local = local.slice(1);
+    return /^\d{9,10}$/.test(local);
+  }
+  if (normCountry === 'india' || normCountry === 'in' || !normCountry) {
+    if (digits.length === 12 && digits.startsWith('91')) {
+      return /^\d{10}$/.test(digits.slice(2));
+    }
+    return /^\d{10}$/.test(digits);
+  }
+
+  return digits.length >= 7 && digits.length <= 15;
+}
 
 // Guest Checkout Endpoint
 // Allows unauthenticated users to start checkout with basic info
@@ -7459,9 +7696,11 @@ app.post('/api/guest/checkout', async (req, res) => {
     return res.status(400).json({ message: 'Valid guest email is required' });
   }
 
-  if (!guestPhone || typeof guestPhone !== 'string' || !/^[6-9]\d{9}$/.test(guestPhone.trim())) {
-    return res.status(400).json({ message: 'Valid 10-digit guest phone number is required' });
+  if (!guestPhone || typeof guestPhone !== 'string' || !isValidBookingPhone(guestPhone)) {
+    return res.status(400).json({ message: 'Valid mobile number with country code is required' });
   }
+
+  const normalizedGuestPhone = normalizeWhatsAppMobile(guestPhone) || guestPhone.trim();
 
   if (!Array.isArray(bookings) || bookings.length === 0) {
     return res.status(400).json({ message: 'At least one booking is required' });
@@ -7517,7 +7756,7 @@ app.post('/api/guest/checkout', async (req, res) => {
         bookingGroupId,
         guestName.trim(),
         guestEmail.trim(),
-        guestPhone.trim(),
+        normalizedGuestPhone,
         serviceName,
         bookingDate,
         bookingTime,
@@ -7529,7 +7768,7 @@ app.post('/api/guest/checkout', async (req, res) => {
         '',
         guestName.trim(),
         guestEmail.trim(),
-        guestPhone.trim(),
+        normalizedGuestPhone,
         'guest',
         now
       );
@@ -7569,7 +7808,7 @@ app.post('/api/guest/checkout', async (req, res) => {
       membershipStatus: 'inactive',
       membershipExpiresAt: null,
       membershipStartedAt: null,
-      mobile: guestPhone.trim(),
+      mobile: normalizedGuestPhone,
     };
     const pricingSummary = finalizeSummaryWithGst(buildAggregatePaymentSummary(pricingBookings, guestPricingUser));
     let guestCouponPreview = null;
@@ -7592,7 +7831,7 @@ app.post('/api/guest/checkout', async (req, res) => {
     // Generate payment token for guest after coupon validation succeeds.
     const paymentToken = createGuestCheckoutAccessToken({
       guestEmail: guestEmail.trim(),
-      guestPhone: guestPhone.trim(),
+      guestPhone: normalizedGuestPhone,
       guestName: guestName.trim(),
       bookingIds: createdBookings.map((b) => b.id),
       couponCode: String(couponCode || '').trim(),
@@ -7612,7 +7851,7 @@ app.post('/api/guest/checkout', async (req, res) => {
         bookingCount: Number(pricingSummary.bookingCount || createdBookings.length),
         guestName: guestName.trim(),
         guestEmail: guestEmail.trim(),
-        guestPhone: guestPhone.trim(),
+        guestPhone: normalizedGuestPhone,
         items: (Array.isArray(pricingSummary.units) ? pricingSummary.units : []).map((unit) => ({
           serviceName: unit.label || 'Booking',
           bookingDate: '',
@@ -7832,11 +8071,14 @@ app.post('/api/public/payments/create-order', async (req, res) => {
       });
     }
 
+    const requestedCurrency = normalizeCurrency(req.body?.currency);
+    const convertedPayment = convertInrPaiseToCurrency(amountInPaise, requestedCurrency);
+
     const booking = paymentContext.booking;
     const bookingOwner = paymentContext.bookingOwner;
     const order = await razorpay.orders.create({
-      amount: amountInPaise,
-      currency: 'INR',
+      amount: convertedPayment.razorpayAmount,
+      currency: convertedPayment.currency,
       receipt: buildRazorpayReceipt(
         booking.bookingGroupId ? 'bkgroup' : paymentContext.kind === 'guest' ? 'guest' : 'booking',
         booking.bookingGroupId || booking.id
@@ -7847,11 +8089,13 @@ app.post('/api/public/payments/create-order', async (req, res) => {
             guestEmail: paymentContext.guestAccess?.guestEmail || '',
             guestPhone: paymentContext.guestAccess?.guestPhone || '',
             couponCode: paymentContext.guestAccess?.couponCode || '',
+            currency: convertedPayment.currency,
           }
         : {
             bookingId: String(booking.id),
             userId: String(booking.userId),
             bookingGroupId: String(booking.bookingGroupId || ''),
+            currency: convertedPayment.currency,
           },
     });
 
@@ -7862,26 +8106,38 @@ app.post('/api/public/payments/create-order', async (req, res) => {
         db.prepare(
           `UPDATE bookings
            SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-               payment_order_id = ?
+               payment_order_id = ?,
+               currency = ?,
+               exchange_rate = ?,
+               original_inr_amount = ?,
+               charged_amount = ?
            WHERE booking_group_id = ?
              AND status <> 'cancelled'
              AND payment_status <> 'paid'`
-        ).run(order.id, booking.bookingGroupId);
+        ).run(order.id, convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount, booking.bookingGroupId);
       } else {
         setPaymentAmountForBookings([booking], amountInPaise);
         db.prepare(
           `UPDATE bookings
            SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-               payment_order_id = ?
+               payment_order_id = ?,
+               currency = ?,
+               exchange_rate = ?,
+               original_inr_amount = ?,
+               charged_amount = ?
            WHERE id = ?`
-        ).run(order.id, booking.id);
+        ).run(order.id, convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount, booking.id);
       }
     } else {
       setPaymentAmountForBookings(paymentContext.payableBookings, amountInPaise);
       db.prepare(
         `UPDATE bookings
          SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-             payment_order_id = ?
+             payment_order_id = ?,
+             currency = ?,
+             exchange_rate = ?,
+             original_inr_amount = ?,
+             charged_amount = ?
          WHERE id = ?
            AND status <> 'cancelled'
            AND payment_status <> 'paid'`
@@ -7890,11 +8146,15 @@ app.post('/api/public/payments/create-order', async (req, res) => {
         db.prepare(
           `UPDATE bookings
            SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-               payment_order_id = ?
+               payment_order_id = ?,
+               currency = ?,
+               exchange_rate = ?,
+               original_inr_amount = ?,
+               charged_amount = ?
            WHERE id = ?
              AND status <> 'cancelled'
              AND payment_status <> 'paid'`
-        ).run(order.id, guestBooking.id);
+        ).run(order.id, convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount, guestBooking.id);
       }
     }
 
@@ -7903,6 +8163,9 @@ app.post('/api/public/payments/create-order', async (req, res) => {
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
+      chargedAmount: convertedPayment.chargedAmount,
+      exchangeRate: convertedPayment.exchangeRate,
+      originalInrAmount: convertedPayment.originalInrAmount,
       bookingId: Number(booking.id || 0),
       bookingIds: paymentContext.kind === 'guest'
         ? paymentContext.payableBookings.map((entry) => Number(entry.id)).filter((id) => Number.isInteger(id) && id > 0)
@@ -7927,6 +8190,7 @@ app.post('/api/public/payments/create-order', async (req, res) => {
         : {
             name: bookingOwner?.name || '',
             email: bookingOwner?.email || '',
+            mobile: bookingOwner?.mobile || '',
           },
     });
   } catch (error) {
@@ -8000,6 +8264,12 @@ app.post('/api/public/payments/verify', async (req, res) => {
            AND payment_status <> 'paid'`
       ).run(razorpayOrderId, razorpayOrderId, razorpayPaymentId, razorpayPaymentId, paymentMethod, paymentMethod, booking.bookingGroupId);
 
+      groupBookings.forEach((gb) => {
+        void sendWhatsAppBookingConfirmation(gb.id).then((result) => {
+          if (!result?.ok) console.warn('[WhatsApp] Group booking confirmation notice:', result?.message);
+        }).catch((err) => console.error('[WhatsApp] Group booking confirmation error:', err?.message || err));
+      });
+
       return res.json({ bookingId: access.bookingId, paid: true, bookingCount: groupBookings.length });
     }
 
@@ -8038,6 +8308,12 @@ app.post('/api/public/payments/verify', async (req, res) => {
       ).run(razorpayOrderId, razorpayOrderId, razorpayPaymentId, razorpayPaymentId, paymentMethod, paymentMethod, booking.id);
     }
   })();
+
+  payableGuestBookings.forEach((pb) => {
+    void sendWhatsAppBookingConfirmation(pb.id).then((result) => {
+      if (!result?.ok) console.warn('[WhatsApp] Guest booking confirmation notice:', result?.message);
+    }).catch((err) => console.error('[WhatsApp] Guest booking confirmation error:', err?.message || err));
+  });
 
   return res.json({
     bookingId: Number(payableGuestBookings[0]?.id || guestBookings[0]?.id || 0),
@@ -8130,38 +8406,45 @@ app.post('/api/payments/create-cart-order', requireAuth, async (req, res) => {
   }
 
   const subtotalAmountPaise = Math.round(Number(paymentSummary.subtotalAmountInr ?? paymentSummary.totalAmountInr ?? 0) * 100);
-  const couponResult = validateCouponForUser({
-    code: req.body?.couponCode,
-    userId: req.user.id,
-    appliesTo: 'services',
-    portal: 'booking',
-    subtotalAmountPaise,
-    singleBookingAmountPaise: getSingleBookingCouponBasePaise(paymentSummary),
-  });
-  if (couponResult.error) {
-    return res.status(400).json({ message: couponResult.error });
+  let couponResult = req.body?.couponCode
+    ? validateCouponForUser({
+        code: req.body?.couponCode,
+        userId: req.user.id,
+        appliesTo: 'services',
+        portal: 'booking',
+        subtotalAmountPaise,
+        singleBookingAmountPaise: getSingleBookingCouponBasePaise(paymentSummary),
+      })
+    : { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotalAmountPaise };
+  if (couponResult?.error) {
+    console.warn('[Booking] Invalid or expired coupon during cart order creation, proceeding without discount:', couponResult.error);
+    couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotalAmountPaise };
   }
   const taxableAmountPaise = Number(couponResult.finalAmountPaise || subtotalAmountPaise);
   const amountInPaise = Math.max(100, taxableAmountPaise);
   paymentSummary = finalizeSummaryWithGst(paymentSummary);
 
+  const requestedCurrency = normalizeCurrency(req.body?.currency);
+  const convertedPayment = convertInrPaiseToCurrency(amountInPaise, requestedCurrency);
+
   try {
     const order = await razorpay.orders.create({
-      amount: amountInPaise,
-      currency: 'INR',
+      amount: convertedPayment.razorpayAmount,
+      currency: convertedPayment.currency,
       receipt: buildRazorpayReceipt('cart', req.user.id),
       notes: {
         userId: String(req.user.id),
         scope: 'cart',
         couponCode: String(couponResult.couponCode || ''),
+        currency: convertedPayment.currency,
       },
     });
 
     const ids = payableBookings.map((entry) => Number(entry.id)).filter((id) => Number.isInteger(id));
     db.prepare(
       `INSERT OR REPLACE INTO cart_payment_orders (
-        order_id, user_id, original_amount_paise, discount_amount_paise, coupon_id, coupon_code, amount_paise, status, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'))`
+        order_id, user_id, original_amount_paise, discount_amount_paise, coupon_id, coupon_code, amount_paise, status, currency, exchange_rate, original_inr_amount, charged_amount, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, datetime('now'))`
     ).run(
       order.id,
       req.user.id,
@@ -8169,15 +8452,23 @@ app.post('/api/payments/create-cart-order', requireAuth, async (req, res) => {
       Number(couponResult.discountAmountPaise || 0),
       couponResult.coupon?.id || null,
       couponResult.couponCode || null,
-      amountInPaise
+      amountInPaise,
+      convertedPayment.currency,
+      convertedPayment.exchangeRate,
+      convertedPayment.originalInrAmount,
+      convertedPayment.chargedAmount
     );
 
     db.prepare(
       `UPDATE bookings
        SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-           payment_order_id = ?
+           payment_order_id = ?,
+           currency = ?,
+           exchange_rate = ?,
+           original_inr_amount = ?,
+           charged_amount = ?
        WHERE id IN (${ids.map(() => '?').join(', ')})`
-    ).run(order.id, ...ids);
+    ).run(order.id, convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount, ...ids);
     setPaymentAmountForBookings(payableBookings, amountInPaise);
 
     return res.json({
@@ -8185,6 +8476,9 @@ app.post('/api/payments/create-cart-order', requireAuth, async (req, res) => {
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
+      chargedAmount: convertedPayment.chargedAmount,
+      exchangeRate: convertedPayment.exchangeRate,
+      originalInrAmount: convertedPayment.originalInrAmount,
       summary: paymentSummary,
       subtotalAmountInr: Number(paymentSummary.subtotalAmountInr || subtotalAmountPaise / 100),
       gstAmountInr: Number(paymentSummary.gstAmountInr || Math.max(0, amountInPaise / 100 - subtotalAmountPaise / 100)),
@@ -8360,16 +8654,19 @@ app.post('/api/payments/create-order', requireAuth, async (req, res) => {
   }
 
   const amountInPaise = Math.round(payableTotalInr * 100);
+  const requestedCurrency = normalizeCurrency(req.body?.currency);
+  const convertedPayment = convertInrPaiseToCurrency(amountInPaise, requestedCurrency);
 
   try {
     const order = await razorpay.orders.create({
-      amount: amountInPaise,
-      currency: 'INR',
+      amount: convertedPayment.razorpayAmount,
+      currency: convertedPayment.currency,
       receipt: buildRazorpayReceipt(booking.bookingGroupId ? 'bkgroup' : 'booking', booking.bookingGroupId || booking.id),
       notes: {
         bookingId: String(booking.id),
         userId: String(booking.userId),
         bookingGroupId: String(booking.bookingGroupId || ''),
+        currency: convertedPayment.currency,
       },
     });
 
@@ -8378,19 +8675,27 @@ app.post('/api/payments/create-order', requireAuth, async (req, res) => {
       db.prepare(
         `UPDATE bookings
          SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-             payment_order_id = ?
+             payment_order_id = ?,
+             currency = ?,
+             exchange_rate = ?,
+             original_inr_amount = ?,
+             charged_amount = ?
          WHERE booking_group_id = ?
            AND status <> 'cancelled'
            AND payment_status <> 'paid'`
-      ).run(order.id, booking.bookingGroupId);
+      ).run(order.id, convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount, booking.bookingGroupId);
     } else {
       setPaymentAmountForBookings([booking], amountInPaise);
       db.prepare(
         `UPDATE bookings
          SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-             payment_order_id = ?
+             payment_order_id = ?,
+             currency = ?,
+             exchange_rate = ?,
+             original_inr_amount = ?,
+             charged_amount = ?
          WHERE id = ?`
-      ).run(order.id, booking.id);
+      ).run(order.id, convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount, booking.id);
     }
 
     return res.json({
@@ -8398,6 +8703,9 @@ app.post('/api/payments/create-order', requireAuth, async (req, res) => {
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
+      chargedAmount: convertedPayment.chargedAmount,
+      exchangeRate: convertedPayment.exchangeRate,
+      originalInrAmount: convertedPayment.originalInrAmount,
       bookingId: booking.id,
       bookingCount: Number(paymentSummary.bookingCount || 1),
       summary: paymentSummary,
@@ -8426,17 +8734,36 @@ function shouldDownloadInvoicePdf(req) {
   return format === 'pdf' || ['1', 'true', 'yes'].includes(download);
 }
 
-function sanitizeInvoiceFilenamePart(value) {
-  return String(value || 'Invoice')
-    .replace(/[^a-z0-9_-]+/gi, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 80) || 'Invoice';
+let cachedInvoicePageBase64 = null;
+function getInvoicePageBackgroundDataUri() {
+  if (cachedInvoicePageBase64) return cachedInvoicePageBase64;
+  try {
+    const imgPath = path.resolve(__dirname, 'assets/invoice-page.png');
+    if (fs.existsSync(imgPath)) {
+      const buf = fs.readFileSync(imgPath);
+      cachedInvoicePageBase64 = `data:image/png;base64,${buf.toString('base64')}`;
+      return cachedInvoicePageBase64;
+    }
+  } catch (err) {
+    console.warn('Failed to load invoice-page.png for inline data URI:', err.message);
+  }
+  return null;
+}
+
+function sanitizeInvoiceFilename(value, defaultName = 'H2_invoice.pdf') {
+  const raw = String(value || defaultName).trim();
+  const base = raw.replace(/\.pdf$/i, '').replace(/[^a-z0-9_-]+/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'invoice';
+  return `${base}.pdf`;
 }
 
 function prepareInvoiceHtmlForPdf(html, req) {
+  let result = String(html || '');
+  const bgDataUri = getInvoicePageBackgroundDataUri();
+  if (bgDataUri) {
+    result = result.replace(/url\(['"]?\/booking\/assets\/invoice-page\.png['"]?\)/g, `url('${bgDataUri}')`);
+  }
   const origin = getRequestOrigin(req).replace(/\/+$/, '');
-  return String(html || '')
+  return result
     .replace(/<head>/i, `<head><base href="${escapeHtml(origin)}/">`)
     .replace(/url\('\/([^']+)'\)/g, `url('${origin}/$1')`)
     .replace(/url\("\/([^"]+)"\)/g, `url("${origin}/$1")`)
@@ -8445,27 +8772,49 @@ function prepareInvoiceHtmlForPdf(html, req) {
     .replace(/\shref="\/([^"]+)"/g, ` href="${origin}/$1"`);
 }
 
-async function sendInvoiceResponse(req, res, html, invoiceNo) {
+async function sendInvoiceResponse(req, res, html, invoiceNo, filename = 'H2_invoice.pdf') {
   if (!shouldDownloadInvoicePdf(req)) {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     return res.send(html);
   }
 
+  const safeFilename = sanitizeInvoiceFilename(filename, 'H2_invoice.pdf');
+
   if (!puppeteer) {
     console.error('Invoice PDF generation unavailable: Puppeteer could not be loaded.', puppeteerLoadError);
+    if (!req.xhr && !(req.headers.accept || '').includes('application/json')) {
+      const fallbackHtml = html.replace('</body>', `<script>window.addEventListener('DOMContentLoaded', () => { setTimeout(() => window.print(), 600); });</script></body>`);
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.send(fallbackHtml);
+    }
     return res.status(503).json({ message: 'Unable to generate the invoice. Please try again later or contact support.' });
   }
 
   let browser;
   try {
-    browser = await puppeteer.launch({
-      headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
+    const executablePath = resolvePuppeteerExecutablePath();
+    const launchOptions = {
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-extensions',
+      ],
+    };
+    if (executablePath) {
+      launchOptions.executablePath = executablePath;
+    }
+    browser = await puppeteer.launch(launchOptions);
     const page = await browser.newPage();
     await page.setViewport({ width: 1200, height: 1600, deviceScaleFactor: 1 });
     await page.setContent(prepareInvoiceHtmlForPdf(html, req), {
-      waitUntil: ['load', 'networkidle0'],
+      waitUntil: 'load',
+      timeout: 15000,
     });
     const pdfBuffer = await page.pdf({
       width: '240mm',
@@ -8475,10 +8824,15 @@ async function sendInvoiceResponse(req, res, html, invoiceNo) {
       margin: { top: '0', right: '0', bottom: '0', left: '0' },
     });
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename=H2_invoice.pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
     return res.send(pdfBuffer);
   } catch (error) {
     console.error('Invoice PDF generation failed:', error);
+    if (!req.xhr && !(req.headers.accept || '').includes('application/json')) {
+      const fallbackHtml = html.replace('</body>', `<script>window.addEventListener('DOMContentLoaded', () => { setTimeout(() => window.print(), 600); });</script></body>`);
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.send(fallbackHtml);
+    }
     return res.status(500).json({ message: 'Unable to generate the invoice. Please try again later or contact support.' });
   } finally {
     if (browser) {
@@ -8718,7 +9072,7 @@ function getPaidBookingDiscountMeta(bookings) {
 }
 
 function merchPaiseToInr(value) {
-  return Math.max(0, Math.round(Number(value || 0) / 100));
+  return Math.max(0, Number(value || 0) / 100);
 }
 
 function parseMerchShippingAddress(value) {
@@ -8812,6 +9166,7 @@ app.get('/invoice/merch', async (req, res) => {
               gst_amount AS gstAmount,
               shipping_charge AS shippingCharge,
               discount_amount AS discountAmount,
+              coupon_code AS couponCode,
               total_amount AS totalAmount,
               payment_method AS paymentMethod,
               payment_status AS paymentStatus,
@@ -8860,7 +9215,11 @@ app.get('/invoice/merch', async (req, res) => {
   const subtotalAmountInr = merchPaiseToInr(order.subtotal);
   const discountAmountInr = merchPaiseToInr(order.discountAmount);
   const shippingAmountInr = merchPaiseToInr(order.shippingCharge);
-  const gstAmountInr = merchPaiseToInr(order.gstAmount);
+  // Derive GST on the discounted merchandise amount (prices are GST-inclusive at 18%: 9% CGST + 9% SGST)
+  const taxableMerchInr = Math.max(0, subtotalAmountInr - discountAmountInr);
+  const totalGstInr = taxableMerchInr > 0 ? (taxableMerchInr - (taxableMerchInr / 1.18)) : 0;
+  const cgstAmountInr = totalGstInr / 2;
+  const sgstAmountInr = totalGstInr / 2;
   const amountInr = merchPaiseToInr(order.totalAmount);
   const invoiceNo = `MR-${order.orderNumber || order.id}`;
   const invoiceDownloadUrl = `/invoice/merch?token=${encodeURIComponent(String(req.query.token || ''))}&format=pdf&download=1`;
@@ -9296,27 +9655,27 @@ app.get('/invoice/merch', async (req, res) => {
          </span>
        </div>
        <div class="summary-row">
-         <span>Discount</span>
-         <span>
-           - ${formatInvoiceInr(discountAmountInr)}
-         </span>
-       </div>
-       <div class="summary-row">
          <span>Shipping</span>
          <span>
            ${formatInvoiceInr(shippingAmountInr)}
          </span>
        </div>
        <div class="summary-row">
+         <span>Discount${order.couponCode ? ` (${escapeHtml(String(order.couponCode))})` : ''}</span>
+         <span>
+           - ${formatInvoiceInr(discountAmountInr)}
+         </span>
+       </div>
+       <div class="summary-row">
          <span>CGST (9%)</span>
          <span>
-           ${formatInvoiceInr((gstAmountInr || 0) / 2)}
+           ${formatInvoiceInr(cgstAmountInr)}
          </span>
        </div>
        <div class="summary-row">
          <span>SGST (9%)</span>
          <span>
-           ${formatInvoiceInr((gstAmountInr || 0) / 2)}
+           ${formatInvoiceInr(sgstAmountInr)}
          </span>
        </div>
        <div class="summary-row summary-total">
@@ -9329,21 +9688,59 @@ app.get('/invoice/merch', async (req, res) => {
     </div>
     <div class="invoice-company-footer">
       <div>
-        P: 91000 56979, 91000 86979<br>
-        E: hello@h2houseofhealth.com
+        📞 91000 56979, 91000 86979<br>
+        ✉️ hello@h2houseofhealth.com
       </div>
       <div>
-        A: 47A, Journalist Colony, Road No:70,<br>
+        📍 47A, Journalist Colony, Road No:70,<br>
         Jubilee Hills, Hyderabad - 500033<br>
-        W: www.h2houseofhealth.com
+        🌐 www.h2houseofhealth.com
       </div>
     </div>
     
     
   </div>
+  <script>
+    (function() {
+      const btn = document.querySelector('.invoice-download-btn');
+      if (!btn) return;
+      btn.addEventListener('click', async function(e) {
+        e.preventDefault();
+        const originalText = btn.textContent;
+        btn.textContent = 'Generating PDF...';
+        btn.style.pointerEvents = 'none';
+        btn.style.opacity = '0.7';
+        try {
+          const res = await fetch(btn.href, { headers: { 'Accept': 'application/pdf' } });
+          const contentType = res.headers.get('content-type') || '';
+          if (res.ok && contentType.includes('application/pdf')) {
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const disposition = res.headers.get('content-disposition') || '';
+            const match = disposition.match(/filename="?([^";]+)"?/i);
+            a.download = match ? match[1] : 'Merch-invoice.pdf';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 10000);
+          } else {
+            window.print();
+          }
+        } catch (err) {
+          window.print();
+        } finally {
+          btn.textContent = originalText;
+          btn.style.pointerEvents = 'auto';
+          btn.style.opacity = '1';
+        }
+      });
+    })();
+  </script>
 </body>
 </html>`;
-  return sendInvoiceResponse(req, res, invoiceHtml, invoiceNo);
+  return sendInvoiceResponse(req, res, invoiceHtml, invoiceNo, 'Merch-invoice.pdf');
 });
 
 app.get('/invoice/booking', async (req, res) => {
@@ -9875,13 +10272,13 @@ app.get('/invoice/booking', async (req, res) => {
     </div>
     <div class="invoice-company-footer">
       <div>
-        P: 91000 56979, 91000 86979<br>
-        E: hello@h2houseofhealth.com
+        📞 91000 56979, 91000 86979<br>
+        ✉️ hello@h2houseofhealth.com
       </div>
       <div>
-        A: 47A, Journalist Colony, Road No:70,<br>
+        📍 47A, Journalist Colony, Road No:70,<br>
         Jubilee Hills, Hyderabad - 500033<br>
-        W: www.h2houseofhealth.com
+        🌐 www.h2houseofhealth.com
       </div>
     </div>
     
@@ -10464,6 +10861,20 @@ app.patch('/api/bookings/:id/status', requireAuth, (req, res) => {
       syncMembershipCoveredHydrogenBookings(Number(existing.userId), targetUser);
     }
   }
+
+  if (status === 'cancelled' && existingStatus !== 'cancelled') {
+    const isGroup = Boolean(existing.bookingGroupId);
+    const cancelledBy = req.user.role === 'admin' ? 'admin' : 'user';
+    const reason = req.body?.reason || req.body?.cancellationReason || (cancelledBy === 'admin' ? 'Cancelled by clinic administration' : 'Cancelled by client');
+    const fullBooking = getBookingForWhatsApp(bookingId) || existing;
+
+    triggerBookingCancellationNotifications(fullBooking, {
+      cancelledBy,
+      reason,
+      isGroup,
+    }).catch((err) => console.error('[Booking] Cancellation notification error:', err?.message || err));
+  }
+
   res.status(204).send();
 });
 
@@ -11124,6 +11535,8 @@ function mapCouponRow(row) {
     description: row.description || '',
     discountType: row.discountType || 'flat',
     discountValue: Number(row.discountValue || 0),
+    commissionType: row.commissionType || 'flat',
+    commissionRate: Number(row.commissionRate || 0),
     commissionPerOrderPaise: Math.max(0, Number(row.commissionPerOrderPaise || 0)),
     commissionByProduct: parseCommissionByProduct(row.commissionByProductJson),
     appliesTo: row.appliesTo || 'all',
@@ -11183,6 +11596,8 @@ function getCouponByCode(code) {
               c.description,
               c.discount_type AS discountType,
               c.discount_value AS discountValue,
+              c.commission_type AS commissionType,
+              c.commission_rate AS commissionRate,
               c.commission_per_order_paise AS commissionPerOrderPaise,
               c.commission_by_product_json AS commissionByProductJson,
               c.applies_to AS appliesTo,
@@ -11227,6 +11642,8 @@ function getCouponById(couponId) {
               c.description,
               c.discount_type AS discountType,
               c.discount_value AS discountValue,
+              c.commission_type AS commissionType,
+              c.commission_rate AS commissionRate,
               c.commission_per_order_paise AS commissionPerOrderPaise,
               c.commission_by_product_json AS commissionByProductJson,
               c.applies_to AS appliesTo,
@@ -11293,11 +11710,12 @@ function calculateCouponDiscountPaise(coupon, subtotalAmountPaise) {
   const subtotal = Math.max(0, Math.round(Number(subtotalAmountPaise || 0)));
   if (!coupon || subtotal <= 0) return 0;
 
+  const discountType = String(coupon.discountType || 'flat').toLowerCase();
   let discountPaise = 0;
-  if (coupon.discountType === 'flat') {
-    discountPaise = Math.round(Number(coupon.discountValue || 0) * 100);
-  } else {
+  if (discountType === 'percentage' || discountType === '%') {
     discountPaise = Math.round(subtotal * (Number(coupon.discountValue || 0) / 100));
+  } else {
+    discountPaise = Math.round(Number(coupon.discountValue || 0) * 100);
   }
 
   if (!Number.isFinite(discountPaise) || discountPaise <= 0) return 0;
@@ -11335,19 +11753,35 @@ function validateCouponForUser({ code, userId, appliesTo, productIds = [], produ
   }
   const couponAppliesTo = String(coupon.appliesTo || 'all').trim().toLowerCase();
   const productRestriction = couponAppliesTo.match(/^product:([\d,]+)$/);
+  const categoryRestriction = couponAppliesTo.match(/^category:([a-z0-9_\-,]+)$/);
   const restrictedProductIds = productRestriction
     ? [...new Set(productRestriction[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
     : [];
+
+  if (categoryRestriction) {
+    const targetCategories = categoryRestriction[1].split(',').map((c) => c.trim().toLowerCase()).filter(Boolean);
+    if (targetCategories.length > 0) {
+      try {
+        const placeholders = targetCategories.map(() => '?').join(',');
+        const catRows = db.prepare(`SELECT id FROM merch_products WHERE LOWER(category) IN (${placeholders})`).all(...targetCategories);
+        catRows.forEach((r) => restrictedProductIds.push(Number(r.id)));
+      } catch (err) {
+        console.warn('[Merch] Failed to resolve category products:', err?.message || err);
+      }
+    }
+  }
+
+  const hasRestriction = Boolean(productRestriction || categoryRestriction);
   const productIdSet = new Set((Array.isArray(productIds) ? productIds : [productIds]).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0));
-  const appliesToProduct = productRestriction && restrictedProductIds.some((id) => productIdSet.has(id));
+  const appliesToProduct = hasRestriction && restrictedProductIds.some((id) => productIdSet.has(id));
   if (!['all', appliesTo].includes(couponAppliesTo) && !appliesToProduct) {
     return { error: 'This coupon is not valid for this payment.' };
   }
-  const restrictedProductSubtotalPaise = productRestriction
+  const restrictedProductSubtotalPaise = hasRestriction
     ? Math.max(0, Math.round(restrictedProductIds.reduce((sum, id) => sum + Number(productLineTotals?.[id] || 0), 0) || productSubtotalAmountPaise || 0))
     : 0;
   if (appliesToProduct && restrictedProductSubtotalPaise <= 0) {
-    return { error: 'This coupon is only valid when the selected product is in the cart.' };
+    return { error: categoryRestriction ? 'This coupon is only valid when an item from the selected category is in the cart.' : 'This coupon is only valid when the selected product is in the cart.' };
   }
   const assignedEmail = String(coupon.assignedUserEmail || coupon.recipientEmail || '').trim().toLowerCase();
   if (coupon.couponType === 'private' || assignedEmail) {
@@ -11524,8 +11958,15 @@ function resolveAdminCustomerContext({ userId, customerName, customerEmail, cust
 
     const nextName = normalizedName || existingUser.name;
     const nextPhone = normalizedPhone || existingUser.mobile || '';
-    if (nextName !== existingUser.name || nextPhone !== (existingUser.mobile || '')) {
-      db.prepare('UPDATE users SET name = ?, mobile = ? WHERE id = ?').run(nextName, nextPhone, existingUser.id);
+    if (nextName !== existingUser.name || (nextPhone && nextPhone !== (existingUser.mobile || ''))) {
+      let finalPhone = existingUser.mobile || '';
+      if (nextPhone && nextPhone !== existingUser.mobile) {
+        const phoneConflict = findUserByMobile(nextPhone, existingUser.id);
+        if (!phoneConflict) {
+          finalPhone = nextPhone;
+        }
+      }
+      db.prepare('UPDATE users SET name = ?, mobile = ? WHERE id = ?').run(nextName, finalPhone, existingUser.id);
       existingUser = getUserById(existingUser.id);
     }
     return { user: existingUser, existingUser: true };
@@ -14639,6 +15080,12 @@ function normalizeWhatsAppMobile(value) {
     if (local.startsWith('0')) local = local.slice(1);
     return `+44${local}`;
   }
+  if (/^[6-9]\d{9}$/.test(digits)) {
+    return `+91${digits}`;
+  }
+  if (/^[2-5]\d{9}$/.test(digits)) {
+    return `+1${digits}`;
+  }
   if (/^\d{10}$/.test(digits)) {
     return `+91${digits}`;
   }
@@ -14814,6 +15261,12 @@ function normalizeWhatsAppMobile(value) {
     let local = digits.slice(2);
     if (local.startsWith('0')) local = local.slice(1);
     return `+44${local}`;
+  }
+  if (/^[6-9]\d{9}$/.test(digits)) {
+    return `+91${digits}`;
+  }
+  if (/^[2-5]\d{9}$/.test(digits)) {
+    return `+1${digits}`;
   }
   if (/^\d{10}$/.test(digits)) {
     return `+91${digits}`;
@@ -15005,8 +15458,10 @@ function getBookingForWhatsApp(bookingId) {
     .prepare(
       `SELECT b.id,
               b.user_id AS userId,
+              b.booking_group_id AS bookingGroupId,
               COALESCE(NULLIF(TRIM(b.client_name), ''), NULLIF(TRIM(u.name), ''), NULLIF(TRIM(b.guest_name), ''), 'Valued Guest') AS clientName,
               COALESCE(NULLIF(TRIM(b.client_phone), ''), NULLIF(TRIM(u.mobile), ''), NULLIF(TRIM(b.guest_phone), ''), '') AS clientPhone,
+              COALESCE(NULLIF(TRIM(b.client_email), ''), NULLIF(TRIM(u.email), ''), NULLIF(TRIM(b.guest_email), ''), '') AS clientEmail,
               b.service_name AS serviceName,
               b.booking_date AS bookingDate,
               b.booking_time AS bookingTime,
@@ -15057,6 +15512,146 @@ async function sendWhatsAppBookingConfirmation(bookingOrId) {
     serviceName,
     bookingId,
   ]);
+}
+
+function resolveBookingRefundStatus(booking) {
+  const paymentStatus = String(booking?.paymentStatus || booking?.payment_status || '').trim().toLowerCase();
+  if (paymentStatus === 'refunded' || paymentStatus === 'paid') {
+    return 'No refund';
+  }
+
+  // Check if booking was a membership-covered session
+  const userId = Number(booking?.userId || booking?.user_id || 0);
+  if (userId > 0) {
+    const user = getUserProfileById(userId);
+    if (user && String(user.membershipStatus || '').toLowerCase() === 'active') {
+      const serviceName = String(booking?.serviceName || booking?.service_name || '');
+      const isHydrogen = SERVICE_CATALOG.some(
+        (s) => String(s.category || '').toUpperCase() === 'HYDROGEN SESSION' && s.name.toLowerCase() === serviceName.toLowerCase()
+      );
+      if (isHydrogen) {
+        return 'Session returned to membership balance';
+      }
+    }
+  }
+
+  return 'No payment was collected';
+}
+
+async function sendBookingCancellationWhatsApp(booking, options = {}) {
+  const rawPhone = booking?.clientPhone || booking?.client_phone || booking?.guestPhone || booking?.guest_phone || '';
+  const customerName = String(
+    booking?.clientName || booking?.client_name || booking?.guestName || booking?.guest_name || 'Valued Guest'
+  ).trim();
+  const bookingNumber = String(
+    booking?.bookingGroupId || booking?.booking_group_id || (booking?.id ? `BK${booking.id}` : 'BK-REF')
+  ).trim();
+  const reason = String(
+    options.reason || (options.cancelledBy === 'admin' ? 'Cancelled by clinic administration' : 'Cancelled by client')
+  ).trim();
+  const refundStatus = options.refundStatus || resolveBookingRefundStatus(booking);
+
+  if (!rawPhone) {
+    console.warn(`[WhatsApp] Skipping booking cancellation notification for ${bookingNumber}: no phone number provided.`);
+    return { ok: false, reason: 'missing_phone' };
+  }
+
+  const phone = normalizeWhatsAppMobile(rawPhone);
+  if (!phone) {
+    console.warn(`[WhatsApp] Skipping booking cancellation notification for ${bookingNumber}: invalid phone "${rawPhone}".`);
+    return { ok: false, reason: 'invalid_phone' };
+  }
+
+  const parameters = [
+    customerName,
+    bookingNumber,
+    reason,
+    refundStatus,
+  ];
+
+  try {
+    const result = await sendWhatsAppMessage(phone, 'order_cancelled', parameters);
+    console.log(`[WhatsApp] Sent order_cancelled notification for booking ${bookingNumber}:`, result);
+    return result;
+  } catch (err) {
+    console.error(`[WhatsApp] Error sending order_cancelled notification for booking ${bookingNumber}:`, err?.message || err);
+    return { ok: false, error: err?.message || err };
+  }
+}
+
+async function sendBookingCancellationEmail(booking, options = {}) {
+  const email = String(
+    booking?.clientEmail || booking?.client_email || booking?.guestEmail || booking?.guest_email || ''
+  ).trim().toLowerCase();
+  const customerName = String(
+    booking?.clientName || booking?.client_name || booking?.guestName || booking?.guest_name || 'Valued Guest'
+  ).trim();
+  const bookingNumber = String(
+    booking?.bookingGroupId || booking?.booking_group_id || (booking?.id ? `BK${booking.id}` : 'BK-REF')
+  ).trim();
+  const reason = String(
+    options.reason || (options.cancelledBy === 'admin' ? 'Cancelled by clinic administration' : 'Cancelled by client')
+  ).trim();
+  const refundStatus = options.refundStatus || resolveBookingRefundStatus(booking);
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    console.warn(`[Booking] Skipping cancellation email for ${bookingNumber}: no valid email provided.`);
+    return { status: 'skipped', reason: 'missing_email' };
+  }
+
+  const subject = `Your H2 House of Health booking ${bookingNumber} has been cancelled`;
+  const text = `Hi ${customerName},\n\nYour H2 House of Health booking ${bookingNumber} has been cancelled.\n\nCancellation reason: ${reason}\nRefund status: ${refundStatus}\n\nIf you have any questions, please contact our support team at support@h2houseofhealth.com.\n\nBest regards,\nH2 House of Health Team`;
+  const html = `<!doctype html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #faf7f4; padding: 24px; color: #2d2422;">
+  <div style="max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 12px; padding: 32px; border: 1px solid #e8dfd8;">
+    <h2 style="color: #8b3e23; margin-top: 0;">Booking Cancellation Confirmation</h2>
+    <p>Hi <strong>${escapeHtml(customerName)}</strong>,</p>
+    <p>Your H2 House of Health booking <strong>${escapeHtml(bookingNumber)}</strong> has been cancelled.</p>
+    <div style="background: #f8f4f0; border-radius: 8px; padding: 16px; margin: 20px 0;">
+      <p style="margin: 6px 0;"><strong>Cancellation reason:</strong> ${escapeHtml(reason)}</p>
+      <p style="margin: 6px 0;"><strong>Refund status:</strong> ${escapeHtml(refundStatus)}</p>
+    </div>
+    <p style="color: #6d6360; font-size: 14px; margin-top: 24px;">If you have any questions, please contact our support team at <a href="mailto:support@h2houseofhealth.com" style="color: #8b3e23;">support@h2houseofhealth.com</a>.</p>
+    <p style="color: #6d6360; font-size: 14px;">Best regards,<br>H2 House of Health Team</p>
+  </div>
+</body>
+</html>`;
+
+  try {
+    await sendConfiguredEmail({
+      to: email,
+      from: MAIL_FROM,
+      subject,
+      text,
+      html,
+    });
+    return { status: 'sent' };
+  } catch (err) {
+    console.error(`[Booking] Failed to send cancellation email for booking ${bookingNumber}:`, err?.message || err);
+    return { status: 'failed', error: err?.message || err };
+  }
+}
+
+async function triggerBookingCancellationNotifications(booking, options = {}) {
+  const results = {
+    whatsapp: { status: 'pending' },
+    email: { status: 'pending' },
+  };
+  try {
+    results.whatsapp = await sendBookingCancellationWhatsApp(booking, options);
+  } catch (err) {
+    console.error('[Booking] WhatsApp cancellation notification error:', err?.message || err);
+    results.whatsapp = { ok: false, error: err?.message || err };
+  }
+  try {
+    results.email = await sendBookingCancellationEmail(booking, options);
+  } catch (err) {
+    console.error('[Booking] Email cancellation notification error:', err?.message || err);
+    results.email = { status: 'failed', error: err?.message || err };
+  }
+  return results;
 }
 function getTransporter() {
   const host = process.env.SMTP_HOST;
@@ -16114,6 +16709,12 @@ function migrate() {
   if (hasTable('coupons') && !hasColumn('coupons', 'commission_per_order_paise')) {
     db.exec('ALTER TABLE coupons ADD COLUMN commission_per_order_paise INTEGER NOT NULL DEFAULT 0');
   }
+  if (hasTable('coupons') && !hasColumn('coupons', 'commission_type')) {
+    db.exec("ALTER TABLE coupons ADD COLUMN commission_type TEXT NOT NULL DEFAULT 'flat'");
+  }
+  if (hasTable('coupons') && !hasColumn('coupons', 'commission_rate')) {
+    db.exec('ALTER TABLE coupons ADD COLUMN commission_rate REAL NOT NULL DEFAULT 0');
+  }
   if (hasTable('coupons') && !hasColumn('coupons', 'commission_by_product_json')) {
     db.exec("ALTER TABLE coupons ADD COLUMN commission_by_product_json TEXT NOT NULL DEFAULT '{}'");
   }
@@ -16286,6 +16887,30 @@ function migrate() {
   }
   if (!hasColumn('bookings', 'booking_type')) {
     db.exec("ALTER TABLE bookings ADD COLUMN booking_type TEXT NOT NULL DEFAULT 'registered'");
+  }
+  if (!hasColumn('bookings', 'currency')) {
+    db.exec("ALTER TABLE bookings ADD COLUMN currency TEXT NOT NULL DEFAULT 'INR'");
+  }
+  if (!hasColumn('bookings', 'exchange_rate')) {
+    db.exec('ALTER TABLE bookings ADD COLUMN exchange_rate REAL DEFAULT 1');
+  }
+  if (!hasColumn('bookings', 'original_inr_amount')) {
+    db.exec('ALTER TABLE bookings ADD COLUMN original_inr_amount REAL');
+  }
+  if (!hasColumn('bookings', 'charged_amount')) {
+    db.exec('ALTER TABLE bookings ADD COLUMN charged_amount REAL');
+  }
+  if (hasTable('cart_payment_orders') && !hasColumn('cart_payment_orders', 'currency')) {
+    db.exec("ALTER TABLE cart_payment_orders ADD COLUMN currency TEXT NOT NULL DEFAULT 'INR'");
+  }
+  if (hasTable('cart_payment_orders') && !hasColumn('cart_payment_orders', 'exchange_rate')) {
+    db.exec('ALTER TABLE cart_payment_orders ADD COLUMN exchange_rate REAL DEFAULT 1');
+  }
+  if (hasTable('cart_payment_orders') && !hasColumn('cart_payment_orders', 'original_inr_amount')) {
+    db.exec('ALTER TABLE cart_payment_orders ADD COLUMN original_inr_amount REAL');
+  }
+  if (hasTable('cart_payment_orders') && !hasColumn('cart_payment_orders', 'charged_amount')) {
+    db.exec('ALTER TABLE cart_payment_orders ADD COLUMN charged_amount REAL');
   }
   db.exec(`
     UPDATE bookings
