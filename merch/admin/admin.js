@@ -3291,12 +3291,12 @@
                       <th>Payment</th>
                       <th>Total</th>
                       <th>Status</th>
-                      <th>Track order</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     ${pageItems.map((order) => `
-                      <tr data-action="select-order" data-id="${order.id}" style="cursor:pointer;">
+                      <tr class="${Number(state.selectedOrderId) === Number(order.id) ? 'is-selected' : ''}" data-action="select-order" data-id="${order.id}" style="cursor:pointer;">
                         <td><input type="checkbox" data-action="toggle-order-selection" data-id="${order.id}" ${state.selectedOrderIds.includes(Number(order.id)) ? 'checked' : ''} aria-label="Select ${escapeHtml(order.orderNumber)}" /> <strong>${escapeHtml(order.orderNumber)}</strong><br><span class="admin-table__muted">${escapeHtml(dateLabel(order.createdAt))}</span></td>
                         <td>${escapeHtml(order.customerName)}<br><span class="admin-table__muted">${escapeHtml(displayEmail(order.email))}</span></td>
                         <td>${escapeHtml(order.couponCode ? money(order.discountAmount) : '—')}</td>
@@ -3306,7 +3306,12 @@
                           <span class="admin-badge ${statusClass(order.status)}">${escapeHtml(getStatusLabel(order.status))}</span>
                         </td>
                         <td>
-                          <button class="admin-action-link" type="button" data-action="track-admin-order" data-id="${order.id}">Track order</button>
+                          <div style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;">
+                            ${!order.shiprocketAwbCode && !['cancelled', 'delivered', 'returned'].includes(normalizeOrderStatus(order.status)) ? `
+                              <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="shiprocket-fulfill" data-id="${order.id}" style="padding:3px 8px;font-size:11px;font-weight:600;white-space:nowrap;">🚀 Ship</button>
+                            ` : ''}
+                            <button class="admin-action-link" type="button" data-action="track-admin-order" data-id="${order.id}" style="white-space:nowrap;">Track</button>
+                          </div>
                         </td>
                       </tr>
                     `).join('')}
@@ -5861,19 +5866,24 @@
     }
   }
 
-  async function loadDashboardStats() {
-    state.dashboardStatsLoading = !state.dashboardStats;
-    renderDashboard();
+  async function loadDashboardStats(options = {}) {
+    const silent = Boolean(options.silent);
+    if (!silent) {
+      state.dashboardStatsLoading = !state.dashboardStats;
+      renderDashboard();
+    }
     try {
       const result = await apiRequest('/api/merch/admin/stats');
       state.dashboardStats = result || null;
       state.notifications = mergeNotificationState(result?.notifications);
     } catch (error) {
-      state.dashboardStats = null;
-      state.notifications = [];
+      if (!silent) {
+        state.dashboardStats = null;
+        state.notifications = [];
+      }
     } finally {
       state.dashboardStatsLoading = false;
-      renderDashboard();
+      if (state.view === 'dashboard') renderDashboard();
       if (state.view === 'reports') renderReports();
     }
   }
@@ -5984,19 +5994,38 @@
     }
   }
 
-  async function loadOrderData() {
-    state.ordersLoading = true;
-    renderOrders();
+  async function loadOrderData(options = {}) {
+    const silent = Boolean(options.silent);
+    if (!silent) {
+      state.ordersLoading = true;
+      renderOrders();
+    }
     try {
       const result = await apiRequest('/api/merch/admin/orders');
-      state.orders = Array.isArray(result.orders) ? result.orders : [];
+      const newOrders = Array.isArray(result.orders) ? result.orders : [];
+      const changed = JSON.stringify(newOrders) !== JSON.stringify(state.orders);
+      state.orders = newOrders;
+      if (!silent || changed) {
+        if (state.view === 'orders') {
+          const activeEl = document.activeElement;
+          if (activeEl instanceof HTMLInputElement && els.ordersView && els.ordersView.contains(activeEl)) {
+            preserveInputFocus(activeEl, renderOrders);
+          } else {
+            renderOrders();
+          }
+        }
+      }
     } catch (error) {
-      state.orders = [];
-      toast('Orders unavailable', error.message || 'Unable to load merch orders from the admin API.', 'warning');
+      if (!silent) {
+        state.orders = [];
+        toast('Orders unavailable', error.message || 'Unable to load merch orders from the admin API.', 'warning');
+      }
     } finally {
-      state.ordersLoading = false;
-      renderOrders();
-      renderDashboard();
+      if (!silent) {
+        state.ordersLoading = false;
+        renderOrders();
+      }
+      if (state.view === 'dashboard') renderDashboard();
       if (state.view === 'reports') renderReports();
     }
   }
@@ -6033,20 +6062,25 @@
     }
   }
 
-  async function loadReportData() {
-    state.reportsLoading = true;
+  async function loadReportData(options = {}) {
+    const silent = Boolean(options.silent);
+    if (!silent) {
+      state.reportsLoading = true;
+    }
     try {
       const params = new URLSearchParams();
       if (state.reportFrom) params.set('startDate', state.reportFrom);
       if (state.reportTo) params.set('endDate', state.reportTo);
       state.reports = await apiRequest(`/api/merch/admin/reports?${params.toString()}`);
     } catch (error) {
-      state.reports = null;
-      toast('Reports unavailable', error.message || 'Unable to load merch reports from the admin API.', 'warning');
+      if (!silent) {
+        state.reports = null;
+        toast('Reports unavailable', error.message || 'Unable to load merch reports from the admin API.', 'warning');
+      }
     } finally {
       state.reportsLoading = false;
-      renderReports();
-      renderDashboard();
+      if (state.view === 'reports') renderReports();
+      if (state.view === 'dashboard') renderDashboard();
     }
   }
 
@@ -6460,11 +6494,14 @@
           <form class="admin-form" data-shiprocket-fulfill-form>
             <div style="display:flex;flex-direction:column;gap:10px;max-height:360px;overflow-y:auto;padding-right:4px;">
               ${couriers.map((c, idx) => `
-                <label class="admin-card" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border:1.5px solid ${idx === 0 ? '#3b82f6' : 'rgba(0,0,0,0.1)'};border-radius:10px;background:${idx === 0 ? 'rgba(59,130,246,0.04)' : 'transparent'};transition:all 0.15s ease;">
+                <label class="admin-card admin-courier-card" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border:1.5px solid ${idx === 0 ? '#3b82f6' : 'rgba(0,0,0,0.1)'};border-radius:10px;background:${idx === 0 ? 'rgba(59,130,246,0.04)' : 'transparent'};transition:all 0.15s ease;">
                   <div style="display:flex;align-items:center;gap:14px;">
                     <input type="radio" name="courier_company_id" value="${c.courierCompanyId}" ${idx === 0 ? 'checked' : ''} style="width:18px;height:18px;accent-color:#3b82f6;" />
                     <div>
-                      <div style="font-weight:600;font-size:14px;color:var(--admin-text,#1f2937);">${escapeHtml(c.courierName)}</div>
+                      <div style="font-weight:600;font-size:14px;color:var(--admin-text,#1f2937);display:flex;align-items:center;gap:6px;">
+                        <span>${escapeHtml(c.courierName)}</span>
+                        ${idx === 0 ? '<span style="background:#10b981;color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;font-weight:700;">Lowest Price</span>' : ''}
+                      </div>
                       <div class="admin-table__muted" style="font-size:12px;margin-top:2px;">
                         Est. Delivery: <strong>${escapeHtml(c.estimatedDeliveryDays || '2-4')} Days</strong> ${c.etd ? `(${escapeHtml(c.etd)})` : ''} · Mode: <strong>${c.isSurface ? 'Surface' : 'Air'}</strong>
                       </div>
@@ -6479,6 +6516,20 @@
             </div>
           </form>
         `;
+
+        const formEl = bodyEl.querySelector('[data-shiprocket-fulfill-form]');
+        formEl?.addEventListener('change', () => {
+          formEl.querySelectorAll('.admin-courier-card').forEach((card) => {
+            const radio = card.querySelector('input[type="radio"]');
+            if (radio?.checked) {
+              card.style.borderColor = '#3b82f6';
+              card.style.background = 'rgba(59,130,246,0.04)';
+            } else {
+              card.style.borderColor = 'rgba(0,0,0,0.1)';
+              card.style.background = 'transparent';
+            }
+          });
+        });
       }
 
       const footEl = els.adminModalDialog.querySelector('.admin-modal__foot');
@@ -7237,8 +7288,12 @@
       case 'toggle-order-selection':
         if (target.checked) {
           if (!state.selectedOrderIds.includes(id)) state.selectedOrderIds.push(id);
+          state.selectedOrderId = id;
         } else {
           state.selectedOrderIds = state.selectedOrderIds.filter((orderId) => orderId !== id);
+          if (Number(state.selectedOrderId) === id) {
+            state.selectedOrderId = state.selectedOrderIds.length === 1 ? state.selectedOrderIds[0] : null;
+          }
         }
         renderOrders();
         return;
@@ -8213,10 +8268,10 @@
     loadOffers();
     setInterval(() => {
       if (document.hidden) return;
-      loadDashboardStats();
-      loadOrderData();
-      loadReportData();
-    }, 15000);
+      loadDashboardStats({ silent: true });
+      loadOrderData({ silent: true });
+      loadReportData({ silent: true });
+    }, 30000);
   }
 
   if (document.readyState === 'loading') {

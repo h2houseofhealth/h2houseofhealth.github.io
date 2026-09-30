@@ -115,6 +115,25 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   if (!hasColumn('merch_products', 'deleted_previous_is_active')) {
     db.exec('ALTER TABLE merch_products ADD COLUMN deleted_previous_is_active INTEGER NOT NULL DEFAULT 1');
   }
+  if (!hasColumn('merch_products', 'length_cm')) {
+    db.exec('ALTER TABLE merch_products ADD COLUMN length_cm REAL');
+  }
+  if (!hasColumn('merch_products', 'breadth_cm')) {
+    db.exec('ALTER TABLE merch_products ADD COLUMN breadth_cm REAL');
+  }
+  if (!hasColumn('merch_products', 'height_cm')) {
+    db.exec('ALTER TABLE merch_products ADD COLUMN height_cm REAL');
+  }
+
+  // Backfill package dimensions for default catalog items
+  try {
+    db.prepare("UPDATE merch_products SET length_cm = 24, breadth_cm = 7, height_cm = 7 WHERE (length_cm IS NULL OR length_cm = 0) AND (lower(slug) LIKE '%bottle%' OR lower(name) LIKE '%bottle%')").run();
+    db.prepare("UPDATE merch_products SET length_cm = 10.3, breadth_cm = 4, height_cm = 4 WHERE (length_cm IS NULL OR length_cm = 0) AND (lower(slug) LIKE '%mist%' OR lower(slug) LIKE '%spray%' OR lower(name) LIKE '%spray%')").run();
+    db.prepare("UPDATE merch_products SET length_cm = 30, breadth_cm = 25, height_cm = 5 WHERE (length_cm IS NULL OR length_cm = 0) AND (lower(slug) LIKE '%hoodie%' OR lower(name) LIKE '%hoodie%')").run();
+  } catch (err) {
+    console.warn('[Merch DB] Dimension backfill note:', err.message);
+  }
+
   // combo_purchase was the old flag-only implementation. Real combo cards
   // are represented by is_combo products and their component rows below.
   db.prepare('UPDATE merch_products SET combo_purchase = 0 WHERE is_combo = 0').run();
@@ -678,6 +697,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
   if (!hasColumn('merch_orders', 'shiprocket_pickup_token')) {
     db.exec('ALTER TABLE merch_orders ADD COLUMN shiprocket_pickup_token TEXT');
+  }
+  if (!hasColumn('merch_orders', 'cancelled_by')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN cancelled_by TEXT');
+  }
+  if (!hasColumn('merch_orders', 'cancelled_at')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN cancelled_at TEXT');
   }
 
   if (!hasColumn('merch_influencers', 'avatar_url')) {
@@ -2398,10 +2423,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     if (String(order.status || '').toLowerCase() === 'cancelled') {
+      const who = order.cancelledBy === 'customer'
+        ? 'Customer'
+        : (order.cancelledBy === 'admin' ? 'Merchant / Admin' : 'Customer or Merchant');
       entries.push({
-        label: 'Cancelled',
-        note: 'Order status was marked cancelled',
-        time: updatedAt,
+        label: 'Order Cancelled',
+        note: `Cancelled by ${who}`,
+        time: order.cancelledAt || updatedAt,
       });
     }
 
@@ -2413,6 +2441,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const billingAddress = parseMerchShippingAddress(order.billingAddress || order.billing_address) || shippingAddress;
     const realCustomerEmail = hasRealEmail(order.customerEmail || order.customer_email) ? String(order.customerEmail || order.customer_email) : '';
     const realGuestEmail = hasRealEmail(order.guestEmail || order.guest_email) ? String(order.guestEmail || order.guest_email) : '';
+    const isCancelled = String(order.status || '').toLowerCase() === 'cancelled';
+    const cancelledBy = order.cancelled_by || order.cancelledBy || (isCancelled ? 'admin' : null);
+    const cancelledAt = order.cancelled_at || order.cancelledAt || (isCancelled ? order.updatedAt || order.updated_at || null : null);
+
     return {
       id: Number(order.id),
       orderNumber: String(order.orderNumber || order.order_number || ''),
@@ -2428,6 +2460,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       displayEmail: realCustomerEmail || 'Email not provided',
       phone: String(order.customerPhone || order.customer_phone || ''),
       status: String(order.status || 'pending'),
+      cancelledBy,
+      cancelledAt,
       subtotal: Number(order.subtotal || 0),
       gstAmount: Number(order.gstAmount || order.gst_amount || 0),
       shippingCharge: Number(order.shippingCharge || order.shipping_charge || 0),
@@ -2481,6 +2515,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         carrierName: order.carrierName || order.carrier_name,
         createdAt: order.createdAt || order.created_at,
         updatedAt: order.updatedAt || order.updated_at,
+        cancelledBy,
+        cancelledAt,
       }),
     };
   }
@@ -4910,14 +4946,33 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     });
   });
 
-  async function autoFulfillOrderWithShiprocket(orderId) {
+  function getOrderItemsWithProductDetails(orderId) {
+    try {
+      return db.prepare(`
+        SELECT 
+          oi.*,
+          COALESCE(p.weight_grams, 0) AS weight_grams,
+          COALESCE(p.length_cm, 0) AS length_cm,
+          COALESCE(p.breadth_cm, 0) AS breadth_cm,
+          COALESCE(p.height_cm, 0) AS height_cm
+        FROM merch_order_items oi
+        LEFT JOIN merch_variants v ON v.id = oi.variant_id
+        LEFT JOIN merch_products p ON p.id = v.product_id
+        WHERE oi.order_id = ?
+      `).all(orderId);
+    } catch {
+      return db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
+    }
+  }
+
+  async function autoCreateShiprocketOrder(orderId) {
     if (!shiprocket.isConfigured()) return null;
 
     try {
       const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
       if (!order) return null;
 
-      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+      const items = getOrderItemsWithProductDetails(order.id);
       let shipmentId = order.shiprocket_shipment_id;
 
       // 1. Create order in Shiprocket if not yet created
@@ -4934,40 +4989,77 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         `).run(String(createRes.orderId), shipmentId, String(createRes.status || 'NEW'), order.id);
       }
 
-      // 2. Automatically assign courier and generate AWB immediately
-      const awbRes = await shiprocket.assignAwb({ shipmentId });
-      let labelUrl = null;
-      try {
-        const labelRes = await shiprocket.generateLabel({ shipmentId });
-        labelUrl = labelRes.labelUrl;
-      } catch (labelErr) {
-        console.warn('[Shiprocket] Auto label generation deferred:', labelErr.message);
+      // Check if auto-assign AWB is enabled via environment configuration
+      const autoAssignAwb = String(process.env.SHIPROCKET_AUTO_ASSIGN_AWB || '').toLowerCase() === 'true';
+      if (autoAssignAwb && shipmentId && !order.shiprocket_awb_code) {
+        try {
+          const parsedAddr = parseMerchShippingAddress(order.shipping_address) || {};
+          const deliveryPostcode = parsedAddr.postalCode || parsedAddr.postal_code || parsedAddr.pincode || '452001';
+          const isCod = String(order.payment_method || '').toLowerCase() === 'cod';
+
+          const totalWeightGrams = items.reduce((sum, item) => {
+            const itemWeight = Number(item.weight_grams ?? item.weightGrams ?? 0);
+            const qty = Math.max(1, Number(item.quantity || item.units || 1));
+            return sum + (itemWeight * qty);
+          }, 0);
+          const orderWeightKg = totalWeightGrams > 0
+            ? Math.max(0.01, Number((totalWeightGrams / 1000).toFixed(3)))
+            : shiprocket.defaultWeightKg;
+
+          const couriers = await shiprocket.checkServiceability({
+            deliveryPostcode,
+            weight: orderWeightKg,
+            cod: isCod,
+          });
+
+          // Couriers are sorted by price ascending: lowest price courier is first
+          const lowestCourier = couriers && couriers.length > 0 ? couriers[0] : null;
+          const courierId = lowestCourier?.courierCompanyId ? Number(lowestCourier.courierCompanyId) : null;
+
+          const awbRes = await shiprocket.assignAwb({ shipmentId, courierId });
+          let labelUrl = null;
+          try {
+            const labelRes = await shiprocket.generateLabel({ shipmentId });
+            labelUrl = labelRes.labelUrl;
+          } catch (labelErr) {
+            console.warn('[Shiprocket] Auto label generation deferred:', labelErr.message);
+          }
+
+          const awbCode = String(awbRes.awbCode || '');
+          const courierName = String(awbRes.courierName || lowestCourier?.courierName || 'Shiprocket');
+
+          db.prepare(`
+            UPDATE merch_orders
+            SET shiprocket_awb_code = ?,
+                shiprocket_courier_name = ?,
+                tracking_number = ?,
+                carrier_name = ?,
+                shiprocket_status = 'AWB ASSIGNED',
+                shiprocket_label_url = COALESCE(?, shiprocket_label_url),
+                updated_at = datetime('now')
+            WHERE id = ?
+          `).run(awbCode, courierName, awbCode, courierName, labelUrl, order.id);
+
+          return {
+            orderId: order.shiprocket_order_id || shipmentId,
+            shipmentId,
+            awbCode,
+            courierName,
+            labelUrl,
+            status: 'AWB ASSIGNED',
+          };
+        } catch (assignErr) {
+          console.warn('[Shiprocket] Auto courier assign notice:', assignErr.message);
+        }
       }
 
-      const awbCode = String(awbRes.awbCode || '');
-      const courierName = String(awbRes.courierName || 'Shiprocket');
-
-      db.prepare(`
-        UPDATE merch_orders
-        SET shiprocket_awb_code = ?,
-            shiprocket_courier_name = ?,
-            tracking_number = ?,
-            carrier_name = ?,
-            status = 'processing',
-            shiprocket_status = 'AWB ASSIGNED',
-            shiprocket_label_url = COALESCE(?, shiprocket_label_url),
-            updated_at = datetime('now')
-        WHERE id = ?
-      `).run(awbCode, courierName, awbCode, courierName, labelUrl, order.id);
-
       return {
+        orderId: order.shiprocket_order_id,
         shipmentId,
-        awbCode,
-        courierName,
-        labelUrl,
+        status: order.shiprocket_status || 'NEW',
       };
     } catch (err) {
-      console.warn('[Shiprocket] Instant auto-fulfillment notice:', err.message);
+      console.warn('[Shiprocket] Auto-order creation notice:', err.message);
       return null;
     }
   }
@@ -5028,12 +5120,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       }
     }
 
-    // Automatically fulfill order with Shiprocket to immediately generate Tracking ID (AWB)
+    // Auto-generate order in Shiprocket for prepaid orders
     let autoFulfill = null;
     try {
-      autoFulfill = await autoFulfillOrderWithShiprocket(order.id);
+      autoFulfill = await autoCreateShiprocketOrder(order.id);
     } catch (fulfillErr) {
-      console.warn('[Shiprocket] Instant auto-fulfillment skipped:', fulfillErr.message);
+      console.warn('[Shiprocket] Auto order generation notice:', fulfillErr.message);
     }
 
     const notifications = await triggerMerchOrderConfirmationNotifications(order.id, req);
@@ -5042,6 +5134,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       success: true,
       message: 'Payment verified, order confirmed',
       orderId: order.id,
+      shiprocketOrderId: autoFulfill?.orderId || null,
+      shiprocketShipmentId: autoFulfill?.shipmentId || null,
       trackingNumber: autoFulfill?.awbCode || null,
       carrierName: autoFulfill?.courierName || null,
       notifications,
@@ -5841,6 +5935,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const result = db.prepare(`
         UPDATE merch_orders
         SET status = 'cancelled',
+            cancelled_by = 'customer',
+            cancelled_at = datetime('now'),
             payment_status = CASE WHEN payment_status IN ('paid', 'cod_pending') THEN 'refunded' ELSE payment_status END,
             updated_at = datetime('now')
         WHERE id = ? AND status NOT IN ('delivered', 'returned', 'cancelled')
@@ -6829,6 +6925,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (String(status).toLowerCase() === 'delivered' && String(existingOrder.status || '').toLowerCase() !== 'delivered') {
       updates.push("delivered_at = datetime('now')");
     }
+    if (String(status).toLowerCase() === 'cancelled' && String(existingOrder.status || '').toLowerCase() !== 'cancelled') {
+      updates.push('cancelled_by = ?');
+      params.push('admin');
+      updates.push("cancelled_at = datetime('now')");
+    }
     if (payment_status) {
       updates.push('payment_status = ?');
       params.push(String(payment_status));
@@ -6902,13 +7003,23 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const deliveryPostcode = parsedAddr.postalCode || parsedAddr.postal_code || parsedAddr.pincode || '452001';
       const isCod = String(order.payment_method || '').toLowerCase() === 'cod';
 
+      const items = getOrderItemsWithProductDetails(order.id);
+      const totalWeightGrams = items.reduce((sum, item) => {
+        const itemWeight = Number(item.weight_grams ?? item.weightGrams ?? 0);
+        const qty = Math.max(1, Number(item.quantity || item.units || 1));
+        return sum + (itemWeight * qty);
+      }, 0);
+      const orderWeightKg = totalWeightGrams > 0
+        ? Math.max(0.01, Number((totalWeightGrams / 1000).toFixed(3)))
+        : shiprocket.defaultWeightKg;
+
       const couriers = await shiprocket.checkServiceability({
         deliveryPostcode,
-        weight: shiprocket.defaultWeightKg,
+        weight: orderWeightKg,
         cod: isCod,
       });
 
-      res.json({ success: true, deliveryPostcode, couriers });
+      res.json({ success: true, deliveryPostcode, weightKg: orderWeightKg, couriers });
     } catch (err) {
       res.status(500).json({ error: err.message, details: err.details || null });
     }
@@ -6920,13 +7031,15 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
       if (!order) return res.status(404).json({ error: 'Order not found' });
 
-      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+      const items = getOrderItemsWithProductDetails(order.id);
       const customPickupLocation = req.body?.pickupLocation || null;
+      const packageDimensions = req.body?.packageDimensions || null;
 
       const result = await shiprocket.createOrder({
         order,
         items,
         customPickupLocation,
+        packageDimensions,
       });
 
       db.prepare(`
@@ -6951,7 +7064,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
       if (!order) return res.status(404).json({ error: 'Order not found' });
 
-      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+      const items = getOrderItemsWithProductDetails(order.id);
       let shipmentId = order.shiprocket_shipment_id;
 
       // If order not yet created in Shiprocket, create it first

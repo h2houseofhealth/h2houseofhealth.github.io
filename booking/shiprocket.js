@@ -12,6 +12,7 @@ class ShiprocketService {
     this.email = config.email || process.env.SHIPROCKET_EMAIL || '';
     this.password = config.password || process.env.SHIPROCKET_PASSWORD || '';
     this.pickupLocation = config.pickupLocation || process.env.SHIPROCKET_PICKUP_LOCATION || 'work';
+    this.pickupPostcode = config.pickupPostcode || process.env.SHIPROCKET_PICKUP_POSTCODE || '500033';
     this.defaultWeightKg = Number(config.defaultWeightKg || process.env.SHIPROCKET_DEFAULT_WEIGHT_KG || 0.5);
     this.defaultLengthCm = Number(config.defaultLengthCm || process.env.SHIPROCKET_DEFAULT_LENGTH_CM || 20);
     this.defaultBreadthCm = Number(config.defaultBreadthCm || process.env.SHIPROCKET_DEFAULT_BREADTH_CM || 12);
@@ -36,6 +37,10 @@ class ShiprocketService {
 
   getPickupLocation() {
     return (this.pickupLocation || process.env.SHIPROCKET_PICKUP_LOCATION || 'work').trim();
+  }
+
+  getPickupPostcode() {
+    return (this.pickupPostcode || process.env.SHIPROCKET_PICKUP_POSTCODE || '500033').trim();
   }
 
   /**
@@ -157,10 +162,45 @@ class ShiprocketService {
     });
 
     const dims = packageDimensions || {};
-    const length = Number(dims.length || this.defaultLengthCm);
-    const breadth = Number(dims.breadth || this.defaultBreadthCm);
-    const height = Number(dims.height || this.defaultHeightCm);
-    const weight = Number(dims.weight || this.defaultWeightKg);
+    let length = Number(dims.length || 0);
+    let breadth = Number(dims.breadth || 0);
+    let height = Number(dims.height || 0);
+
+    // Calculate dimensions from items if not explicitly provided
+    if (!length || !breadth || !height) {
+      let maxL = 0;
+      let maxB = 0;
+      let totalH = 0;
+      for (const item of items) {
+        const itemL = Number(item.length_cm || item.length || 0);
+        const itemB = Number(item.breadth_cm || item.breadth || 0);
+        const itemH = Number(item.height_cm || item.height || 0);
+        const qty = Math.max(1, Number(item.quantity || item.units || 1));
+        if (itemL > maxL) maxL = itemL;
+        if (itemB > maxB) maxB = itemB;
+        totalH += itemH * qty;
+      }
+      length = length || maxL || this.defaultLengthCm;
+      breadth = breadth || maxB || this.defaultBreadthCm;
+      height = height || totalH || this.defaultHeightCm;
+    }
+
+    // Calculate weight: prioritize dims.weight, then calculate from items (weight_grams), then fallback to defaultWeightKg
+    let weight = Number(dims.weight || 0);
+    if (!weight || weight <= 0) {
+      const totalWeightGrams = items.reduce((sum, item) => {
+        const itemWeight = Number(item.weight_grams ?? item.weightGrams ?? item.weight ?? 0);
+        const qty = Math.max(1, Number(item.quantity || item.units || 1));
+        return sum + (itemWeight * qty);
+      }, 0);
+
+      if (totalWeightGrams > 0) {
+        // Shiprocket requires weight in Kg, rounded to 3 decimal places (min 0.01 kg)
+        weight = Math.max(0.01, Number((totalWeightGrams / 1000).toFixed(3)));
+      } else {
+        weight = this.defaultWeightKg;
+      }
+    }
 
     const payload = {
       order_id: String(order.order_number || `ORD-${order.id}`),
@@ -224,7 +264,7 @@ class ShiprocketService {
   async checkServiceability({ pickupPostcode, deliveryPostcode, weight = 0.5, cod = false }) {
     const isCod = cod ? 1 : 0;
     const query = new URLSearchParams({
-      pickup_postcode: String(pickupPostcode || '452001'),
+      pickup_postcode: String(pickupPostcode || this.getPickupPostcode() || '500033'),
       delivery_postcode: String(deliveryPostcode),
       weight: String(weight || 0.5),
       cod: String(isCod),
@@ -235,17 +275,19 @@ class ShiprocketService {
     });
 
     const couriers = result?.data?.available_courier_companies || [];
-    return couriers.map((c) => ({
-      courierCompanyId: c.courier_company_id,
-      courierName: c.courier_name,
-      rate: Number(c.rate || 0),
-      etd: c.etd,
-      estimatedDeliveryDays: c.estimated_delivery_days,
-      rating: c.rating,
-      mode: c.mode,
-      trackingPerformance: c.tracking_performance,
-      isSurface: c.is_surface,
-    }));
+    return couriers
+      .map((c) => ({
+        courierCompanyId: c.courier_company_id,
+        courierName: c.courier_name,
+        rate: Number(c.rate || 0),
+        etd: c.etd,
+        estimatedDeliveryDays: c.estimated_delivery_days,
+        rating: c.rating,
+        mode: c.mode,
+        trackingPerformance: c.tracking_performance,
+        isSurface: c.is_surface,
+      }))
+      .sort((a, b) => a.rate - b.rate);
   }
 
   /**
