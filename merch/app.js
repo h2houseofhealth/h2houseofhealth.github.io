@@ -2257,6 +2257,21 @@ function getWishlistProductPrice(item) {
     }
     if (cartPayable) cartPayable.textContent = formatPrice(payable);
 
+    // Hide coupon section when a bundle discount is active
+    const cartCouponSection = document.querySelector('.cart-coupon');
+    if (cartCouponSection) {
+      const hasBundleDiscount = bundleDiscount > 0;
+      cartCouponSection.hidden = hasBundleDiscount;
+      // Clear any applied coupon when bundle discount kicks in (they shouldn't stack)
+      if (hasBundleDiscount && state.merchCouponCode) {
+        state.merchCouponCode = '';
+        state.merchCouponPreview = null;
+        state.merchCouponError = '';
+        if (els.cartCouponCode) els.cartCouponCode.value = '';
+        renderMerchCouponPreview();
+      }
+    }
+
     // Bind remove buttons
     els.cartItems.querySelectorAll('.cart-item__remove').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -5255,8 +5270,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     els.searchResults.innerHTML = results.map(p => `
       <div class="search-result-item" data-product-id="${p.id}" style="
         display: flex; gap: 12px; padding: 12px; cursor: pointer; border-bottom: 1px solid var(--border);
-        border-radius: 8px; transition: background 0.2s;
-      " onmouseover="this.style.background='rgba(0,0,0,0.03)'" onmouseout="this.style.background='transparent'">
+        border-radius: 8px; transition: background 0.2s; touch-action: manipulation;
+      ">
         <img src="${escapeHtml(p.images?.[0] || p.imageUrl || FALLBACK_PRODUCT_IMAGE)}" alt="" style="width: 48px; height: 48px; border-radius: 6px; object-fit: cover;" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
         <div>
           <p style="font-weight: 600; font-size: 14px; margin: 0 0 2px;">${escapeHtml(p.name)}</p>
