@@ -1827,6 +1827,10 @@
     offersLoading: false,
     offerDraft: null,
     offerError: '',
+    securityQuestion: null,
+    campaigns: [],
+    campaignsLoading: false,
+    latestCreatedCampaign: null,
   };
 
   const els = {
@@ -3791,6 +3795,371 @@
     });
   }
 
+  function renderCampaignCreatorSection(selectedInfluencer) {
+    const activeInfluencers = (state.influencers || []).filter((i) => i.active !== 0 && i.active !== false);
+    const selectedInfId = selectedInfluencer ? Number(selectedInfluencer.id) : (activeInfluencers[0] ? Number(activeInfluencers[0].id) : '');
+
+    // Get candidate coupons: portal === 'merch'
+    const candidateCoupons = (state.coupons || []).filter((c) => {
+      const portalMatch = !c.portal || c.portal === 'merch';
+      return portalMatch;
+    });
+
+    return `
+      <div class="admin-campaign-creator">
+        <div class="admin-campaign-creator__head">
+          <h4 class="admin-campaign-creator__title">CREATE NEW TRACKING LINK</h4>
+          <p class="admin-campaign-creator__desc">Fill in the details below to generate an attributable Instagram Story tracking link (<code>/c/:slug</code>).</p>
+        </div>
+        
+        <form id="campaignCreateForm" class="admin-campaign-form" data-form="campaign-create" onsubmit="return false;">
+          <div class="admin-campaign-form__grid">
+            <div class="admin-campaign-field">
+              <div class="admin-step-label">
+                <span class="admin-step-pill">Step 1</span>
+                <label for="campaignInfluencerSelect">Influencer <span class="admin-required-star">*</span></label>
+              </div>
+              <select class="admin-select" name="influencerId" id="campaignInfluencerSelect" required style="width:100%;">
+                <option value="">-- Select Influencer --</option>
+                ${(state.influencers || []).map((inf) => `
+                  <option value="${inf.id}" ${Number(inf.id) === Number(selectedInfId) ? 'selected' : ''}>
+                    ${escapeHtml(inf.name || 'Unnamed')} (@${escapeHtml(inf.handle || 'no-handle')}) ${!inf.active ? '— [Inactive]' : ''}
+                  </option>
+                `).join('')}
+              </select>
+            </div>
+
+            <div class="admin-campaign-field">
+              <div class="admin-step-label">
+                <span class="admin-step-pill">Step 2</span>
+                <label for="campaignCouponSelect">Coupon <span class="admin-required-star">*</span></label>
+              </div>
+              <select class="admin-select" name="couponCode" id="campaignCouponSelect" required style="width:100%;">
+                <option value="">-- Select Coupon --</option>
+                ${candidateCoupons.map((c) => {
+                  const isAssigned = selectedInfId && (Number(c.influencerId || c.influencer_id) === Number(selectedInfId));
+                  const isAct = Number(c.is_active ?? c.active ?? 1) === 1;
+                  return `
+                    <option value="${escapeHtml(c.code)}" data-influencer-id="${c.influencerId || c.influencer_id || ''}" data-discount="${escapeHtml(couponDiscountLabel(c))}" data-active="${isAct ? '1' : '0'}">
+                      ${escapeHtml(c.code)} (${escapeHtml(couponDiscountLabel(c))})${isAssigned ? ' ★ Assigned' : ''}${!isAct ? ' [Inactive]' : ''}
+                    </option>
+                  `;
+                }).join('')}
+              </select>
+              <div id="campaignCouponFeedback" class="admin-field-hint" style="font-size:12px;color:var(--admin-muted);margin-top:2px;"></div>
+            </div>
+
+            <div class="admin-campaign-field">
+              <div class="admin-step-label">
+                <span class="admin-step-pill">Step 3</span>
+                <label for="campaignTargetProductSelect">Target Product</label>
+              </div>
+              <input type="hidden" name="targetProductId" value="11" />
+              <select class="admin-select" id="campaignTargetProductSelect" disabled style="width:100%;background:#ffffff;color:var(--admin-text);opacity:0.95;cursor:default;">
+                <option value="11" selected>H2 Molecular Hydrogen Water Bottle</option>
+              </select>
+            </div>
+
+            <div class="admin-campaign-field">
+              <div class="admin-step-label">
+                <label for="campaignVariantSelect">Variant <span class="admin-required-star">*</span></label>
+              </div>
+              <select class="admin-select" name="targetVariantId" id="campaignVariantSelect" required style="width:100%;">
+                <option value="569" selected>Silver (SKU: HM-BTL-460-SLV) — ₹22,990 (Default)</option>
+                <option value="570">Black (SKU: HM-BTL-460-BLK) — ₹22,990</option>
+                <option value="571">Gold (SKU: HM-BTL-460-GLD) — ₹22,990</option>
+                <option value="572">Blue (SKU: HM-BTL-460-BLU) — ₹22,990</option>
+              </select>
+            </div>
+
+            <div class="admin-campaign-field" style="grid-column: 1 / -1;">
+              <div class="admin-step-label">
+                <span class="admin-step-pill">Step 4</span>
+                <label for="campaignSlugInput">Campaign Slug <span class="admin-required-star">*</span></label>
+              </div>
+              <input class="admin-input" name="slug" id="campaignSlugInput" placeholder="e.g. RyanH2" pattern="^[A-Za-z0-9_-]{2,50}$" required style="width:100%;" />
+              <div class="admin-campaign-preview">
+                <span class="admin-campaign-preview__label">Live Link Preview:</span>
+                <span id="campaignSlugLiveUrl" class="admin-campaign-preview__code">${window.location.origin}/c/<span>...</span></span>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top:6px;display:flex;align-items:center;gap:12px;">
+            <button class="admin-btn admin-btn--primary admin-campaign-submit-btn" type="submit" id="btnSubmitCampaign">
+              GENERATE TRACKING LINK
+            </button>
+            <span id="campaignFormFeedback" style="font-size:13px;"></span>
+          </div>
+        </form>
+      </div>
+    `;
+  }
+
+  function renderCampaignSuccessCard() {
+    const c = state.latestCreatedCampaign;
+    if (!c) {
+      return `
+        <div id="campaignGeneratedSuccessBanner" class="admin-campaign-success-card" style="display:none;">
+          <div class="admin-campaign-success-card__top">
+            <div class="admin-campaign-success-card__header">
+              <span class="admin-campaign-success-card__icon" aria-hidden="true">✓</span>
+              <strong class="admin-campaign-success-card__title">Tracking link created</strong>
+            </div>
+            <button type="button" class="admin-campaign-success-card__close" data-action="dismiss-campaign-success" title="Dismiss" aria-label="Dismiss">✕</button>
+          </div>
+          <div class="admin-campaign-success-card__body">
+            <div class="admin-campaign-success-card__meta">
+              <span class="admin-campaign-success-card__name" id="campaignSuccessName"></span>
+              <span class="admin-campaign-success-card__sub" id="campaignSuccessSub"></span>
+            </div>
+            <div class="admin-campaign-success-card__url-row">
+              <div class="admin-campaign-success-card__url-box">
+                <input class="admin-campaign-success-card__input" id="campaignGeneratedUrlDisplay" readonly value="" />
+              </div>
+              <button class="admin-btn admin-btn--primary admin-campaign-success-card__copy-btn" type="button" data-action="copy-generated-campaign-link">
+                COPY LINK
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    return `
+      <div id="campaignGeneratedSuccessBanner" class="admin-campaign-success-card">
+        <div class="admin-campaign-success-card__top">
+          <div class="admin-campaign-success-card__header">
+            <span class="admin-campaign-success-card__icon" aria-hidden="true">✓</span>
+            <strong class="admin-campaign-success-card__title">Tracking link created</strong>
+          </div>
+          <button type="button" class="admin-campaign-success-card__close" data-action="dismiss-campaign-success" title="Dismiss" aria-label="Dismiss">✕</button>
+        </div>
+        <div class="admin-campaign-success-card__body">
+          <div class="admin-campaign-success-card__meta">
+            <span class="admin-campaign-success-card__name" id="campaignSuccessName">${escapeHtml(c.name || `${c.slug} Instagram Story`)}</span>
+            <span class="admin-campaign-success-card__sub" id="campaignSuccessSub">${escapeHtml(c.influencerName || '')} &bull; ${escapeHtml(c.couponCode || '')}</span>
+          </div>
+          <div class="admin-campaign-success-card__url-row">
+            <div class="admin-campaign-success-card__url-box">
+              <input class="admin-campaign-success-card__input" id="campaignGeneratedUrlDisplay" readonly value="${escapeHtml(c.fullUrl || '')}" />
+            </div>
+            <button class="admin-btn admin-btn--primary admin-campaign-success-card__copy-btn" type="button" data-action="copy-generated-campaign-link">
+              COPY LINK
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderCampaignsTable() {
+    const list = Array.isArray(state.campaigns) ? state.campaigns : [];
+    return `
+      <div class="admin-campaigns-section">
+        <div class="admin-campaigns-section__head">
+          <div>
+            <h4 class="admin-campaigns-section__title">EXISTING TRACKING CAMPAIGNS</h4>
+            <p class="admin-campaigns-section__sub">Manage your active influencer links and view their performance.</p>
+          </div>
+          <span class="admin-badge admin-badge--neutral" style="font-size:12px;padding:4px 10px;font-weight:600;">
+            ${list.length} Campaign${list.length === 1 ? '' : 's'}
+          </span>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table admin-campaigns-table">
+            <thead>
+              <tr>
+                <th style="min-width:180px;">Campaign Link</th>
+                <th style="min-width:140px;">Influencer</th>
+                <th style="min-width:110px;">Coupon</th>
+                <th style="min-width:160px;">Target Bottle</th>
+                <th style="min-width:90px;text-align:center;">Status</th>
+                <th style="min-width:80px;text-align:right;">Clicks</th>
+                <th style="min-width:80px;text-align:right;">Orders</th>
+                <th style="min-width:110px;text-align:right;">Revenue</th>
+                <th style="min-width:120px;text-align:center;">Conversion Rate</th>
+                <th style="min-width:160px;text-align:center;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${list.length ? list.map((c) => {
+                const fullUrl = `${window.location.origin}/c/${escapeHtml(c.slug)}`;
+                const variantMeta = {
+                  569: { color: 'Silver', size: '460ml', sku: 'HM-BTL-460-SLV', price: 2299000 },
+                  570: { color: 'Black', size: '460ml', sku: 'HM-BTL-460-BLK', price: 2299000 },
+                  571: { color: 'Gold', size: '460ml', sku: 'HM-BTL-460-GLD', price: 2299000 },
+                  572: { color: 'Blue', size: '460ml', sku: 'HM-BTL-460-BLU', price: 2299000 },
+                }[c.targetVariantId] || {};
+                const variantColor = c.targetVariantColor || variantMeta.color || 'Silver';
+                const variantSize = c.targetVariantSize || variantMeta.size || '460ml';
+                const variantSku = c.targetVariantSku || variantMeta.sku || '';
+                const variantPrice = c.targetVariantPrice || variantMeta.price || 2299000;
+
+                return `
+                  <tr>
+                    <td class="admin-campaign-cell-link">
+                      <strong>${escapeHtml(c.name || `${c.slug} Campaign`)}</strong>
+                      <a href="${fullUrl}" target="_blank" rel="noopener" title="Open ${fullUrl}">/c/${escapeHtml(c.slug)} ↗</a>
+                    </td>
+                    <td>
+                      <strong style="color:var(--admin-text);">${escapeHtml(c.influencerName || 'Unknown')}</strong><br>
+                      <span class="admin-table__muted" style="font-size:12px;">@${escapeHtml(c.influencerHandle || 'no-handle')}</span>
+                    </td>
+                    <td>
+                      <span class="admin-badge admin-badge--neutral" style="font-family:var(--font-mono, monospace);font-weight:700;font-size:12px;letter-spacing:0.04em;">${escapeHtml(c.couponCode)}</span>
+                    </td>
+                    <td>
+                      <strong style="font-size:13px;color:var(--admin-text);display:block;">${escapeHtml(c.targetProductName || 'H2 Water Bottle')}</strong>
+                      <div style="margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                        <span class="admin-badge admin-badge--neutral" style="font-size:11px;font-weight:700;background:rgba(200,101,45,0.08);color:var(--admin-accent-dark,#9f3e1f);border:1px solid rgba(200,101,45,0.2);">
+                          ${escapeHtml(variantColor)} (${escapeHtml(variantSize)})
+                        </span>
+                        <strong style="font-size:12px;color:var(--admin-text);">${money(variantPrice)}</strong>
+                      </div>
+                      ${variantSku ? `<span class="admin-table__muted" style="font-size:11px;display:block;margin-top:3px;">SKU: ${escapeHtml(variantSku)}</span>` : ''}
+                    </td>
+                    <td style="text-align:center;">
+                      <span class="admin-badge ${c.isActive ? 'admin-badge--active' : 'admin-badge--inactive'}" style="font-size:11px;font-weight:700;">
+                        ${c.isActive ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td style="text-align:right;"><strong style="font-size:13px;">${formatCount(c.clicks)}</strong></td>
+                    <td style="text-align:right;"><strong style="font-size:13px;">${formatCount(c.orders)}</strong></td>
+                    <td style="text-align:right;"><strong style="font-size:13px;color:var(--admin-text);">${money(c.revenue)}</strong></td>
+                    <td style="text-align:center;">
+                      <span class="admin-badge ${c.conversionRate > 0 ? 'admin-badge--active' : 'admin-badge--neutral'}" style="font-size:11px;font-weight:700;">
+                        ${c.conversionRate}%
+                      </span>
+                    </td>
+                    <td style="text-align:center;">
+                      <div class="admin-campaign-cell-actions" style="display:inline-flex;gap:8px;align-items:center;justify-content:center;">
+                        <button class="admin-btn admin-btn--soft admin-campaign-btn" type="button" data-action="copy-campaign-link" data-url="${fullUrl}" title="Copy tracking URL to clipboard">
+                          COPY LINK
+                        </button>
+                        <button class="admin-btn ${c.isActive ? 'admin-btn--ghost' : 'admin-btn--soft'} admin-campaign-btn" type="button" data-action="toggle-campaign-active" data-id="${c.id}" data-active="${c.isActive ? 'true' : 'false'}" title="${c.isActive ? 'Deactivate this tracking link' : 'Activate this tracking link'}">
+                          ${c.isActive ? 'Deactivate' : 'Activate'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                `;
+              }).join('') : `
+                <tr>
+                  <td colspan="10" style="text-align:center;padding:32px 16px;color:var(--admin-muted);">
+                    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+                      <span style="font-size:20px;">🔗</span>
+                      <strong style="font-size:14px;color:var(--admin-text);">No tracking campaigns created yet</strong>
+                      <span style="font-size:12px;">Select an influencer and coupon above to generate your first link.</span>
+                    </div>
+                  </td>
+                </tr>
+              `}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  async function handleCampaignCreateSubmit(form) {
+    const influencerId = Number(form.querySelector('[name="influencerId"]')?.value);
+    const couponCode = String(form.querySelector('[name="couponCode"]')?.value || '').trim();
+    const targetProductId = Number(form.querySelector('[name="targetProductId"]')?.value) || 11;
+    const targetVariantId = Number(form.querySelector('[name="targetVariantId"]')?.value) || 569;
+    const slug = String(form.querySelector('[name="slug"]')?.value || '').trim();
+
+    if (!influencerId) {
+      toast('Influencer Required', 'Please select an influencer for this campaign.', 'warning');
+      return;
+    }
+    if (!couponCode) {
+      toast('Coupon Required', 'Please select a valid coupon for this campaign.', 'warning');
+      return;
+    }
+
+    // Coupon verification against state
+    const couponMatch = (state.coupons || []).find((c) => String(c.code).toLowerCase() === couponCode.toLowerCase());
+    if (couponMatch) {
+      if (couponMatch.portal && couponMatch.portal !== 'merch') {
+        toast('Invalid Coupon', `Coupon '${couponCode}' does not belong to the merch portal.`, 'danger');
+        return;
+      }
+      if (Number(couponMatch.is_active ?? couponMatch.active ?? 1) !== 1) {
+        toast('Inactive Coupon', `Coupon '${couponCode}' is currently inactive.`, 'danger');
+        return;
+      }
+      const exp = couponMatch.valid_till || couponMatch.expires_at;
+      if (exp && new Date(exp).getTime() < Date.now()) {
+        toast('Expired Coupon', `Coupon '${couponCode}' has expired.`, 'danger');
+        return;
+      }
+    }
+
+    if (!slug || !/^[A-Za-z0-9_-]{2,50}$/.test(slug)) {
+      toast('Invalid Slug', 'Slug must be 2 to 50 alphanumeric characters (letters, numbers, hyphens, underscores).', 'warning');
+      return;
+    }
+
+    // Duplicate check
+    const duplicate = (state.campaigns || []).find((c) => String(c.slug).toLowerCase() === slug.toLowerCase());
+    if (duplicate) {
+      toast('Duplicate Slug', `Campaign slug '${slug}' already exists. Please choose a different slug.`, 'danger');
+      return;
+    }
+
+    const submitBtn = form.querySelector('#btnSubmitCampaign');
+    if (submitBtn) submitBtn.disabled = true;
+
+    try {
+      const res = await apiRequest('/api/merch/admin/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          influencerId,
+          couponCode,
+          targetProductId,
+          targetVariantId,
+          slug,
+          name: `${slug} Instagram Story`,
+        }),
+      });
+
+      if (res?.campaign) {
+        const fullUrl = `${window.location.origin}/c/${res.campaign.slug}`;
+        const selectedInf = (state.influencers || []).find((i) => Number(i.id) === influencerId);
+        const variantName = { 569: 'Silver (460ml)', 570: 'Black (460ml)', 571: 'Gold (460ml)', 572: 'Blue (460ml)' }[targetVariantId] || 'Silver';
+        state.latestCreatedCampaign = {
+          slug: res.campaign.slug,
+          fullUrl,
+          name: res.campaign.name || `${slug} Instagram Story`,
+          influencerName: selectedInf?.name || 'Influencer',
+          couponCode,
+          variantName,
+        };
+        toast('Campaign Created', `Tracking link for /c/${slug} generated successfully.`, 'success');
+        await loadCampaignData();
+        renderInfluencers();
+
+        const banner = document.getElementById('campaignGeneratedSuccessBanner');
+        const display = document.getElementById('campaignGeneratedUrlDisplay');
+        const nameEl = document.getElementById('campaignSuccessName');
+        const subEl = document.getElementById('campaignSuccessSub');
+        if (banner) {
+          if (display) display.value = fullUrl;
+          if (nameEl) nameEl.textContent = state.latestCreatedCampaign.name;
+          if (subEl) subEl.textContent = `${state.latestCreatedCampaign.variantName} • ${state.latestCreatedCampaign.influencerName} • ${state.latestCreatedCampaign.couponCode}`;
+          banner.style.display = 'flex';
+          banner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      }
+    } catch (err) {
+      toast('Campaign Creation Failed', err.message || 'Unable to create tracking campaign.', 'danger');
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  }
+
   function renderInfluencers() {
     const query = state.influencersSearch.trim().toLowerCase();
     const selectedInfluencerFilter = String(state.influencerDetailsFilter || 'all');
@@ -4016,6 +4385,20 @@
               </div>
             </section>
           </div>
+
+          <section class="admin-card admin-campaigns-panel" style="margin-top:24px;" id="influencer-campaigns-panel">
+            <div class="admin-card__head">
+              <div>
+                <h3 class="admin-card__title" style="font-size:18px;font-weight:700;color:var(--admin-text);letter-spacing:-0.01em;">INFLUENCER TRACKING CAMPAIGNS</h3>
+                <p class="admin-card__sub" style="margin-top:4px;font-size:13px;color:var(--admin-muted);">Create and manage influencer tracking links for H2 House of Health merch.</p>
+              </div>
+            </div>
+            <div class="admin-card__body admin-campaigns-panel__body">
+              ${renderCampaignCreatorSection(selectedInfluencer)}
+              ${renderCampaignSuccessCard()}
+              ${renderCampaignsTable()}
+            </div>
+          </section>
         </div>
       </section>
     `;
@@ -5826,12 +6209,28 @@
     }
   }
 
+  async function loadCampaignData() {
+    state.campaignsLoading = true;
+    try {
+      const result = await apiRequest('/api/merch/admin/campaigns');
+      state.campaigns = Array.isArray(result.campaigns) ? result.campaigns : [];
+    } catch (error) {
+      console.warn('[Admin] Failed to load campaigns:', error?.message || error);
+      state.campaigns = [];
+    } finally {
+      state.campaignsLoading = false;
+    }
+  }
+
   async function loadInfluencerData() {
     state.influencersLoading = true;
     renderInfluencers();
     try {
-      const result = await apiRequest('/api/merch/admin/influencers');
-      state.influencers = Array.isArray(result.influencers) ? result.influencers : [];
+      const [infResult] = await Promise.all([
+        apiRequest('/api/merch/admin/influencers'),
+        loadCampaignData(),
+      ]);
+      state.influencers = Array.isArray(infResult?.influencers) ? infResult.influencers : [];
       if (!state.selectedInfluencerId && state.influencers[0]) {
         state.selectedInfluencerId = state.influencers[0].id;
       }
@@ -6469,6 +6868,47 @@
     const influencer = state.influencers.find((item) => Number(item.id) === id);
 
     switch (action) {
+      case 'copy-campaign-link': {
+        const url = String(target?.dataset?.url || '');
+        if (url) {
+          copyTextToClipboard(url);
+          toast('Copied', 'Campaign tracking link copied to clipboard.', 'success');
+        }
+        return;
+      }
+      case 'copy-generated-campaign-link': {
+        const input = document.getElementById('campaignGeneratedUrlDisplay');
+        const url = input?.value || state.latestCreatedCampaign?.fullUrl;
+        if (url) {
+          copyTextToClipboard(url);
+          toast('Copied', 'Campaign tracking link copied to clipboard.', 'success');
+        }
+        return;
+      }
+      case 'dismiss-campaign-success': {
+        state.latestCreatedCampaign = null;
+        const banner = document.getElementById('campaignGeneratedSuccessBanner');
+        if (banner) banner.style.display = 'none';
+        return;
+      }
+      case 'toggle-campaign-active': {
+        const campaignId = Number(target?.dataset?.id);
+        const currentActive = target?.dataset?.active === 'true';
+        if (!campaignId) return;
+        try {
+          await apiRequest(`/api/merch/admin/campaigns/${campaignId}/active`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ isActive: !currentActive }),
+          });
+          toast('Campaign Updated', `Campaign has been ${!currentActive ? 'activated' : 'deactivated'}.`, 'success');
+          await loadCampaignData();
+          renderInfluencers();
+        } catch (err) {
+          toast('Update Failed', err.message || 'Failed to toggle campaign status', 'danger');
+        }
+        return;
+      }
       case 'shiprocket-fulfill':
         if (order) await openShiprocketFulfillModal(order);
         return;
@@ -7945,6 +8385,12 @@
     document.addEventListener('input', (event) => {
       const target = event.target;
       if (!(target instanceof HTMLElement)) return;
+      if (target.matches('#campaignSlugInput')) {
+        const liveSpan = document.getElementById('campaignSlugLiveUrl');
+        if (liveSpan) {
+          liveSpan.innerHTML = `${window.location.origin}/c/<span>${escapeHtml(target.value.trim() || '...')}</span>`;
+        }
+      }
       handleInput(target);
     });
 
@@ -7954,6 +8400,28 @@
       if ((target instanceof HTMLInputElement || target instanceof HTMLSelectElement) && target.dataset.action) {
         handleAction(target.dataset.action, target);
         return;
+      }
+      if (target.matches('#campaignCouponSelect')) {
+        const opt = target.selectedOptions[0];
+        const feedback = document.getElementById('campaignCouponFeedback');
+        if (feedback && opt) {
+          feedback.textContent = opt.dataset.discount ? `Verified active merch coupon (${opt.dataset.discount})` : '';
+        }
+      }
+      if (target.matches('#campaignInfluencerSelect')) {
+        const infId = target.value;
+        const couponSelect = document.getElementById('campaignCouponSelect');
+        if (couponSelect && infId) {
+          const options = Array.from(couponSelect.options);
+          const assignedOpt = options.find((opt) => String(opt.dataset.influencerId) === String(infId));
+          if (assignedOpt) {
+            couponSelect.value = assignedOpt.value;
+            const feedback = document.getElementById('campaignCouponFeedback');
+            if (feedback) {
+              feedback.textContent = `Assigned influencer coupon: ${assignedOpt.value} (${assignedOpt.dataset.discount || ''})`;
+            }
+          }
+        }
       }
       if (target.matches('[data-hype-label-select]')) {
         const customWrap = target.closest('.admin-hype-row')?.querySelector('[data-hype-custom-wrap]');
@@ -7966,6 +8434,11 @@
     document.addEventListener('submit', (event) => {
       const target = event.target;
       if (!(target instanceof HTMLFormElement)) return;
+      if (target.matches('#campaignCreateForm') || target.matches('[data-form="campaign-create"]')) {
+        event.preventDefault();
+        handleCampaignCreateSubmit(target);
+        return;
+      }
       const entityForm = target.closest('[data-entity-form]');
       if (entityForm) {
         event.preventDefault();
