@@ -985,17 +985,51 @@ app.get('/auth/google/callback', ensureGoogleOAuthConfigured, (req, res, next) =
 app.use('/api/auth', rateLimit({ windowMs: 60_000, max: 40 }));
 
 function getMobileVariants(mobile) {
-  const norm = String(mobile || '').trim();
-  const withoutPlus = norm.replace(/^\+/, '');
-  let local = withoutPlus;
-  if (norm.startsWith('+91')) {
-    local = norm.slice(3);
-  } else if (norm.startsWith('+1')) {
-    local = norm.slice(2);
-  } else if (norm.startsWith('+44')) {
-    local = norm.slice(3);
+  const raw = String(mobile || '').trim();
+  if (!raw) return [];
+  const digits = raw.replace(/\D/g, '');
+  const withoutPlus = raw.replace(/^\+/, '').replace(/[\s\-()]/g, '');
+  let local = digits;
+  if (digits.length === 12 && digits.startsWith('91')) {
+    local = digits.slice(2);
+  } else if (digits.length === 11 && digits.startsWith('1')) {
+    local = digits.slice(1);
+  } else if ((digits.length === 12 || digits.length === 13) && digits.startsWith('44')) {
+    local = digits.slice(2);
+    if (local.startsWith('0')) local = local.slice(1);
+  } else if (digits.length === 11 && digits.startsWith('0')) {
+    local = digits.slice(1);
   }
-  return [norm, withoutPlus, local];
+
+  const variants = new Set();
+  variants.add(raw);
+  variants.add(withoutPlus);
+  variants.add(digits);
+  variants.add(local);
+  if (local.length === 10) {
+    variants.add(`+91${local}`);
+    variants.add(`91${local}`);
+    variants.add(`0${local}`);
+  }
+  return Array.from(variants).filter(Boolean);
+}
+
+function findUserByMobile(mobile, excludeUserId = null) {
+  const variants = getMobileVariants(mobile);
+  if (!variants.length) return null;
+  const placeholders = variants.map(() => '?').join(', ');
+  let sql = `SELECT * FROM users WHERE (mobile IN (${placeholders}) OR (length(replace(replace(replace(replace(mobile, ' ', ''), '-', ''), '+', ''), '(', '')) >= 10 AND substr(replace(replace(replace(replace(mobile, ' ', ''), '-', ''), '+', ''), '(', ''), -10) = ?))`;
+  const params = [...variants];
+  const digits = String(mobile || '').replace(/\D/g, '');
+  const last10 = digits.slice(-10);
+  params.push(last10.length === 10 ? last10 : digits);
+
+  if (excludeUserId) {
+    sql += ' AND id != ?';
+    params.push(Number(excludeUserId));
+  }
+  sql += ' ORDER BY CASE WHEN email IS NOT NULL AND email != \'\' AND email NOT LIKE \'%@h2houseofhealth.local\' AND email NOT LIKE \'%@h2health.local\' THEN 0 ELSE 1 END, id ASC LIMIT 1';
+  return db.prepare(sql).get(...params);
 }
 
 function getLatestSignupOtp(mobile) {
@@ -1143,9 +1177,7 @@ app.post('/api/auth/signup/send-whatsapp-otp', async (req, res) => {
     return res.status(400).json({ message: 'Enter a valid mobile number with country code.' });
   }
 
-  const existingUser = db.prepare(
-    'SELECT id FROM users WHERE mobile IN (?, ?, ?) AND mobile_verified = 1 LIMIT 1'
-  ).get(...getMobileVariants(mobile));
+  const existingUser = findUserByMobile(mobile);
   if (existingUser) {
     return res.status(409).json({ message: 'mobile number already registered' });
   }
@@ -1166,7 +1198,7 @@ app.post('/api/auth/signup/verify', (req, res) => {
   if (!mobile || !/^\d{6}$/.test(otp) || !name) {
     return res.status(400).json({ message: 'mobile, otp, and name are required' });
   }
-  if (db.prepare('SELECT id FROM users WHERE mobile IN (?, ?, ?) AND mobile_verified = 1 LIMIT 1').get(...getMobileVariants(mobile))) {
+  if (findUserByMobile(mobile)) {
     return res.status(409).json({ message: 'mobile number already registered' });
   }
 
@@ -1416,9 +1448,7 @@ app.post('/api/auth/send-whatsapp-otp', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Enter a valid mobile number with country code.' });
   }
 
-  const user = db
-    .prepare('SELECT id, role FROM users WHERE mobile IN (?, ?, ?) ORDER BY id DESC LIMIT 1')
-    .get(...getMobileVariants(mobile));
+  const user = findUserByMobile(mobile);
   if (!user || String(user.role || 'user').toLowerCase() === 'admin') {
     return res.status(404).json({ success: false, message: 'Account not found. Please sign up first.' });
   }
@@ -1487,14 +1517,13 @@ app.post('/api/auth/verify-whatsapp-otp', (req, res) => {
     return res.status(401).json({ message: 'Invalid OTP.' });
   }
 
-  const userRow = db
-    .prepare('SELECT id FROM users WHERE mobile IN (?, ?, ?) ORDER BY id DESC LIMIT 1')
-    .get(...getMobileVariants(mobile));
+  const userRow = findUserByMobile(mobile);
   if (!userRow) {
     return res.status(404).json({ message: 'Account not found' });
   }
 
   db.prepare('UPDATE login_otps SET verified = 1 WHERE id = ?').run(latestOtp.id);
+  db.prepare('UPDATE users SET mobile_verified = 1 WHERE id = ?').run(userRow.id);
   const syncedUser = syncMembershipForUser({ userId: Number(userRow.id) }) || getUserProfileById(Number(userRow.id));
   if (!syncedUser || String(syncedUser.role || 'user').toLowerCase() === 'admin') {
     return res.status(404).json({ message: 'Account not found' });
@@ -1834,8 +1863,28 @@ app.put('/api/profile', requireAuth, (req, res) => {
     return res.status(400).json({ message: 'invalid gender' });
   }
 
-  if (mobile && !/^[0-9+\-\s()]{7,20}$/.test(mobile)) {
-    return res.status(400).json({ message: 'invalid mobile number' });
+  if (mobile) {
+    if (!/^[0-9+\-\s()]{7,20}$/.test(mobile)) {
+      return res.status(400).json({ message: 'invalid mobile number' });
+    }
+    const mobileOwner = findUserByMobile(mobile, req.user.id);
+    if (mobileOwner) {
+      return res.status(409).json({ message: 'Mobile number is already linked to another account' });
+    }
+  }
+
+  const hasEmailField = Object.prototype.hasOwnProperty.call(req.body || {}, 'email');
+  const email = hasEmailField ? String(req.body?.email || '').trim().toLowerCase() : '';
+  if (hasEmailField && email) {
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ message: 'invalid email address' });
+    }
+    const emailOwner = db
+      .prepare('SELECT id FROM users WHERE lower(email) = ? AND id != ? LIMIT 1')
+      .get(email, req.user.id);
+    if (emailOwner) {
+      return res.status(409).json({ message: 'Email address is already linked to another account' });
+    }
   }
 
   if (hasAvatarField && avatarUrl && !/^https?:\/\/.+/i.test(avatarUrl) && !avatarUrl.startsWith('/uploads/')) {
@@ -1846,15 +1895,24 @@ app.put('/api/profile', requireAuth, (req, res) => {
     .prepare('SELECT avatar_url AS avatarUrl FROM users WHERE id = ?')
     .get(req.user.id);
   const nextAvatarUrl = hasAvatarField ? (avatarUrl || null) : (current?.avatarUrl || null);
+  const normalizedMobile = mobile ? (normalizeWhatsAppMobile(mobile) || mobile) : null;
+
+  const updateFields = ['name = ?', 'age = ?', 'gender = ?', 'mobile = ?', 'avatar_url = ?'];
+  const updateParams = [name, age, gender || null, normalizedMobile, nextAvatarUrl];
+  if (hasEmailField && email) {
+    updateFields.push('email = ?');
+    updateParams.push(email);
+  }
+  updateParams.push(req.user.id);
 
   db.prepare(
     `UPDATE users
-     SET name = ?, age = ?, gender = ?, mobile = ?, avatar_url = ?
+     SET ${updateFields.join(', ')}
      WHERE id = ?`
-  ).run(name, age, gender || null, mobile || null, nextAvatarUrl, req.user.id);
+  ).run(...updateParams);
 
   const profile = db.prepare(
-    `SELECT id, name, role, age, gender, mobile, avatar_url AS avatarUrl,
+    `SELECT id, name, email, role, age, gender, mobile, avatar_url AS avatarUrl,
             membership_status AS membershipStatus, membership_plan AS membershipPlan,
             membership_started_at AS membershipStartedAt, membership_expires_at AS membershipExpiresAt,
             membership_people_count AS membershipPeopleCount
@@ -2588,14 +2646,22 @@ app.patch('/api/admin/users/:id', requireAuth, requireAdmin, (req, res) => {
 
   if (nextEmail !== existing.email) {
     const emailConflict = db
-      .prepare('SELECT id FROM users WHERE email = ? AND id <> ?')
+      .prepare('SELECT id FROM users WHERE lower(email) = ? AND id <> ?')
       .get(nextEmail, userId);
     if (emailConflict) {
       return res.status(409).json({ message: 'That email is already in use.' });
     }
   }
 
-  db.prepare('UPDATE users SET email = ?, mobile = ? WHERE id = ?').run(nextEmail, nextMobile || null, userId);
+  if (nextMobile && nextMobile !== existing.mobile) {
+    const mobileConflict = findUserByMobile(nextMobile, userId);
+    if (mobileConflict) {
+      return res.status(409).json({ message: 'That mobile number is already in use.' });
+    }
+  }
+
+  const normalizedNextMobile = nextMobile ? (normalizeWhatsAppMobile(nextMobile) || nextMobile) : null;
+  db.prepare('UPDATE users SET email = ?, mobile = ? WHERE id = ?').run(nextEmail, normalizedNextMobile, userId);
 
   return res.json({
     user: {
@@ -3129,6 +3195,8 @@ app.get('/api/admin/coupons', requireAuth, requireAdmin, (req, res) => {
               c.description,
               c.discount_type AS discountType,
               c.discount_value AS discountValue,
+              c.commission_type AS commissionType,
+              c.commission_rate AS commissionRate,
               c.commission_per_order_paise AS commissionPerOrderPaise,
               c.commission_by_product_json AS commissionByProductJson,
               c.applies_to AS appliesTo,
@@ -3341,19 +3409,26 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   let code = normalizeCouponCode(req.body?.code);
   const description = String(req.body?.description || '').trim();
   const festivalName = String(req.body?.festivalName || '').trim();
-  const discountType = 'flat';
-  const discountValue = Number(req.body?.discountValue || 0);
+  const discountType = String(req.body?.discountType || 'flat').trim().toLowerCase() === 'percentage' ? 'percentage' : 'flat';
+  const discountValue = Number(req.body?.discountValue ?? req.body?.discount ?? 0);
   const couponCategory = String(req.body?.couponCategory || '').trim().toLowerCase();
+  const commissionType = String(req.body?.commissionType || 'flat').trim().toLowerCase() === 'percentage' ? 'percentage' : 'flat';
+  const commissionRate = commissionType === 'percentage'
+    ? Math.max(0, Math.min(100, Number(req.body?.commissionRate ?? req.body?.commissionValue ?? req.body?.commissionPerOrder ?? 0)))
+    : 0;
   const commissionPerOrderPaise = couponCategory && couponCategory !== 'influencer'
     ? 0
-    : Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
+    : commissionType === 'percentage'
+      ? 0
+      : Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? req.body?.commissionValue ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
   const commissionByProductJson = normalizeCommissionByProduct(req.body?.commissionByProduct);
   const appliesToRaw = String(req.body?.appliesTo || 'all').trim().toLowerCase();
   const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
+  const categoryAppliesTo = appliesToRaw.match(/^category:([a-z0-9_\-,]+)$/);
   const productIds = productAppliesTo
     ? [...new Set(productAppliesTo[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
     : [];
-  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo ? appliesToRaw : 'all';
+  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo || categoryAppliesTo ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || '').trim().toLowerCase();
   const influencerId = Number(req.body?.influencerId || req.body?.influencer_id || 0);
   const sendEmail = req.body?.sendEmail !== false;
@@ -3391,7 +3466,10 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   if (!Number.isFinite(discountValue) || discountValue <= 0) {
     return res.status(400).json({ message: 'discountValue must be greater than 0.' });
   }
-  if (discountValue > 10000000) {
+  if (discountType === 'percentage' && discountValue > 100) {
+    return res.status(400).json({ message: 'Percentage discount cannot exceed 100%.' });
+  }
+  if (discountType === 'flat' && discountValue > 10000000) {
     return res.status(400).json({ message: 'discountValue is too large.' });
   }
   if (recipientEmail && !isValidEmail(recipientEmail)) {
@@ -3451,14 +3529,16 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
 
   db.prepare(
     `INSERT INTO coupons (
-      code, description, discount_type, discount_value, commission_per_order_paise, commission_by_product_json, applies_to, max_redemptions, per_user_limit, expires_at, active,
+      code, description, discount_type, discount_value, commission_type, commission_rate, commission_per_order_paise, commission_by_product_json, applies_to, max_redemptions, per_user_limit, expires_at, active,
       coupon_type, assigned_user_email, used_by, is_active, valid_from, valid_till,
       recipient_email, recipient_name, festival_name, emailed_at, email_status, email_error, portal, influencer_id, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(code) DO UPDATE SET
       description = excluded.description,
       discount_type = excluded.discount_type,
       discount_value = excluded.discount_value,
+      commission_type = excluded.commission_type,
+      commission_rate = excluded.commission_rate,
       commission_per_order_paise = excluded.commission_per_order_paise,
       commission_by_product_json = excluded.commission_by_product_json,
       applies_to = excluded.applies_to,
@@ -3482,6 +3562,8 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     description,
     discountType,
     discountValue,
+    commissionType,
+    commissionRate,
     commissionPerOrderPaise,
     commissionByProductJson,
     appliesTo,
@@ -3572,19 +3654,26 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   let code = normalizeCouponCode(req.body?.code || existing.code);
   const description = String(req.body?.description || existing.description || '').trim();
   const festivalName = String(req.body?.festivalName || existing.festivalName || '').trim();
-  const discountType = String(req.body?.discountType || existing.discountType || 'flat').trim().toLowerCase() || 'flat';
-  const discountValue = Number(req.body?.discountValue ?? existing.discountValue ?? 0);
+  const discountType = String(req.body?.discountType || existing.discountType || 'flat').trim().toLowerCase() === 'percentage' ? 'percentage' : 'flat';
+  const discountValue = Number(req.body?.discountValue ?? req.body?.discount ?? existing.discountValue ?? 0);
   const couponCategory = String(req.body?.couponCategory || '').trim().toLowerCase();
+  const commissionType = String(req.body?.commissionType || existing.commissionType || 'flat').trim().toLowerCase() === 'percentage' ? 'percentage' : 'flat';
+  const commissionRate = commissionType === 'percentage'
+    ? Math.max(0, Math.min(100, Number(req.body?.commissionRate ?? req.body?.commissionValue ?? req.body?.commissionPerOrder ?? existing.commissionRate ?? 0)))
+    : 0;
   const commissionPerOrderPaise = couponCategory && couponCategory !== 'influencer'
     ? 0
-    : Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? existing.commissionPerOrderPaise ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
+    : commissionType === 'percentage'
+      ? 0
+      : Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? req.body?.commissionValue ?? existing.commissionPerOrderPaise ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
   const commissionByProductJson = normalizeCommissionByProduct(req.body?.commissionByProduct, existing.commissionByProduct);
   const appliesToRaw = String(req.body?.appliesTo || existing.appliesTo || 'all').trim().toLowerCase();
   const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
+  const categoryAppliesTo = appliesToRaw.match(/^category:([a-z0-9_\-,]+)$/);
   const productIds = productAppliesTo
     ? [...new Set(productAppliesTo[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
     : [];
-  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo ? appliesToRaw : 'all';
+  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo || categoryAppliesTo ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || existing.recipientEmail || '').trim().toLowerCase();
   const recipientName = String(req.body?.recipientName || existing.recipientName || '').trim();
   const influencerIdRaw = Object.prototype.hasOwnProperty.call(req.body || {}, 'influencerId')
@@ -3639,6 +3728,12 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   if (!Number.isFinite(discountValue) || discountValue <= 0) {
     return res.status(400).json({ message: 'discountValue must be greater than 0.' });
   }
+  if (discountType === 'percentage' && discountValue > 100) {
+    return res.status(400).json({ message: 'Percentage discount cannot exceed 100%.' });
+  }
+  if (discountType === 'flat' && discountValue > 10000000) {
+    return res.status(400).json({ message: 'discountValue is too large.' });
+  }
   if (couponType === 'private' && !recipientEmail) {
     return res.status(400).json({ message: 'recipientEmail is required for private coupons.' });
   }
@@ -3674,6 +3769,8 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
         description = ?,
         discount_type = ?,
         discount_value = ?,
+        commission_type = ?,
+        commission_rate = ?,
         commission_per_order_paise = ?,
         commission_by_product_json = ?,
         applies_to = ?,
@@ -3697,6 +3794,8 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
       description,
       discountType || 'flat',
       discountValue,
+      commissionType || 'flat',
+      commissionRate || 0,
       commissionPerOrderPaise,
       commissionByProductJson,
       appliesTo,
@@ -8121,16 +8220,19 @@ app.post('/api/payments/create-cart-order', requireAuth, async (req, res) => {
   }
 
   const subtotalAmountPaise = Math.round(Number(paymentSummary.subtotalAmountInr ?? paymentSummary.totalAmountInr ?? 0) * 100);
-  const couponResult = validateCouponForUser({
-    code: req.body?.couponCode,
-    userId: req.user.id,
-    appliesTo: 'services',
-    portal: 'booking',
-    subtotalAmountPaise,
-    singleBookingAmountPaise: getSingleBookingCouponBasePaise(paymentSummary),
-  });
-  if (couponResult.error) {
-    return res.status(400).json({ message: couponResult.error });
+  let couponResult = req.body?.couponCode
+    ? validateCouponForUser({
+        code: req.body?.couponCode,
+        userId: req.user.id,
+        appliesTo: 'services',
+        portal: 'booking',
+        subtotalAmountPaise,
+        singleBookingAmountPaise: getSingleBookingCouponBasePaise(paymentSummary),
+      })
+    : { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotalAmountPaise };
+  if (couponResult?.error) {
+    console.warn('[Booking] Invalid or expired coupon during cart order creation, proceeding without discount:', couponResult.error);
+    couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotalAmountPaise };
   }
   const taxableAmountPaise = Number(couponResult.finalAmountPaise || subtotalAmountPaise);
   const amountInPaise = Math.max(100, taxableAmountPaise);
@@ -11115,6 +11217,8 @@ function mapCouponRow(row) {
     description: row.description || '',
     discountType: row.discountType || 'flat',
     discountValue: Number(row.discountValue || 0),
+    commissionType: row.commissionType || 'flat',
+    commissionRate: Number(row.commissionRate || 0),
     commissionPerOrderPaise: Math.max(0, Number(row.commissionPerOrderPaise || 0)),
     commissionByProduct: parseCommissionByProduct(row.commissionByProductJson),
     appliesTo: row.appliesTo || 'all',
@@ -11174,6 +11278,8 @@ function getCouponByCode(code) {
               c.description,
               c.discount_type AS discountType,
               c.discount_value AS discountValue,
+              c.commission_type AS commissionType,
+              c.commission_rate AS commissionRate,
               c.commission_per_order_paise AS commissionPerOrderPaise,
               c.commission_by_product_json AS commissionByProductJson,
               c.applies_to AS appliesTo,
@@ -11218,6 +11324,8 @@ function getCouponById(couponId) {
               c.description,
               c.discount_type AS discountType,
               c.discount_value AS discountValue,
+              c.commission_type AS commissionType,
+              c.commission_rate AS commissionRate,
               c.commission_per_order_paise AS commissionPerOrderPaise,
               c.commission_by_product_json AS commissionByProductJson,
               c.applies_to AS appliesTo,
@@ -11284,11 +11392,12 @@ function calculateCouponDiscountPaise(coupon, subtotalAmountPaise) {
   const subtotal = Math.max(0, Math.round(Number(subtotalAmountPaise || 0)));
   if (!coupon || subtotal <= 0) return 0;
 
+  const discountType = String(coupon.discountType || 'flat').toLowerCase();
   let discountPaise = 0;
-  if (coupon.discountType === 'flat') {
-    discountPaise = Math.round(Number(coupon.discountValue || 0) * 100);
-  } else {
+  if (discountType === 'percentage' || discountType === '%') {
     discountPaise = Math.round(subtotal * (Number(coupon.discountValue || 0) / 100));
+  } else {
+    discountPaise = Math.round(Number(coupon.discountValue || 0) * 100);
   }
 
   if (!Number.isFinite(discountPaise) || discountPaise <= 0) return 0;
@@ -11326,19 +11435,35 @@ function validateCouponForUser({ code, userId, appliesTo, productIds = [], produ
   }
   const couponAppliesTo = String(coupon.appliesTo || 'all').trim().toLowerCase();
   const productRestriction = couponAppliesTo.match(/^product:([\d,]+)$/);
+  const categoryRestriction = couponAppliesTo.match(/^category:([a-z0-9_\-,]+)$/);
   const restrictedProductIds = productRestriction
     ? [...new Set(productRestriction[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
     : [];
+
+  if (categoryRestriction) {
+    const targetCategories = categoryRestriction[1].split(',').map((c) => c.trim().toLowerCase()).filter(Boolean);
+    if (targetCategories.length > 0) {
+      try {
+        const placeholders = targetCategories.map(() => '?').join(',');
+        const catRows = db.prepare(`SELECT id FROM merch_products WHERE LOWER(category) IN (${placeholders})`).all(...targetCategories);
+        catRows.forEach((r) => restrictedProductIds.push(Number(r.id)));
+      } catch (err) {
+        console.warn('[Merch] Failed to resolve category products:', err?.message || err);
+      }
+    }
+  }
+
+  const hasRestriction = Boolean(productRestriction || categoryRestriction);
   const productIdSet = new Set((Array.isArray(productIds) ? productIds : [productIds]).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0));
-  const appliesToProduct = productRestriction && restrictedProductIds.some((id) => productIdSet.has(id));
+  const appliesToProduct = hasRestriction && restrictedProductIds.some((id) => productIdSet.has(id));
   if (!['all', appliesTo].includes(couponAppliesTo) && !appliesToProduct) {
     return { error: 'This coupon is not valid for this payment.' };
   }
-  const restrictedProductSubtotalPaise = productRestriction
+  const restrictedProductSubtotalPaise = hasRestriction
     ? Math.max(0, Math.round(restrictedProductIds.reduce((sum, id) => sum + Number(productLineTotals?.[id] || 0), 0) || productSubtotalAmountPaise || 0))
     : 0;
   if (appliesToProduct && restrictedProductSubtotalPaise <= 0) {
-    return { error: 'This coupon is only valid when the selected product is in the cart.' };
+    return { error: categoryRestriction ? 'This coupon is only valid when an item from the selected category is in the cart.' : 'This coupon is only valid when the selected product is in the cart.' };
   }
   const assignedEmail = String(coupon.assignedUserEmail || coupon.recipientEmail || '').trim().toLowerCase();
   if (coupon.couponType === 'private' || assignedEmail) {
@@ -11515,8 +11640,15 @@ function resolveAdminCustomerContext({ userId, customerName, customerEmail, cust
 
     const nextName = normalizedName || existingUser.name;
     const nextPhone = normalizedPhone || existingUser.mobile || '';
-    if (nextName !== existingUser.name || nextPhone !== (existingUser.mobile || '')) {
-      db.prepare('UPDATE users SET name = ?, mobile = ? WHERE id = ?').run(nextName, nextPhone, existingUser.id);
+    if (nextName !== existingUser.name || (nextPhone && nextPhone !== (existingUser.mobile || ''))) {
+      let finalPhone = existingUser.mobile || '';
+      if (nextPhone && nextPhone !== existingUser.mobile) {
+        const phoneConflict = findUserByMobile(nextPhone, existingUser.id);
+        if (!phoneConflict) {
+          finalPhone = nextPhone;
+        }
+      }
+      db.prepare('UPDATE users SET name = ?, mobile = ? WHERE id = ?').run(nextName, finalPhone, existingUser.id);
       existingUser = getUserById(existingUser.id);
     }
     return { user: existingUser, existingUser: true };
@@ -16104,6 +16236,12 @@ function migrate() {
   }
   if (hasTable('coupons') && !hasColumn('coupons', 'commission_per_order_paise')) {
     db.exec('ALTER TABLE coupons ADD COLUMN commission_per_order_paise INTEGER NOT NULL DEFAULT 0');
+  }
+  if (hasTable('coupons') && !hasColumn('coupons', 'commission_type')) {
+    db.exec("ALTER TABLE coupons ADD COLUMN commission_type TEXT NOT NULL DEFAULT 'flat'");
+  }
+  if (hasTable('coupons') && !hasColumn('coupons', 'commission_rate')) {
+    db.exec('ALTER TABLE coupons ADD COLUMN commission_rate REAL NOT NULL DEFAULT 0');
   }
   if (hasTable('coupons') && !hasColumn('coupons', 'commission_by_product_json')) {
     db.exec("ALTER TABLE coupons ADD COLUMN commission_by_product_json TEXT NOT NULL DEFAULT '{}'");

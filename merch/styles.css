@@ -1363,6 +1363,7 @@ body.is-auth-loading .merch-auth-cta {
 
 .influencer-chart {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 10px;
 }
 
@@ -5823,8 +5824,17 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
   background: var(--primary-dark);
 }
 
+.tracking-step.is-cancelled .tracking-step__marker {
+  background: #dc2626 !important;
+  color: #ffffff !important;
+}
+
 .tracking-step.is-current .tracking-step__marker {
   box-shadow: 0 0 0 5px rgba(200, 101, 45, 0.13);
+}
+
+.tracking-step.is-cancelled.is-current .tracking-step__marker {
+  box-shadow: 0 0 0 5px rgba(220, 38, 38, 0.16) !important;
 }
 
 .tracking-step__marker svg {
@@ -5846,6 +5856,25 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
   padding: 10px 14px 12px;
   border-radius: 8px;
   background: rgba(200, 101, 45, 0.08);
+}
+
+.tracking-step.is-cancelled .tracking-step__body {
+  background: rgba(220, 38, 38, 0.07) !important;
+}
+
+.tracking-step.is-cancelled .tracking-step__body h3 {
+  color: #dc2626 !important;
+}
+
+.tracking-step__cancelled-note {
+  color: #b91c1c !important;
+  font-weight: 600 !important;
+}
+
+.tracking-status-badge--cancelled {
+  background: rgba(220, 38, 38, 0.1) !important;
+  color: #dc2626 !important;
+  border: 1px solid rgba(220, 38, 38, 0.22) !important;
 }
 
 .tracking-step__body h3 {

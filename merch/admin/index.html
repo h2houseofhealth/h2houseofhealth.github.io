@@ -65,13 +65,28 @@
               <span aria-hidden="true">&#128276;</span>
               <span id="notificationBadgeCount">0</span>
             </div>
-            <button class="admin-profile" type="button" data-action="open-profile" aria-label="Open admin profile">
+            <button class="admin-profile" type="button" data-action="open-profile" aria-label="Open admin profile" aria-expanded="false" aria-controls="adminProfileDropdown">
               <span class="admin-profile__avatar" id="profileAvatar">AH</span>
               <span class="admin-profile__meta">
                 <strong>Admin House</strong>
                 <small>admin@h2health.local</small>
               </span>
+              <svg class="admin-profile__chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
             </button>
+            <div class="admin-profile-dropdown" id="adminProfileDropdown" data-profile-menu hidden>
+              <div class="admin-profile-dropdown__identity">
+                <span class="admin-profile-dropdown__avatar">AH</span>
+                <div>
+                  <strong>Admin House</strong>
+                  <span>admin@h2health.local</span>
+                  <small>Store administrator</small>
+                </div>
+              </div>
+              <div class="admin-profile-dropdown__actions">
+                <button type="button" data-action="change-password">Change Password</button>
+                <button class="admin-profile-dropdown__logout" type="button" data-action="logout">Logout</button>
+              </div>
+            </div>
           </div>
         </header>
 
@@ -98,6 +113,6 @@
 
     <div class="admin-toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
 
-    <script src="admin.js?v=20260804-1"></script>
+    <script src="admin.js?v=20260930-customers-date-max-2"></script>
   </body>
 </html>

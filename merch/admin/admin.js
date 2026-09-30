@@ -72,6 +72,10 @@
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
   }
 
+  function getLocalDateInputMax() {
+    return toISODate(new Date());
+  }
+
   function daysAgo(days) {
     const date = new Date(today);
     date.setDate(date.getDate() - days);
@@ -518,6 +522,38 @@
     return type.includes('percent') || type === '%' ? `${value}% off` : `₹${value.toLocaleString('en-IN')} off`;
   }
 
+  function couponCommissionLabel(coupon) {
+    const type = String(coupon?.commissionType || coupon?.commission_type || 'flat').toLowerCase();
+    if (type.includes('percent') || type === '%') {
+      const rate = Number(coupon?.commissionRate ?? coupon?.commission_rate ?? 0);
+      return `${rate}%`;
+    }
+    const paise = Number(coupon?.commissionPerOrderPaise ?? coupon?.commission_per_order_paise ?? 0);
+    const rupees = paise > 0 ? Math.round(paise / 100) : Number(coupon?.commissionPerOrder ?? 0);
+    return `₹${rupees.toLocaleString('en-IN')}`;
+  }
+
+  function formatCouponAppliesToLabel(appliesTo) {
+    const raw = String(appliesTo || 'merch').trim().toLowerCase();
+    if (['all', 'merch'].includes(raw)) return 'All Merch Products';
+    const catMatch = raw.match(/^category:([a-z0-9_\-,]+)$/);
+    if (catMatch) {
+      const slugs = catMatch[1].split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+      const names = slugs.map((slug) => {
+        const found = (Array.isArray(state.categories) ? state.categories : []).find((c) => String(c.slug || c.id || '').toLowerCase() === slug);
+        if (found?.name) return found.name;
+        if (slug === 't-shirt') return 'T-Shirts';
+        return slug.charAt(0).toUpperCase() + slug.slice(1);
+      });
+      return names.length ? names.join(', ') : 'Categories';
+    }
+    const prodMatch = raw.match(/^product:([\d,]+)$/);
+    if (prodMatch) {
+      return `Specific Products (${prodMatch[1].split(',').length})`;
+    }
+    return raw;
+  }
+
   function getCouponRedemptionCount(coupon) {
     return Number(coupon?.totalRedemptions || coupon?.orderRedemptions || coupon?.redemptions || coupon?.usageCount || 0);
   }
@@ -566,8 +602,7 @@
       const expiry = coupon.validTill || coupon.expiresAt || coupon.expiry;
       const active = Number(coupon.active ?? coupon.isActive ?? 0) === 1;
       return `<article class="admin-assigned-coupon">
-        <div class="admin-assigned-coupon__head"><strong>${escapeHtml(coupon.code)}</strong><span class="admin-badge ${active ? 'admin-badge--active' : 'admin-badge--inactive'}">${active ? 'Active' : 'Inactive'}</span></div>
-        <div class="admin-assigned-coupon__meta"><span>Discount value <strong>${escapeHtml(couponDiscountLabel(coupon))}</strong></span><span>Used <strong>${usage} / ${escapeHtml(String(limit))}</strong></span><span>Expires <strong>${escapeHtml(expiry ? dateLabel(expiry) : 'No expiry')}</strong></span></div>
+        <div class="admin-assigned-coupon__meta"><span>Discount <strong>${escapeHtml(couponDiscountLabel(coupon))}</strong></span><span>Commission <strong>${escapeHtml(couponCommissionLabel(coupon))}</strong></span><span>Applies <strong>${escapeHtml(formatCouponAppliesToLabel(coupon.appliesTo))}</strong></span><span>Used <strong>${usage} / ${escapeHtml(String(limit))}</strong></span><span>Expires <strong>${escapeHtml(expiry ? dateLabel(expiry) : 'No expiry')}</strong></span></div>
       </article>`;
     }).join('')}</div>`;
   }
@@ -579,9 +614,22 @@
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val);
   }
 
+  function getInfluencerMonthStats(influencer, month = '') {
+    if (!influencer) return { orders: 0, revenue: 0, commission: 0, couponUsage: 0 };
+    if (!month) {
+      return {
+        orders: Number(influencer.totalOrders || 0),
+        revenue: Number(influencer.revenue || 0),
+        commission: Number(influencer.commission || 0),
+        couponUsage: Number(influencer.couponUsage || 0),
+      };
+    }
+    return (influencer.monthlySales || []).find((row) => row.month === month) || { orders: 0, revenue: 0, commission: 0, couponUsage: 0 };
+  }
+
   function renderPayCommissionModal(influencer) {
     if (!influencer) return;
-    const stats = getMonthStats(influencer);
+    const stats = getInfluencerMonthStats(influencer);
     const commissionEarned = Math.max(0, Number(stats.commission || 0));
     const commissionPaid = Math.max(0, Number(influencer.paidCommission || 0));
     const commissionBalance = Math.max(0, commissionEarned - commissionPaid);
@@ -710,8 +758,14 @@
       submitBtn.textContent = 'Processing & Sending Invoice...';
     }
 
+    const targetInfluencerId = Number(influencerId || form.dataset.influencerId);
+    if (!targetInfluencerId) {
+      toast('Influencer ID missing', 'Unable to determine influencer for payment.', 'danger');
+      return;
+    }
+
     try {
-      const result = await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencerId)}/payments`, {
+      const result = await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(targetInfluencerId)}/payments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -749,11 +803,119 @@
     }
   }
 
-  function renderCommissionCorrectionModal(influencer) {
+  async function loadSecurityQuestion(force = false) {
+    if (state.securityQuestion && !force) return state.securityQuestion;
+    try {
+      const data = await apiRequest('/api/merch/admin/security-question');
+      state.securityQuestion = data;
+      return data;
+    } catch (err) {
+      console.warn('[Admin] Failed to load security question:', err);
+      return { isConfigured: false, question: 'First name of H2 House of Health..??' };
+    }
+  }
+
+  function renderCreateSecurityModal(targetInfluencer) {
+    const defaultQuestion = state.securityQuestion?.question || 'First name of H2 House of Health..??';
+    openModal({
+      title: 'Create Security',
+      subtitle: 'Define Security Verification for Commission Authorization',
+      size: 'sm',
+      body: `
+        <div class="admin-create-security-modal">
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;padding:12px 14px;border-radius:8px;margin-bottom:16px;">
+            <p style="margin:0;font-size:13px;color:#1e40af;font-weight:600;">🔒 Security Question Setup</p>
+            <p style="margin:4px 0 0;font-size:12px;color:#1d4ed8;line-height:1.45;">Define the answer to the security question below. This answer will be verified whenever an admin adjusts commission.</p>
+          </div>
+
+          <form class="admin-form" id="createSecurityForm" onsubmit="return false;">
+            <div class="admin-form__grid">
+              <div class="admin-field admin-field--wide">
+                <span style="font-weight:600;font-size:13px;color:#1e293b;display:block;margin-bottom:6px;">Security Question</span>
+                <div style="background:#f8fafc;border:1px solid #cbd5e1;padding:10px 14px;border-radius:6px;font-size:14px;font-weight:600;color:#0f172a;">
+                  ${escapeHtml(defaultQuestion)}
+                </div>
+              </div>
+
+              <label class="admin-field admin-field--wide" style="margin-top:6px;">
+                <span>Define Answer <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
+                <input class="admin-input" id="definedSecurityAnswerInput" name="definedAnswer" type="text" placeholder="Enter answer..." required autocomplete="off" />
+                <small class="admin-field__hint">Enter the answer defined by admin for this security question.</small>
+              </label>
+            </div>
+          </form>
+        </div>
+      `,
+      footer: `
+        <button class="admin-btn admin-btn--ghost" type="button" data-action="cancel-create-security" data-influencer-id="${targetInfluencer?.id ? escapeHtml(targetInfluencer.id) : ''}">Cancel</button>
+        <button class="admin-btn admin-btn--primary" type="button" data-action="submit-create-security" data-influencer-id="${targetInfluencer?.id ? escapeHtml(targetInfluencer.id) : ''}">Save Security Answer</button>
+      `,
+    });
+
+    setTimeout(() => {
+      document.getElementById('definedSecurityAnswerInput')?.focus();
+    }, 100);
+  }
+
+  async function handleCreateSecuritySubmit(targetInfluencerId) {
+    const input = document.getElementById('definedSecurityAnswerInput');
+    const answer = String(input?.value || '').trim();
+    if (!answer) {
+      toast('Answer required', 'Please enter an answer for the security question.', 'warning');
+      input?.focus();
+      return;
+    }
+
+    const saveBtn = els.adminModalDialog?.querySelector('[data-action="submit-create-security"]');
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+    }
+
+    try {
+      const question = state.securityQuestion?.question || 'First name of H2 House of Health..??';
+      await apiRequest('/api/merch/admin/security-question', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, answer }),
+      });
+
+      state.securityQuestion = {
+        isConfigured: true,
+        question,
+      };
+
+      toast('Security Defined', 'Security answer has been configured successfully.', 'success');
+
+      if (targetInfluencerId) {
+        const inf = state.influencers.find((item) => Number(item.id) === Number(targetInfluencerId));
+        if (inf) {
+          await renderCommissionCorrectionModal(inf);
+          return;
+        }
+      }
+      closeModal();
+    } catch (err) {
+      toast('Failed to save security', err.message || 'Could not save security answer.', 'danger');
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Security Answer';
+      }
+    }
+  }
+
+  async function renderCommissionCorrectionModal(influencer) {
     if (!influencer) return;
+    const stats = getInfluencerMonthStats(influencer);
     const currentPaid = Number(influencer.paidCommission || 0);
-    const commissionEarned = Math.max(0, Number(influencer.commission || 0));
+    const commissionEarned = Math.max(0, Number(influencer.commission ?? stats.commission ?? 0));
     const balanceRemaining = Math.max(0, commissionEarned - currentPaid);
+    const maxNewAttr = commissionEarned > 0 ? `max="${Math.floor(commissionEarned / 100)}"` : '';
+    const maxBalAttr = balanceRemaining > 0 ? `max="${Math.floor(balanceRemaining / 100)}"` : '';
+
+    const secData = await loadSecurityQuestion();
+    const isConfigured = Boolean(secData?.isConfigured);
+    const questionText = secData?.question || 'First name of H2 House of Health..??';
 
     openModal({
       title: `Adjust Commission: ${influencer.name}`,
@@ -763,7 +925,7 @@
         <div class="admin-commission-correction-modal">
           <div style="background:#fef2f2;border:1px solid #fecaca;padding:12px 14px;border-radius:8px;margin-bottom:16px;">
             <p style="margin:0;font-size:13px;color:#991b1b;font-weight:600;">🔒 Secured Admin Authorization Required</p>
-            <p style="margin:4px 0 0;font-size:12px;color:#b91c1c;line-height:1.45;">Commission Paid is locked after payment. Any correction must be accompanied by an audit reason and admin password verification.</p>
+            <p style="margin:4px 0 0;font-size:12px;color:#b91c1c;line-height:1.45;">Commission Paid is locked after payment. Any correction must be accompanied by an audit reason and security question verification.</p>
           </div>
 
           <form class="admin-form" id="commissionCorrectionForm" data-influencer-id="${escapeHtml(influencer.id)}" data-current-paid-paise="${currentPaid}" onsubmit="return false;">
@@ -775,13 +937,13 @@
 
               <label class="admin-field admin-field--wide">
                 <span>Corrected Amount (₹)</span>
-                <input class="admin-input" name="newAmount" type="number" min="0" max="${Math.floor(commissionEarned / 100)}" step="1" value="${Math.round(currentPaid / 100)}" placeholder="0" />
+                <input class="admin-input" name="newAmount" type="number" min="0" ${maxNewAttr} step="1" value="${Math.round(currentPaid / 100)}" placeholder="0" />
                 <small class="admin-field__hint">Use this for a manual cumulative correction. Leave it unchanged when using Pay Balance Amount.</small>
               </label>
 
               <label class="admin-field admin-field--wide">
                 <span>Pay Balance Amount (₹)</span>
-                <input class="admin-input" name="balanceAmount" type="number" min="0" max="${Math.floor(balanceRemaining / 100)}" step="1" value="0" placeholder="0" />
+                <input class="admin-input" name="balanceAmount" type="number" min="0" ${maxBalAttr} step="1" value="0" placeholder="0" />
                 <small class="admin-field__hint">Adds this amount to the current Commission Paid. Remaining balance: ${money(balanceRemaining)}.</small>
               </label>
 
@@ -791,11 +953,37 @@
                 <small class="admin-field__hint">Required for accounting and compliance audit logging.</small>
               </label>
 
-              <label class="admin-field admin-field--wide">
-                <span>Admin Security Password <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
-                <input class="admin-input" name="adminPassword" type="password" placeholder="Enter admin password to authorize" required autocomplete="current-password" />
-                <small class="admin-field__hint">Enter your admin password to authorize this correction.</small>
-              </label>
+              ${!isConfigured ? `
+                <div class="admin-field admin-field--wide" style="background:#f8fafc;border:1px dashed #cbd5e1;padding:14px 16px;border-radius:8px;margin-top:6px;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+                    <div>
+                      <p style="margin:0;font-weight:600;font-size:13px;color:#1e293b;">
+                        <i class="ri-shield-keyhole-line" style="color:#ef4444;margin-right:6px;"></i>Security Not Created
+                      </p>
+                      <p style="margin:4px 0 0;font-size:12px;color:#64748b;">
+                        Create security first to authorize commission adjustments.
+                      </p>
+                    </div>
+                    <button type="button" class="admin-btn admin-btn--primary admin-btn--sm" data-action="create-security" data-influencer-id="${escapeHtml(influencer.id)}" style="display:inline-flex;align-items:center;gap:6px;">
+                      <i class="ri-shield-check-line"></i> Create Security
+                    </button>
+                  </div>
+                </div>
+              ` : `
+                <label class="admin-field admin-field--wide" style="background:#f8fafc;border:1px solid #e2e8f0;padding:14px 16px;border-radius:8px;margin-top:6px;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                    <span style="font-weight:600;font-size:13px;color:#0f172a;">
+                      <i class="ri-question-line" style="color:#2563eb;margin-right:4px;"></i>
+                      ${escapeHtml(questionText)} <strong style="color:var(--admin-danger);font-size:14px;">*</strong>
+                    </span>
+                    <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" data-action="create-security" data-influencer-id="${escapeHtml(influencer.id)}" style="font-size:11px;padding:2px 8px;height:auto;color:#475569;text-decoration:underline;">
+                      Change Security
+                    </button>
+                  </div>
+                  <input class="admin-input" name="securityAnswer" type="text" placeholder="Enter your answer" required autocomplete="off" style="background:#ffffff;" />
+                  <small class="admin-field__hint">Answer the security question to authorize this commission correction.</small>
+                </label>
+              `}
             </div>
           </form>
         </div>
@@ -814,12 +1002,12 @@
     const newAmountInput = form.querySelector('[name="newAmount"]');
     const balanceAmountInput = form.querySelector('[name="balanceAmount"]');
     const reasonInput = form.querySelector('[name="correctionReason"]');
-    const passwordInput = form.querySelector('[name="adminPassword"]');
+    const answerInput = form.querySelector('[name="securityAnswer"]');
 
     const newAmount = Number(newAmountInput?.value);
     const balanceAmount = Number(balanceAmountInput?.value || 0);
     const reason = String(reasonInput?.value || '').trim();
-    const password = String(passwordInput?.value || '').trim();
+    const securityAnswer = String(answerInput?.value || '').trim();
 
     if (isNaN(newAmount) || newAmount < 0 || !Number.isFinite(balanceAmount) || balanceAmount < 0) {
       toast('Invalid amount', 'Enter a valid non-negative amount in Rupees.', 'warning');
@@ -829,8 +1017,9 @@
 
     const currentPaid = Number(form.dataset.currentPaidPaise || 0) / 100;
     const cumulativeAmount = balanceAmount > 0 ? currentPaid + balanceAmount : newAmount;
-    const earnedAmount = Number(influencerId && state.influencers.find((item) => Number(item.id) === Number(influencerId))?.commission || 0) / 100;
-    if (cumulativeAmount > earnedAmount) {
+    const targetInf = state.influencers.find((item) => Number(item.id) === Number(influencerId));
+    const earnedAmount = Number(influencerId && (targetInf?.commission ?? getInfluencerMonthStats(targetInf)?.commission ?? 0)) / 100;
+    if (earnedAmount > 0 && cumulativeAmount > earnedAmount) {
       toast('Amount exceeds commission earned', `Commission Paid cannot be greater than the earned commission of ${money(Math.round(earnedAmount * 100))}.`, 'warning');
       return;
     }
@@ -841,16 +1030,21 @@
       return;
     }
 
-    if (!password) {
-      toast('Password required', 'Please enter your admin password to authorize this change.', 'warning');
-      passwordInput?.focus();
+    if (!state.securityQuestion?.isConfigured) {
+      toast('Security required', 'Please click Create Security to set up your security answer first.', 'warning');
+      return;
+    }
+
+    if (!securityAnswer) {
+      toast('Answer required', 'Please answer the security question to authorize.', 'warning');
+      answerInput?.focus();
       return;
     }
 
     const submitBtn = els.adminModalDialog.querySelector('[data-action="submit-commission-correction"]');
     if (submitBtn) {
       submitBtn.disabled = true;
-      submitBtn.textContent = 'Verifying Authorization...';
+      submitBtn.textContent = 'Verifying Answer...';
     }
 
     try {
@@ -861,7 +1055,7 @@
           newAmountPaise: balanceAmount > 0 ? Math.round(currentPaid * 100) : Math.round(newAmount * 100),
           payBalancePaise: Math.round(balanceAmount * 100),
           reason,
-          password,
+          securityAnswer,
         }),
       });
 
@@ -870,10 +1064,17 @@
       await loadInfluencerData();
       await loadReportData();
     } catch (error) {
-      toast('Authorization Failed', error.message || 'Invalid admin password or authorization failure.', 'danger');
+      const rawMsg = String(error?.message || '');
+      const isWrongAnswer = rawMsg.toLowerCase().includes('wrong answer') || rawMsg.toLowerCase().includes('wrong');
+      const displayMsg = isWrongAnswer ? 'Wrong answer' : (error.message || 'Authorization failed.');
+      toast('Wrong answer', displayMsg, 'danger');
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.textContent = 'Authorize & Update Amount';
+      }
+      if (answerInput) {
+        answerInput.focus();
+        answerInput.select();
       }
     }
   }
@@ -1029,8 +1230,6 @@
     const emailDisabled = canEmail ? '' : ' disabled';
 
     return `
-      <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="pay-influencer-commission" data-id="${id}" style="margin-right:4px;">Pay Commission</button>
-      <button class="admin-action-link" type="button" data-action="view-commission-history" data-id="${id}">Payment History</button>
       <button class="admin-action-link" type="button" data-action="edit-influencer" data-id="${id}">Edit Influencer</button>
       <button class="admin-action-link" type="button" data-action="view-influencer-report" data-id="${id}">View Report</button>
       <button class="admin-action-link" type="button" data-action="download-influencer-report" data-id="${id}">Download Report</button>
@@ -1769,6 +1968,7 @@
     customersDateTo: '',
     customersAppliedDateFrom: '',
     customersAppliedDateTo: '',
+    customersDateValidation: '',
     couponsSearch: '',
     couponsStatus: 'all',
     couponsType: 'all',
@@ -1827,6 +2027,7 @@
     offersLoading: false,
     offerDraft: null,
     offerError: '',
+    securityQuestion: null,
   };
 
   const els = {
@@ -1851,6 +2052,8 @@
     adminModalDialog: document.getElementById('adminModalDialog'),
     toastRegion: document.getElementById('toastRegion'),
     profileAvatar: document.getElementById('profileAvatar'),
+    profileTrigger: document.querySelector('[data-action="open-profile"]'),
+    profileDropdown: document.getElementById('adminProfileDropdown'),
     adminContent: document.getElementById('adminContent'),
   };
 
@@ -3291,12 +3494,12 @@
                       <th>Payment</th>
                       <th>Total</th>
                       <th>Status</th>
-                      <th>Track order</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     ${pageItems.map((order) => `
-                      <tr data-action="select-order" data-id="${order.id}" style="cursor:pointer;">
+                      <tr class="${Number(state.selectedOrderId) === Number(order.id) ? 'is-selected' : ''}" data-action="select-order" data-id="${order.id}" style="cursor:pointer;">
                         <td><input type="checkbox" data-action="toggle-order-selection" data-id="${order.id}" ${state.selectedOrderIds.includes(Number(order.id)) ? 'checked' : ''} aria-label="Select ${escapeHtml(order.orderNumber)}" /> <strong>${escapeHtml(order.orderNumber)}</strong><br><span class="admin-table__muted">${escapeHtml(dateLabel(order.createdAt))}</span></td>
                         <td>${escapeHtml(order.customerName)}<br><span class="admin-table__muted">${escapeHtml(displayEmail(order.email))}</span></td>
                         <td>${escapeHtml(order.couponCode ? money(order.discountAmount) : '—')}</td>
@@ -3306,7 +3509,12 @@
                           <span class="admin-badge ${statusClass(order.status)}">${escapeHtml(getStatusLabel(order.status))}</span>
                         </td>
                         <td>
-                          <button class="admin-action-link" type="button" data-action="track-admin-order" data-id="${order.id}">Track order</button>
+                          <div style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;">
+                            ${!order.shiprocketAwbCode && !['cancelled', 'delivered', 'returned'].includes(normalizeOrderStatus(order.status)) ? `
+                              <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="shiprocket-fulfill" data-id="${order.id}" style="padding:3px 8px;font-size:11px;font-weight:600;white-space:nowrap;">🚀 Ship</button>
+                            ` : ''}
+                            <button class="admin-action-link" type="button" data-action="track-admin-order" data-id="${order.id}" style="white-space:nowrap;">Track</button>
+                          </div>
                         </td>
                       </tr>
                     `).join('')}
@@ -3411,6 +3619,13 @@
     return new Date(/^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T00:00:00` : raw.replace(' ', 'T'));
   }
 
+  function getCustomersDateValidation(from, to) {
+    const todayIso = getLocalDateInputMax();
+    if ((from && from > todayIso) || (to && to > todayIso)) return 'Future dates are not allowed.';
+    if (from && to && from > to) return 'From date cannot be later than To date.';
+    return '';
+  }
+
   function renderCustomers() {
     if (state.customersLoading && !state.customers.length) {
       els.customersView.innerHTML = `
@@ -3446,6 +3661,7 @@
       return;
     }
 
+    const customerDateMax = getLocalDateInputMax();
     const query = state.customersSearch.trim().toLowerCase();
     const todayStart = new Date(`${toISODate(today)}T00:00:00`);
     const tomorrowStart = new Date(todayStart);
@@ -3492,10 +3708,11 @@
               <div class="admin-toolbar__group">
                 <div class="admin-orders-date-range${state.customersAppliedDateFrom || state.customersAppliedDateTo ? ' is-active' : ''}">
                   <button class="admin-btn ${state.customersTodayOnly ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-action="toggle-customers-today">Today</button>
-                  <label class="admin-orders-date-field"><span>From</span><input class="admin-input" type="date" data-input="customersDateFrom" value="${escapeHtml(state.customersDateFrom)}" /></label>
-                  <label class="admin-orders-date-field"><span>To</span><input class="admin-input" type="date" data-input="customersDateTo" value="${escapeHtml(state.customersDateTo)}" /></label>
+                  <label class="admin-orders-date-field"><span>From</span><input class="admin-input" type="date" data-input="customersDateFrom" value="${escapeHtml(state.customersDateFrom)}" max="${customerDateMax}" /></label>
+                  <label class="admin-orders-date-field"><span>To</span><input class="admin-input" type="date" data-input="customersDateTo" value="${escapeHtml(state.customersDateTo)}" max="${customerDateMax}" /></label>
                   <button class="admin-btn admin-btn--soft" type="button" data-action="apply-customers-date-range">Apply</button>
-                  <button class="admin-btn admin-btn--ghost" type="button" data-action="clear-customers-date-range" ${state.customersAppliedDateFrom || state.customersAppliedDateTo || state.customersDateFrom || state.customersDateTo ? '' : 'disabled'}>Clear</button>
+                  <button class="admin-btn admin-btn--ghost" type="button" data-action="clear-customers-date-range" ${state.customersAppliedDateFrom || state.customersAppliedDateTo || state.customersDateFrom || state.customersDateTo || state.customersDateValidation ? '' : 'disabled'}>Clear</button>
+                  ${state.customersDateValidation ? `<p class="admin-table__muted" style="width:100%;margin:2px 0 0;color:var(--admin-danger);" role="alert">${escapeHtml(state.customersDateValidation)}</p>` : ''}
                 </div>
               </div>
             </div>
@@ -3561,6 +3778,9 @@
         </div>
       </section>
     `;
+    els.customersView.querySelectorAll('[data-input="customersDateFrom"], [data-input="customersDateTo"]').forEach((input) => {
+      input.max = customerDateMax;
+    });
   }
 
   function renderCoupons() {
@@ -3685,7 +3905,7 @@
                           <tr data-action="select-coupon" data-id="${coupon.id}" style="cursor:pointer;">
                             <td><strong>${escapeHtml(coupon.code || '-')}</strong></td>
                             <td><span class="admin-badge ${typeValue === 'influencer' ? 'admin-badge--influencer' : typeValue === 'private' ? 'admin-badge--private' : 'admin-badge--general'}">${escapeHtml(typeLabel)}</span></td>
-                            <td>${escapeHtml(coupon.discount || coupon.discountValue || '-')}</td>
+                            <td>${escapeHtml(couponDiscountLabel(coupon))}</td>
                             <td>${escapeHtml(String(usageCount))}</td>
                             <td>${escapeHtml(expiryValue ? dateLabel(expiryValue) : 'No expiry')}</td>
                             <td><span class="admin-badge ${statusClass(statusValue)}">${escapeHtml(getStatusLabel(statusValue))}</span></td>
@@ -3733,9 +3953,11 @@
                       </p>
                     </div>
                     <div class="admin-list__item">
-                      <p class="admin-list__item-title">Order Summary</p>
+                      <p class="admin-list__item-title">Coupon Details</p>
                       <p class="admin-list__item-sub">
-                        Discount: ${escapeHtml(String(selectedCoupon.discount || selectedCoupon.discountValue || '-'))}<br>
+                        Discount: <strong>${escapeHtml(couponDiscountLabel(selectedCoupon))}</strong><br>
+                        ${getCouponTypeValue(selectedCoupon) === 'influencer' ? `Commission: <strong>${escapeHtml(couponCommissionLabel(selectedCoupon))}</strong><br>` : ''}
+                        Applies To: <strong>${escapeHtml(formatCouponAppliesToLabel(selectedCoupon.appliesTo))}</strong><br>
                         Expiry: ${escapeHtml(selectedCoupon.validTill || selectedCoupon.expiresAt || selectedCoupon.expiry ? dateLabel(selectedCoupon.validTill || selectedCoupon.expiresAt || selectedCoupon.expiry) : 'No expiry')}<br>
                         Created: ${escapeHtml(selectedCoupon.createdAt ? dateLabel(selectedCoupon.createdAt) : '—')}
                       </p>
@@ -3795,10 +4017,7 @@
     const query = state.influencersSearch.trim().toLowerCase();
     const selectedInfluencerFilter = String(state.influencerDetailsFilter || 'all');
     const month = '';
-    const getMonthStats = (influencer) => {
-      if (!month) return { orders: Number(influencer.totalOrders || 0), revenue: Number(influencer.revenue || 0), commission: Number(influencer.commission || 0), couponUsage: Number(influencer.couponUsage || 0) };
-      return (influencer.monthlySales || []).find((row) => row.month === month) || { orders: 0, revenue: 0, commission: 0, couponUsage: 0 };
-    };
+    const getMonthStats = (influencer) => getInfluencerMonthStats(influencer, month);
     const getPeriodStats = (influencer) => {
       const period = state.influencersDatePeriod;
       const lifetime = {
@@ -4913,87 +5132,314 @@
     `;
   }
 
-  function renderProfileModal() {
+  // ── Change Password (3-step: send OTP → verify OTP → set new password) ──
+  function renderChangePasswordModal(step = 'email', ctx = {}) {
+    const adminEmail = 'admin@h2health.local';
+
+    const steps = {
+      email: {
+        kicker: 'Step 1 of 3',
+        title: 'Change Password',
+        body: `
+          <p style="margin:0 0 18px;color:var(--admin-muted);font-size:13px;line-height:1.6;">
+            A one-time verification code will be sent to your admin email address.
+          </p>
+          <div class="admin-form-grid">
+            <label class="admin-field admin-field--wide">
+              <span>Admin Email</span>
+              <input type="email" id="cpEmailInput"
+                     value="${escapeHtml(adminEmail)}"
+                     placeholder="admin@h2health.local"
+                     autocomplete="email" />
+            </label>
+          </div>
+          <p id="cpError" style="margin:10px 0 0;color:var(--admin-danger);font-size:13px;display:none;"></p>
+        `,
+        footer: `
+          <button class="admin-btn admin-btn--primary" type="button" id="cpNextBtn">Send OTP</button>
+          <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button>
+        `,
+      },
+      otp: {
+        kicker: 'Step 2 of 3',
+        title: 'Enter Verification Code',
+        body: `
+          <p style="margin:0 0 18px;color:var(--admin-muted);font-size:13px;line-height:1.6;">
+            We sent a 6-digit code to <strong>${escapeHtml(ctx.email || adminEmail)}</strong>.
+            Enter it below to continue.
+          </p>
+          <div class="admin-form-grid">
+            <label class="admin-field admin-field--wide">
+              <span>Verification Code</span>
+              <input type="text" id="cpOtpInput"
+                     inputmode="numeric" maxlength="6"
+                     placeholder="123456"
+                     autocomplete="one-time-code"
+                     style="letter-spacing:0.22em;font-size:18px;text-align:center;" />
+            </label>
+          </div>
+          <p id="cpError" style="margin:10px 0 0;color:var(--admin-danger);font-size:13px;display:none;"></p>
+        `,
+        footer: `
+          <button class="admin-btn admin-btn--primary" type="button" id="cpNextBtn">Verify Code</button>
+          <button class="admin-btn admin-btn--ghost" type="button" id="cpBackBtn">Back</button>
+        `,
+      },
+      password: {
+        kicker: 'Step 3 of 3',
+        title: 'Set New Password',
+        body: `
+          <p style="margin:0 0 18px;color:var(--admin-muted);font-size:13px;line-height:1.6;">
+            Choose a strong new password for your admin account.
+          </p>
+          <div class="admin-form-grid">
+            <label class="admin-field admin-field--wide">
+              <span>New Password</span>
+              <input type="password" id="cpPasswordInput"
+                     placeholder="Minimum 8 characters"
+                     autocomplete="new-password"
+                     minlength="8" />
+            </label>
+            <label class="admin-field admin-field--wide">
+              <span>Confirm New Password</span>
+              <input type="password" id="cpConfirmInput"
+                     placeholder="Repeat new password"
+                     autocomplete="new-password"
+                     minlength="8" />
+            </label>
+          </div>
+          <p id="cpError" style="margin:10px 0 0;color:var(--admin-danger);font-size:13px;display:none;"></p>
+        `,
+        footer: `
+          <button class="admin-btn admin-btn--primary" type="button" id="cpNextBtn">Change Password</button>
+          <button class="admin-btn admin-btn--ghost" type="button" id="cpBackBtn">Back</button>
+        `,
+      },
+    };
+
+    const cfg = steps[step];
     openModal({
-      title: 'Admin Profile',
-      subtitle: 'Admin access and session shortcuts',
-      body: `
-        <div class="admin-list">
-          <div class="admin-list__item">
-            <div class="admin-list__item-head">
-              <div>
-                <p class="admin-list__item-title">Admin House</p>
-                <p class="admin-list__item-sub">admin@h2health.local</p>
-              </div>
-              <span class="admin-avatar">${escapeHtml(initials('Admin House'))}</span>
-            </div>
-          </div>
-          <div class="admin-list__item">
-            <p class="admin-list__item-title">Role</p>
-            <p class="admin-list__item-sub">Store administrator</p>
-          </div>
-          <div class="admin-list__item">
-            <p class="admin-list__item-title">Quick Actions</p>
-            <div class="admin-actions">
-              <button class="admin-action-link" type="button" data-action="change-password">Change Password</button>
-              <button class="admin-action-link" type="button" data-action="logout">Logout</button>
-            </div>
-          </div>
-        </div>
-      `,
-      footer: `
-        <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Close</button>
-      `,
+      title: cfg.title,
+      subtitle: cfg.kicker,
+      body: cfg.body,
+      footer: cfg.footer,
       size: 'sm',
     });
+
+    const dialog = els.adminModalDialog;
+    const errorEl = dialog.querySelector('#cpError');
+
+    function showError(msg) {
+      if (!errorEl) return;
+      errorEl.textContent = msg;
+      errorEl.style.display = msg ? 'block' : 'none';
+    }
+
+    function setLoading(btn, loading) {
+      if (!btn) return;
+      btn.disabled = loading;
+      btn.textContent = loading
+        ? 'Please wait…'
+        : (step === 'email' ? 'Send OTP' : step === 'otp' ? 'Verify Code' : 'Change Password');
+    }
+
+    // Back buttons
+    dialog.querySelector('#cpBackBtn')?.addEventListener('click', () => {
+      if (step === 'otp') renderChangePasswordModal('email', ctx);
+      if (step === 'password') renderChangePasswordModal('otp', ctx);
+    });
+
+    // Primary action button
+    const nextBtn = dialog.querySelector('#cpNextBtn');
+    if (!nextBtn) return;
+
+    nextBtn.addEventListener('click', async () => {
+      showError('');
+
+      if (step === 'email') {
+        const emailInput = dialog.querySelector('#cpEmailInput');
+        const email = (emailInput?.value || '').trim();
+        if (!email) { showError('Please enter your email address.'); return; }
+        setLoading(nextBtn, true);
+        try {
+          const result = await apiRequest('/api/auth/password/forgot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email }),
+          });
+          toast('OTP Sent', result.message || 'Check your email for the verification code.', 'success');
+          renderChangePasswordModal('otp', { ...ctx, email });
+        } catch (err) {
+          showError(err.message || 'Failed to send OTP. Please try again.');
+          setLoading(nextBtn, false);
+        }
+        return;
+      }
+
+      if (step === 'otp') {
+        const otp = (dialog.querySelector('#cpOtpInput')?.value || '').trim();
+        if (!otp || otp.length < 4) { showError('Please enter the verification code.'); return; }
+        setLoading(nextBtn, true);
+        try {
+          const result = await apiRequest('/api/auth/password/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: ctx.email, otp }),
+          });
+          toast('Code Verified', result.message || 'Now set your new password.', 'success');
+          renderChangePasswordModal('password', { ...ctx, otp });
+        } catch (err) {
+          showError(err.message || 'Invalid or expired code. Please try again.');
+          setLoading(nextBtn, false);
+        }
+        return;
+      }
+
+      if (step === 'password') {
+        const newPass = dialog.querySelector('#cpPasswordInput')?.value || '';
+        const confirmPass = dialog.querySelector('#cpConfirmInput')?.value || '';
+        if (newPass.length < 8) { showError('Password must be at least 8 characters.'); return; }
+        if (newPass !== confirmPass) { showError('Passwords do not match.'); return; }
+        setLoading(nextBtn, true);
+        try {
+          const result = await apiRequest('/api/auth/password/reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: ctx.email, password: newPass }),
+          });
+          closeModal();
+          toast('Password Changed', result.message || 'Your password has been updated successfully.', 'success');
+        } catch (err) {
+          showError(err.message || 'Failed to change password. Please try again.');
+          setLoading(nextBtn, false);
+        }
+      }
+    });
+
+    // Auto-focus first input
+    window.setTimeout(() => {
+      dialog.querySelector('input')?.focus();
+    }, 80);
   }
 
-  function getCouponProductOptions(entity = null) {
+  function closeProfileDropdown() {
+    if (!els.profileDropdown || els.profileDropdown.hidden) return false;
+    els.profileDropdown.hidden = true;
+    els.profileTrigger?.setAttribute('aria-expanded', 'false');
+    return true;
+  }
+
+  function toggleProfileDropdown() {
+    if (!els.profileDropdown) return;
+    const willOpen = els.profileDropdown.hidden;
+    els.profileDropdown.hidden = !willOpen;
+    els.profileTrigger?.setAttribute('aria-expanded', String(willOpen));
+  }
+
+  function getCouponCategoryOptions(entity = null) {
     const selectedAppliesTo = String(entity?.appliesTo || '').trim().toLowerCase();
-    const selectedIds = new Set(
-      (selectedAppliesTo.match(/^product:(.+)$/)?.[1] || '')
-        .split(',')
-        .map((id) => Number(id.trim()))
-        .filter((id) => Number.isInteger(id) && id > 0)
-    );
-    const products = [];
-    for (const product of Array.isArray(state.products) ? state.products : []) {
-      const productId = Number(product.productId || product.id);
-      if (!Number.isInteger(productId) || productId <= 0) continue;
-      const variantLabel = [product.size, product.color].filter(Boolean).join(' / ');
-      products.push({
-        id: productId,
-        name: product.name || `Product ${productId}`,
-        label: variantLabel ? `${product.name || `Product ${productId}`} — ${variantLabel}` : product.name || `Product ${productId}`,
-        selected: selectedIds.has(productId),
+    const isAll = !selectedAppliesTo || selectedAppliesTo === 'merch' || selectedAppliesTo === 'all';
+    const catMatch = selectedAppliesTo.match(/^category:([a-z0-9_\-,]+)$/);
+    const selectedCategorySlugs = new Set();
+    if (catMatch) {
+      catMatch[1].split(',').forEach((s) => {
+        const slug = s.trim().toLowerCase();
+        if (slug) selectedCategorySlugs.add(slug);
+      });
+    } else if (selectedAppliesTo.startsWith('product:')) {
+      const pids = selectedAppliesTo.replace('product:', '').split(',').map(Number).filter(Boolean);
+      for (const p of (Array.isArray(state.products) ? state.products : [])) {
+        const pid = Number(p.productId || p.id);
+        if (pids.includes(pid)) {
+          const cat = String(p.categorySlug || p.category || '').trim().toLowerCase();
+          if (cat) selectedCategorySlugs.add(cat);
+        }
+      }
+    }
+
+    const normalizeCategorySlug = (raw) => {
+      const val = String(raw || '').trim().toLowerCase();
+      if (!val) return '';
+      if (val === 'bottles' || val.includes('bottle')) return 'bottles';
+      if (val === 'sprays' || val.includes('mist') || val.includes('spray')) return 'sprays';
+      if (val === 'hoodies' || val === 'hoodie') return 'hoodies';
+      if (val === 't-shirt' || val === 't-shirts' || val === 'tshirt') return 't-shirt';
+      return slugify(val);
+    };
+
+    const getCategoryDisplayName = (slug, fallbackName) => {
+      if (slug === 'bottles') return 'Hydrogen Water Bottles';
+      if (slug === 'sprays') return 'Hydrogen Mists / Sprays';
+      if (slug === 'hoodies') return 'Hoodies';
+      if (slug === 't-shirt') return 'T-Shirts';
+      if (fallbackName && String(fallbackName).trim()) return String(fallbackName).trim();
+      return slug.split('-').map((w) => w ? w[0].toUpperCase() + w.slice(1) : '').join(' ');
+    };
+
+    const categoriesMap = new Map();
+    const seenNames = new Set();
+
+    const addCategory = (rawSlug, rawName) => {
+      const canonicalSlug = normalizeCategorySlug(rawSlug || rawName);
+      if (!canonicalSlug) return;
+      const displayName = getCategoryDisplayName(canonicalSlug, rawName);
+      const normName = displayName.toLowerCase();
+      if (categoriesMap.has(canonicalSlug) || seenNames.has(normName)) return;
+
+      seenNames.add(normName);
+      categoriesMap.set(canonicalSlug, {
+        slug: canonicalSlug,
+        name: displayName,
+        label: displayName,
+      });
+    };
+
+    // 1. Authoritative: from state.categories
+    for (const cat of (Array.isArray(state.categories) ? state.categories : [])) {
+      addCategory(cat.slug || cat.id, cat.name);
+    }
+
+    // 2. Supplemental: check loaded products for any unlisted categories
+    for (const prod of (Array.isArray(state.products) ? state.products : [])) {
+      addCategory(prod.categorySlug || prod.category, prod.category);
+    }
+
+    const categories = [];
+    for (const [slug, item] of categoriesMap.entries()) {
+      categories.push({
+        slug,
+        name: item.name,
+        label: item.name,
+        selected: !isAll && (selectedCategorySlugs.has(slug) || (slug === 'bottles' && selectedCategorySlugs.has('hydrogen water bottles')) || (slug === 'sprays' && selectedCategorySlugs.has('hydrogen mists / sprays'))),
       });
     }
+
     return {
-      allSelected: !selectedIds.size || selectedAppliesTo === 'merch' || selectedAppliesTo === 'all',
-      products,
+      allSelected: isAll || !categories.some((cat) => cat.selected),
+      categories,
     };
   }
 
   function couponProductsSummary(form) {
     const allSelected = form.querySelector('[data-coupon-product-all]')?.checked;
-    const selected = [...form.querySelectorAll('[data-coupon-product-id]:checked')];
+    const selected = [...form.querySelectorAll('[data-coupon-category-slug]:checked')];
     if (allSelected || !selected.length) return 'All Merch Products';
-    if (selected.length === 1) return selected[0].dataset.couponProductName || '1 Product Selected';
-    return `${selected.length} Products Selected`;
+    if (selected.length === 1) return selected[0].dataset.couponCategoryName || '1 Category Selected';
+    return `${selected.length} Categories Selected`;
   }
 
   function syncCouponProductSelection(checkbox) {
     const form = checkbox.closest('[data-entity-form="coupon"]');
     if (!form) return;
     const allCheckbox = form.querySelector('[data-coupon-product-all]');
-    const productCheckboxes = [...form.querySelectorAll('[data-coupon-product-id]')];
+    const categoryCheckboxes = [...form.querySelectorAll('[data-coupon-category-slug]')];
     if (checkbox === allCheckbox && allCheckbox.checked) {
-      productCheckboxes.forEach((productCheckbox) => { productCheckbox.checked = false; });
-    } else if (checkbox === allCheckbox && !allCheckbox.checked && !productCheckboxes.some((productCheckbox) => productCheckbox.checked)) {
+      categoryCheckboxes.forEach((productCheckbox) => { productCheckbox.checked = false; });
+    } else if (checkbox === allCheckbox && !allCheckbox.checked && !categoryCheckboxes.some((productCheckbox) => productCheckbox.checked)) {
       allCheckbox.checked = true;
-    } else if (checkbox !== allCheckbox && productCheckboxes.some((productCheckbox) => productCheckbox.checked)) {
+    } else if (checkbox !== allCheckbox && categoryCheckboxes.some((productCheckbox) => productCheckbox.checked)) {
       allCheckbox.checked = false;
-    } else if (checkbox !== allCheckbox && !productCheckboxes.some((productCheckbox) => productCheckbox.checked)) {
+    } else if (checkbox !== allCheckbox && !categoryCheckboxes.some((productCheckbox) => productCheckbox.checked)) {
       allCheckbox.checked = true;
     }
     const trigger = form.querySelector('[data-coupon-products-toggle]');
@@ -5120,8 +5566,39 @@
           </label>
           <label class="admin-field"><span>Campaign Name</span><input class="admin-input" name="festivalName" value="${escapeHtml(entity?.festivalName || '')}" /></label>
           <label class="admin-field admin-field--wide"><span>Description</span><input class="admin-input" name="description" value="${escapeHtml(entity?.description || '')}" /></label>
-          <label class="admin-field"><span>Discount</span><input class="admin-input" name="discount" type="number" min="1" step="1" value="${escapeHtml(entity?.discount || entity?.discountValue || '')}" required /></label>
-          <label class="admin-field"><span>Commission per Order (rupees)</span><input class="admin-input" name="commissionPerOrder" data-coupon-commission type="number" min="0" step="1" value="${escapeHtml(Number(entity?.commissionPerOrderPaise || 0) / 100)}" /><small class="admin-field__hint" data-coupon-commission-hint></small></label>
+          ${(() => {
+            const rawDiscountType = String(entity?.discountType || (String(entity?.discount || '').includes('%') ? 'percentage' : 'flat')).toLowerCase();
+            const isPercentDiscount = rawDiscountType.includes('percent') || rawDiscountType === '%';
+            const rawCommType = String(entity?.commissionType || 'flat').toLowerCase();
+            const isPercentComm = rawCommType.includes('percent') || rawCommType === '%';
+            const discountVal = entity?.discountValue != null && entity?.discountValue !== ''
+              ? Number(entity.discountValue)
+              : (entity?.discount != null && entity?.discount !== '' ? String(entity.discount).replace(/[^0-9.]/g, '') : '');
+            const commVal = isPercentComm
+              ? (entity?.commissionRate ?? '')
+              : (entity?.commissionPerOrderPaise ? Number(entity.commissionPerOrderPaise) / 100 : (entity?.commissionPerOrder ?? ''));
+            return `
+              <label class="admin-field"><span>Discount Type</span>
+                <select class="admin-select" name="discountType" data-coupon-discount-type>
+                  <option value="flat" ${!isPercentDiscount ? 'selected' : ''}>Rupees (₹)</option>
+                  <option value="percentage" ${isPercentDiscount ? 'selected' : ''}>Percentage (%)</option>
+                </select>
+              </label>
+              <label class="admin-field"><span data-coupon-discount-label>Discount ${isPercentDiscount ? '(%)' : '(₹)'}</span>
+                <input class="admin-input" name="discount" data-coupon-discount-input type="number" min="1" ${isPercentDiscount ? 'max="100"' : ''} step="1" value="${escapeHtml(String(discountVal))}" placeholder="${isPercentDiscount ? 'e.g. 10' : 'e.g. 1000'}" required />
+              </label>
+              <label class="admin-field" data-coupon-commission-type-field><span>Commission Type</span>
+                <select class="admin-select" name="commissionType" data-coupon-commission-type>
+                  <option value="flat" ${!isPercentComm ? 'selected' : ''}>Rupees (₹)</option>
+                  <option value="percentage" ${isPercentComm ? 'selected' : ''}>Percentage (%)</option>
+                </select>
+              </label>
+              <label class="admin-field" data-coupon-commission-field><span data-coupon-commission-label>Commission per Order ${isPercentComm ? '(%)' : '(₹)'}</span>
+                <input class="admin-input" name="commissionValue" data-coupon-commission type="number" min="0" ${isPercentComm ? 'max="100"' : ''} step="${isPercentComm ? '0.5' : '1'}" value="${escapeHtml(String(commVal))}" placeholder="${isPercentComm ? 'e.g. 10' : 'e.g. 100'}" />
+                <small class="admin-field__hint" data-coupon-commission-hint></small>
+              </label>
+            `;
+          })()}
           <label class="admin-field" data-coupon-usage-type-field hidden><span>Usage Type</span>
             <select class="admin-select" name="usageType" data-coupon-usage-type>
               <option value="limited" ${getCouponUsageTypeValue(entity) === 'limited' ? 'selected' : ''}>Limited</option>
@@ -5138,22 +5615,22 @@
           </label>
           <label class="admin-field" data-coupon-owner-field><span>Owner Email</span><input class="admin-input" name="recipientEmail" type="email" value="${escapeHtml(entity?.recipientEmail || '')}" placeholder="customer@example.com" /></label>
           ${(() => {
-            const productOptions = getCouponProductOptions(entity);
+            const categoryOptions = getCouponCategoryOptions(entity);
             return `
               <div class="admin-field admin-field--wide admin-product-multiselect" data-coupon-products-dropdown>
                 <span>Applies To</span>
-                <button class="admin-product-multiselect__trigger" type="button" data-coupon-products-toggle aria-expanded="false">${escapeHtml(productOptions.allSelected ? 'All Merch Products' : productOptions.products.filter((product) => product.selected).length === 1 ? productOptions.products.find((product) => product.selected)?.label || '1 Product Selected' : `${productOptions.products.filter((product) => product.selected).length} Products Selected`)}</button>
+                <button class="admin-product-multiselect__trigger" type="button" data-coupon-products-toggle aria-expanded="false">${escapeHtml(categoryOptions.allSelected ? 'All Merch Products' : categoryOptions.categories.filter((cat) => cat.selected).length === 1 ? categoryOptions.categories.find((cat) => cat.selected)?.label || '1 Category Selected' : `${categoryOptions.categories.filter((cat) => cat.selected).length} Categories Selected`)}</button>
                 <div class="admin-product-multiselect__menu" data-coupon-products-menu hidden>
-                  <input class="admin-input" type="search" data-input="couponProductSearch" placeholder="Search products" aria-label="Search products" />
+                  <input class="admin-input" type="search" data-input="couponProductSearch" placeholder="Search categories" aria-label="Search categories" />
                   <div class="admin-product-multiselect__options">
                     <label class="admin-product-multiselect__option" data-coupon-product-option data-coupon-product-search="all merch products">
-                      <input type="checkbox" name="appliesToAll" value="merch" data-coupon-product-checkbox data-coupon-product-all ${productOptions.allSelected ? 'checked' : ''} />
+                      <input type="checkbox" name="appliesToAll" value="merch" data-coupon-product-checkbox data-coupon-product-all ${categoryOptions.allSelected ? 'checked' : ''} />
                       <span>All Merch Products</span>
                     </label>
-                    ${productOptions.products.map((product) => `
-                      <label class="admin-product-multiselect__option" data-coupon-product-option data-coupon-product-search="${escapeHtml(product.label).toLowerCase()}">
-                        <input type="checkbox" name="appliesToProduct" value="${product.id}" data-coupon-product-checkbox data-coupon-product-id="${product.id}" data-coupon-product-name="${escapeHtml(product.label)}" ${product.selected ? 'checked' : ''} />
-                        <span>${escapeHtml(product.label)}</span>
+                    ${categoryOptions.categories.map((cat) => `
+                      <label class="admin-product-multiselect__option" data-coupon-product-option data-coupon-product-search="${escapeHtml(cat.label).toLowerCase()}">
+                        <input type="checkbox" name="appliesToCategory" value="${cat.slug}" data-coupon-product-checkbox data-coupon-category-slug="${cat.slug}" data-coupon-category-name="${escapeHtml(cat.label)}" ${cat.selected ? 'checked' : ''} />
+                        <span>${escapeHtml(cat.label)}</span>
                       </label>
                     `).join('')}
                   </div>
@@ -5259,8 +5736,53 @@
     const productsToggle = form.querySelector('[data-coupon-products-toggle]');
     const productsMenu = form.querySelector('[data-coupon-products-menu]');
     const productsSearch = form.querySelector('[data-input="couponProductSearch"]');
+    const discountTypeSelect = form.querySelector('[name="discountType"]');
+    const discountInput = form.querySelector('[name="discount"]');
+    const discountLabel = form.querySelector('[data-coupon-discount-label]');
+    const commissionTypeSelect = form.querySelector('[name="commissionType"]');
+    const commissionTypeField = form.querySelector('[data-coupon-commission-type-field]');
     const commissionInput = form.querySelector('[data-coupon-commission]');
     const commissionHint = form.querySelector('[data-coupon-commission-hint]');
+    const commissionLabel = form.querySelector('[data-coupon-commission-label]');
+
+    const updateDiscountUI = () => {
+      const type = String(discountTypeSelect?.value || 'flat').toLowerCase();
+      const isPercent = type === 'percentage';
+      if (discountLabel) discountLabel.textContent = `Discount ${isPercent ? '(%)' : '(₹)'}`;
+      if (discountInput) {
+        if (isPercent) {
+          discountInput.setAttribute('max', '100');
+          discountInput.placeholder = 'e.g. 10';
+          if (Number(discountInput.value) > 100) discountInput.value = '100';
+        } else {
+          discountInput.removeAttribute('max');
+          discountInput.placeholder = 'e.g. 1000';
+        }
+      }
+    };
+
+    const updateCommissionUI = () => {
+      const type = String(commissionTypeSelect?.value || 'flat').toLowerCase();
+      const isPercent = type === 'percentage';
+      if (commissionLabel) commissionLabel.textContent = `Commission per Order ${isPercent ? '(%)' : '(₹)'}`;
+      if (commissionInput) {
+        if (isPercent) {
+          commissionInput.setAttribute('max', '100');
+          commissionInput.setAttribute('step', '0.5');
+          commissionInput.placeholder = 'e.g. 10';
+          if (Number(commissionInput.value) > 100) commissionInput.value = '100';
+        } else {
+          commissionInput.removeAttribute('max');
+          commissionInput.setAttribute('step', '1');
+          commissionInput.placeholder = 'e.g. 100';
+        }
+      }
+    };
+
+    discountTypeSelect?.addEventListener('change', updateDiscountUI);
+    commissionTypeSelect?.addEventListener('change', updateCommissionUI);
+    updateDiscountUI();
+    updateCommissionUI();
 
     productsToggle?.addEventListener('click', () => {
       const isOpen = !productsMenu?.hidden;
@@ -5308,9 +5830,15 @@
         commissionInput.disabled = isCommissionBlackout;
         if (isCommissionBlackout) commissionInput.value = '0';
       }
+      if (commissionTypeSelect) {
+        commissionTypeSelect.disabled = isCommissionBlackout;
+        if (isCommissionBlackout) commissionTypeSelect.value = 'flat';
+      }
+      if (commissionTypeField) commissionTypeField.hidden = isCommissionBlackout;
       if (commissionHint) commissionHint.textContent = isCommissionBlackout
         ? 'Commission applies only to influencer coupons.'
         : '';
+      updateCommissionUI();
 
       if (influencerField) influencerField.hidden = !isInfluencer;
       if (ownerField) ownerField.hidden = !isPrivate;
@@ -5561,26 +6089,44 @@
     const isUnlimitedInfluencer = couponCategory === 'influencer' && usageType === 'unlimited';
     const influencer = getInfluencerById(influencerId);
     const usageCount = Number(fd.get('usageCount') || 0);
+
+    const discountType = String(fd.get('discountType') || 'flat').trim().toLowerCase();
+    const discountValue = Number(fd.get('discount') || 0);
+    const commissionType = String(fd.get('commissionType') || 'flat').trim().toLowerCase();
+    const rawCommVal = Number(fd.get('commissionValue') || 0);
+
+    const commissionRate = couponCategory !== 'influencer' || commissionType !== 'percentage'
+      ? 0
+      : Math.min(100, Math.max(0, rawCommVal));
+
+    const commissionPerOrderPaise = couponCategory !== 'influencer' || commissionType === 'percentage'
+      ? 0
+      : Math.max(0, Math.round(rawCommVal * 100));
+
+    const appliesTo = fd.get('appliesToAll') === 'merch'
+      ? 'merch'
+      : (() => {
+          const categorySlugs = [...new Set(fd.getAll('appliesToCategory').map((s) => String(s || '').trim().toLowerCase()).filter(Boolean))];
+          return categorySlugs.length ? `category:${categorySlugs.join(',')}` : 'merch';
+        })();
+
     return {
       id: existing?.id || Date.now(),
       code: String(fd.get('code') || '').trim().toUpperCase(),
       description: String(fd.get('description') || '').trim(),
-      discount: String(fd.get('discount') || '').trim(),
-      commissionPerOrderPaise: couponCategory !== 'influencer'
-        ? 0
-        : Math.max(0, Math.round(Number(fd.get('commissionPerOrder') || 0) * 100)),
+      discountType,
+      discountValue,
+      discount: discountType === 'percentage' ? `${discountValue}%` : String(discountValue),
+      commissionType,
+      commissionRate,
+      commissionPerOrderPaise,
       usageCount: isUnlimitedInfluencer ? null : Number.isFinite(usageCount) && usageCount > 0 ? usageCount : null,
       expiry: isUnlimitedInfluencer ? '' : String(fd.get('expiry') || '').trim(),
       usageType,
       status: fd.get('status') === 'on' ? 'active' : 'inactive',
       couponType,
       ownerType: couponCategory === 'influencer' ? 'influencer' : couponCategory === 'private' ? 'private' : 'general',
-      appliesTo: fd.get('appliesToAll') === 'merch'
-        ? 'merch'
-        : (() => {
-            const productIds = [...new Set(fd.getAll('appliesToProduct').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
-            return productIds.length ? `product:${productIds.join(',')}` : 'merch';
-          })(),
+      appliesTo,
       owner: couponCategory === 'influencer' ? influencer?.name || 'Influencer' : couponCategory === 'private' ? recipientEmail : 'General',
       recipientName: couponCategory === 'influencer' ? influencer?.name || '' : '',
       recipientEmail: couponCategory === 'private' ? recipientEmail : '',
@@ -5671,19 +6217,24 @@
     }
   }
 
-  async function loadDashboardStats() {
-    state.dashboardStatsLoading = !state.dashboardStats;
-    renderDashboard();
+  async function loadDashboardStats(options = {}) {
+    const silent = Boolean(options.silent);
+    if (!silent) {
+      state.dashboardStatsLoading = !state.dashboardStats;
+      renderDashboard();
+    }
     try {
       const result = await apiRequest('/api/merch/admin/stats');
       state.dashboardStats = result || null;
       state.notifications = mergeNotificationState(result?.notifications);
     } catch (error) {
-      state.dashboardStats = null;
-      state.notifications = [];
+      if (!silent) {
+        state.dashboardStats = null;
+        state.notifications = [];
+      }
     } finally {
       state.dashboardStatsLoading = false;
-      renderDashboard();
+      if (state.view === 'dashboard') renderDashboard();
       if (state.view === 'reports') renderReports();
     }
   }
@@ -5732,6 +6283,7 @@
           slug: product.slug,
           primarySku: product.primarySku || firstVariant.sku || '',
           categoryId,
+          categorySlug,
           category: state.categories.find((item) => String(item.id) === String(categoryId))?.name || unknownCategories.get(categorySlug)?.name || categorySlug,
           price,
           priceLabel: catalogPrice(price),
@@ -5794,19 +6346,38 @@
     }
   }
 
-  async function loadOrderData() {
-    state.ordersLoading = true;
-    renderOrders();
+  async function loadOrderData(options = {}) {
+    const silent = Boolean(options.silent);
+    if (!silent) {
+      state.ordersLoading = true;
+      renderOrders();
+    }
     try {
       const result = await apiRequest('/api/merch/admin/orders');
-      state.orders = Array.isArray(result.orders) ? result.orders : [];
+      const newOrders = Array.isArray(result.orders) ? result.orders : [];
+      const changed = JSON.stringify(newOrders) !== JSON.stringify(state.orders);
+      state.orders = newOrders;
+      if (!silent || changed) {
+        if (state.view === 'orders') {
+          const activeEl = document.activeElement;
+          if (activeEl instanceof HTMLInputElement && els.ordersView && els.ordersView.contains(activeEl)) {
+            preserveInputFocus(activeEl, renderOrders);
+          } else {
+            renderOrders();
+          }
+        }
+      }
     } catch (error) {
-      state.orders = [];
-      toast('Orders unavailable', error.message || 'Unable to load merch orders from the admin API.', 'warning');
+      if (!silent) {
+        state.orders = [];
+        toast('Orders unavailable', error.message || 'Unable to load merch orders from the admin API.', 'warning');
+      }
     } finally {
-      state.ordersLoading = false;
-      renderOrders();
-      renderDashboard();
+      if (!silent) {
+        state.ordersLoading = false;
+        renderOrders();
+      }
+      if (state.view === 'dashboard') renderDashboard();
       if (state.view === 'reports') renderReports();
     }
   }
@@ -5843,20 +6414,25 @@
     }
   }
 
-  async function loadReportData() {
-    state.reportsLoading = true;
+  async function loadReportData(options = {}) {
+    const silent = Boolean(options.silent);
+    if (!silent) {
+      state.reportsLoading = true;
+    }
     try {
       const params = new URLSearchParams();
       if (state.reportFrom) params.set('startDate', state.reportFrom);
       if (state.reportTo) params.set('endDate', state.reportTo);
       state.reports = await apiRequest(`/api/merch/admin/reports?${params.toString()}`);
     } catch (error) {
-      state.reports = null;
-      toast('Reports unavailable', error.message || 'Unable to load merch reports from the admin API.', 'warning');
+      if (!silent) {
+        state.reports = null;
+        toast('Reports unavailable', error.message || 'Unable to load merch reports from the admin API.', 'warning');
+      }
     } finally {
       state.reportsLoading = false;
-      renderReports();
-      renderDashboard();
+      if (state.view === 'reports') renderReports();
+      if (state.view === 'dashboard') renderDashboard();
     }
   }
 
@@ -6270,11 +6846,14 @@
           <form class="admin-form" data-shiprocket-fulfill-form>
             <div style="display:flex;flex-direction:column;gap:10px;max-height:360px;overflow-y:auto;padding-right:4px;">
               ${couriers.map((c, idx) => `
-                <label class="admin-card" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border:1.5px solid ${idx === 0 ? '#3b82f6' : 'rgba(0,0,0,0.1)'};border-radius:10px;background:${idx === 0 ? 'rgba(59,130,246,0.04)' : 'transparent'};transition:all 0.15s ease;">
+                <label class="admin-card admin-courier-card" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border:1.5px solid ${idx === 0 ? '#3b82f6' : 'rgba(0,0,0,0.1)'};border-radius:10px;background:${idx === 0 ? 'rgba(59,130,246,0.04)' : 'transparent'};transition:all 0.15s ease;">
                   <div style="display:flex;align-items:center;gap:14px;">
                     <input type="radio" name="courier_company_id" value="${c.courierCompanyId}" ${idx === 0 ? 'checked' : ''} style="width:18px;height:18px;accent-color:#3b82f6;" />
                     <div>
-                      <div style="font-weight:600;font-size:14px;color:var(--admin-text,#1f2937);">${escapeHtml(c.courierName)}</div>
+                      <div style="font-weight:600;font-size:14px;color:var(--admin-text,#1f2937);display:flex;align-items:center;gap:6px;">
+                        <span>${escapeHtml(c.courierName)}</span>
+                        ${idx === 0 ? '<span style="background:#10b981;color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;font-weight:700;">Lowest Price</span>' : ''}
+                      </div>
                       <div class="admin-table__muted" style="font-size:12px;margin-top:2px;">
                         Est. Delivery: <strong>${escapeHtml(c.estimatedDeliveryDays || '2-4')} Days</strong> ${c.etd ? `(${escapeHtml(c.etd)})` : ''} · Mode: <strong>${c.isSurface ? 'Surface' : 'Air'}</strong>
                       </div>
@@ -6289,6 +6868,20 @@
             </div>
           </form>
         `;
+
+        const formEl = bodyEl.querySelector('[data-shiprocket-fulfill-form]');
+        formEl?.addEventListener('change', () => {
+          formEl.querySelectorAll('.admin-courier-card').forEach((card) => {
+            const radio = card.querySelector('input[type="radio"]');
+            if (radio?.checked) {
+              card.style.borderColor = '#3b82f6';
+              card.style.background = 'rgba(59,130,246,0.04)';
+            } else {
+              card.style.borderColor = 'rgba(0,0,0,0.1)';
+              card.style.background = 'transparent';
+            }
+          });
+        });
       }
 
       const footEl = els.adminModalDialog.querySelector('.admin-modal__foot');
@@ -6618,7 +7211,7 @@
         renderDashboard();
         return;
       case 'open-profile':
-        renderProfileModal();
+        toggleProfileDropdown();
         return;
       case 'open-hype-modal':
         renderHypeModal();
@@ -6682,7 +7275,8 @@
 
   return;
       case 'change-password':
-        toast('Placeholder', 'Password reset flow can be wired to the auth API later.', 'default');
+        closeProfileDropdown();
+        renderChangePasswordModal();
         return;
       case 'open-product-modal':
         renderEntityFormModal('product');
@@ -7047,8 +7641,12 @@
       case 'toggle-order-selection':
         if (target.checked) {
           if (!state.selectedOrderIds.includes(id)) state.selectedOrderIds.push(id);
+          state.selectedOrderId = id;
         } else {
           state.selectedOrderIds = state.selectedOrderIds.filter((orderId) => orderId !== id);
+          if (Number(state.selectedOrderId) === id) {
+            state.selectedOrderId = state.selectedOrderIds.length === 1 ? state.selectedOrderIds[0] : null;
+          }
         }
         renderOrders();
         return;
@@ -7125,20 +7723,27 @@
           state.customersDateTo = '';
           state.customersAppliedDateFrom = '';
           state.customersAppliedDateTo = '';
+          state.customersDateValidation = '';
         }
         renderCustomers();
         return;
       case 'apply-customers-date-range': {
         const from = String(state.customersDateFrom || '').trim();
         const to = String(state.customersDateTo || '').trim();
+        const validationMessage = getCustomersDateValidation(from, to);
+        if (validationMessage) {
+          const customerDateMax = getLocalDateInputMax();
+          if (from > customerDateMax) state.customersDateFrom = '';
+          if (to > customerDateMax) state.customersDateTo = '';
+          state.customersDateValidation = validationMessage;
+          renderCustomers();
+          return;
+        }
         if (!from || !to) {
           toast('Date range incomplete', 'Choose both a From and To date before applying the customer filter.', 'warning');
           return;
         }
-        if (from > to) {
-          toast('Invalid date range', 'The From date must be on or before the To date.', 'warning');
-          return;
-        }
+        state.customersDateValidation = '';
         state.customersTodayOnly = false;
         state.customersAppliedDateFrom = from;
         state.customersAppliedDateTo = to;
@@ -7151,6 +7756,7 @@
         state.customersDateTo = '';
         state.customersAppliedDateFrom = '';
         state.customersAppliedDateTo = '';
+        state.customersDateValidation = '';
         renderCustomers();
         return;
       case 'toggle-orders-today':
@@ -7410,7 +8016,7 @@
       case 'pay-influencer-commission': {
         const targetInfluencer = influencer || state.influencers.find((item) => Number(item.id) === Number(target?.dataset?.id));
         if (targetInfluencer) {
-          renderPayCommissionModal(targetInfluencer);
+          renderCommissionCorrectionModal(targetInfluencer);
         }
         return;
       }
@@ -7427,6 +8033,27 @@
       case 'submit-commission-correction':
         await handleCommissionCorrectionSubmit(id || Number(target?.dataset?.id));
         return;
+      case 'create-security': {
+        const infId = target?.dataset?.influencerId || id;
+        const targetInfluencer = state.influencers.find((item) => Number(item.id) === Number(infId));
+        renderCreateSecurityModal(targetInfluencer);
+        return;
+      }
+      case 'cancel-create-security': {
+        const infId = target?.dataset?.influencerId || id;
+        const targetInfluencer = state.influencers.find((item) => Number(item.id) === Number(infId));
+        if (targetInfluencer) {
+          await renderCommissionCorrectionModal(targetInfluencer);
+        } else {
+          closeModal();
+        }
+        return;
+      }
+      case 'submit-create-security': {
+        const infId = target?.dataset?.influencerId || id;
+        await handleCreateSecuritySubmit(infId);
+        return;
+      }
       case 'view-commission-history': {
         const targetInfluencer = influencer || state.influencers.find((item) => Number(item.id) === Number(target?.dataset?.id));
         if (targetInfluencer) {
@@ -7599,6 +8226,14 @@
       return;
     }
     if (inputKey === 'customersDateFrom' || inputKey === 'customersDateTo') {
+      const customerDateMax = getLocalDateInputMax();
+      if (state[inputKey] > customerDateMax) {
+        state[inputKey] = '';
+        state.customersDateValidation = 'Future dates are not allowed.';
+      } else {
+        state.customersDateValidation = getCustomersDateValidation(state.customersDateFrom, state.customersDateTo);
+      }
+      preserveInputFocus(target, renderCustomers);
       return;
     }
     if (inputKey === 'couponsSearch' || inputKey === 'couponsStatus' || inputKey === 'couponsType') {
@@ -7829,8 +8464,16 @@
 
     if (type === 'coupon') {
       const entity = updateCouponFromForm(form, existingId ? state.coupons.find((item) => Number(item.id) === existingId) : null);
-      if (!entity.code || !entity.discount) {
+      if (!entity.code || !entity.discountValue) {
         toast('Missing details', 'Coupon code and discount are required.', 'warning');
+        return;
+      }
+      if (entity.discountType === 'percentage' && (entity.discountValue < 1 || entity.discountValue > 100)) {
+        toast('Invalid discount', 'Percentage discount must be between 1% and 100%.', 'warning');
+        return;
+      }
+      if (entity.couponCategory === 'influencer' && entity.commissionType === 'percentage' && (entity.commissionRate < 0 || entity.commissionRate > 100)) {
+        toast('Invalid commission', 'Commission percentage must be between 0% and 100%.', 'warning');
         return;
       }
       if (entity.couponCategory === 'influencer' && !entity.influencerId) {
@@ -7844,7 +8487,10 @@
       const payload = {
         code: entity.code,
         description: entity.description,
-        discountValue: Number(entity.discount) || 0,
+        discountType: entity.discountType,
+        discountValue: Number(entity.discountValue) || 0,
+        commissionType: entity.commissionType,
+        commissionRate: Number(entity.commissionRate) || 0,
         commissionPerOrderPaise: Math.max(0, Math.round(Number(entity.commissionPerOrderPaise || 0))),
         couponCategory: entity.couponCategory,
         couponType: entity.couponType,
@@ -7916,6 +8562,10 @@
       const openProductDropdown = document.querySelector('[data-coupon-products-dropdown].is-open, [data-influencer-coupon-dropdown].is-open');
       if (openProductDropdown && !target.closest('[data-coupon-products-dropdown], [data-influencer-coupon-dropdown]')) {
         closeCouponProductDropdown();
+      }
+
+      if (els.profileDropdown && !els.profileDropdown.hidden && !target.closest('[data-profile-menu], [data-action="open-profile"]')) {
+        closeProfileDropdown();
       }
 
       const actionTarget = target.closest('[data-action]');
@@ -7996,6 +8646,10 @@
     });
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
+        if (closeProfileDropdown()) {
+          event.preventDefault();
+          return;
+        }
         if (closeCouponProductDropdown()) {
           event.preventDefault();
           return;
@@ -8020,13 +8674,14 @@
     loadCouponData();
     loadReportData();
     loadSettingsData();
+    loadSecurityQuestion();
     loadOffers();
     setInterval(() => {
       if (document.hidden) return;
-      loadDashboardStats();
-      loadOrderData();
-      loadReportData();
-    }, 15000);
+      loadDashboardStats({ silent: true });
+      loadOrderData({ silent: true });
+      loadReportData({ silent: true });
+    }, 30000);
   }
 
   if (document.readyState === 'loading') {
