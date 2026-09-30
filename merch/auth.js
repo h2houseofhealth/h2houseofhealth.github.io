@@ -498,7 +498,7 @@ async function finishAuthSuccess(result) {
   const user = result?.user || null;
   if (token) {
     try {
-      window.localStorage?.setItem('booking_portal_auth_token', token);
+      window.localStorage?.removeItem('booking_portal_auth_token');
     } catch {
       // Ignore storage issues.
     }

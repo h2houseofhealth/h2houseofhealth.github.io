@@ -46,6 +46,9 @@ const PORT = process.env.PORT || 3000;
 const WEBSITE_ROOT = path.resolve(__dirname, '..');
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_super_secret_change_me';
 const IS_PRODUCTION = normalizeEnvValue(process.env.NODE_ENV).toLowerCase() === 'production';
+if (IS_PRODUCTION && !normalizeEnvValue(process.env.JWT_SECRET)) {
+  throw new Error('JWT_SECRET must be configured in production.');
+}
 const AUTH_COOKIE_SECURE_MODE = normalizeEnvValue(process.env.AUTH_COOKIE_SECURE || 'auto').toLowerCase();
 const GOOGLE_CLIENT_ID = normalizeEnvValue(process.env.GOOGLE_CLIENT_ID);
 const GOOGLE_CLIENT_SECRET = normalizeEnvValue(process.env.GOOGLE_CLIENT_SECRET);
@@ -55,9 +58,12 @@ const ALLOW_DEV_OTP_FALLBACK = normalizeEnvValue(process.env.ALLOW_DEV_OTP_FALLB
 const SHOW_DEV_OTP_OVERRIDE = parseBooleanEnv(process.env.SHOW_DEV_OTP_IN_UI, false);
 const SHOW_DEV_OTP_IN_UI = ALLOW_DEV_OTP_FALLBACK && (!IS_PRODUCTION || SHOW_DEV_OTP_OVERRIDE);
 const TOKEN_COOKIE = 'booking_portal_token';
+const REFRESH_TOKEN_COOKIE = 'booking_portal_refresh';
 const AUTH_SESSION_TTL_MINUTES = 20;
 const AUTH_SESSION_TTL_MS = AUTH_SESSION_TTL_MINUTES * 60 * 1000;
 const AUTH_SESSION_JWT_EXPIRES_IN = `${AUTH_SESSION_TTL_MINUTES}m`;
+const REFRESH_SESSION_TTL_DAYS = 30;
+const REFRESH_SESSION_TTL_MS = REFRESH_SESSION_TTL_DAYS * 24 * 60 * 60 * 1000;
 const ALLOWED_SLOT_START_TIMES = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'];
 const LEGACY_ALLOWED_SLOT_START_TIMES = ['10:30', '11:30', '12:30', '13:30', '14:30', '15:30', '16:30', '17:30', '18:30', '19:30'];
 const MAX_BOOKINGS_PER_SLOT_HYDROGEN = 8;
@@ -1664,8 +1670,56 @@ app.post('/api/auth/password/reset', (req, res) => {
 });
 
 app.post('/api/auth/logout', (req, res) => {
+  const authorizationHeader = String(req.headers.authorization || '').trim();
+  const bearerToken = authorizationHeader.toLowerCase().startsWith('bearer ')
+    ? authorizationHeader.slice(7).trim()
+    : '';
+  const accessToken = String(req.cookies?.[TOKEN_COOKIE] || bearerToken).trim();
+  const refreshToken = String(req.cookies?.[REFRESH_TOKEN_COOKIE] || '').trim();
+  try {
+    const payload = accessToken ? jwt.decode(accessToken) : null;
+    if (payload?.jti) {
+      db.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL")
+        .run(new Date().toISOString(), String(payload.jti));
+    }
+  } catch {
+    // Logout remains idempotent even if the access token is malformed.
+  }
+  if (refreshToken) {
+    db.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE refresh_token_hash = ? AND revoked_at IS NULL")
+      .run(new Date().toISOString(), hashSessionToken(refreshToken));
+  }
   res.clearCookie(TOKEN_COOKIE, getAuthCookieOptions(req));
+  res.clearCookie(REFRESH_TOKEN_COOKIE, getRefreshCookieOptions(req));
   res.status(204).send();
+});
+
+app.post('/api/auth/refresh', (req, res) => {
+  const refreshToken = String(req.cookies?.[REFRESH_TOKEN_COOKIE] || '').trim();
+  if (!refreshToken) return res.status(401).json({ message: 'unauthorized' });
+
+  const existing = db.prepare(
+    `SELECT id, user_id AS userId, expires_at AS expiresAt, revoked_at AS revokedAt
+     FROM auth_sessions WHERE refresh_token_hash = ?`
+  ).get(hashSessionToken(refreshToken));
+  if (!existing || existing.revokedAt || new Date(existing.expiresAt).getTime() <= Date.now()) {
+    return res.status(401).json({ message: 'unauthorized' });
+  }
+
+  const user = getUserProfileById(Number(existing.userId));
+  if (!user) return res.status(401).json({ message: 'unauthorized' });
+  db.prepare("UPDATE auth_sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL")
+    .run(new Date().toISOString(), String(existing.id));
+  const authUser = {
+    id: Number(user.id), name: String(user.name), email: user.email ? String(user.email) : '',
+    role: String(user.role || 'user'), age: user.age ?? null, gender: user.gender || '',
+    mobile: user.mobile || '', avatarUrl: user.avatarUrl || '',
+    membershipStatus: user.membershipStatus || 'inactive', membershipPlan: user.membershipPlan || '',
+    membershipStartedAt: user.membershipStartedAt || null, membershipExpiresAt: user.membershipExpiresAt || null,
+    membershipPeopleCount: user.membershipPeopleCount ?? null, membershipSubscriptionId: user.membershipSubscriptionId || null,
+  };
+  const token = issueAuthSession(req, res, authUser);
+  return res.json({ user: authUser, token });
 });
 
 app.get('/api/auth/me', requireAuth, (req, res) => {
@@ -13779,15 +13833,34 @@ function findOrCreateGoogleUser(profile) {
 }
 
 function setAuthCookie(req, res, user) {
+  return issueAuthSession(req, res, user);
+}
+
+function hashSessionToken(token) {
+  return crypto.createHash('sha256').update(String(token || '')).digest('hex');
+}
+
+function issueAuthSession(req, res, user) {
+  const sessionId = crypto.randomUUID();
+  const refreshToken = crypto.randomBytes(48).toString('base64url');
+  const refreshExpiresAt = new Date(Date.now() + REFRESH_SESSION_TTL_MS).toISOString();
+  db.prepare(
+    `INSERT INTO auth_sessions (id, user_id, refresh_token_hash, expires_at, created_at)
+     VALUES (?, ?, ?, ?, ?)`
+  ).run(sessionId, Number(user.id), hashSessionToken(refreshToken), refreshExpiresAt, new Date().toISOString());
+
   const token = jwt.sign(
     { sub: user.id, name: user.name, email: user.email, role: user.role },
     JWT_SECRET,
-    { expiresIn: AUTH_SESSION_JWT_EXPIRES_IN }
+    { expiresIn: AUTH_SESSION_JWT_EXPIRES_IN, jwtid: sessionId, algorithm: 'HS256' }
   );
 
   res.cookie(TOKEN_COOKIE, token, {
     ...getAuthCookieOptions(req),
     maxAge: AUTH_SESSION_TTL_MS,
+  });
+  res.cookie(REFRESH_TOKEN_COOKIE, refreshToken, {
+    ...getRefreshCookieOptions(req),
   });
   return token;
 }
@@ -13801,6 +13874,15 @@ function getAuthCookieOptions(req) {
     secure,
     path: '/',
     maxAge: AUTH_SESSION_TTL_MS,
+  };
+}
+
+function getRefreshCookieOptions(req) {
+  return {
+    ...getAuthCookieOptions(req),
+    httpOnly: true,
+    path: '/api/auth',
+    maxAge: REFRESH_SESSION_TTL_MS,
   };
 }
 
@@ -13847,7 +13929,16 @@ function requireAuth(req, res, next) {
 
   for (const token of tokens) {
     try {
-      const payload = jwt.verify(token, JWT_SECRET);
+      const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+      if (payload?.jti) {
+        const authSession = db.prepare(
+          `SELECT id, expires_at AS expiresAt, revoked_at AS revokedAt
+           FROM auth_sessions WHERE id = ?`
+        ).get(String(payload.jti));
+        if (!authSession || authSession.revokedAt || new Date(authSession.expiresAt).getTime() <= Date.now()) {
+          continue;
+        }
+      }
       syncMembershipForUser({ userId: Number(payload.sub) });
       const user = getUserProfileById(Number(payload.sub));
 
@@ -15645,6 +15736,18 @@ function migrate() {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      refresh_token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      revoked_at TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at ON auth_sessions(expires_at);
+
     CREATE TABLE IF NOT EXISTS doctors (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER UNIQUE,
@@ -16275,8 +16378,13 @@ function seedDoctors() {
 }
 
 function seedAdmin() {
-  const email = 'admin@h2health.local';
-  const defaultPasswordHash = bcrypt.hashSync('Admin@12345', 10);
+  const email = normalizeEnvValue(process.env.ADMIN_LOGIN_EMAIL || 'admin@h2health.local').toLowerCase();
+  const initialPassword = normalizeEnvValue(process.env.ADMIN_INITIAL_PASSWORD);
+  if (IS_PRODUCTION && !initialPassword) {
+    console.warn('ADMIN_INITIAL_PASSWORD is not configured; skipping automatic production admin creation/reset.');
+    return;
+  }
+  const defaultPasswordHash = bcrypt.hashSync(initialPassword || 'Admin@12345', 10);
   const existing = db.prepare('SELECT id, password_hash FROM users WHERE email = ?').get(email);
 
   if (!existing) {

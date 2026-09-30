@@ -17,6 +17,7 @@
 
   const API_URL = resolveApiUrl();
   const AUTH_TOKEN_STORAGE_KEY = 'booking_portal_auth_token';
+  let authRefreshPromise = null;
   const CONFIRMATION_STORAGE_KEY = 'merch_booking_confirmation';
   const CHECKOUT_DETAILS_STORAGE_KEY = 'merch_checkout_details_v1';
 
@@ -43,24 +44,39 @@
 
   function getStoredAuthToken() {
     try {
-      return String(window.localStorage?.getItem(AUTH_TOKEN_STORAGE_KEY) || '').trim();
+      window.localStorage?.removeItem(AUTH_TOKEN_STORAGE_KEY);
     } catch {
-      return '';
+      // Ignore storage access errors.
     }
+    return '';
   }
 
   async function api(path, options = {}) {
-    const headers = new Headers(options.headers || {});
-    const authToken = getStoredAuthToken();
-    if (authToken && !headers.has('Authorization')) {
-      headers.set('Authorization', `Bearer ${authToken}`);
+    const request = () => {
+      const headers = new Headers(options.headers || {});
+      const authToken = getStoredAuthToken();
+      if (authToken && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${authToken}`);
+      return fetch(buildApiUrl(path), { ...options, credentials: 'include', headers });
+    };
+    let response = await request();
+    if (response.status === 401 && !String(path).startsWith('/api/auth/')) {
+      if (!authRefreshPromise) {
+        authRefreshPromise = fetch(buildApiUrl('/api/auth/refresh'), {
+          method: 'POST', credentials: 'include', headers: { Accept: 'application/json' },
+        }).then(async (refreshResponse) => {
+          if (!refreshResponse.ok) throw new Error('Authentication refresh failed');
+          const refreshData = await refreshResponse.json();
+          window.localStorage?.removeItem(AUTH_TOKEN_STORAGE_KEY);
+          return refreshData;
+        }).finally(() => { authRefreshPromise = null; });
+      }
+      try {
+        await authRefreshPromise;
+        response = await request();
+      } catch {
+        // Preserve the original 401 so the existing auth UI can handle it.
+      }
     }
-
-    const response = await fetch(buildApiUrl(path), {
-      ...options,
-      credentials: 'include',
-      headers,
-    });
 
     let data = null;
     try {
