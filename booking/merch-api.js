@@ -561,6 +561,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   if (!hasColumn('merch_orders', 'commission_amount_paise')) db.exec('ALTER TABLE merch_orders ADD COLUMN commission_amount_paise INTEGER NOT NULL DEFAULT 0');
   if (!hasColumn('merch_orders', 'commission_snapshot_at')) db.exec('ALTER TABLE merch_orders ADD COLUMN commission_snapshot_at TEXT');
   if (!hasColumn('merch_order_items', 'commission_amount_paise')) db.exec('ALTER TABLE merch_order_items ADD COLUMN commission_amount_paise INTEGER NOT NULL DEFAULT 0');
+  if (!hasColumn('merch_influencers', 'commission_per_order_paise')) db.exec('ALTER TABLE merch_influencers ADD COLUMN commission_per_order_paise INTEGER NOT NULL DEFAULT 0');
   db.exec("UPDATE merch_orders SET commission_amount_paise = COALESCE((SELECT commission_per_order_paise FROM merch_influencers WHERE merch_influencers.id = merch_orders.influencer_id), 0), commission_snapshot_at = datetime('now') WHERE commission_snapshot_at IS NULL");
 
   db.exec(`
