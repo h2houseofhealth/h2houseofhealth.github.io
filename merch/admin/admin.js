@@ -4128,17 +4128,19 @@
         <div class="admin-section__head">
           <div>
             <h2 class="admin-section__title">Offers</h2>
-            <p class="admin-section__desc">Create promotional offers shown on the storefront under "Shop Offers". Select products and the variants that should receive an offer, then enter a discount for each selected variant. Only active offers are visible to customers.</p>
+            <p class="admin-section__desc">Create promotional offers shown on the storefront under “Shop Offers”. Only active offers are visible to customers.</p>
           </div>
           <div class="admin-section__actions">
-            <button class="admin-btn admin-btn--primary" type="button" data-action="new-offer">+ New Offer</button>
+            <button class="admin-btn admin-btn--primary" type="button" data-action="new-offer">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              New Offer
+            </button>
           </div>
         </div>
         <div class="admin-section__body">
           ${draft ? `
-            <div class="admin-offer-form" id="offerForm"
-                 style="background:var(--admin-bg-subtle,#faf7f4);border:1px solid var(--admin-border);border-radius:10px;padding:20px 22px;margin-bottom:24px;">
-              <h3 style="margin:0 0 4px;font-size:15px;font-weight:700;">
+            <div class="admin-offer-form" id="offerForm">
+              <h3>
                 ${draft.id ? 'Edit Offer' : 'New Offer'}
                 ${!draft.id && checkedIds.length > 0
                   ? `<span style="font-size:12px;font-weight:400;color:var(--admin-muted);margin-left:8px;">${selectedVariantCount} variant${selectedVariantCount === 1 ? '' : 's'} selected</span>`
@@ -4230,30 +4232,40 @@
           ` : ''}
 
           ${state.offersLoading
-            ? '<p class="admin-table__muted">Loading offers\u2026</p>'
+            ? '<p class="admin-table__muted" style="padding:12px 0;">Loading offers\u2026</p>'
             : state.offers.length === 0
-              ? '<p class="admin-table__muted">No offers yet. Click + New Offer to create one.</p>'
+              ? `<div class="admin-offers-empty">
+                   <div class="admin-offers-empty__icon">◈</div>
+                   <p>No offers yet.<br>Click <strong>New Offer</strong> to create your first promotional offer.</p>
+                 </div>`
               : `
             <div class="admin-table-wrap">
-              <table class="admin-table">
+              <table class="admin-table admin-table--offers">
+                <colgroup>
+                  <col class="col-offer">
+                  <col class="col-product">
+                  <col class="col-discount">
+                  <col class="col-status">
+                  <col class="col-actions">
+                </colgroup>
                 <thead><tr>
                   <th>Offer</th>
                   <th>Product / Variant</th>
                   <th>Discount</th>
                   <th>Status</th>
-                  <th>Actions</th>
+                  <th></th>
                 </tr></thead>
                 <tbody>
                   ${state.offers.map((offer) => `
                     <tr>
                       <td>
-                        <strong>${escapeHtml(offer.name)}</strong><br>
-                        <span class="admin-table__muted">${escapeHtml(offer.shortDescription || '\u2014')}</span>
+                        <span class="admin-offer-name">${escapeHtml(offer.name)}</span>
+                        ${offer.shortDescription ? `<span class="admin-table__muted">${escapeHtml(offer.shortDescription)}</span>` : ''}
                       </td>
                       <td>${offer.productName
-                        ? `${escapeHtml(offer.productName)}${
+                        ? `<span class="admin-offer-product-name">${escapeHtml(offer.productName)}</span>${
                             offer.variantSku
-                              ? `<br><span class="admin-table__muted">${escapeHtml([offer.variantSize, offer.variantColor].filter(Boolean).join(' / ') || offer.variantSku)}</span>`
+                              ? `<span class="admin-offer-variant-tag">${escapeHtml([offer.variantSize, offer.variantColor].filter(Boolean).join(' / ') || offer.variantSku)}</span>`
                               : ''}`
                         : '<span class="admin-table__muted">\u2014</span>'}</td>
                       <td>${offer.discountType === 'percentage'
@@ -4266,7 +4278,7 @@
                         </span>
                       </td>
                       <td>
-                        <div class="admin-toolbar__group">
+                        <div class="admin-table-actions">
                           <button class="admin-btn admin-btn--ghost" type="button"
                                   data-action="edit-offer" data-offer-id="${escapeHtml(String(offer.id))}">Edit</button>
                           <button class="admin-btn admin-btn--ghost admin-btn--danger" type="button"
