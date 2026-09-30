@@ -31,6 +31,13 @@ const Mailgun = require('mailgun.js');
 const formData = require('form-data');
 const Razorpay = require('razorpay');
 const multer = require('multer');
+// Deployments may install dependencies as root while the service runs as a
+// different user. Prefer the shared application cache when it exists so the
+// PDF browser is available to the runtime user as well.
+const sharedPuppeteerCacheDir = path.resolve(__dirname, '../.cache/puppeteer');
+if (!process.env.PUPPETEER_CACHE_DIR && fs.existsSync(sharedPuppeteerCacheDir)) {
+  process.env.PUPPETEER_CACHE_DIR = sharedPuppeteerCacheDir;
+}
 let puppeteer;
 let puppeteerLoadError;
 try {
