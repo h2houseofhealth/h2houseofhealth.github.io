@@ -4913,6 +4913,196 @@
     `;
   }
 
+  // ── Change Password (3-step: send OTP → verify OTP → set new password) ──
+  function renderChangePasswordModal(step = 'email', ctx = {}) {
+    const adminEmail = 'admin@h2health.local';
+
+    const steps = {
+      email: {
+        kicker: 'Step 1 of 3',
+        title: 'Change Password',
+        body: `
+          <p style="margin:0 0 18px;color:var(--admin-muted);font-size:13px;line-height:1.6;">
+            A one-time verification code will be sent to your admin email address.
+          </p>
+          <div class="admin-form-grid">
+            <label class="admin-field admin-field--wide">
+              <span>Admin Email</span>
+              <input type="email" id="cpEmailInput"
+                     value="${escapeHtml(adminEmail)}"
+                     placeholder="admin@h2health.local"
+                     autocomplete="email" />
+            </label>
+          </div>
+          <p id="cpError" style="margin:10px 0 0;color:var(--admin-danger);font-size:13px;display:none;"></p>
+        `,
+        footer: `
+          <button class="admin-btn admin-btn--primary" type="button" id="cpNextBtn">Send OTP</button>
+          <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button>
+        `,
+      },
+      otp: {
+        kicker: 'Step 2 of 3',
+        title: 'Enter Verification Code',
+        body: `
+          <p style="margin:0 0 18px;color:var(--admin-muted);font-size:13px;line-height:1.6;">
+            We sent a 6-digit code to <strong>${escapeHtml(ctx.email || adminEmail)}</strong>.
+            Enter it below to continue.
+          </p>
+          <div class="admin-form-grid">
+            <label class="admin-field admin-field--wide">
+              <span>Verification Code</span>
+              <input type="text" id="cpOtpInput"
+                     inputmode="numeric" maxlength="6"
+                     placeholder="123456"
+                     autocomplete="one-time-code"
+                     style="letter-spacing:0.22em;font-size:18px;text-align:center;" />
+            </label>
+          </div>
+          <p id="cpError" style="margin:10px 0 0;color:var(--admin-danger);font-size:13px;display:none;"></p>
+        `,
+        footer: `
+          <button class="admin-btn admin-btn--primary" type="button" id="cpNextBtn">Verify Code</button>
+          <button class="admin-btn admin-btn--ghost" type="button" id="cpBackBtn">Back</button>
+        `,
+      },
+      password: {
+        kicker: 'Step 3 of 3',
+        title: 'Set New Password',
+        body: `
+          <p style="margin:0 0 18px;color:var(--admin-muted);font-size:13px;line-height:1.6;">
+            Choose a strong new password for your admin account.
+          </p>
+          <div class="admin-form-grid">
+            <label class="admin-field admin-field--wide">
+              <span>New Password</span>
+              <input type="password" id="cpPasswordInput"
+                     placeholder="Minimum 8 characters"
+                     autocomplete="new-password"
+                     minlength="8" />
+            </label>
+            <label class="admin-field admin-field--wide">
+              <span>Confirm New Password</span>
+              <input type="password" id="cpConfirmInput"
+                     placeholder="Repeat new password"
+                     autocomplete="new-password"
+                     minlength="8" />
+            </label>
+          </div>
+          <p id="cpError" style="margin:10px 0 0;color:var(--admin-danger);font-size:13px;display:none;"></p>
+        `,
+        footer: `
+          <button class="admin-btn admin-btn--primary" type="button" id="cpNextBtn">Change Password</button>
+          <button class="admin-btn admin-btn--ghost" type="button" id="cpBackBtn">Back</button>
+        `,
+      },
+    };
+
+    const cfg = steps[step];
+    openModal({
+      title: cfg.title,
+      subtitle: cfg.kicker,
+      body: cfg.body,
+      footer: cfg.footer,
+      size: 'sm',
+    });
+
+    const dialog = els.adminModalDialog;
+    const errorEl = dialog.querySelector('#cpError');
+
+    function showError(msg) {
+      if (!errorEl) return;
+      errorEl.textContent = msg;
+      errorEl.style.display = msg ? 'block' : 'none';
+    }
+
+    function setLoading(btn, loading) {
+      if (!btn) return;
+      btn.disabled = loading;
+      btn.textContent = loading
+        ? 'Please wait…'
+        : (step === 'email' ? 'Send OTP' : step === 'otp' ? 'Verify Code' : 'Change Password');
+    }
+
+    // Back buttons
+    dialog.querySelector('#cpBackBtn')?.addEventListener('click', () => {
+      if (step === 'otp') renderChangePasswordModal('email', ctx);
+      if (step === 'password') renderChangePasswordModal('otp', ctx);
+    });
+
+    // Primary action button
+    const nextBtn = dialog.querySelector('#cpNextBtn');
+    if (!nextBtn) return;
+
+    nextBtn.addEventListener('click', async () => {
+      showError('');
+
+      if (step === 'email') {
+        const emailInput = dialog.querySelector('#cpEmailInput');
+        const email = (emailInput?.value || '').trim();
+        if (!email) { showError('Please enter your email address.'); return; }
+        setLoading(nextBtn, true);
+        try {
+          const result = await apiRequest('/api/auth/password/forgot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email }),
+          });
+          toast('OTP Sent', result.message || 'Check your email for the verification code.', 'success');
+          renderChangePasswordModal('otp', { ...ctx, email });
+        } catch (err) {
+          showError(err.message || 'Failed to send OTP. Please try again.');
+          setLoading(nextBtn, false);
+        }
+        return;
+      }
+
+      if (step === 'otp') {
+        const otp = (dialog.querySelector('#cpOtpInput')?.value || '').trim();
+        if (!otp || otp.length < 4) { showError('Please enter the verification code.'); return; }
+        setLoading(nextBtn, true);
+        try {
+          const result = await apiRequest('/api/auth/password/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: ctx.email, otp }),
+          });
+          toast('Code Verified', result.message || 'Now set your new password.', 'success');
+          renderChangePasswordModal('password', { ...ctx, otp });
+        } catch (err) {
+          showError(err.message || 'Invalid or expired code. Please try again.');
+          setLoading(nextBtn, false);
+        }
+        return;
+      }
+
+      if (step === 'password') {
+        const newPass = dialog.querySelector('#cpPasswordInput')?.value || '';
+        const confirmPass = dialog.querySelector('#cpConfirmInput')?.value || '';
+        if (newPass.length < 8) { showError('Password must be at least 8 characters.'); return; }
+        if (newPass !== confirmPass) { showError('Passwords do not match.'); return; }
+        setLoading(nextBtn, true);
+        try {
+          const result = await apiRequest('/api/auth/password/reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: ctx.email, password: newPass }),
+          });
+          closeModal();
+          toast('Password Changed', result.message || 'Your password has been updated successfully.', 'success');
+        } catch (err) {
+          showError(err.message || 'Failed to change password. Please try again.');
+          setLoading(nextBtn, false);
+        }
+      }
+    });
+
+    // Auto-focus first input
+    window.setTimeout(() => {
+      dialog.querySelector('input')?.focus();
+    }, 80);
+  }
+
   function renderProfileModal() {
     openModal({
       title: 'Admin Profile',
@@ -6682,7 +6872,7 @@
 
   return;
       case 'change-password':
-        toast('Placeholder', 'Password reset flow can be wired to the auth API later.', 'default');
+        renderChangePasswordModal();
         return;
       case 'open-product-modal':
         renderEntityFormModal('product');
