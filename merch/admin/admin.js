@@ -3296,7 +3296,7 @@
                   </thead>
                   <tbody>
                     ${pageItems.map((order) => `
-                      <tr data-action="select-order" data-id="${order.id}" style="cursor:pointer;">
+                      <tr class="${Number(state.selectedOrderId) === Number(order.id) ? 'is-selected' : ''}" data-action="select-order" data-id="${order.id}" style="cursor:pointer;">
                         <td><input type="checkbox" data-action="toggle-order-selection" data-id="${order.id}" ${state.selectedOrderIds.includes(Number(order.id)) ? 'checked' : ''} aria-label="Select ${escapeHtml(order.orderNumber)}" /> <strong>${escapeHtml(order.orderNumber)}</strong><br><span class="admin-table__muted">${escapeHtml(dateLabel(order.createdAt))}</span></td>
                         <td>${escapeHtml(order.customerName)}<br><span class="admin-table__muted">${escapeHtml(displayEmail(order.email))}</span></td>
                         <td>${escapeHtml(order.couponCode ? money(order.discountAmount) : '—')}</td>
@@ -5861,19 +5861,24 @@
     }
   }
 
-  async function loadDashboardStats() {
-    state.dashboardStatsLoading = !state.dashboardStats;
-    renderDashboard();
+  async function loadDashboardStats(options = {}) {
+    const silent = Boolean(options.silent);
+    if (!silent) {
+      state.dashboardStatsLoading = !state.dashboardStats;
+      renderDashboard();
+    }
     try {
       const result = await apiRequest('/api/merch/admin/stats');
       state.dashboardStats = result || null;
       state.notifications = mergeNotificationState(result?.notifications);
     } catch (error) {
-      state.dashboardStats = null;
-      state.notifications = [];
+      if (!silent) {
+        state.dashboardStats = null;
+        state.notifications = [];
+      }
     } finally {
       state.dashboardStatsLoading = false;
-      renderDashboard();
+      if (state.view === 'dashboard') renderDashboard();
       if (state.view === 'reports') renderReports();
     }
   }
@@ -5984,19 +5989,38 @@
     }
   }
 
-  async function loadOrderData() {
-    state.ordersLoading = true;
-    renderOrders();
+  async function loadOrderData(options = {}) {
+    const silent = Boolean(options.silent);
+    if (!silent) {
+      state.ordersLoading = true;
+      renderOrders();
+    }
     try {
       const result = await apiRequest('/api/merch/admin/orders');
-      state.orders = Array.isArray(result.orders) ? result.orders : [];
+      const newOrders = Array.isArray(result.orders) ? result.orders : [];
+      const changed = JSON.stringify(newOrders) !== JSON.stringify(state.orders);
+      state.orders = newOrders;
+      if (!silent || changed) {
+        if (state.view === 'orders') {
+          const activeEl = document.activeElement;
+          if (activeEl instanceof HTMLInputElement && els.ordersView && els.ordersView.contains(activeEl)) {
+            preserveInputFocus(activeEl, renderOrders);
+          } else {
+            renderOrders();
+          }
+        }
+      }
     } catch (error) {
-      state.orders = [];
-      toast('Orders unavailable', error.message || 'Unable to load merch orders from the admin API.', 'warning');
+      if (!silent) {
+        state.orders = [];
+        toast('Orders unavailable', error.message || 'Unable to load merch orders from the admin API.', 'warning');
+      }
     } finally {
-      state.ordersLoading = false;
-      renderOrders();
-      renderDashboard();
+      if (!silent) {
+        state.ordersLoading = false;
+        renderOrders();
+      }
+      if (state.view === 'dashboard') renderDashboard();
       if (state.view === 'reports') renderReports();
     }
   }
@@ -6033,20 +6057,25 @@
     }
   }
 
-  async function loadReportData() {
-    state.reportsLoading = true;
+  async function loadReportData(options = {}) {
+    const silent = Boolean(options.silent);
+    if (!silent) {
+      state.reportsLoading = true;
+    }
     try {
       const params = new URLSearchParams();
       if (state.reportFrom) params.set('startDate', state.reportFrom);
       if (state.reportTo) params.set('endDate', state.reportTo);
       state.reports = await apiRequest(`/api/merch/admin/reports?${params.toString()}`);
     } catch (error) {
-      state.reports = null;
-      toast('Reports unavailable', error.message || 'Unable to load merch reports from the admin API.', 'warning');
+      if (!silent) {
+        state.reports = null;
+        toast('Reports unavailable', error.message || 'Unable to load merch reports from the admin API.', 'warning');
+      }
     } finally {
       state.reportsLoading = false;
-      renderReports();
-      renderDashboard();
+      if (state.view === 'reports') renderReports();
+      if (state.view === 'dashboard') renderDashboard();
     }
   }
 
@@ -8213,10 +8242,10 @@
     loadOffers();
     setInterval(() => {
       if (document.hidden) return;
-      loadDashboardStats();
-      loadOrderData();
-      loadReportData();
-    }, 15000);
+      loadDashboardStats({ silent: true });
+      loadOrderData({ silent: true });
+      loadReportData({ silent: true });
+    }, 30000);
   }
 
   if (document.readyState === 'loading') {

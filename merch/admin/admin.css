@@ -1078,6 +1078,10 @@ a {
   background: rgba(200, 101, 45, 0.05);
 }
 
+.admin-table tbody tr.is-selected {
+  background: rgba(200, 101, 45, 0.09) !important;
+}
+
 .admin-table__muted {
   color: var(--admin-muted);
   font-size: 12px;

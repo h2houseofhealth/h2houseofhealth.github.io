@@ -115,6 +115,25 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   if (!hasColumn('merch_products', 'deleted_previous_is_active')) {
     db.exec('ALTER TABLE merch_products ADD COLUMN deleted_previous_is_active INTEGER NOT NULL DEFAULT 1');
   }
+  if (!hasColumn('merch_products', 'length_cm')) {
+    db.exec('ALTER TABLE merch_products ADD COLUMN length_cm REAL');
+  }
+  if (!hasColumn('merch_products', 'breadth_cm')) {
+    db.exec('ALTER TABLE merch_products ADD COLUMN breadth_cm REAL');
+  }
+  if (!hasColumn('merch_products', 'height_cm')) {
+    db.exec('ALTER TABLE merch_products ADD COLUMN height_cm REAL');
+  }
+
+  // Backfill package dimensions for default catalog items
+  try {
+    db.prepare("UPDATE merch_products SET length_cm = 24, breadth_cm = 7, height_cm = 7 WHERE (length_cm IS NULL OR length_cm = 0) AND (lower(slug) LIKE '%bottle%' OR lower(name) LIKE '%bottle%')").run();
+    db.prepare("UPDATE merch_products SET length_cm = 10.3, breadth_cm = 4, height_cm = 4 WHERE (length_cm IS NULL OR length_cm = 0) AND (lower(slug) LIKE '%mist%' OR lower(slug) LIKE '%spray%' OR lower(name) LIKE '%spray%')").run();
+    db.prepare("UPDATE merch_products SET length_cm = 30, breadth_cm = 25, height_cm = 5 WHERE (length_cm IS NULL OR length_cm = 0) AND (lower(slug) LIKE '%hoodie%' OR lower(name) LIKE '%hoodie%')").run();
+  } catch (err) {
+    console.warn('[Merch DB] Dimension backfill note:', err.message);
+  }
+
   // combo_purchase was the old flag-only implementation. Real combo cards
   // are represented by is_combo products and their component rows below.
   db.prepare('UPDATE merch_products SET combo_purchase = 0 WHERE is_combo = 0').run();
@@ -4910,6 +4929,25 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     });
   });
 
+  function getOrderItemsWithProductDetails(orderId) {
+    try {
+      return db.prepare(`
+        SELECT 
+          oi.*,
+          COALESCE(p.weight_grams, 0) AS weight_grams,
+          COALESCE(p.length_cm, 0) AS length_cm,
+          COALESCE(p.breadth_cm, 0) AS breadth_cm,
+          COALESCE(p.height_cm, 0) AS height_cm
+        FROM merch_order_items oi
+        LEFT JOIN merch_variants v ON v.id = oi.variant_id
+        LEFT JOIN merch_products p ON p.id = v.product_id
+        WHERE oi.order_id = ?
+      `).all(orderId);
+    } catch {
+      return db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
+    }
+  }
+
   async function autoFulfillOrderWithShiprocket(orderId) {
     if (!shiprocket.isConfigured()) return null;
 
@@ -4917,7 +4955,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
       if (!order) return null;
 
-      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+      const items = getOrderItemsWithProductDetails(order.id);
       let shipmentId = order.shiprocket_shipment_id;
 
       // 1. Create order in Shiprocket if not yet created
@@ -5028,13 +5066,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       }
     }
 
-    // Automatically fulfill order with Shiprocket to immediately generate Tracking ID (AWB)
+    // Instant auto-fulfillment stopped so couriers and AWBs are not auto-assigned on checkout.
+    // Merchants fulfill orders via the Admin dashboard when items are physically packed.
     let autoFulfill = null;
-    try {
-      autoFulfill = await autoFulfillOrderWithShiprocket(order.id);
-    } catch (fulfillErr) {
-      console.warn('[Shiprocket] Instant auto-fulfillment skipped:', fulfillErr.message);
-    }
 
     const notifications = await triggerMerchOrderConfirmationNotifications(order.id, req);
 
@@ -6902,13 +6936,23 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const deliveryPostcode = parsedAddr.postalCode || parsedAddr.postal_code || parsedAddr.pincode || '452001';
       const isCod = String(order.payment_method || '').toLowerCase() === 'cod';
 
+      const items = getOrderItemsWithProductDetails(order.id);
+      const totalWeightGrams = items.reduce((sum, item) => {
+        const itemWeight = Number(item.weight_grams ?? item.weightGrams ?? 0);
+        const qty = Math.max(1, Number(item.quantity || item.units || 1));
+        return sum + (itemWeight * qty);
+      }, 0);
+      const orderWeightKg = totalWeightGrams > 0
+        ? Math.max(0.01, Number((totalWeightGrams / 1000).toFixed(3)))
+        : shiprocket.defaultWeightKg;
+
       const couriers = await shiprocket.checkServiceability({
         deliveryPostcode,
-        weight: shiprocket.defaultWeightKg,
+        weight: orderWeightKg,
         cod: isCod,
       });
 
-      res.json({ success: true, deliveryPostcode, couriers });
+      res.json({ success: true, deliveryPostcode, weightKg: orderWeightKg, couriers });
     } catch (err) {
       res.status(500).json({ error: err.message, details: err.details || null });
     }
@@ -6920,13 +6964,15 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
       if (!order) return res.status(404).json({ error: 'Order not found' });
 
-      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+      const items = getOrderItemsWithProductDetails(order.id);
       const customPickupLocation = req.body?.pickupLocation || null;
+      const packageDimensions = req.body?.packageDimensions || null;
 
       const result = await shiprocket.createOrder({
         order,
         items,
         customPickupLocation,
+        packageDimensions,
       });
 
       db.prepare(`
@@ -6951,7 +6997,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
       if (!order) return res.status(404).json({ error: 'Order not found' });
 
-      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+      const items = getOrderItemsWithProductDetails(order.id);
       let shipmentId = order.shiprocket_shipment_id;
 
       // If order not yet created in Shiprocket, create it first
