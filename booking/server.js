@@ -983,6 +983,8 @@ mountMerchApi(app, {
   JWT_SECRET,
   jwt,
   merchImageUpload,
+  sendWhatsAppMessage,
+  normalizeWhatsAppMobile,
   sendMerchEmail: ({ to, subject, text, html }) => sendConfiguredEmail({
     to,
     from: MAIL_FROM,
@@ -5561,6 +5563,12 @@ app.post('/api/hydrogen/verify', requireAuth, async (req, res) => {
        AND payment_order_id = ?`
   ).run(razorpayPaymentId, paymentMethod, paymentMethod, req.user.id, razorpayOrderId);
 
+  for (const b of bookings) {
+    void sendWhatsAppBookingConfirmation(b.id).then((result) => {
+      if (!result?.ok) console.warn('[WhatsApp] Hydrogen confirmation notice:', result?.message);
+    }).catch((err) => console.error('[WhatsApp] Hydrogen confirmation error:', err?.message || err));
+  }
+
   return res.json({ paid: true, bookingCount: bookings.length });
 });
 
@@ -7600,6 +7608,16 @@ app.patch('/api/public/guest/bookings/:id/status', (req, res) => {
   } else {
     db.prepare('UPDATE bookings SET status = ? WHERE id = ?').run(status, bookingId);
   }
+
+  if (status === 'cancelled' && existingStatus !== 'cancelled') {
+    const reason = req.body?.reason || req.body?.cancellationReason || 'Cancelled by client';
+    const fullBooking = getBookingForWhatsApp(bookingId) || existing;
+    triggerBookingCancellationNotifications(fullBooking, {
+      cancelledBy: 'guest',
+      reason,
+    }).catch((err) => console.error('[Booking] Guest cancellation notification error:', err?.message || err));
+  }
+
   return res.status(204).send();
 });
 
@@ -8237,6 +8255,12 @@ app.post('/api/public/payments/verify', async (req, res) => {
            AND payment_status <> 'paid'`
       ).run(razorpayOrderId, razorpayOrderId, razorpayPaymentId, razorpayPaymentId, paymentMethod, paymentMethod, booking.bookingGroupId);
 
+      groupBookings.forEach((gb) => {
+        void sendWhatsAppBookingConfirmation(gb.id).then((result) => {
+          if (!result?.ok) console.warn('[WhatsApp] Group booking confirmation notice:', result?.message);
+        }).catch((err) => console.error('[WhatsApp] Group booking confirmation error:', err?.message || err));
+      });
+
       return res.json({ bookingId: access.bookingId, paid: true, bookingCount: groupBookings.length });
     }
 
@@ -8275,6 +8299,12 @@ app.post('/api/public/payments/verify', async (req, res) => {
       ).run(razorpayOrderId, razorpayOrderId, razorpayPaymentId, razorpayPaymentId, paymentMethod, paymentMethod, booking.id);
     }
   })();
+
+  payableGuestBookings.forEach((pb) => {
+    void sendWhatsAppBookingConfirmation(pb.id).then((result) => {
+      if (!result?.ok) console.warn('[WhatsApp] Guest booking confirmation notice:', result?.message);
+    }).catch((err) => console.error('[WhatsApp] Guest booking confirmation error:', err?.message || err));
+  });
 
   return res.json({
     bookingId: Number(payableGuestBookings[0]?.id || guestBookings[0]?.id || 0),
@@ -9033,7 +9063,7 @@ function getPaidBookingDiscountMeta(bookings) {
 }
 
 function merchPaiseToInr(value) {
-  return Math.max(0, Math.round(Number(value || 0) / 100));
+  return Math.max(0, Number(value || 0) / 100);
 }
 
 function parseMerchShippingAddress(value) {
@@ -9127,6 +9157,7 @@ app.get('/invoice/merch', async (req, res) => {
               gst_amount AS gstAmount,
               shipping_charge AS shippingCharge,
               discount_amount AS discountAmount,
+              coupon_code AS couponCode,
               total_amount AS totalAmount,
               payment_method AS paymentMethod,
               payment_status AS paymentStatus,
@@ -9175,7 +9206,11 @@ app.get('/invoice/merch', async (req, res) => {
   const subtotalAmountInr = merchPaiseToInr(order.subtotal);
   const discountAmountInr = merchPaiseToInr(order.discountAmount);
   const shippingAmountInr = merchPaiseToInr(order.shippingCharge);
-  const gstAmountInr = merchPaiseToInr(order.gstAmount);
+  // Derive GST on the discounted merchandise amount (prices are GST-inclusive at 18%: 9% CGST + 9% SGST)
+  const taxableMerchInr = Math.max(0, subtotalAmountInr - discountAmountInr);
+  const totalGstInr = taxableMerchInr > 0 ? (taxableMerchInr - (taxableMerchInr / 1.18)) : 0;
+  const cgstAmountInr = totalGstInr / 2;
+  const sgstAmountInr = totalGstInr / 2;
   const amountInr = merchPaiseToInr(order.totalAmount);
   const invoiceNo = `MR-${order.orderNumber || order.id}`;
   const invoiceDownloadUrl = `/invoice/merch?token=${encodeURIComponent(String(req.query.token || ''))}&format=pdf&download=1`;
@@ -9611,27 +9646,27 @@ app.get('/invoice/merch', async (req, res) => {
          </span>
        </div>
        <div class="summary-row">
-         <span>Discount</span>
-         <span>
-           - ${formatInvoiceInr(discountAmountInr)}
-         </span>
-       </div>
-       <div class="summary-row">
          <span>Shipping</span>
          <span>
            ${formatInvoiceInr(shippingAmountInr)}
          </span>
        </div>
        <div class="summary-row">
+         <span>Discount${order.couponCode ? ` (${escapeHtml(String(order.couponCode))})` : ''}</span>
+         <span>
+           - ${formatInvoiceInr(discountAmountInr)}
+         </span>
+       </div>
+       <div class="summary-row">
          <span>CGST (9%)</span>
          <span>
-           ${formatInvoiceInr((gstAmountInr || 0) / 2)}
+           ${formatInvoiceInr(cgstAmountInr)}
          </span>
        </div>
        <div class="summary-row">
          <span>SGST (9%)</span>
          <span>
-           ${formatInvoiceInr((gstAmountInr || 0) / 2)}
+           ${formatInvoiceInr(sgstAmountInr)}
          </span>
        </div>
        <div class="summary-row summary-total">
@@ -9644,13 +9679,13 @@ app.get('/invoice/merch', async (req, res) => {
     </div>
     <div class="invoice-company-footer">
       <div>
-        P: 91000 56979, 91000 86979<br>
-        E: hello@h2houseofhealth.com
+        📞 91000 56979, 91000 86979<br>
+        ✉️ hello@h2houseofhealth.com
       </div>
       <div>
-        A: 47A, Journalist Colony, Road No:70,<br>
+        📍 47A, Journalist Colony, Road No:70,<br>
         Jubilee Hills, Hyderabad - 500033<br>
-        W: www.h2houseofhealth.com
+        🌐 www.h2houseofhealth.com
       </div>
     </div>
     
@@ -10228,13 +10263,13 @@ app.get('/invoice/booking', async (req, res) => {
     </div>
     <div class="invoice-company-footer">
       <div>
-        P: 91000 56979, 91000 86979<br>
-        E: hello@h2houseofhealth.com
+        📞 91000 56979, 91000 86979<br>
+        ✉️ hello@h2houseofhealth.com
       </div>
       <div>
-        A: 47A, Journalist Colony, Road No:70,<br>
+        📍 47A, Journalist Colony, Road No:70,<br>
         Jubilee Hills, Hyderabad - 500033<br>
-        W: www.h2houseofhealth.com
+        🌐 www.h2houseofhealth.com
       </div>
     </div>
     
@@ -10817,6 +10852,20 @@ app.patch('/api/bookings/:id/status', requireAuth, (req, res) => {
       syncMembershipCoveredHydrogenBookings(Number(existing.userId), targetUser);
     }
   }
+
+  if (status === 'cancelled' && existingStatus !== 'cancelled') {
+    const isGroup = Boolean(existing.bookingGroupId);
+    const cancelledBy = req.user.role === 'admin' ? 'admin' : 'user';
+    const reason = req.body?.reason || req.body?.cancellationReason || (cancelledBy === 'admin' ? 'Cancelled by clinic administration' : 'Cancelled by client');
+    const fullBooking = getBookingForWhatsApp(bookingId) || existing;
+
+    triggerBookingCancellationNotifications(fullBooking, {
+      cancelledBy,
+      reason,
+      isGroup,
+    }).catch((err) => console.error('[Booking] Cancellation notification error:', err?.message || err));
+  }
+
   res.status(204).send();
 });
 
@@ -15022,6 +15071,12 @@ function normalizeWhatsAppMobile(value) {
     if (local.startsWith('0')) local = local.slice(1);
     return `+44${local}`;
   }
+  if (/^[6-9]\d{9}$/.test(digits)) {
+    return `+91${digits}`;
+  }
+  if (/^[2-5]\d{9}$/.test(digits)) {
+    return `+1${digits}`;
+  }
   if (/^\d{10}$/.test(digits)) {
     return `+91${digits}`;
   }
@@ -15197,6 +15252,12 @@ function normalizeWhatsAppMobile(value) {
     let local = digits.slice(2);
     if (local.startsWith('0')) local = local.slice(1);
     return `+44${local}`;
+  }
+  if (/^[6-9]\d{9}$/.test(digits)) {
+    return `+91${digits}`;
+  }
+  if (/^[2-5]\d{9}$/.test(digits)) {
+    return `+1${digits}`;
   }
   if (/^\d{10}$/.test(digits)) {
     return `+91${digits}`;
@@ -15388,8 +15449,10 @@ function getBookingForWhatsApp(bookingId) {
     .prepare(
       `SELECT b.id,
               b.user_id AS userId,
+              b.booking_group_id AS bookingGroupId,
               COALESCE(NULLIF(TRIM(b.client_name), ''), NULLIF(TRIM(u.name), ''), NULLIF(TRIM(b.guest_name), ''), 'Valued Guest') AS clientName,
               COALESCE(NULLIF(TRIM(b.client_phone), ''), NULLIF(TRIM(u.mobile), ''), NULLIF(TRIM(b.guest_phone), ''), '') AS clientPhone,
+              COALESCE(NULLIF(TRIM(b.client_email), ''), NULLIF(TRIM(u.email), ''), NULLIF(TRIM(b.guest_email), ''), '') AS clientEmail,
               b.service_name AS serviceName,
               b.booking_date AS bookingDate,
               b.booking_time AS bookingTime,
@@ -15440,6 +15503,146 @@ async function sendWhatsAppBookingConfirmation(bookingOrId) {
     serviceName,
     bookingId,
   ]);
+}
+
+function resolveBookingRefundStatus(booking) {
+  const paymentStatus = String(booking?.paymentStatus || booking?.payment_status || '').trim().toLowerCase();
+  if (paymentStatus === 'refunded' || paymentStatus === 'paid') {
+    return 'No refund';
+  }
+
+  // Check if booking was a membership-covered session
+  const userId = Number(booking?.userId || booking?.user_id || 0);
+  if (userId > 0) {
+    const user = getUserProfileById(userId);
+    if (user && String(user.membershipStatus || '').toLowerCase() === 'active') {
+      const serviceName = String(booking?.serviceName || booking?.service_name || '');
+      const isHydrogen = SERVICE_CATALOG.some(
+        (s) => String(s.category || '').toUpperCase() === 'HYDROGEN SESSION' && s.name.toLowerCase() === serviceName.toLowerCase()
+      );
+      if (isHydrogen) {
+        return 'Session returned to membership balance';
+      }
+    }
+  }
+
+  return 'No payment was collected';
+}
+
+async function sendBookingCancellationWhatsApp(booking, options = {}) {
+  const rawPhone = booking?.clientPhone || booking?.client_phone || booking?.guestPhone || booking?.guest_phone || '';
+  const customerName = String(
+    booking?.clientName || booking?.client_name || booking?.guestName || booking?.guest_name || 'Valued Guest'
+  ).trim();
+  const bookingNumber = String(
+    booking?.bookingGroupId || booking?.booking_group_id || (booking?.id ? `BK${booking.id}` : 'BK-REF')
+  ).trim();
+  const reason = String(
+    options.reason || (options.cancelledBy === 'admin' ? 'Cancelled by clinic administration' : 'Cancelled by client')
+  ).trim();
+  const refundStatus = options.refundStatus || resolveBookingRefundStatus(booking);
+
+  if (!rawPhone) {
+    console.warn(`[WhatsApp] Skipping booking cancellation notification for ${bookingNumber}: no phone number provided.`);
+    return { ok: false, reason: 'missing_phone' };
+  }
+
+  const phone = normalizeWhatsAppMobile(rawPhone);
+  if (!phone) {
+    console.warn(`[WhatsApp] Skipping booking cancellation notification for ${bookingNumber}: invalid phone "${rawPhone}".`);
+    return { ok: false, reason: 'invalid_phone' };
+  }
+
+  const parameters = [
+    customerName,
+    bookingNumber,
+    reason,
+    refundStatus,
+  ];
+
+  try {
+    const result = await sendWhatsAppMessage(phone, 'order_cancelled', parameters);
+    console.log(`[WhatsApp] Sent order_cancelled notification for booking ${bookingNumber}:`, result);
+    return result;
+  } catch (err) {
+    console.error(`[WhatsApp] Error sending order_cancelled notification for booking ${bookingNumber}:`, err?.message || err);
+    return { ok: false, error: err?.message || err };
+  }
+}
+
+async function sendBookingCancellationEmail(booking, options = {}) {
+  const email = String(
+    booking?.clientEmail || booking?.client_email || booking?.guestEmail || booking?.guest_email || ''
+  ).trim().toLowerCase();
+  const customerName = String(
+    booking?.clientName || booking?.client_name || booking?.guestName || booking?.guest_name || 'Valued Guest'
+  ).trim();
+  const bookingNumber = String(
+    booking?.bookingGroupId || booking?.booking_group_id || (booking?.id ? `BK${booking.id}` : 'BK-REF')
+  ).trim();
+  const reason = String(
+    options.reason || (options.cancelledBy === 'admin' ? 'Cancelled by clinic administration' : 'Cancelled by client')
+  ).trim();
+  const refundStatus = options.refundStatus || resolveBookingRefundStatus(booking);
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    console.warn(`[Booking] Skipping cancellation email for ${bookingNumber}: no valid email provided.`);
+    return { status: 'skipped', reason: 'missing_email' };
+  }
+
+  const subject = `Your H2 House of Health booking ${bookingNumber} has been cancelled`;
+  const text = `Hi ${customerName},\n\nYour H2 House of Health booking ${bookingNumber} has been cancelled.\n\nCancellation reason: ${reason}\nRefund status: ${refundStatus}\n\nIf you have any questions, please contact our support team at support@h2houseofhealth.com.\n\nBest regards,\nH2 House of Health Team`;
+  const html = `<!doctype html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #faf7f4; padding: 24px; color: #2d2422;">
+  <div style="max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 12px; padding: 32px; border: 1px solid #e8dfd8;">
+    <h2 style="color: #8b3e23; margin-top: 0;">Booking Cancellation Confirmation</h2>
+    <p>Hi <strong>${escapeHtml(customerName)}</strong>,</p>
+    <p>Your H2 House of Health booking <strong>${escapeHtml(bookingNumber)}</strong> has been cancelled.</p>
+    <div style="background: #f8f4f0; border-radius: 8px; padding: 16px; margin: 20px 0;">
+      <p style="margin: 6px 0;"><strong>Cancellation reason:</strong> ${escapeHtml(reason)}</p>
+      <p style="margin: 6px 0;"><strong>Refund status:</strong> ${escapeHtml(refundStatus)}</p>
+    </div>
+    <p style="color: #6d6360; font-size: 14px; margin-top: 24px;">If you have any questions, please contact our support team at <a href="mailto:support@h2houseofhealth.com" style="color: #8b3e23;">support@h2houseofhealth.com</a>.</p>
+    <p style="color: #6d6360; font-size: 14px;">Best regards,<br>H2 House of Health Team</p>
+  </div>
+</body>
+</html>`;
+
+  try {
+    await sendConfiguredEmail({
+      to: email,
+      from: MAIL_FROM,
+      subject,
+      text,
+      html,
+    });
+    return { status: 'sent' };
+  } catch (err) {
+    console.error(`[Booking] Failed to send cancellation email for booking ${bookingNumber}:`, err?.message || err);
+    return { status: 'failed', error: err?.message || err };
+  }
+}
+
+async function triggerBookingCancellationNotifications(booking, options = {}) {
+  const results = {
+    whatsapp: { status: 'pending' },
+    email: { status: 'pending' },
+  };
+  try {
+    results.whatsapp = await sendBookingCancellationWhatsApp(booking, options);
+  } catch (err) {
+    console.error('[Booking] WhatsApp cancellation notification error:', err?.message || err);
+    results.whatsapp = { ok: false, error: err?.message || err };
+  }
+  try {
+    results.email = await sendBookingCancellationEmail(booking, options);
+  } catch (err) {
+    console.error('[Booking] Email cancellation notification error:', err?.message || err);
+    results.email = { status: 'failed', error: err?.message || err };
+  }
+  return results;
 }
 function getTransporter() {
   const host = process.env.SMTP_HOST;
