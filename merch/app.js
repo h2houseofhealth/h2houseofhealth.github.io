@@ -155,6 +155,10 @@
     offersLoading: false,
     availableCoupons: [],
     activeOfferId: null,
+    currency: (function() {
+      try { return localStorage.getItem('h2_currency') || 'INR'; } catch { return 'INR'; }
+    })(),
+    currencyConfig: { defaultCurrency: 'INR', supportedCurrencies: ['INR', 'USD'], inrPerUsd: 85 },
   };
 
   const FALLBACK_PRODUCT_IMAGE = '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113';
@@ -2002,6 +2006,14 @@ function getWishlistProductPrice(item) {
   }
 
   function formatCheckoutMoney(amountInr) {
+    if (state.currency === 'USD') {
+      const rate = state.currencyConfig?.inrPerUsd || 85;
+      const usd = Math.round((Number(amountInr || 0) / rate) * 100) / 100;
+      return '$' + usd.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    }
     return '₹' + Number(amountInr || 0).toLocaleString('en-IN', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
@@ -5769,6 +5781,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
         ${renderCheckoutRecommendations()}
 
+        <div class="checkout-currency-selector" aria-label="Select currency">
+          <span class="checkout-currency-label">Currency</span>
+          <div class="currency-toggle-group">
+            <button type="button" class="currency-toggle-btn ${state.currency === 'INR' ? 'is-active' : ''}" data-currency="INR">₹ INR</button>
+            <button type="button" class="currency-toggle-btn ${state.currency === 'USD' ? 'is-active' : ''}" data-currency="USD">$ USD</button>
+          </div>
+        </div>
+
         <div class="shopify-pricing">
           <div class="shopify-price-row"><span>Subtotal</span><strong>${formatCheckoutMoney(totals.subtotal)}</strong></div>
           ${discount}
@@ -5778,8 +5798,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
         <div class="shopify-total">
           <span>Total</span>
-          <strong><small>INR</small> ${formatCheckoutMoney(totals.total)}</strong>
-          <p>Including ${formatCheckoutMoney(totals.gstIncluded)} in taxes</p>
+          <strong><small>${state.currency}</small> ${formatCheckoutMoney(totals.total)}</strong>
+          <p>${state.currency === 'USD' ? `Approx. ${formatCheckoutMoney(totals.total)} USD · Base ₹${Number(totals.total).toLocaleString('en-IN')}` : `Including ${formatCheckoutMoney(totals.gstIncluded)} in taxes`}</p>
         </div>
 
         <div class="shopify-trust">
@@ -5908,6 +5928,17 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     form.addEventListener('change', () => {
       state.checkoutDraft = getCheckoutDraftFromForm(form);
       renderCheckoutPage();
+    });
+    els.checkoutPage?.querySelectorAll('.currency-toggle-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const curr = btn.dataset.currency;
+        if (curr && (curr === 'INR' || curr === 'USD')) {
+          state.currency = curr;
+          try { localStorage.setItem('h2_currency', curr); } catch {}
+          renderCheckoutPage();
+        }
+      });
     });
     form.addEventListener('submit', handleCheckoutPageSubmit);
     els.checkoutPage?.querySelector('#checkoutCouponApplyBtn')?.addEventListener('click', applyMerchCouponFromCheckout);
@@ -6357,7 +6388,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items, customer, address, couponCode, bundleCode: state.merchBundleCode, campaignSlug: state.campaignAttribution?.slug || '' }),
+        body: JSON.stringify({ items, customer, address, couponCode, bundleCode: state.merchBundleCode, campaignSlug: state.campaignAttribution?.slug || '', currency: state.currency || 'INR' }),
       });
 
       if (!res.ok) {
@@ -6766,6 +6797,18 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     }
   }
 
+  async function loadCurrencyConfig() {
+    try {
+      const res = await fetch(buildApiUrl('/api/currency/config'));
+      if (res.ok) {
+        const cfg = await res.json();
+        if (cfg && cfg.inrPerUsd) {
+          state.currencyConfig = cfg;
+        }
+      }
+    } catch {}
+  }
+
   // ─── Initialize ───
   async function init() {
     cleanupLegacySharedCartStorage();
@@ -6775,8 +6818,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     loadCart(state.currentUser);
     renderCartBadge();
     bindEvents();
-    await loadMerchProducts();
-    await resolveCampaignAttribution();
+    await Promise.all([loadCurrencyConfig(), loadMerchProducts(), resolveCampaignAttribution()]);
     renderProductGrid();
     routeFromLocation();
     loadTrendingProducts();

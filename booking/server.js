@@ -102,6 +102,7 @@ function resolvePuppeteerExecutablePath() {
 }
 
 loadEnvFromFile(path.join(__dirname, '.env'));
+const { convertInrPaiseToCurrency, normalizeCurrency, getCurrencyConfig } = require('./currency');
 
 const PORT = process.env.PORT || 3000;
 const WEBSITE_ROOT = path.resolve(__dirname, '..');
@@ -6032,7 +6033,11 @@ app.get('/api/payments/config', requireAuth, (_req, res) => {
     return res.status(503).json({ message: RAZORPAY_UNAVAILABLE_MESSAGE });
   }
 
-  return res.json({ keyId: RAZORPAY_KEY_ID, currency: 'INR' });
+  return res.json({ keyId: RAZORPAY_KEY_ID, currency: 'INR', currencyConfig: getCurrencyConfig() });
+});
+
+app.get('/api/currency/config', (_req, res) => {
+  return res.json(getCurrencyConfig());
 });
 
 app.get('/api/bookings/:id/payment-link', requireAuth, (req, res) => {
@@ -7357,6 +7362,7 @@ app.get('/api/public/payments/booking', (req, res) => {
         holdMinutes: BOOKING_HOLD_MINUTES,
       },
       keyId: RAZORPAY_KEY_ID,
+      currencyConfig: getCurrencyConfig(),
     });
   }
 
@@ -7434,6 +7440,7 @@ app.get('/api/public/payments/booking', (req, res) => {
       holdMinutes: BOOKING_HOLD_MINUTES,
     },
     keyId: RAZORPAY_KEY_ID,
+    currencyConfig: getCurrencyConfig(),
   });
 });
 
@@ -8037,11 +8044,14 @@ app.post('/api/public/payments/create-order', async (req, res) => {
       });
     }
 
+    const requestedCurrency = normalizeCurrency(req.body?.currency);
+    const convertedPayment = convertInrPaiseToCurrency(amountInPaise, requestedCurrency);
+
     const booking = paymentContext.booking;
     const bookingOwner = paymentContext.bookingOwner;
     const order = await razorpay.orders.create({
-      amount: amountInPaise,
-      currency: 'INR',
+      amount: convertedPayment.razorpayAmount,
+      currency: convertedPayment.currency,
       receipt: buildRazorpayReceipt(
         booking.bookingGroupId ? 'bkgroup' : paymentContext.kind === 'guest' ? 'guest' : 'booking',
         booking.bookingGroupId || booking.id
@@ -8052,11 +8062,13 @@ app.post('/api/public/payments/create-order', async (req, res) => {
             guestEmail: paymentContext.guestAccess?.guestEmail || '',
             guestPhone: paymentContext.guestAccess?.guestPhone || '',
             couponCode: paymentContext.guestAccess?.couponCode || '',
+            currency: convertedPayment.currency,
           }
         : {
             bookingId: String(booking.id),
             userId: String(booking.userId),
             bookingGroupId: String(booking.bookingGroupId || ''),
+            currency: convertedPayment.currency,
           },
     });
 
@@ -8067,26 +8079,38 @@ app.post('/api/public/payments/create-order', async (req, res) => {
         db.prepare(
           `UPDATE bookings
            SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-               payment_order_id = ?
+               payment_order_id = ?,
+               currency = ?,
+               exchange_rate = ?,
+               original_inr_amount = ?,
+               charged_amount = ?
            WHERE booking_group_id = ?
              AND status <> 'cancelled'
              AND payment_status <> 'paid'`
-        ).run(order.id, booking.bookingGroupId);
+        ).run(order.id, convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount, booking.bookingGroupId);
       } else {
         setPaymentAmountForBookings([booking], amountInPaise);
         db.prepare(
           `UPDATE bookings
            SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-               payment_order_id = ?
+               payment_order_id = ?,
+               currency = ?,
+               exchange_rate = ?,
+               original_inr_amount = ?,
+               charged_amount = ?
            WHERE id = ?`
-        ).run(order.id, booking.id);
+        ).run(order.id, convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount, booking.id);
       }
     } else {
       setPaymentAmountForBookings(paymentContext.payableBookings, amountInPaise);
       db.prepare(
         `UPDATE bookings
          SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-             payment_order_id = ?
+             payment_order_id = ?,
+             currency = ?,
+             exchange_rate = ?,
+             original_inr_amount = ?,
+             charged_amount = ?
          WHERE id = ?
            AND status <> 'cancelled'
            AND payment_status <> 'paid'`
@@ -8095,11 +8119,15 @@ app.post('/api/public/payments/create-order', async (req, res) => {
         db.prepare(
           `UPDATE bookings
            SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-               payment_order_id = ?
+               payment_order_id = ?,
+               currency = ?,
+               exchange_rate = ?,
+               original_inr_amount = ?,
+               charged_amount = ?
            WHERE id = ?
              AND status <> 'cancelled'
              AND payment_status <> 'paid'`
-        ).run(order.id, guestBooking.id);
+        ).run(order.id, convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount, guestBooking.id);
       }
     }
 
@@ -8108,6 +8136,9 @@ app.post('/api/public/payments/create-order', async (req, res) => {
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
+      chargedAmount: convertedPayment.chargedAmount,
+      exchangeRate: convertedPayment.exchangeRate,
+      originalInrAmount: convertedPayment.originalInrAmount,
       bookingId: Number(booking.id || 0),
       bookingIds: paymentContext.kind === 'guest'
         ? paymentContext.payableBookings.map((entry) => Number(entry.id)).filter((id) => Number.isInteger(id) && id > 0)
@@ -8354,23 +8385,27 @@ app.post('/api/payments/create-cart-order', requireAuth, async (req, res) => {
   const amountInPaise = Math.max(100, taxableAmountPaise);
   paymentSummary = finalizeSummaryWithGst(paymentSummary);
 
+  const requestedCurrency = normalizeCurrency(req.body?.currency);
+  const convertedPayment = convertInrPaiseToCurrency(amountInPaise, requestedCurrency);
+
   try {
     const order = await razorpay.orders.create({
-      amount: amountInPaise,
-      currency: 'INR',
+      amount: convertedPayment.razorpayAmount,
+      currency: convertedPayment.currency,
       receipt: buildRazorpayReceipt('cart', req.user.id),
       notes: {
         userId: String(req.user.id),
         scope: 'cart',
         couponCode: String(couponResult.couponCode || ''),
+        currency: convertedPayment.currency,
       },
     });
 
     const ids = payableBookings.map((entry) => Number(entry.id)).filter((id) => Number.isInteger(id));
     db.prepare(
       `INSERT OR REPLACE INTO cart_payment_orders (
-        order_id, user_id, original_amount_paise, discount_amount_paise, coupon_id, coupon_code, amount_paise, status, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'))`
+        order_id, user_id, original_amount_paise, discount_amount_paise, coupon_id, coupon_code, amount_paise, status, currency, exchange_rate, original_inr_amount, charged_amount, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, datetime('now'))`
     ).run(
       order.id,
       req.user.id,
@@ -8378,15 +8413,23 @@ app.post('/api/payments/create-cart-order', requireAuth, async (req, res) => {
       Number(couponResult.discountAmountPaise || 0),
       couponResult.coupon?.id || null,
       couponResult.couponCode || null,
-      amountInPaise
+      amountInPaise,
+      convertedPayment.currency,
+      convertedPayment.exchangeRate,
+      convertedPayment.originalInrAmount,
+      convertedPayment.chargedAmount
     );
 
     db.prepare(
       `UPDATE bookings
        SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-           payment_order_id = ?
+           payment_order_id = ?,
+           currency = ?,
+           exchange_rate = ?,
+           original_inr_amount = ?,
+           charged_amount = ?
        WHERE id IN (${ids.map(() => '?').join(', ')})`
-    ).run(order.id, ...ids);
+    ).run(order.id, convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount, ...ids);
     setPaymentAmountForBookings(payableBookings, amountInPaise);
 
     return res.json({
@@ -8394,6 +8437,9 @@ app.post('/api/payments/create-cart-order', requireAuth, async (req, res) => {
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
+      chargedAmount: convertedPayment.chargedAmount,
+      exchangeRate: convertedPayment.exchangeRate,
+      originalInrAmount: convertedPayment.originalInrAmount,
       summary: paymentSummary,
       subtotalAmountInr: Number(paymentSummary.subtotalAmountInr || subtotalAmountPaise / 100),
       gstAmountInr: Number(paymentSummary.gstAmountInr || Math.max(0, amountInPaise / 100 - subtotalAmountPaise / 100)),
@@ -8569,16 +8615,19 @@ app.post('/api/payments/create-order', requireAuth, async (req, res) => {
   }
 
   const amountInPaise = Math.round(payableTotalInr * 100);
+  const requestedCurrency = normalizeCurrency(req.body?.currency);
+  const convertedPayment = convertInrPaiseToCurrency(amountInPaise, requestedCurrency);
 
   try {
     const order = await razorpay.orders.create({
-      amount: amountInPaise,
-      currency: 'INR',
+      amount: convertedPayment.razorpayAmount,
+      currency: convertedPayment.currency,
       receipt: buildRazorpayReceipt(booking.bookingGroupId ? 'bkgroup' : 'booking', booking.bookingGroupId || booking.id),
       notes: {
         bookingId: String(booking.id),
         userId: String(booking.userId),
         bookingGroupId: String(booking.bookingGroupId || ''),
+        currency: convertedPayment.currency,
       },
     });
 
@@ -8587,19 +8636,27 @@ app.post('/api/payments/create-order', requireAuth, async (req, res) => {
       db.prepare(
         `UPDATE bookings
          SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-             payment_order_id = ?
+             payment_order_id = ?,
+             currency = ?,
+             exchange_rate = ?,
+             original_inr_amount = ?,
+             charged_amount = ?
          WHERE booking_group_id = ?
            AND status <> 'cancelled'
            AND payment_status <> 'paid'`
-      ).run(order.id, booking.bookingGroupId);
+      ).run(order.id, convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount, booking.bookingGroupId);
     } else {
       setPaymentAmountForBookings([booking], amountInPaise);
       db.prepare(
         `UPDATE bookings
          SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-             payment_order_id = ?
+             payment_order_id = ?,
+             currency = ?,
+             exchange_rate = ?,
+             original_inr_amount = ?,
+             charged_amount = ?
          WHERE id = ?`
-      ).run(order.id, booking.id);
+      ).run(order.id, convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount, booking.id);
     }
 
     return res.json({
@@ -8607,6 +8664,9 @@ app.post('/api/payments/create-order', requireAuth, async (req, res) => {
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
+      chargedAmount: convertedPayment.chargedAmount,
+      exchangeRate: convertedPayment.exchangeRate,
+      originalInrAmount: convertedPayment.originalInrAmount,
       bookingId: booking.id,
       bookingCount: Number(paymentSummary.bookingCount || 1),
       summary: paymentSummary,
@@ -16615,6 +16675,30 @@ function migrate() {
   }
   if (!hasColumn('bookings', 'booking_type')) {
     db.exec("ALTER TABLE bookings ADD COLUMN booking_type TEXT NOT NULL DEFAULT 'registered'");
+  }
+  if (!hasColumn('bookings', 'currency')) {
+    db.exec("ALTER TABLE bookings ADD COLUMN currency TEXT NOT NULL DEFAULT 'INR'");
+  }
+  if (!hasColumn('bookings', 'exchange_rate')) {
+    db.exec('ALTER TABLE bookings ADD COLUMN exchange_rate REAL DEFAULT 1');
+  }
+  if (!hasColumn('bookings', 'original_inr_amount')) {
+    db.exec('ALTER TABLE bookings ADD COLUMN original_inr_amount REAL');
+  }
+  if (!hasColumn('bookings', 'charged_amount')) {
+    db.exec('ALTER TABLE bookings ADD COLUMN charged_amount REAL');
+  }
+  if (hasTable('cart_payment_orders') && !hasColumn('cart_payment_orders', 'currency')) {
+    db.exec("ALTER TABLE cart_payment_orders ADD COLUMN currency TEXT NOT NULL DEFAULT 'INR'");
+  }
+  if (hasTable('cart_payment_orders') && !hasColumn('cart_payment_orders', 'exchange_rate')) {
+    db.exec('ALTER TABLE cart_payment_orders ADD COLUMN exchange_rate REAL DEFAULT 1');
+  }
+  if (hasTable('cart_payment_orders') && !hasColumn('cart_payment_orders', 'original_inr_amount')) {
+    db.exec('ALTER TABLE cart_payment_orders ADD COLUMN original_inr_amount REAL');
+  }
+  if (hasTable('cart_payment_orders') && !hasColumn('cart_payment_orders', 'charged_amount')) {
+    db.exec('ALTER TABLE cart_payment_orders ADD COLUMN charged_amount REAL');
   }
   db.exec(`
     UPDATE bookings
