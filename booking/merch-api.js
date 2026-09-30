@@ -4913,7 +4913,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       });
     }
 
-    const couponResult = couponCode
+    let couponResult = couponCode
       ? validateMerchCouponForUser({
           code: couponCode,
           userId: authUser?.id,
@@ -4922,8 +4922,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           subtotalAmountPaise: subtotal,
         })
       : { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
-    if (couponResult.error) {
-      return res.status(400).json({ error: couponResult.error });
+    if (couponResult?.error) {
+      console.warn('[Merch] Invalid or expired coupon during checkout, proceeding without discount:', couponResult.error);
+      couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
     }
 
     // Product prices are GST-inclusive; derive included GST for reporting only.
@@ -5278,7 +5279,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       validatedItems.push({ productId: Number(variant.product_id), variantId: variant.id, productName: variant.product_name, variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '), sku: variant.sku, unitPrice: variant.price, quantity, lineTotal });
     }
 
-    const couponResult = couponCode
+    let couponResult = couponCode
       ? validateMerchCouponForUser({
           code: couponCode,
           userId: authUser?.id,
@@ -5287,8 +5288,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           subtotalAmountPaise: subtotal,
         })
       : { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
-    if (couponResult.error) {
-      return res.status(400).json({ error: couponResult.error });
+    if (couponResult?.error) {
+      console.warn('[Merch] Invalid or expired coupon during COD checkout, proceeding without discount:', couponResult.error);
+      couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
     }
 
     const gstAmount = Math.max(0, subtotal - Math.round(subtotal / 1.18));

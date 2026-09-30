@@ -8154,16 +8154,19 @@ app.post('/api/payments/create-cart-order', requireAuth, async (req, res) => {
   }
 
   const subtotalAmountPaise = Math.round(Number(paymentSummary.subtotalAmountInr ?? paymentSummary.totalAmountInr ?? 0) * 100);
-  const couponResult = validateCouponForUser({
-    code: req.body?.couponCode,
-    userId: req.user.id,
-    appliesTo: 'services',
-    portal: 'booking',
-    subtotalAmountPaise,
-    singleBookingAmountPaise: getSingleBookingCouponBasePaise(paymentSummary),
-  });
-  if (couponResult.error) {
-    return res.status(400).json({ message: couponResult.error });
+  let couponResult = req.body?.couponCode
+    ? validateCouponForUser({
+        code: req.body?.couponCode,
+        userId: req.user.id,
+        appliesTo: 'services',
+        portal: 'booking',
+        subtotalAmountPaise,
+        singleBookingAmountPaise: getSingleBookingCouponBasePaise(paymentSummary),
+      })
+    : { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotalAmountPaise };
+  if (couponResult?.error) {
+    console.warn('[Booking] Invalid or expired coupon during cart order creation, proceeding without discount:', couponResult.error);
+    couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotalAmountPaise };
   }
   const taxableAmountPaise = Number(couponResult.finalAmountPaise || subtotalAmountPaise);
   const amountInPaise = Math.max(100, taxableAmountPaise);
