@@ -5030,7 +5030,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
   });
 
-  app.post('/api/merch/preview-coupon',(req, res) => {
+  app.post('/api/merch/preview-coupon', (req, res) => {
+    const bundleCode = String(req.body?.bundleCode || '').trim().toUpperCase();
+    if (bundleCode === 'H2BUNDLE15') {
+      return res.status(400).json({ error: 'Coupons cannot be applied to orders with Bundle & Save discounts.' });
+    }
     const authUser = getMerchAuthUser(req);
     const couponCode = normalizeMerchCouponCode(req.body?.couponCode);
     if (!couponCode) {
@@ -5206,7 +5210,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       });
     }
 
-    let couponResult = couponCode
+    const bundleDiscountPaise = getMerchBundleDiscountPaise(bundleCode, validatedItems);
+    let couponResult = (couponCode && bundleDiscountPaise === 0)
       ? validateMerchCouponForUser({
           code: couponCode,
           userId: authUser?.id,
@@ -5221,8 +5226,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     const shippingCharge = (subtotal >= 99900 || subtotal <= 100) ? 0 : 9900; // Free above ₹999 or ₹1 test
-    const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
-      + getMerchBundleDiscountPaise(bundleCode, validatedItems);
+    const discountAmount = bundleDiscountPaise > 0
+      ? bundleDiscountPaise
+      : Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
     const discountedSubtotal = Math.max(0, subtotal - discountAmount);
     // Product prices are GST-inclusive; derive included GST on discounted amount.
     const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
@@ -5245,7 +5251,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       amount: convertedPayment.razorpayAmount,
       currency: convertedPayment.currency,
       receipt: orderNumber,
-      notes: { customerEmail: resolvedCustomer.email, orderNumber, couponCode: String(couponResult.couponCode || couponCode || ''), bundleCode, currency: convertedPayment.currency },
+      notes: { customerEmail: resolvedCustomer.email, orderNumber, couponCode: bundleDiscountPaise > 0 ? '' : String(couponResult.couponCode || couponCode || ''), bundleCode, currency: convertedPayment.currency },
     }).then(rpOrder => {
       // Save order to DB
       const insertOrder = db.prepare(`
@@ -5285,7 +5291,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         shippingCharge,
         discountAmount,
         customer: resolvedCustomer,
-        coupon: buildMerchCouponPreview(couponResult),
+        coupon: bundleDiscountPaise > 0 ? null : buildMerchCouponPreview(couponResult),
       });
     }).catch(err => {
       console.error('Merch Razorpay order create failed:', err?.message || err);
@@ -5574,7 +5580,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       validatedItems.push({ productId: Number(variant.product_id), variantId: variant.id, productName: variant.product_name, variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '), sku: variant.sku, unitPrice: variant.price, quantity, lineTotal });
     }
 
-    let couponResult = couponCode
+    const bundleDiscountPaise = getMerchBundleDiscountPaise(bundleCode, validatedItems);
+    let couponResult = (couponCode && bundleDiscountPaise === 0)
       ? validateMerchCouponForUser({
           code: couponCode,
           userId: authUser?.id,
@@ -5590,8 +5597,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     const shippingCharge = (subtotal >= 99900 || subtotal <= 100) ? 0 : 9900;
     const codSurcharge = 5000; // ₹50
-    const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
-      + getMerchBundleDiscountPaise(bundleCode, validatedItems);
+    const discountAmount = bundleDiscountPaise > 0
+      ? bundleDiscountPaise
+      : Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
     const discountedSubtotal = Math.max(0, subtotal - discountAmount);
     // Product prices are GST-inclusive; derive included GST on discounted amount.
     const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
@@ -5647,7 +5655,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       decrementMerchPurchaseVariant(item.variantId, item.quantity);
     }
 
-    if (Number(couponResult.coupon?.id || 0) > 0 && Number(discountAmount || 0) > 0 && Number(authUser?.id || 0) > 0) {
+    if (bundleDiscountPaise === 0 && Number(couponResult.coupon?.id || 0) > 0 && Number(discountAmount || 0) > 0 && Number(authUser?.id || 0) > 0) {
       recordMerchCouponRedemption({
         couponId: Number(couponResult.coupon.id),
         userId: Number(authUser.id),
@@ -5677,7 +5685,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       currency: 'INR',
       totalAmount,
       discountAmount,
-      coupon: buildMerchCouponPreview(couponResult),
+      coupon: bundleDiscountPaise > 0 ? null : buildMerchCouponPreview(couponResult),
       notifications,
       message: 'COD order placed',
       customer: resolvedCustomer,
