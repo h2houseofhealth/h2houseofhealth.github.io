@@ -6498,7 +6498,10 @@
                   <div style="display:flex;align-items:center;gap:14px;">
                     <input type="radio" name="courier_company_id" value="${c.courierCompanyId}" ${idx === 0 ? 'checked' : ''} style="width:18px;height:18px;accent-color:#3b82f6;" />
                     <div>
-                      <div style="font-weight:600;font-size:14px;color:var(--admin-text,#1f2937);">${escapeHtml(c.courierName)}</div>
+                      <div style="font-weight:600;font-size:14px;color:var(--admin-text,#1f2937);display:flex;align-items:center;gap:6px;">
+                        <span>${escapeHtml(c.courierName)}</span>
+                        ${idx === 0 ? '<span style="background:#10b981;color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;font-weight:700;">Lowest Price</span>' : ''}
+                      </div>
                       <div class="admin-table__muted" style="font-size:12px;margin-top:2px;">
                         Est. Delivery: <strong>${escapeHtml(c.estimatedDeliveryDays || '2-4')} Days</strong> ${c.etd ? `(${escapeHtml(c.etd)})` : ''} · Mode: <strong>${c.isSurface ? 'Surface' : 'Air'}</strong>
                       </div>

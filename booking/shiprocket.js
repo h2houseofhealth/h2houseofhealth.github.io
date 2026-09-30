@@ -275,17 +275,19 @@ class ShiprocketService {
     });
 
     const couriers = result?.data?.available_courier_companies || [];
-    return couriers.map((c) => ({
-      courierCompanyId: c.courier_company_id,
-      courierName: c.courier_name,
-      rate: Number(c.rate || 0),
-      etd: c.etd,
-      estimatedDeliveryDays: c.estimated_delivery_days,
-      rating: c.rating,
-      mode: c.mode,
-      trackingPerformance: c.tracking_performance,
-      isSurface: c.is_surface,
-    }));
+    return couriers
+      .map((c) => ({
+        courierCompanyId: c.courier_company_id,
+        courierName: c.courier_name,
+        rate: Number(c.rate || 0),
+        etd: c.etd,
+        estimatedDeliveryDays: c.estimated_delivery_days,
+        rating: c.rating,
+        mode: c.mode,
+        trackingPerformance: c.tracking_performance,
+        isSurface: c.is_surface,
+      }))
+      .sort((a, b) => a.rate - b.rate);
   }
 
   /**

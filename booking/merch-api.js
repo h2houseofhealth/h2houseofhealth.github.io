@@ -4987,12 +4987,70 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
               updated_at = datetime('now')
           WHERE id = ?
         `).run(String(createRes.orderId), shipmentId, String(createRes.status || 'NEW'), order.id);
+      }
 
-        return {
-          orderId: createRes.orderId,
-          shipmentId,
-          status: createRes.status || 'NEW',
-        };
+      // Check if auto-assign AWB is enabled via environment configuration
+      const autoAssignAwb = String(process.env.SHIPROCKET_AUTO_ASSIGN_AWB || '').toLowerCase() === 'true';
+      if (autoAssignAwb && shipmentId && !order.shiprocket_awb_code) {
+        try {
+          const parsedAddr = parseMerchShippingAddress(order.shipping_address) || {};
+          const deliveryPostcode = parsedAddr.postalCode || parsedAddr.postal_code || parsedAddr.pincode || '452001';
+          const isCod = String(order.payment_method || '').toLowerCase() === 'cod';
+
+          const totalWeightGrams = items.reduce((sum, item) => {
+            const itemWeight = Number(item.weight_grams ?? item.weightGrams ?? 0);
+            const qty = Math.max(1, Number(item.quantity || item.units || 1));
+            return sum + (itemWeight * qty);
+          }, 0);
+          const orderWeightKg = totalWeightGrams > 0
+            ? Math.max(0.01, Number((totalWeightGrams / 1000).toFixed(3)))
+            : shiprocket.defaultWeightKg;
+
+          const couriers = await shiprocket.checkServiceability({
+            deliveryPostcode,
+            weight: orderWeightKg,
+            cod: isCod,
+          });
+
+          // Couriers are sorted by price ascending: lowest price courier is first
+          const lowestCourier = couriers && couriers.length > 0 ? couriers[0] : null;
+          const courierId = lowestCourier?.courierCompanyId ? Number(lowestCourier.courierCompanyId) : null;
+
+          const awbRes = await shiprocket.assignAwb({ shipmentId, courierId });
+          let labelUrl = null;
+          try {
+            const labelRes = await shiprocket.generateLabel({ shipmentId });
+            labelUrl = labelRes.labelUrl;
+          } catch (labelErr) {
+            console.warn('[Shiprocket] Auto label generation deferred:', labelErr.message);
+          }
+
+          const awbCode = String(awbRes.awbCode || '');
+          const courierName = String(awbRes.courierName || lowestCourier?.courierName || 'Shiprocket');
+
+          db.prepare(`
+            UPDATE merch_orders
+            SET shiprocket_awb_code = ?,
+                shiprocket_courier_name = ?,
+                tracking_number = ?,
+                carrier_name = ?,
+                shiprocket_status = 'AWB ASSIGNED',
+                shiprocket_label_url = COALESCE(?, shiprocket_label_url),
+                updated_at = datetime('now')
+            WHERE id = ?
+          `).run(awbCode, courierName, awbCode, courierName, labelUrl, order.id);
+
+          return {
+            orderId: order.shiprocket_order_id || shipmentId,
+            shipmentId,
+            awbCode,
+            courierName,
+            labelUrl,
+            status: 'AWB ASSIGNED',
+          };
+        } catch (assignErr) {
+          console.warn('[Shiprocket] Auto courier assign notice:', assignErr.message);
+        }
       }
 
       return {
