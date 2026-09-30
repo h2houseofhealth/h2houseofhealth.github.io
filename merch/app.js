@@ -2021,7 +2021,9 @@ function getWishlistProductPrice(item) {
   }
 
   function getCheckoutDiscountAmount() {
-    return Math.max(0, Number(state.merchCouponPreview?.discountAmountInr || 0)) + getMerchBundleDiscountAmount();
+    const bundleDiscount = getMerchBundleDiscountAmount();
+    if (bundleDiscount > 0) return bundleDiscount;
+    return Math.max(0, Number(state.merchCouponPreview?.discountAmountInr || 0));
   }
 
   function getMerchCouponPayableAmount() {
@@ -2066,11 +2068,13 @@ function getWishlistProductPrice(item) {
 
   function getCheckoutTotals() {
     const subtotal = getCartTotal();
-    const shipping = getMerchShippingCharge(subtotal);
+    const bundleDiscount = getMerchBundleDiscountAmount();
     const discount = getCheckoutDiscountAmount();
+    const shipping = getMerchShippingCharge(Math.max(0, subtotal - discount));
     const total = Math.max(1, subtotal + shipping - discount);
     return {
       subtotal,
+      bundleDiscount,
       shipping,
       discount,
       total,
@@ -2111,6 +2115,17 @@ function getWishlistProductPrice(item) {
 
   async function applyMerchCouponFromCart(options = {}) {
     const isSilent = Boolean(options?.silent);
+    const bundleDiscount = getMerchBundleDiscountAmount();
+    if (bundleDiscount > 0) {
+      clearMerchCoupon();
+      if (!isSilent) {
+        showCheckoutNotice('Coupon not applicable', 'Coupons cannot be applied to Bundle & Save orders because bundle discount is already applied.', { variant: 'error' });
+      }
+      renderCart();
+      if (state.currentView === 'checkout') renderCheckoutPage();
+      return;
+    }
+
     const checkoutCoupon = document.getElementById('checkoutCouponCode');
     const rawCode = state.currentView === 'checkout'
       ? (checkoutCoupon?.value || state.merchCouponCode || '')
@@ -2134,6 +2149,7 @@ function getWishlistProductPrice(item) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           couponCode: code,
+          bundleCode: state.merchBundleCode || '',
           subtotalAmountPaise: Math.round(getCartTotal() * 100),
           productIds: state.cart.map((item) => Number(item.productId)).filter(Boolean),
           productLineTotals: state.cart.reduce((totals, item) => {
@@ -5737,10 +5753,16 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   function renderCheckoutSummary() {
     const totals = getCheckoutTotals();
+    const hasBundleDiscount = totals.bundleDiscount > 0;
+    if (hasBundleDiscount && (state.merchCouponCode || state.merchCouponPreview)) {
+      state.merchCouponCode = '';
+      state.merchCouponPreview = null;
+      state.merchCouponError = '';
+    }
     const hasShippingAddress = Boolean(state.checkoutDraft?.line1 && state.checkoutDraft?.city && state.checkoutDraft?.state && state.checkoutDraft?.postalCode);
     const discount = totals.discount > 0 ? `
       <div class="shopify-price-row shopify-price-row--discount">
-        <span>Discount${state.merchCouponCode ? ` (${escapeHtml(state.merchCouponCode)})` : ''}</span>
+        <span>${hasBundleDiscount ? 'Bundle discount (15% OFF)' : `Discount${state.merchCouponCode ? ` (${escapeHtml(state.merchCouponCode)})` : ''}`}</span>
         <strong>- ${formatCheckoutMoney(totals.discount)}</strong>
       </div>
     ` : '';
@@ -5767,6 +5789,15 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           `).join('')}
         </div>
 
+        ${hasBundleDiscount ? `
+          <div class="shopify-bundle-badge" style="background:#fef7f2;border:1px dashed #ae5431;border-radius:10px;padding:12px 14px;margin-bottom:18px;display:flex;align-items:flex-start;gap:10px;">
+            <span style="font-size:1.2rem;line-height:1;" aria-hidden="true">✨</span>
+            <div>
+              <strong style="display:block;font-size:0.88rem;color:#ae5431;line-height:1.3;">Bundle &amp; Save Applied (15% OFF)</strong>
+              <small style="display:block;font-size:0.78rem;color:#78350f;margin-top:2px;">Special 15% savings are active for your bottle &amp; spray bundle. Coupons cannot be combined with bundle discounts.</small>
+            </div>
+          </div>
+        ` : `
         <div class="shopify-coupon">
           <div class="shopify-coupon__row">
             <label class="shopify-coupon__field">
@@ -5793,6 +5824,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             `).join('')}
           </div>` : ''}
         </div>
+        `}
 
         ${renderCheckoutRecommendations()}
 
@@ -6396,7 +6428,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   async function startRazorpayCheckout(customer, address) {
     const items = state.cart.map(item => ({ variantId: item.variantId, quantity: item.quantity }));
-    const couponCode = state.merchCouponPreview?.code ? normalizeCouponCode(state.merchCouponPreview.code) : '';
+    const hasBundleDiscount = getMerchBundleDiscountAmount() > 0;
+    const couponCode = (!hasBundleDiscount && state.merchCouponPreview?.code) ? normalizeCouponCode(state.merchCouponPreview.code) : '';
 
     try {
       const res = await fetch(buildApiUrl('/api/merch/checkout'), {
