@@ -7542,6 +7542,58 @@ app.patch('/api/public/guest/bookings/:id/status', (req, res) => {
   return res.status(204).send();
 });
 
+function isValidBookingPhone(phone, country = '') {
+  if (!phone || typeof phone !== 'string') return false;
+  const trimmed = phone.trim();
+  if (!trimmed) return false;
+  if (/[^\d\s+\-]/.test(trimmed)) return false;
+
+  if (trimmed.startsWith('+')) {
+    const digits = trimmed.slice(1).replace(/[\s\-]/g, '');
+    if (trimmed.startsWith('+91')) {
+      return /^\d{10}$/.test(digits.slice(2));
+    }
+    if (trimmed.startsWith('+1')) {
+      return /^\d{10}$/.test(digits.slice(1));
+    }
+    if (trimmed.startsWith('+44')) {
+      const local = digits.slice(2).replace(/^0/, '');
+      return /^\d{9,10}$/.test(local);
+    }
+    if (trimmed.startsWith('+971')) {
+      return /^\d{8,9}$/.test(digits.slice(3));
+    }
+    if (trimmed.startsWith('+65')) {
+      return /^\d{8}$/.test(digits.slice(2));
+    }
+    if (trimmed.startsWith('+61')) {
+      return /^\d{9}$/.test(digits.slice(2));
+    }
+    return digits.length >= 7 && digits.length <= 15;
+  }
+
+  const digits = trimmed.replace(/[\s\-]/g, '');
+  const normCountry = String(country || '').trim().toLowerCase();
+
+  if (normCountry === 'united states' || normCountry === 'us' || (digits.length === 11 && digits.startsWith('1'))) {
+    const local = digits.length === 11 ? digits.slice(1) : digits;
+    return /^\d{10}$/.test(local);
+  }
+  if (normCountry === 'united kingdom' || normCountry === 'uk' || ((digits.length === 12 || digits.length === 13) && digits.startsWith('44'))) {
+    let local = digits.startsWith('44') ? digits.slice(2) : digits;
+    if (local.startsWith('0')) local = local.slice(1);
+    return /^\d{9,10}$/.test(local);
+  }
+  if (normCountry === 'india' || normCountry === 'in' || !normCountry) {
+    if (digits.length === 12 && digits.startsWith('91')) {
+      return /^\d{10}$/.test(digits.slice(2));
+    }
+    return /^\d{10}$/.test(digits);
+  }
+
+  return digits.length >= 7 && digits.length <= 15;
+}
+
 // Guest Checkout Endpoint
 // Allows unauthenticated users to start checkout with basic info
 app.post('/api/guest/checkout', async (req, res) => {
@@ -7556,9 +7608,11 @@ app.post('/api/guest/checkout', async (req, res) => {
     return res.status(400).json({ message: 'Valid guest email is required' });
   }
 
-  if (!guestPhone || typeof guestPhone !== 'string' || !/^[6-9]\d{9}$/.test(guestPhone.trim())) {
-    return res.status(400).json({ message: 'Valid 10-digit guest phone number is required' });
+  if (!guestPhone || typeof guestPhone !== 'string' || !isValidBookingPhone(guestPhone)) {
+    return res.status(400).json({ message: 'Valid mobile number with country code is required' });
   }
+
+  const normalizedGuestPhone = normalizeWhatsAppMobile(guestPhone) || guestPhone.trim();
 
   if (!Array.isArray(bookings) || bookings.length === 0) {
     return res.status(400).json({ message: 'At least one booking is required' });
@@ -7614,7 +7668,7 @@ app.post('/api/guest/checkout', async (req, res) => {
         bookingGroupId,
         guestName.trim(),
         guestEmail.trim(),
-        guestPhone.trim(),
+        normalizedGuestPhone,
         serviceName,
         bookingDate,
         bookingTime,
@@ -7626,7 +7680,7 @@ app.post('/api/guest/checkout', async (req, res) => {
         '',
         guestName.trim(),
         guestEmail.trim(),
-        guestPhone.trim(),
+        normalizedGuestPhone,
         'guest',
         now
       );
@@ -7666,7 +7720,7 @@ app.post('/api/guest/checkout', async (req, res) => {
       membershipStatus: 'inactive',
       membershipExpiresAt: null,
       membershipStartedAt: null,
-      mobile: guestPhone.trim(),
+      mobile: normalizedGuestPhone,
     };
     const pricingSummary = finalizeSummaryWithGst(buildAggregatePaymentSummary(pricingBookings, guestPricingUser));
     let guestCouponPreview = null;
@@ -7689,7 +7743,7 @@ app.post('/api/guest/checkout', async (req, res) => {
     // Generate payment token for guest after coupon validation succeeds.
     const paymentToken = createGuestCheckoutAccessToken({
       guestEmail: guestEmail.trim(),
-      guestPhone: guestPhone.trim(),
+      guestPhone: normalizedGuestPhone,
       guestName: guestName.trim(),
       bookingIds: createdBookings.map((b) => b.id),
       couponCode: String(couponCode || '').trim(),
@@ -7709,7 +7763,7 @@ app.post('/api/guest/checkout', async (req, res) => {
         bookingCount: Number(pricingSummary.bookingCount || createdBookings.length),
         guestName: guestName.trim(),
         guestEmail: guestEmail.trim(),
-        guestPhone: guestPhone.trim(),
+        guestPhone: normalizedGuestPhone,
         items: (Array.isArray(pricingSummary.units) ? pricingSummary.units : []).map((unit) => ({
           serviceName: unit.label || 'Booking',
           bookingDate: '',
@@ -8024,6 +8078,7 @@ app.post('/api/public/payments/create-order', async (req, res) => {
         : {
             name: bookingOwner?.name || '',
             email: bookingOwner?.email || '',
+            mobile: bookingOwner?.mobile || '',
           },
     });
   } catch (error) {
