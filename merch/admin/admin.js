@@ -72,6 +72,10 @@
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
   }
 
+  function getLocalDateInputMax() {
+    return toISODate(new Date());
+  }
+
   function daysAgo(days) {
     const date = new Date(today);
     date.setDate(date.getDate() - days);
@@ -1964,6 +1968,7 @@
     customersDateTo: '',
     customersAppliedDateFrom: '',
     customersAppliedDateTo: '',
+    customersDateValidation: '',
     couponsSearch: '',
     couponsStatus: 'all',
     couponsType: 'all',
@@ -2047,6 +2052,8 @@
     adminModalDialog: document.getElementById('adminModalDialog'),
     toastRegion: document.getElementById('toastRegion'),
     profileAvatar: document.getElementById('profileAvatar'),
+    profileTrigger: document.querySelector('[data-action="open-profile"]'),
+    profileDropdown: document.getElementById('adminProfileDropdown'),
     adminContent: document.getElementById('adminContent'),
   };
 
@@ -3612,6 +3619,13 @@
     return new Date(/^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T00:00:00` : raw.replace(' ', 'T'));
   }
 
+  function getCustomersDateValidation(from, to) {
+    const todayIso = getLocalDateInputMax();
+    if ((from && from > todayIso) || (to && to > todayIso)) return 'Future dates are not allowed.';
+    if (from && to && from > to) return 'From date cannot be later than To date.';
+    return '';
+  }
+
   function renderCustomers() {
     if (state.customersLoading && !state.customers.length) {
       els.customersView.innerHTML = `
@@ -3647,6 +3661,7 @@
       return;
     }
 
+    const customerDateMax = getLocalDateInputMax();
     const query = state.customersSearch.trim().toLowerCase();
     const todayStart = new Date(`${toISODate(today)}T00:00:00`);
     const tomorrowStart = new Date(todayStart);
@@ -3693,10 +3708,11 @@
               <div class="admin-toolbar__group">
                 <div class="admin-orders-date-range${state.customersAppliedDateFrom || state.customersAppliedDateTo ? ' is-active' : ''}">
                   <button class="admin-btn ${state.customersTodayOnly ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-action="toggle-customers-today">Today</button>
-                  <label class="admin-orders-date-field"><span>From</span><input class="admin-input" type="date" data-input="customersDateFrom" value="${escapeHtml(state.customersDateFrom)}" /></label>
-                  <label class="admin-orders-date-field"><span>To</span><input class="admin-input" type="date" data-input="customersDateTo" value="${escapeHtml(state.customersDateTo)}" /></label>
+                  <label class="admin-orders-date-field"><span>From</span><input class="admin-input" type="date" data-input="customersDateFrom" value="${escapeHtml(state.customersDateFrom)}" max="${customerDateMax}" /></label>
+                  <label class="admin-orders-date-field"><span>To</span><input class="admin-input" type="date" data-input="customersDateTo" value="${escapeHtml(state.customersDateTo)}" max="${customerDateMax}" /></label>
                   <button class="admin-btn admin-btn--soft" type="button" data-action="apply-customers-date-range">Apply</button>
-                  <button class="admin-btn admin-btn--ghost" type="button" data-action="clear-customers-date-range" ${state.customersAppliedDateFrom || state.customersAppliedDateTo || state.customersDateFrom || state.customersDateTo ? '' : 'disabled'}>Clear</button>
+                  <button class="admin-btn admin-btn--ghost" type="button" data-action="clear-customers-date-range" ${state.customersAppliedDateFrom || state.customersAppliedDateTo || state.customersDateFrom || state.customersDateTo || state.customersDateValidation ? '' : 'disabled'}>Clear</button>
+                  ${state.customersDateValidation ? `<p class="admin-table__muted" style="width:100%;margin:2px 0 0;color:var(--admin-danger);" role="alert">${escapeHtml(state.customersDateValidation)}</p>` : ''}
                 </div>
               </div>
             </div>
@@ -3762,6 +3778,9 @@
         </div>
       </section>
     `;
+    els.customersView.querySelectorAll('[data-input="customersDateFrom"], [data-input="customersDateTo"]').forEach((input) => {
+      input.max = customerDateMax;
+    });
   }
 
   function renderCoupons() {
@@ -5303,39 +5322,18 @@
     }, 80);
   }
 
-  function renderProfileModal() {
-    openModal({
-      title: 'Admin Profile',
-      subtitle: 'Admin access and session shortcuts',
-      body: `
-        <div class="admin-list">
-          <div class="admin-list__item">
-            <div class="admin-list__item-head">
-              <div>
-                <p class="admin-list__item-title">Admin House</p>
-                <p class="admin-list__item-sub">admin@h2health.local</p>
-              </div>
-              <span class="admin-avatar">${escapeHtml(initials('Admin House'))}</span>
-            </div>
-          </div>
-          <div class="admin-list__item">
-            <p class="admin-list__item-title">Role</p>
-            <p class="admin-list__item-sub">Store administrator</p>
-          </div>
-          <div class="admin-list__item">
-            <p class="admin-list__item-title">Quick Actions</p>
-            <div class="admin-actions">
-              <button class="admin-action-link" type="button" data-action="change-password">Change Password</button>
-              <button class="admin-action-link" type="button" data-action="logout">Logout</button>
-            </div>
-          </div>
-        </div>
-      `,
-      footer: `
-        <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Close</button>
-      `,
-      size: 'sm',
-    });
+  function closeProfileDropdown() {
+    if (!els.profileDropdown || els.profileDropdown.hidden) return false;
+    els.profileDropdown.hidden = true;
+    els.profileTrigger?.setAttribute('aria-expanded', 'false');
+    return true;
+  }
+
+  function toggleProfileDropdown() {
+    if (!els.profileDropdown) return;
+    const willOpen = els.profileDropdown.hidden;
+    els.profileDropdown.hidden = !willOpen;
+    els.profileTrigger?.setAttribute('aria-expanded', String(willOpen));
   }
 
   function getCouponCategoryOptions(entity = null) {
@@ -7213,7 +7211,7 @@
         renderDashboard();
         return;
       case 'open-profile':
-        renderProfileModal();
+        toggleProfileDropdown();
         return;
       case 'open-hype-modal':
         renderHypeModal();
@@ -7277,6 +7275,7 @@
 
   return;
       case 'change-password':
+        closeProfileDropdown();
         renderChangePasswordModal();
         return;
       case 'open-product-modal':
@@ -7724,20 +7723,27 @@
           state.customersDateTo = '';
           state.customersAppliedDateFrom = '';
           state.customersAppliedDateTo = '';
+          state.customersDateValidation = '';
         }
         renderCustomers();
         return;
       case 'apply-customers-date-range': {
         const from = String(state.customersDateFrom || '').trim();
         const to = String(state.customersDateTo || '').trim();
+        const validationMessage = getCustomersDateValidation(from, to);
+        if (validationMessage) {
+          const customerDateMax = getLocalDateInputMax();
+          if (from > customerDateMax) state.customersDateFrom = '';
+          if (to > customerDateMax) state.customersDateTo = '';
+          state.customersDateValidation = validationMessage;
+          renderCustomers();
+          return;
+        }
         if (!from || !to) {
           toast('Date range incomplete', 'Choose both a From and To date before applying the customer filter.', 'warning');
           return;
         }
-        if (from > to) {
-          toast('Invalid date range', 'The From date must be on or before the To date.', 'warning');
-          return;
-        }
+        state.customersDateValidation = '';
         state.customersTodayOnly = false;
         state.customersAppliedDateFrom = from;
         state.customersAppliedDateTo = to;
@@ -7750,6 +7756,7 @@
         state.customersDateTo = '';
         state.customersAppliedDateFrom = '';
         state.customersAppliedDateTo = '';
+        state.customersDateValidation = '';
         renderCustomers();
         return;
       case 'toggle-orders-today':
@@ -8219,6 +8226,14 @@
       return;
     }
     if (inputKey === 'customersDateFrom' || inputKey === 'customersDateTo') {
+      const customerDateMax = getLocalDateInputMax();
+      if (state[inputKey] > customerDateMax) {
+        state[inputKey] = '';
+        state.customersDateValidation = 'Future dates are not allowed.';
+      } else {
+        state.customersDateValidation = getCustomersDateValidation(state.customersDateFrom, state.customersDateTo);
+      }
+      preserveInputFocus(target, renderCustomers);
       return;
     }
     if (inputKey === 'couponsSearch' || inputKey === 'couponsStatus' || inputKey === 'couponsType') {
@@ -8549,6 +8564,10 @@
         closeCouponProductDropdown();
       }
 
+      if (els.profileDropdown && !els.profileDropdown.hidden && !target.closest('[data-profile-menu], [data-action="open-profile"]')) {
+        closeProfileDropdown();
+      }
+
       const actionTarget = target.closest('[data-action]');
       if (actionTarget) {
         if (actionTarget instanceof HTMLInputElement || actionTarget instanceof HTMLSelectElement) return;
@@ -8627,6 +8646,10 @@
     });
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
+        if (closeProfileDropdown()) {
+          event.preventDefault();
+          return;
+        }
         if (closeCouponProductDropdown()) {
           event.preventDefault();
           return;
