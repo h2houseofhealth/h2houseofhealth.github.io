@@ -35,7 +35,19 @@ try {
   puppeteer = null;
 }
 
-module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, JWT_SECRET, jwt, sendMerchEmail = null, couponHelpers = {}, merchImageUpload = null }) {
+module.exports = function mountMerchApi(app, {
+  db,
+  razorpay,
+  RAZORPAY_KEY_ID,
+  RAZORPAY_KEY_SECRET,
+  JWT_SECRET,
+  jwt,
+  sendMerchEmail = null,
+  couponHelpers = {},
+  merchImageUpload = null,
+  sendWhatsAppMessage = null,
+  normalizeWhatsAppMobile = null,
+}) {
   const {
     normalizeCouponCode,
     validateCouponForUser,
@@ -423,7 +435,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       },
       {
         slug: 'h2-mist-spray',
-        price: 100, // Temporary test price: 100 paise = Rs. 1 (original: 1190000)
+        price: 1190000,
         oldSkus: ['HM-SPR-050-WHT', 'HM-SPR-100-WHT', 'HM-SPR-050-RSG', 'HM-SPR-100-RSG'],
         specifications: {
           'Product Name': 'Hydrogen Mist Sprayer',
@@ -4153,8 +4165,15 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
 
   function normalizeMerchWhatsAppPhone(phone) {
-    const digits = String(phone || '').replace(/\D/g, '');
+    const raw = String(phone || '').trim();
+    if (typeof normalizeWhatsAppMobile === 'function') {
+      const normalized = normalizeWhatsAppMobile(raw);
+      if (normalized) return normalized.replace(/^\+/, '');
+    }
+    const digits = raw.replace(/\D/g, '');
     if (!digits) return '';
+    if (/^[6-9]\d{9}$/.test(digits)) return `91${digits}`;
+    if (/^[2-5]\d{9}$/.test(digits)) return `1${digits}`;
     if (digits.length === 10) return `91${digits}`;
     return digits;
   }
@@ -4614,6 +4633,144 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       result.whatsapp.latest = getLatestMerchWhatsAppMessageStatus(orderId);
     }
     return result;
+  }
+
+  function resolveMerchRefundStatus(order, options = {}) {
+    const method = String(order?.payment_method || '').toLowerCase();
+    const paymentStatus = String(order?.payment_status || '').toLowerCase();
+    const prevPaymentStatus = String(options.previousPaymentStatus || '').toLowerCase();
+
+    if (method === 'cod') {
+      return 'No refund required (COD order)';
+    }
+    if (paymentStatus === 'refunded' || paymentStatus === 'paid' || prevPaymentStatus === 'paid') {
+      return 'No refund';
+    }
+    return 'No payment was collected';
+  }
+
+  async function sendMerchCancellationWhatsApp(order, options = {}) {
+    const rawPhone = order?.customer_phone || order?.customerPhone || order?.guest_phone || order?.guestPhone || '';
+    const customerName = String(order?.customer_name || order?.customerName || order?.guest_name || order?.guestName || 'Valued Customer').trim();
+    const orderNumber = String(order?.order_number || order?.orderNumber || (order?.id ? `Order #${order.id}` : 'Order')).trim();
+    const reason = String(options.reason || (options.cancelledBy === 'customer' ? 'Requested by customer' : 'Cancelled by store administration')).trim();
+    const refundStatus = options.refundStatus || resolveMerchRefundStatus(order, options);
+
+    if (!rawPhone) {
+      console.warn(`[WhatsApp] Skipping merch cancellation notification for order ${orderNumber}: no phone number provided.`);
+      return { ok: false, reason: 'missing_phone' };
+    }
+
+    const phone = typeof normalizeWhatsAppMobile === 'function' ? normalizeWhatsAppMobile(rawPhone) : normalizeMerchWhatsAppPhone(rawPhone);
+    if (!phone) {
+      console.warn(`[WhatsApp] Skipping merch cancellation notification for order ${orderNumber}: invalid phone "${rawPhone}".`);
+      return { ok: false, reason: 'invalid_phone' };
+    }
+
+    const parameters = [
+      customerName,
+      orderNumber,
+      reason,
+      refundStatus,
+    ];
+
+    try {
+      if (typeof sendWhatsAppMessage === 'function') {
+        const result = await sendWhatsAppMessage(phone, 'order_cancelled', parameters);
+        console.log(`[WhatsApp] Sent order_cancelled notification for merch order ${orderNumber}:`, result);
+        return result;
+      }
+      const config = getMerchWhatsAppConfig();
+      if (!config.token || !config.phoneNumberId) {
+        console.warn(`[WhatsApp] Skipping cancellation notification for merch order ${orderNumber}: WhatsApp Cloud API not configured.`);
+        return { ok: false, reason: 'unconfigured' };
+      }
+      const payload = {
+        to: phone.replace(/^\+/, ''),
+        type: 'template',
+        template: {
+          name: 'order_cancelled',
+          language: { code: 'en' },
+          components: [
+            {
+              type: 'body',
+              parameters: parameters.map((param) => ({ type: 'text', text: String(param) })),
+            },
+          ],
+        },
+      };
+      const result = await sendWhatsAppGraphMessage(config, payload);
+      console.log(`[WhatsApp] Sent order_cancelled notification for merch order ${orderNumber}:`, result);
+      return { ok: true, result };
+    } catch (err) {
+      console.error(`[WhatsApp] Error sending order_cancelled notification for merch order ${orderNumber}:`, err?.message || err);
+      return { ok: false, error: err?.message || err };
+    }
+  }
+
+  async function sendMerchCancellationEmail(order, options = {}) {
+    const email = String(order?.customer_email || order?.customerEmail || order?.guest_email || order?.guestEmail || '').trim().toLowerCase();
+    const customerName = String(order?.customer_name || order?.customerName || order?.guest_name || order?.guestName || 'Valued Customer').trim();
+    const orderNumber = String(order?.order_number || order?.orderNumber || (order?.id ? `Order #${order.id}` : 'Order')).trim();
+    const reason = String(options.reason || (options.cancelledBy === 'customer' ? 'Requested by customer' : 'Cancelled by store administration')).trim();
+    const refundStatus = options.refundStatus || resolveMerchRefundStatus(order, options);
+
+    if (!email || !isValidMerchEmail(email)) {
+      console.warn(`[Merch] Skipping cancellation email for order ${orderNumber}: no valid email.`);
+      return { status: 'skipped', reason: 'missing_email' };
+    }
+    if (typeof sendMerchEmail !== 'function') {
+      console.warn(`[Merch] Cancellation email skipped for order ${orderNumber}: email service not configured.`);
+      return { status: 'skipped', reason: 'missing_service' };
+    }
+
+    const subject = `Your H2 House of Health order ${orderNumber} has been cancelled`;
+    const text = `Hi ${customerName},\n\nYour H2 House of Health order ${orderNumber} has been cancelled.\n\nCancellation reason: ${reason}\nRefund status: ${refundStatus}\n\nIf you have any questions, please contact our support team at support@h2houseofhealth.com.\n\nBest regards,\nH2 House of Health Team`;
+    const html = `<!doctype html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #faf7f4; padding: 24px; color: #2d2422;">
+  <div style="max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 12px; padding: 32px; border: 1px solid #e8dfd8;">
+    <h2 style="color: #8b3e23; margin-top: 0;">Order Cancellation Confirmation</h2>
+    <p>Hi <strong>${escapeHtml(customerName)}</strong>,</p>
+    <p>Your H2 House of Health order <strong>${escapeHtml(orderNumber)}</strong> has been cancelled.</p>
+    <div style="background: #f8f4f0; border-radius: 8px; padding: 16px; margin: 20px 0;">
+      <p style="margin: 6px 0;"><strong>Cancellation reason:</strong> ${escapeHtml(reason)}</p>
+      <p style="margin: 6px 0;"><strong>Refund status:</strong> ${escapeHtml(refundStatus)}</p>
+    </div>
+    <p style="color: #6d6360; font-size: 14px; margin-top: 24px;">If you have any questions, please contact our support team at <a href="mailto:support@h2houseofhealth.com" style="color: #8b3e23;">support@h2houseofhealth.com</a>.</p>
+    <p style="color: #6d6360; font-size: 14px;">Best regards,<br>H2 House of Health Team</p>
+  </div>
+</body>
+</html>`;
+
+    try {
+      await sendMerchEmail({ to: email, subject, text, html });
+      return { status: 'sent' };
+    } catch (err) {
+      console.error(`[Merch] Failed to send cancellation email for order ${orderNumber}:`, err?.message || err);
+      return { status: 'failed', error: err?.message || err };
+    }
+  }
+
+  async function triggerMerchCancellationNotifications(order, options = {}) {
+    const results = {
+      whatsapp: { status: 'pending' },
+      email: { status: 'pending' },
+    };
+    try {
+      results.whatsapp = await sendMerchCancellationWhatsApp(order, options);
+    } catch (err) {
+      console.error('[Merch] WhatsApp cancellation error:', err?.message || err);
+      results.whatsapp = { ok: false, error: err?.message || err };
+    }
+    try {
+      results.email = await sendMerchCancellationEmail(order, options);
+    } catch (err) {
+      console.error('[Merch] Email cancellation error:', err?.message || err);
+      results.email = { status: 'failed', error: err?.message || err };
+    }
+    return results;
   }
 
   function handleMerchWhatsAppStatusWebhook(body) {
@@ -5595,7 +5752,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
     }
 
-    const shippingCharge = (subtotal >= 99900 || subtotal <= 100) ? 0 : 9900;
+    const shippingCharge = subtotal >= 99900 ? 0 : 9900;
     const codSurcharge = 5000; // ₹50
     const discountAmount = bundleDiscountPaise > 0
       ? bundleDiscountPaise
@@ -6305,6 +6462,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if ((currentStatus === 'pending' || currentPaymentStatus === 'pending') && currentPaymentStatus !== 'paid') {
       db.prepare('DELETE FROM merch_order_items WHERE order_id = ?').run(order.id);
       db.prepare('DELETE FROM merch_orders WHERE id = ?').run(order.id);
+      triggerMerchCancellationNotifications(order, {
+        cancelledBy: 'customer',
+        reason: req.body?.reason || req.body?.cancellationReason || 'Requested by customer',
+        refundStatus: 'No payment was collected',
+      }).catch((err) => console.error('[Merch] Customer cancel unpaid order notification error:', err?.message || err));
       return res.json({ success: true, removed: true, orderId: order.id });
     }
 
@@ -6322,7 +6484,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         SET status = 'cancelled',
             cancelled_by = 'customer',
             cancelled_at = datetime('now'),
-            payment_status = CASE WHEN payment_status IN ('paid', 'cod_pending') THEN 'refunded' ELSE payment_status END,
+            payment_status = CASE WHEN payment_status = 'cod_pending' THEN 'cancelled' ELSE payment_status END,
             updated_at = datetime('now')
         WHERE id = ? AND status NOT IN ('delivered', 'returned', 'cancelled')
       `).run(order.id);
@@ -6341,6 +6503,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     const updated = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(order.id);
     const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+    triggerMerchCancellationNotifications(updated || order, {
+      cancelledBy: 'customer',
+      reason: req.body?.reason || req.body?.cancellationReason || 'Requested by customer',
+      previousPaymentStatus: currentPaymentStatus,
+    }).catch((err) => console.error('[Merch] Customer cancel notification error:', err?.message || err));
     res.json({ success: true, order: buildMerchOrderRecord(updated, items) });
   });
 
@@ -7563,6 +7730,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
     const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(req.params.id);
+
+    if (String(status).toLowerCase() === 'cancelled' && existingStatus !== 'cancelled') {
+      const reason = req.body?.reason || req.body?.cancellationReason || 'Cancelled by store administration';
+      triggerMerchCancellationNotifications(order || existingOrder, {
+        cancelledBy: 'admin',
+        reason,
+        previousPaymentStatus: String(existingOrder.payment_status || '').toLowerCase(),
+      }).catch((err) => console.error('[Merch] Admin cancel notification error:', err?.message || err));
+    }
+
     res.json({ success: true, order: buildMerchOrderRecord(order, items) });
   });
 

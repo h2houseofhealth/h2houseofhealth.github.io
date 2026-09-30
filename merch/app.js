@@ -1997,7 +1997,7 @@ function getWishlistProductPrice(item) {
   }
 
   function getMerchShippingCharge(subtotalInr = getCartTotal()) {
-    return Number(subtotalInr || 0) >= 999 || Number(subtotalInr || 0) <= 1 ? 0 : 99;
+    return Number(subtotalInr || 0) >= 999 ? 0 : 99;
   }
 
   function getIncludedGstAmount(subtotalInr = getCartTotal()) {
@@ -3748,7 +3748,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const isPending = (String(order.status || '').toLowerCase() === 'pending' || String(order.paymentStatus || '').toLowerCase() === 'pending') && String(order.status || '').toLowerCase() !== 'cancelled';
     const confirmPrompt = isPending
       ? `Cancel ${order.orderNumber || `Order #${order.id}`}? This order will be removed from your orders.`
-      : `Cancel ${order.orderNumber || `Order #${order.id}`}? Any payment will be refunded.`;
+      : `Cancel ${order.orderNumber || `Order #${order.id}`}? No refund.`;
     if (!window.confirm(confirmPrompt)) return;
     try {
       const result = await api(`/api/merch/orders/${encodeURIComponent(order.id)}/cancel`, { method: 'POST' });
@@ -3757,7 +3757,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         renderAccountDrawer();
         showCheckoutNotice('Order cancelled', `${order.orderNumber || `Order #${order.id}`} was cancelled and removed.`);
       } else {
-        state.merchOrders = state.merchOrders.map((item) => String(item.id) === String(order.id) ? (result.order || { ...order, status: 'cancelled', paymentStatus: 'refunded' }) : item);
+        state.merchOrders = state.merchOrders.map((item) => String(item.id) === String(order.id) ? (result.order || { ...order, status: 'cancelled', paymentStatus: order.paymentStatus }) : item);
         renderAccountDrawer();
         showCheckoutNotice('Order cancelled', `${order.orderNumber || `Order #${order.id}`} was cancelled successfully.`);
       }
