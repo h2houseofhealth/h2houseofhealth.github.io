@@ -2896,17 +2896,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   function renderSparklineBars(rows = [], valueKey = 'value', labelKey = 'label', formatter = null) {
     const items = Array.isArray(rows) ? rows : [];
-    const maxValue = items.reduce((max, item) => Math.max(max, Number(item?.[valueKey] || 0)), 0) || 1;
     return items.map((item) => {
       const value = Number(item?.[valueKey] || 0);
-      const width = Math.max(8, Math.round((value / maxValue) * 100));
       const formattedValue = typeof formatter === 'function' ? formatter(value, item) : formatPrice(value || 0);
       return `
-        <div class="influencer-chart__row">
-          <span class="influencer-chart__label">${escapeHtml(item?.[labelKey] || '')}</span>
-          <span class="influencer-chart__bar"><span style="width:${width}%"></span></span>
-          <strong class="influencer-chart__value">${escapeHtml(formattedValue)}</strong>
-        </div>
+        <article class="influencer-kpi">
+          <p>${escapeHtml(item?.[labelKey] || '')}</p>
+          <strong>${escapeHtml(formattedValue)}</strong>
+        </article>
       `;
     }).join('');
   }

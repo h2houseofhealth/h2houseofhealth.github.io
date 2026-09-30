@@ -1363,6 +1363,7 @@ body.is-auth-loading .merch-auth-cta {
 
 .influencer-chart {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 10px;
 }
 

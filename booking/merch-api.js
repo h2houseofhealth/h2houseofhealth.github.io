@@ -88,6 +88,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       settings_json TEXT NOT NULL DEFAULT '{}',
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS merch_admin_security_questions (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      question TEXT NOT NULL DEFAULT 'First name of H2 House of Health..??',
+      answer TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Product specifications are optional so existing databases continue to work.
@@ -727,6 +734,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   if (hasTable('coupons') && !hasColumn('coupons', 'influencer_id')) {
     db.exec('ALTER TABLE coupons ADD COLUMN influencer_id INTEGER REFERENCES merch_influencers(id)');
   }
+  if (hasTable('coupons') && !hasColumn('coupons', 'commission_type')) {
+    db.exec("ALTER TABLE coupons ADD COLUMN commission_type TEXT NOT NULL DEFAULT 'flat'");
+  }
+  if (hasTable('coupons') && !hasColumn('coupons', 'commission_rate')) {
+    db.exec('ALTER TABLE coupons ADD COLUMN commission_rate REAL NOT NULL DEFAULT 0');
+  }
 
   if (!hasTable('merch_influencer_commission_payments')) {
     db.exec(`
@@ -1130,6 +1143,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!normalizedCode) return null;
     return db.prepare(`
       SELECT c.id, c.code, c.description, c.discount_type AS discountType, c.discount_value AS discountValue,
+             c.commission_type AS commissionType, c.commission_rate AS commissionRate,
              c.commission_per_order_paise AS commissionPerOrderPaise,
              c.applies_to AS appliesTo, c.active, c.is_active AS isActive, c.portal,
              c.influencer_id AS influencerId, i.name AS influencerName, i.handle AS influencerHandle,
@@ -1148,6 +1162,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!ids.length) return [];
     return db.prepare(`
       SELECT c.id, c.code, c.description, c.discount_type AS discountType, c.discount_value AS discountValue,
+             c.commission_type AS commissionType, c.commission_rate AS commissionRate,
              c.commission_per_order_paise AS commissionPerOrderPaise,
              c.active, c.is_active AS isActive, c.influencer_id AS influencerId,
              COUNT(mo.id) AS usageCount,
@@ -1643,6 +1658,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     const coupons = db.prepare(`
       SELECT c.id, c.code, c.description, c.discount_type AS discountType, c.discount_value AS discountValue,
+             c.commission_type AS commissionType, c.commission_rate AS commissionRate,
              c.commission_per_order_paise AS commissionPerOrderPaise,
              c.applies_to AS appliesTo, c.max_redemptions AS maxRedemptions, c.per_user_limit AS perUserLimit,
              c.expires_at AS expiresAt, c.active, c.coupon_type AS couponType,
@@ -1668,6 +1684,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         description: String(coupon.description || ''),
         discountType: String(coupon.discountType || ''),
         discountValue: Number(coupon.discountValue || 0),
+        commissionType: String(coupon.commissionType || 'flat'),
+        commissionRate: Number(coupon.commissionRate || 0),
+        commissionPerOrderPaise: Number(coupon.commissionPerOrderPaise || 0),
         appliesTo: String(coupon.appliesTo || 'all'),
         maxRedemptions: Number.isFinite(maxRedemptions) && maxRedemptions > 0 ? maxRedemptions : null,
         perUserLimit: Number(coupon.perUserLimit || 1),
@@ -4537,12 +4556,23 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function getMerchCommissionSnapshot(coupon, items = []) {
     if (!coupon?.influencerId) return { total: 0, byProduct: new Map() };
-    const fallback = Math.max(0, Math.round(Number(coupon.commissionPerOrderPaise || 0)));
+    const commissionType = String(coupon.commissionType || coupon.commission_type || 'flat').toLowerCase();
+    const fallback = Math.max(0, Math.round(Number(coupon.commissionPerOrderPaise || coupon.commission_per_order_paise || 0)));
+    const commissionRate = Number(coupon.commissionRate || coupon.commission_rate || 0);
     const lineCommissions = new Map();
-    let total = items.length ? fallback : 0;
-    for (const item of items) {
-      const productCommission = fallback;
-      lineCommissions.set(Number(item.variantId), productCommission);
+    let total = 0;
+    if (commissionType === 'percentage' || commissionType === '%') {
+      const orderSubtotalPaise = items.reduce((sum, item) => sum + Math.max(0, Math.round(Number(item.lineTotal || 0))), 0);
+      total = Math.round(orderSubtotalPaise * (commissionRate / 100));
+      for (const item of items) {
+        const itemLineTotal = Math.max(0, Math.round(Number(item.lineTotal || 0)));
+        lineCommissions.set(Number(item.variantId), Math.round(itemLineTotal * (commissionRate / 100)));
+      }
+    } else {
+      total = items.length ? fallback : 0;
+      for (const item of items) {
+        lineCommissions.set(Number(item.variantId), fallback);
+      }
     }
     return { total, byProduct: lineCommissions };
   }
@@ -4672,6 +4702,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         SELECT id, code, description, discount_type AS discountType, discount_value AS discountValue,
                applies_to AS appliesTo, max_redemptions AS maxRedemptions, per_user_limit AS perUserLimit,
                active, is_active AS isActive, coupon_type AS couponType,
+               commission_type AS commissionType, commission_rate AS commissionRate,
                valid_from AS validFrom, valid_till AS validTill, expires_at AS expiresAt,
                festival_name AS festivalName, influencer_id AS influencerId, created_at AS createdAt
         FROM coupons
@@ -4688,8 +4719,20 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const coupons = rows.filter((row) => {
         const appliesTo = String(row.appliesTo || 'all').trim().toLowerCase();
         if (['all', 'merch'].includes(appliesTo)) return true;
-        const match = appliesTo.match(/^product:([\\d,]+)$/);
-        return Boolean(match && productIds.some((id) => match[1].split(',').includes(String(id))));
+        const match = appliesTo.match(/^product:([\d,]+)$/);
+        if (match && productIds.some((id) => match[1].split(',').includes(String(id)))) return true;
+        const catMatch = appliesTo.match(/^category:([a-z0-9_\-,]+)$/);
+        if (catMatch) {
+          const catSlugs = catMatch[1].split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+          if (productIds.length > 0) {
+            const placeholders = productIds.map(() => '?').join(',');
+            const prodRows = db.prepare(`SELECT DISTINCT LOWER(category) AS category FROM merch_products WHERE id IN (${placeholders})`).all(...productIds);
+            const inCartCats = prodRows.map((r) => String(r.category || '').toLowerCase());
+            return catSlugs.some((cat) => inCartCats.includes(cat));
+          }
+          return true;
+        }
+        return false;
       }).map((row) => {
         const campaignText = `${row.festivalName || ''} ${row.description || ''}`.toLowerCase();
         const couponCategory = Number(row.influencerId || 0) > 0
@@ -4700,21 +4743,23 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
             ? 'seasonal'
             : 'public';
         return {
-        id: Number(row.id),
-        code: row.code,
-        description: row.description || '',
-        discountType: row.discountType || 'flat',
-        discountValue: Number(row.discountValue || 0),
-        appliesTo: row.appliesTo || 'all',
-        couponType: row.couponType || 'public',
-        couponCategory,
-        influencerId: row.influencerId == null ? null : Number(row.influencerId),
-        festivalName: row.festivalName || '',
-        validFrom: row.validFrom || null,
-        validTill: row.validTill || row.expiresAt || null,
-        expiresAt: row.validTill || row.expiresAt || null,
-        maxRedemptions: row.maxRedemptions == null ? null : Number(row.maxRedemptions),
-        perUserLimit: Number(row.perUserLimit || 1),
+          id: Number(row.id),
+          code: row.code,
+          description: row.description || '',
+          discountType: row.discountType || 'flat',
+          discountValue: Number(row.discountValue || 0),
+          commissionType: row.commissionType || 'flat',
+          commissionRate: Number(row.commissionRate || 0),
+          appliesTo: row.appliesTo || 'all',
+          couponType: row.couponType || 'public',
+          couponCategory,
+          influencerId: row.influencerId == null ? null : Number(row.influencerId),
+          festivalName: row.festivalName || '',
+          validFrom: row.validFrom || null,
+          validTill: row.validTill || row.expiresAt || null,
+          expiresAt: row.validTill || row.expiresAt || null,
+          maxRedemptions: row.maxRedemptions == null ? null : Number(row.maxRedemptions),
+          perUserLimit: Number(row.perUserLimit || 1),
         };
       });
       return res.json({ coupons });
@@ -6591,9 +6636,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const commissionEarnedPaise = Math.round(Number(stats.totalCommissionEarned || 0));
     const previousPaidPaise = Math.round(Number(influencer.paidCommission ?? influencer.paid_commission ?? 0));
     const newCumulativePaidPaise = previousPaidPaise + amountPaise;
-    if (newCumulativePaidPaise > commissionEarnedPaise) {
-      return res.status(400).json({ message: `Payment cannot exceed the remaining commission balance (${Math.max(0, commissionEarnedPaise - previousPaidPaise) / 100}).` });
-    }
     const balanceRemainingPaise = Math.max(0, commissionEarnedPaise - newCumulativePaidPaise);
 
     const now = new Date();
@@ -6748,10 +6790,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       return res.status(404).json({ message: 'Influencer not found' });
     }
 
-    // Verify security password
-    const password = String(req.body?.password || '').trim();
-    if (!password || !verifyAdminAuthorization(req, password)) {
-      return res.status(401).json({ message: 'Security authorization failed. Invalid admin password.' });
+    // Verify security question answer
+    const securityRow = db.prepare('SELECT answer FROM merch_admin_security_questions WHERE id = 1').get();
+    if (!securityRow || !securityRow.answer || !String(securityRow.answer).trim()) {
+      return res.status(400).json({ message: 'Security question is not configured yet. Please create security first.' });
+    }
+
+    const submittedAnswer = String(req.body?.securityAnswer || req.body?.answer || '').trim();
+    const expectedAnswer = String(securityRow.answer || '').trim();
+    if (!submittedAnswer || submittedAnswer.toLowerCase() !== expectedAnswer.toLowerCase()) {
+      return res.status(401).json({ message: 'Wrong answer' });
     }
 
     const reason = String(req.body?.reason || '').trim();
@@ -6769,7 +6817,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const stats = getInfluencerStatsRows([influencerId])[0] || {};
     const commissionEarnedPaise = Math.max(0, Math.round(Number(stats.totalCommissionEarned || 0)));
     const cumulativePaidPaise = payBalancePaise > 0 ? prevAmountPaise + payBalancePaise : newAmountPaise;
-    if (cumulativePaidPaise > commissionEarnedPaise) {
+    if (commissionEarnedPaise > 0 && cumulativePaidPaise > commissionEarnedPaise) {
       return res.status(400).json({ message: `Commission paid cannot exceed earned commission (${commissionEarnedPaise / 100}).` });
     }
     const changedBy = String(req.user?.email || req.user?.name || 'admin');
@@ -6805,6 +6853,37 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       changedBy,
       reason,
       influencer: updatedInfluencer,
+    });
+  });
+
+  // ─── ADMIN: Security Question Configuration ───
+  app.get('/api/merch/admin/security-question', requireAdmin, (req, res) => {
+    const row = db.prepare('SELECT question, answer FROM merch_admin_security_questions WHERE id = 1').get();
+    const isConfigured = Boolean(row && row.answer && String(row.answer).trim().length > 0);
+    res.json({
+      isConfigured,
+      question: row?.question || 'First name of H2 House of Health..??',
+    });
+  });
+
+  app.post('/api/merch/admin/security-question', requireAdmin, (req, res) => {
+    const question = String(req.body?.question || 'First name of H2 House of Health..??').trim();
+    const answer = String(req.body?.answer || '').trim();
+    if (!answer) {
+      return res.status(400).json({ message: 'Answer is required.' });
+    }
+
+    db.prepare(`
+      INSERT INTO merch_admin_security_questions (id, question, answer, updated_at)
+      VALUES (1, ?, ?, datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET question = excluded.question, answer = excluded.answer, updated_at = excluded.updated_at
+    `).run(question, answer);
+
+    res.json({
+      success: true,
+      isConfigured: true,
+      question,
+      message: 'Security answer defined successfully.',
     });
   });
 
