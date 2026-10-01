@@ -1871,7 +1871,9 @@ function getWishlistProductPrice(item) {
 
     const existing = state.cart.find(item => item.variantId === variantId);
     if (existing) {
-      const newQty = Math.min(Math.max(1, quantity), variant.stock);
+      const currentQty = Math.max(1, Number(existing.quantity || 1));
+      const addQty = Math.max(1, Number(quantity || 1));
+      const newQty = Math.min(currentQty + addQty, Number(variant.stock || 99));
       existing.quantity = newQty;
       existing.price = effectivePrice;
       existing.originalPrice = offerInfo ? offerInfo.originalPrice : null;
@@ -2083,7 +2085,7 @@ function getWishlistProductPrice(item) {
   }
 
   function getCartCount() {
-    return state.cart.reduce((sum, item) => sum + item.quantity, 0);
+    return (state.cart || []).reduce((sum, item) => sum + Math.max(1, Number(item.quantity || 1)), 0);
   }
 
   function normalizeCouponCode(code) {
@@ -3324,6 +3326,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const icons = {
       profile: '<svg class="account-panel-nav__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="1.8"/><path d="M4 21a8 8 0 0 1 16 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
       orders: '<svg class="account-panel-nav__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 8h12l-1 12H7L6 8Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 8a3 3 0 0 1 6 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+      cart: '<svg class="account-panel-nav__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5h2.2l1.6 8.4a1.4 1.4 0 0 0 1.38 1.16h7.6a1.4 1.4 0 0 0 1.35-1.03L19.6 8H7.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="9.4" cy="19" r="1.05" fill="currentColor"/><circle cx="17" cy="19" r="1.05" fill="currentColor"/></svg>',
       addresses: '<svg class="account-panel-nav__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s7-5.3 7-11a7 7 0 1 0-14 0c0 5.7 7 11 7 11Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 12.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4Z" stroke="currentColor" stroke-width="1.8"/></svg>',
       wishlist: '<svg class="account-panel-nav__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20.5 5.8c-1.7-1.8-4.4-1.8-6.1 0L12 8.2 9.6 5.8c-1.7-1.8-4.4-1.8-6.1 0-1.8 1.9-1.8 4.9 0 6.7L12 21l8.5-8.5c1.8-1.8 1.8-4.8 0-6.7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
       logout: '<svg class="account-panel-nav__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M10 7V5a2 2 0 0 1 2-2h7v18h-7a2 2 0 0 1-2-2v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 12h9M10 9l3 3-3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -3349,13 +3352,15 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const avatarStyle = profile.avatarUrl
       ? ` style="background-image:url('${escapeHtml(profile.avatarUrl)}')"`
       : '';
+    const totalCartCount = getCartCount();
 
     els.accountDrawerContent.innerHTML = `
       <nav class="account-panel-nav" aria-label="Account sections">
         <button type="button" data-account-nav="account-profile" aria-current="${state.accountActiveSection === 'account-profile' ? 'page' : 'false'}">${renderAccountNavIcon('profile')}<span>My Profile</span></button>
-        <button type="button" data-account-nav="account-orders" aria-current="${state.accountActiveSection === 'account-orders' ? 'page' : 'false'}">${renderAccountNavIcon('orders')}<span>My Orders</span></button>
+        <button type="button" data-account-nav="account-orders" aria-current="${state.accountActiveSection === 'account-orders' ? 'page' : 'false'}">${renderAccountNavIcon('orders')}<span>My Orders</span>${orders.length > 0 ? `<span class="account-nav-badge">${orders.length}</span>` : ''}</button>
+        <button type="button" data-account-nav="cart">${renderAccountNavIcon('cart')}<span>My Cart</span>${totalCartCount > 0 ? `<span class="account-nav-badge">${totalCartCount}</span>` : ''}</button>
         <button type="button" data-account-nav="account-addresses" aria-current="${state.accountActiveSection === 'account-addresses' ? 'page' : 'false'}">${renderAccountNavIcon('addresses')}<span>My Addresses</span></button>
-        <button type="button" data-account-nav="account-wishlist" aria-current="${state.accountActiveSection === 'account-wishlist' ? 'page' : 'false'}">${renderAccountNavIcon('wishlist')}<span>Wishlist</span></button>
+        <button type="button" data-account-nav="account-wishlist" aria-current="${state.accountActiveSection === 'account-wishlist' ? 'page' : 'false'}">${renderAccountNavIcon('wishlist')}<span>Wishlist</span>${wishlistItems.length > 0 ? `<span class="account-nav-badge">${wishlistItems.length}</span>` : ''}</button>
         ${state.influencerDashboard?.influencer ? `<button type="button" data-account-nav="account-influencer" aria-current="${state.accountActiveSection === 'account-influencer' ? 'page' : 'false'}">${renderAccountNavIcon('influencer')}<span>Influencer Dashboard</span></button>` : ''}
       </nav>
       <section id="account-profile" data-account-section="account-profile" class="account-card account-card--profile">
@@ -3718,7 +3723,13 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
     els.accountDrawerContent?.querySelectorAll('[data-account-nav]').forEach((button) => {
       button.addEventListener('click', () => {
-        state.accountActiveSection = button.dataset.accountNav || 'account-profile';
+        const targetSection = button.dataset.accountNav || 'account-profile';
+        if (targetSection === 'cart') {
+          closeAccountDrawer();
+          openCartDrawer();
+          return;
+        }
+        state.accountActiveSection = targetSection;
         renderAccountDrawer();
       });
     });

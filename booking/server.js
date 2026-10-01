@@ -649,8 +649,17 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-const db = new Database(dbPath);
+const db = new Database(dbPath, { timeout: 5000 });
 db.pragma('journal_mode = WAL');
+db.pragma('busy_timeout = 5000');
+db.pragma('synchronous = NORMAL');
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Promise Rejection at:', promise, 'reason:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception thrown:', err?.stack || err);
+});
 const razorpayConfigError = getRazorpayConfigError();
 const RAZORPAY_UNAVAILABLE_MESSAGE = razorpayConfigError || 'Razorpay is not configured';
 const razorpay = !razorpayConfigError
@@ -11338,6 +11347,19 @@ app.post('/api/contact', async (req, res) => {
   }
 });
 
+// Global Express error handler to prevent process crashes and 502 Bad Gateway
+app.use((err, req, res, _next) => {
+  console.error(`Unhandled Express route error [${req.method} ${req.originalUrl || req.url}]:`, err?.stack || err);
+  if (res.headersSent) {
+    return;
+  }
+  const status = Number(err?.status || err?.statusCode || 500);
+  return res.status(status >= 400 && status < 600 ? status : 500).json({
+    error: 'Internal Server Error',
+    message: IS_PRODUCTION ? 'An unexpected error occurred. Please try again.' : (err?.message || 'Internal Server Error')
+  });
+});
+
 const HOST = normalizeEnvValue(process.env.HOST || (IS_PRODUCTION ? '0.0.0.0' : '127.0.0.1'));
 const BASE_PORT = Number(PORT) || 3000;
 const MAX_PORT_TRIES = 10;
@@ -17049,3 +17071,13 @@ function rateLimit({ windowMs, max }) {
     return next();
   };
 }
+
+// Periodically clean up expired rate-limit buckets to prevent memory leaks under load
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, row] of requestCounters.entries()) {
+    if (now > row.resetAt) {
+      requestCounters.delete(key);
+    }
+  }
+}, 120_000).unref();
