@@ -4684,13 +4684,22 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       // Clear the merch UI even if the server could not be reached.
     }
 
-    // 1. Immediately clear cart and promotional state from memory
+    // 1. Immediately clear cart and promotional state from memory AND storage
     state.cart = [];
     state.cartOwnerId = null;
     state.merchBundleCode = '';
     state.merchCouponCode = '';
     state.merchCouponPreview = null;
     state.merchCouponError = '';
+
+    try {
+      localStorage.removeItem('merch_cart_guest');
+      localStorage.removeItem('merch_bundle_guest');
+      localStorage.removeItem('merch_coupon_guest');
+      localStorage.removeItem('merch_cart');
+      localStorage.removeItem('merch_bundle_code');
+    } catch {}
+
     renderCartBadge();
     if (state.cartDrawerOpen) renderCart();
     closeCart();
@@ -4719,9 +4728,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     if (state.currentView === 'checkout') {
       showShop();
     }
-
-    // 4. Load isolated guest cart
-    loadCart(null);
 
     requestAnimationFrame(() => {
       document.querySelector('#merchAuthCta a')?.focus();
@@ -6586,6 +6592,11 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
       if (currentUserId) {
         await syncCartFromBackend();
+        try {
+          localStorage.removeItem('merch_cart_guest');
+          localStorage.removeItem('merch_bundle_guest');
+          localStorage.removeItem('merch_coupon_guest');
+        } catch {}
       }
 
       renderCartBadge();
@@ -6809,9 +6820,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
     state.campaignAttribution = attribution;
 
-    // Check if target bottle should be seeded or updated to the campaign's target variant
-    const isTargetingCheckout = window.location.hash === '#checkout' || Boolean(paramSlug);
-    if (isTargetingCheckout) {
+    // Only auto-seed the target product if the user directly arrived via an active campaign link
+    const isDirectCampaignLanding = Boolean(paramSlug);
+    if (isDirectCampaignLanding) {
       const targetProductId = Number(attribution.targetProductId || 11);
       const targetVariantId = Number(attribution.targetVariantId || 569);
       const bottleProduct = (state.products || []).find((p) => Number(p.id) === targetProductId)
@@ -6829,7 +6840,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           if (bottleIndex >= 0) {
             const currentItem = state.cart[bottleIndex];
             // If user arrived via campaign link and current bottle variant is different, swap to the campaign variant
-            if (Number(currentItem.variantId) !== Number(targetVariant.id) && Boolean(paramSlug)) {
+            if (Number(currentItem.variantId) !== Number(targetVariant.id)) {
               state.cart.splice(bottleIndex, 1);
               addToCart(targetVariant.id, currentItem.quantity || 1, bottleProduct, { openDrawerAfterAdd: false, preserveCoupon: true });
             }
