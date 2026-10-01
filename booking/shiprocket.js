@@ -12,12 +12,10 @@ class ShiprocketService {
     this.email = config.email || process.env.SHIPROCKET_EMAIL || '';
     this.password = config.password || process.env.SHIPROCKET_PASSWORD || '';
     this.pickupLocation = config.pickupLocation || process.env.SHIPROCKET_PICKUP_LOCATION || 'work';
-    this.pickupPostcode = config.pickupPostcode || process.env.SHIPROCKET_PICKUP_POSTCODE || '500033';
-    // Default package dimensions and weight matching product specifications (H2 Hydrogen Mist Spray: 10.3cm × 4cm × 4cm, 0.15 kg / 150g)
-    this.defaultWeightKg = Number(config.defaultWeightKg || process.env.SHIPROCKET_DEFAULT_WEIGHT_KG || 0.15);
-    this.defaultLengthCm = Number(config.defaultLengthCm || process.env.SHIPROCKET_DEFAULT_LENGTH_CM || 10.3);
-    this.defaultBreadthCm = Number(config.defaultBreadthCm || process.env.SHIPROCKET_DEFAULT_BREADTH_CM || 4);
-    this.defaultHeightCm = Number(config.defaultHeightCm || process.env.SHIPROCKET_DEFAULT_HEIGHT_CM || 4);
+    this.defaultWeightKg = Number(config.defaultWeightKg || process.env.SHIPROCKET_DEFAULT_WEIGHT_KG || 0.5);
+    this.defaultLengthCm = Number(config.defaultLengthCm || process.env.SHIPROCKET_DEFAULT_LENGTH_CM || 20);
+    this.defaultBreadthCm = Number(config.defaultBreadthCm || process.env.SHIPROCKET_DEFAULT_BREADTH_CM || 12);
+    this.defaultHeightCm = Number(config.defaultHeightCm || process.env.SHIPROCKET_DEFAULT_HEIGHT_CM || 10);
 
     // In-memory token cache (valid for 10 days in Shiprocket)
     this.token = null;
@@ -38,10 +36,6 @@ class ShiprocketService {
 
   getPickupLocation() {
     return (this.pickupLocation || process.env.SHIPROCKET_PICKUP_LOCATION || 'work').trim();
-  }
-
-  getPickupPostcode() {
-    return (this.pickupPostcode || process.env.SHIPROCKET_PICKUP_POSTCODE || '500033').trim();
   }
 
   /**
@@ -118,139 +112,27 @@ class ShiprocketService {
   }
 
   /**
-   * Calculate exact package dimensions and weight for an order:
-   * - If a single item is placed, only that specific product's dimensions and weight are passed.
-   * - If multiple items or combined items are placed, the combined dimensions (max L, max B, stacked H)
-   *   and combined total weight (sum of all product weights * quantities) are passed.
-   */
-  calculatePackageMetrics(items = [], packageDimensions = null) {
-    const dims = packageDimensions || {};
-    let length = Number(dims.length || 0);
-    let breadth = Number(dims.breadth || 0);
-    let height = Number(dims.height || 0);
-    let weight = Number(dims.weight || 0);
-
-    let maxL = 0;
-    let maxB = 0;
-    let totalH = 0;
-    let totalWeightGrams = 0;
-
-    for (const item of items) {
-      const qty = Math.max(1, Number(item.quantity || item.units || 1));
-      let itemL = Number(item.length_cm || item.length || 0);
-      let itemB = Number(item.breadth_cm || item.breadth || 0);
-      let itemH = Number(item.height_cm || item.height || 0);
-      let itemWeight = Number(item.weight_grams ?? item.weightGrams ?? item.weight ?? 0);
-
-      const nameLower = String(item.product_name || item.name || '').toLowerCase();
-      const skuUpper = String(item.sku || '').toUpperCase();
-
-      // Resolve known product specifications:
-      // 1. Hydrogen Water Bottle: 1kg (1000g), 24cm × 7cm × 7cm
-      // 2. Hydrogen Mist Spray: 0.15kg (150g), 10.3cm × 4cm × 4cm
-      // 3. Hoodie: 0.65kg (650g), 30cm × 25cm × 5cm
-      if (nameLower.includes('bottle') || skuUpper.includes('BTL')) {
-        itemL = itemL > 0 ? itemL : 24;
-        itemB = itemB > 0 ? itemB : 7;
-        itemH = itemH > 0 ? itemH : 7;
-        itemWeight = itemWeight > 0 ? itemWeight : 1000;
-      } else if (nameLower.includes('spray') || nameLower.includes('mist') || skuUpper.includes('SPR')) {
-        itemL = itemL > 0 ? itemL : 10.3;
-        itemB = itemB > 0 ? itemB : 4;
-        itemH = itemH > 0 ? itemH : 4;
-        itemWeight = itemWeight > 0 ? itemWeight : 150;
-      } else if (nameLower.includes('hoodie') || skuUpper.includes('HOD')) {
-        itemL = itemL > 0 ? itemL : 30;
-        itemB = itemB > 0 ? itemB : 25;
-        itemH = itemH > 0 ? itemH : 5;
-        itemWeight = itemWeight > 0 ? itemWeight : 650;
-      } else {
-        itemL = itemL > 0 ? itemL : this.defaultLengthCm;
-        itemB = itemB > 0 ? itemB : this.defaultBreadthCm;
-        itemH = itemH > 0 ? itemH : this.defaultHeightCm;
-        itemWeight = itemWeight > 0 ? itemWeight : (this.defaultWeightKg * 1000);
-      }
-
-      if (itemL > maxL) maxL = itemL;
-      if (itemB > maxB) maxB = itemB;
-      totalH += (itemH * qty);
-      totalWeightGrams += (itemWeight * qty);
-    }
-
-    // Apply calculated or fallback dimensions
-    length = length || maxL || this.defaultLengthCm;
-    breadth = breadth || maxB || this.defaultBreadthCm;
-    height = height || totalH || this.defaultHeightCm;
-
-    // Apply calculated or fallback weight (in kg, minimum 0.01 kg, rounded to 3 decimal places)
-    if (!weight || weight <= 0) {
-      weight = totalWeightGrams > 0
-        ? Math.max(0.01, Number((totalWeightGrams / 1000).toFixed(3)))
-        : this.defaultWeightKg;
-    }
-
-    return {
-      length: Number(length.toFixed(1)),
-      breadth: Number(breadth.toFixed(1)),
-      height: Number(height.toFixed(1)),
-      weight: Number(weight.toFixed(3)),
-      totalWeightGrams,
-    };
-  }
-
-  /**
    * 1. Create a custom ad-hoc order in Shiprocket
    */
   async createOrder({ order, items = [], customPickupLocation = null, packageDimensions = null }) {
     if (!order) throw new Error('Order object is required');
 
-    // Parse shipping address safely
+    // Parse address safely
     let shippingAddr = {};
-    const rawShipping = order.shipping_address || order.shippingAddress;
-    if (typeof rawShipping === 'string') {
+    if (typeof order.shipping_address === 'string') {
       try {
-        shippingAddr = JSON.parse(rawShipping);
+        shippingAddr = JSON.parse(order.shipping_address);
       } catch {
-        shippingAddr = { address1: rawShipping };
+        shippingAddr = { address1: order.shipping_address };
       }
-    } else if (rawShipping && typeof rawShipping === 'object') {
-      shippingAddr = rawShipping;
+    } else if (order.shipping_address && typeof order.shipping_address === 'object') {
+      shippingAddr = order.shipping_address;
     }
 
-    // Parse billing address safely
-    let billingAddr = {};
-    const rawBilling = order.billing_address || order.billingAddress;
-    if (typeof rawBilling === 'string') {
-      try {
-        billingAddr = JSON.parse(rawBilling);
-      } catch {
-        billingAddr = { address1: rawBilling };
-      }
-    } else if (rawBilling && typeof rawBilling === 'object') {
-      billingAddr = rawBilling;
-    }
-    const finalBilling = (billingAddr && (billingAddr.line1 || billingAddr.address1 || billingAddr.street)) ? billingAddr : shippingAddr;
-
-    // Resolve full customer name from recipientName, customer_name, guest_name, or profile
-    const rawName = String(
-      shippingAddr.recipientName ||
-      shippingAddr.recipient_name ||
-      shippingAddr.name ||
-      shippingAddr.fullName ||
-      finalBilling.recipientName ||
-      finalBilling.recipient_name ||
-      finalBilling.name ||
-      order.customer_name ||
-      order.customerName ||
-      order.guest_name ||
-      order.guestName ||
-      ''
-    ).trim();
-
-    const nameParts = rawName ? rawName.split(/\s+/).filter(Boolean) : [];
+    const fullName = String(shippingAddr.name || order.customer_name || 'Customer').trim();
+    const nameParts = fullName.split(' ');
     const firstName = nameParts[0] || 'Valued';
-    const lastName = nameParts.slice(1).join(' ') || (firstName === 'Valued' ? 'Customer' : '');
-    const fullName = [firstName, lastName].filter(Boolean).join(' ') || 'Customer';
+    const lastName = nameParts.slice(1).join(' ') || 'Customer';
 
     const orderDate = order.created_at
       ? new Date(order.created_at).toISOString().slice(0, 19).replace('T', ' ')
@@ -274,9 +156,11 @@ class ShiprocketService {
       };
     });
 
-    // Calculate exact packaging dimensions and weight for the specific items in this order
-    const metrics = this.calculatePackageMetrics(items, packageDimensions);
-    const { length, breadth, height, weight } = metrics;
+    const dims = packageDimensions || {};
+    const length = Number(dims.length || this.defaultLengthCm);
+    const breadth = Number(dims.breadth || this.defaultBreadthCm);
+    const height = Number(dims.height || this.defaultHeightCm);
+    const weight = Number(dims.weight || this.defaultWeightKg);
 
     const payload = {
       order_id: String(order.order_number || `ORD-${order.id}`),
@@ -284,17 +168,16 @@ class ShiprocketService {
       pickup_location: customPickupLocation || this.getPickupLocation(),
       channel_id: '',
       comment: `Order #${order.order_number || order.id} from H2 House of Health Store`,
-      customer_name: fullName,
       billing_customer_name: firstName,
       billing_last_name: lastName,
-      billing_address: String(finalBilling.line1 || finalBilling.address1 || finalBilling.street || finalBilling.address || 'Address').slice(0, 150),
-      billing_address_2: String(finalBilling.line2 || finalBilling.address2 || finalBilling.landmark || '').slice(0, 150),
-      billing_city: String(finalBilling.city || 'Indore').trim(),
-      billing_pincode: String(finalBilling.postalCode || finalBilling.postal_code || finalBilling.pincode || '452001').trim(),
-      billing_state: String(finalBilling.state || 'Madhya Pradesh').trim(),
-      billing_country: String(finalBilling.country || 'India').trim(),
+      billing_address: String(shippingAddr.line1 || shippingAddr.address1 || shippingAddr.street || shippingAddr.address || 'Address').slice(0, 150),
+      billing_address_2: String(shippingAddr.line2 || shippingAddr.address2 || shippingAddr.landmark || '').slice(0, 150),
+      billing_city: String(shippingAddr.city || 'Indore').trim(),
+      billing_pincode: String(shippingAddr.postalCode || shippingAddr.postal_code || shippingAddr.pincode || '452001').trim(),
+      billing_state: String(shippingAddr.state || 'Madhya Pradesh').trim(),
+      billing_country: String(shippingAddr.country || 'India').trim(),
       billing_email: String(order.customer_email || order.customerEmail || 'orders@h2houseofhealth.com').trim().toLowerCase(),
-      billing_phone: String(order.customer_phone || order.customerPhone || finalBilling.phone || '9999999999').replace(/\D/g, '').slice(-10),
+      billing_phone: String(order.customer_phone || order.customerPhone || shippingAddr.phone || '9999999999').replace(/\D/g, '').slice(-10),
       shipping_is_billing: true,
       shipping_customer_name: firstName,
       shipping_last_name: lastName,
@@ -341,7 +224,7 @@ class ShiprocketService {
   async checkServiceability({ pickupPostcode, deliveryPostcode, weight = 0.5, cod = false }) {
     const isCod = cod ? 1 : 0;
     const query = new URLSearchParams({
-      pickup_postcode: String(pickupPostcode || this.getPickupPostcode() || '500033'),
+      pickup_postcode: String(pickupPostcode || '452001'),
       delivery_postcode: String(deliveryPostcode),
       weight: String(weight || 0.5),
       cod: String(isCod),
@@ -352,19 +235,17 @@ class ShiprocketService {
     });
 
     const couriers = result?.data?.available_courier_companies || [];
-    return couriers
-      .map((c) => ({
-        courierCompanyId: c.courier_company_id,
-        courierName: c.courier_name,
-        rate: Number(c.rate || 0),
-        etd: c.etd,
-        estimatedDeliveryDays: c.estimated_delivery_days,
-        rating: c.rating,
-        mode: c.mode,
-        trackingPerformance: c.tracking_performance,
-        isSurface: c.is_surface,
-      }))
-      .sort((a, b) => a.rate - b.rate);
+    return couriers.map((c) => ({
+      courierCompanyId: c.courier_company_id,
+      courierName: c.courier_name,
+      rate: Number(c.rate || 0),
+      etd: c.etd,
+      estimatedDeliveryDays: c.estimated_delivery_days,
+      rating: c.rating,
+      mode: c.mode,
+      trackingPerformance: c.tracking_performance,
+      isSurface: c.is_surface,
+    }));
   }
 
   /**

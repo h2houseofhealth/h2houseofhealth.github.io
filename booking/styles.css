@@ -3512,75 +3512,42 @@ h1, h2, h3 {
   font-weight: 700;
 }
 
-.mobile-auth-number-row,
 #authCard .mobile-auth-number-row {
-  display: flex;
-  align-items: stretch;
+  display: grid;
+  grid-template-columns: 6.8rem minmax(0, 1fr);
   min-height: 3rem;
+  overflow: hidden;
   border: 1px solid rgba(var(--ink-rgb), 0.12);
   border-radius: 10px;
   background: #fff;
-  position: relative;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.mobile-auth-number-row select,
-#authCard .mobile-auth-number-row select {
-  flex: 0 0 auto;
-  width: auto;
-  min-width: 120px;
-  max-width: 52%;
-  height: 3rem;
-  padding: 0 1.9rem 0 0.85rem;
-  border: 0;
-  border-right: 1px solid rgba(var(--ink-rgb), 0.12);
-  border-radius: 9px 0 0 9px;
-  background-color: rgba(var(--ink-rgb), 0.02);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23374151' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 0.65rem center;
-  background-size: 11px;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  appearance: none;
-  color: var(--ink, #1f2937);
-  font-size: 0.88rem;
-  font-weight: 500;
-  cursor: pointer;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.mobile-auth-number-row input,
+#authCard .mobile-auth-number-row select,
 #authCard .mobile-auth-number-row input {
-  flex: 1 1 auto;
-  min-width: 0;
   width: 100%;
+  min-width: 0;
   height: 3rem;
-  padding: 0 0.95rem;
   border: 0;
-  border-radius: 0 9px 9px 0;
+  border-radius: 0;
   background: transparent;
   box-shadow: none;
-  font-size: 0.95rem;
-  color: var(--ink, #1f2937);
 }
 
-.mobile-auth-number-row:focus-within,
+#authCard .mobile-auth-number-row select {
+  padding: 0 0.8rem;
+  border-right: 1px solid rgba(var(--ink-rgb), 0.1);
+  color: rgba(var(--ink-rgb), 0.72);
+  font-size: 0.9rem;
+}
+
+#authCard .mobile-auth-number-row input {
+  padding: 0 0.95rem;
+  font-size: 0.95rem;
+}
+
 #authCard .mobile-auth-number-row:focus-within {
   border-color: rgba(var(--brand-primary-rgb), 0.52);
   box-shadow: 0 0 0 3px rgba(var(--brand-primary-rgb), 0.1);
-}
-
-@media (max-width: 480px) {
-  .mobile-auth-number-row select,
-  #authCard .mobile-auth-number-row select {
-    min-width: 105px;
-    max-width: 48%;
-    padding-left: 0.65rem;
-    padding-right: 1.6rem;
-    font-size: 0.84rem;
-  }
 }
 
 #authCard .mobile-auth-send {
@@ -6543,12 +6510,10 @@ textarea {
   border: 1px solid #E6DAD2;
   border-radius: 10px;
   padding: 0.55rem 0.65rem;
-  font-size: 1rem;
+  font-size: 0.95rem;
   background: #FFFFFF;
   box-sizing: border-box;
   transition: all var(--transition-fast);
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
 }
 
 input:focus,
@@ -18229,56 +18194,3 @@ body:not(.auth-mode) main.portal:not(:has(#memberChoiceGate:not([hidden]))) >
     font-size: 16px !important;
   }
 }
-
-/* Currency Selector Component */
-.checkout-currency-selector {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.65rem 0.9rem;
-  background: rgba(var(--surface-rgb, 255, 255, 255), 0.95);
-  border: 1px solid rgba(var(--ink-rgb, 31, 41, 55), 0.12);
-  border-radius: 10px;
-  margin-bottom: 1rem;
-}
-
-.checkout-currency-label {
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: var(--ink, #2d241e);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.currency-toggle-group {
-  display: inline-flex;
-  background: rgba(139, 94, 60, 0.09);
-  border-radius: 8px;
-  padding: 3px;
-  gap: 3px;
-}
-
-.currency-toggle-btn {
-  border: none;
-  background: transparent;
-  padding: 0.35rem 0.75rem;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: #6b5b52;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s ease-in-out;
-  line-height: 1.2;
-}
-
-.currency-toggle-btn:hover {
-  color: #2b2523;
-}
-
-.currency-toggle-btn.is-active {
-  background: #8b5e3c;
-  color: #ffffff;
-  box-shadow: 0 1px 3px rgba(139, 94, 60, 0.25);
-}
-
