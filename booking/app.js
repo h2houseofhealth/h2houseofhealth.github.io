@@ -14374,8 +14374,7 @@ function getUserHistoryBookings(bookings = state.bookings) {
 
 function getUserCartUnitCount(bookings = state.bookings) {
   const cartDisplayBookings = getUserCartDisplayBookings(bookings);
-  if (!cartDisplayBookings.length) return 0;
-  return buildUserBookingRows(cartDisplayBookings, cartDisplayBookings).length;
+  return cartDisplayBookings.length;
 }
 
 function buildUserCartSummary(bookings = state.bookings) {
@@ -14729,6 +14728,9 @@ function renderCartButtonState() {
     elements.cartCount.textContent = '0';
   }
   elements.cartBtn.setAttribute('aria-label', count > 0 ? `Cart, ${count} item${count === 1 ? '' : 's'}` : 'Cart');
+  if (elements.userTabCart) {
+    elements.userTabCart.textContent = count > 0 ? `Cart (${count})` : 'Cart';
+  }
 }
 
 function renderAdminRows(bookings) {
