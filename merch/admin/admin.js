@@ -1246,7 +1246,7 @@
             </div>
           </div>
 
-          <iframe class="admin-invoice-preview-frame" src="${blobUrl}" style="width:100%;height:520px;border:1px solid var(--admin-border);border-radius:8px;background:#f8fafc;" title="Invoice Preview"></iframe>
+          <iframe class="admin-invoice-preview-frame" src="${blobUrl}" style="width:100%;height:540px;border:1px solid #e7cabb;border-radius:10px;background:#f8f3ee;" title="Invoice Preview"></iframe>
         </div>
       `,
       footer: `
