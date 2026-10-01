@@ -4018,7 +4018,7 @@
 
   function renderCampaignCreatorSection(selectedInfluencer) {
     const activeInfluencers = (state.influencers || []).filter((i) => i.active !== 0 && i.active !== false);
-    const selectedInfId = selectedInfluencer ? Number(selectedInfluencer.id) : '';
+    const selectedInfId = selectedInfluencer ? Number(selectedInfluencer.id) : (activeInfluencers[0] ? Number(activeInfluencers[0].id) : '');
 
     // Get candidate coupons: portal === 'merch'
     const candidateCoupons = (state.coupons || []).filter((c) => {
@@ -8416,20 +8416,14 @@
         return;
       case 'delete-coupon':
         if (coupon) {
-          const couponToDelete = { ...coupon }; // snapshot before modal replaces state
           openConfirmModal({
             title: 'Delete coupon',
-            message: `Delete coupon ${couponToDelete.code}?`,
+            message: `Delete coupon ${coupon.code}?`,
             confirmLabel: 'Delete',
             onConfirm: async () => {
-              try {
-                await apiRequest(`/api/admin/coupons/${encodeURIComponent(couponToDelete.id)}`, { method: 'DELETE' });
-                toast('Coupon deleted', `${couponToDelete.code} removed from the list.`, 'danger');
-                state.selectedCouponId = null;
-                await loadCouponData();
-              } catch (err) {
-                toast('Delete failed', err?.message || 'Could not delete coupon. Please try again.', 'error');
-              }
+              await apiRequest(`/api/admin/coupons/${encodeURIComponent(coupon.id)}`, { method: 'DELETE' });
+              toast('Coupon deleted', `${coupon.code} removed from the list.`, 'danger');
+              await loadCouponData();
             },
           });
         }
