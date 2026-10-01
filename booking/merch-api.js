@@ -5907,7 +5907,7 @@ module.exports = function mountMerchApi(app, {
       couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
     }
 
-    const shippingCharge = (subtotal >= 99900 || subtotal <= 100) ? 0 : 9900; // Free above ₹999 or ₹1 test
+    const shippingCharge = 0; // Free shipping by default as of now
     const discountAmount = bundleDiscountPaise > 0
       ? bundleDiscountPaise
       : Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
@@ -6280,7 +6280,7 @@ module.exports = function mountMerchApi(app, {
       couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
     }
 
-    const shippingCharge = subtotal >= 99900 ? 0 : 9900;
+    const shippingCharge = 0; // Free shipping by default as of now
     const codSurcharge = 5000; // ₹50
     const discountAmount = bundleDiscountPaise > 0
       ? bundleDiscountPaise
