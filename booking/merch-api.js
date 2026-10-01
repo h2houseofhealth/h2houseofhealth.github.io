@@ -1508,38 +1508,274 @@ module.exports = function mountMerchApi(app, {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Commission Invoice ${escapeHtml(invoiceNum)} - H2 House of Health</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..800;1,9..40,400..800&display=swap" rel="stylesheet">
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f1f5f9; color: #0f172a; margin: 0; padding: 24px 12px; }
-    .invoice-card { max-width: 680px; margin: 0 auto; background: #ffffff; border-radius: 14px; box-shadow: 0 4px 20px rgba(0,0,0,0.07); border: 1px solid #e2e8f0; overflow: hidden; }
-    .header { background: #0b1329; color: #ffffff; padding: 32px 36px 26px; }
-    .header-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 22px; }
-    .brand-title { font-size: 22px; font-weight: 800; letter-spacing: 0.04em; color: #38bdf8; text-transform: uppercase; margin: 0; }
-    .brand-sub { font-size: 13px; color: #94a3b8; margin: 4px 0 0; }
-    .badge-paid { display: inline-block; background: #10b981; color: #ffffff; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; padding: 6px 14px; border-radius: 9999px; text-transform: uppercase; }
-    .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 14px; border-top: 1px solid #1e293b; padding-top: 18px; }
-    .meta-item-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; margin-bottom: 4px; }
-    .meta-item-val { font-size: 13px; font-weight: 600; color: #f8fafc; word-break: break-word; }
-    .body { padding: 30px 36px; }
-    .parties-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 28px; }
-    @media (max-width: 580px) { .parties-grid { grid-template-columns: 1fr; } }
-    .party-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 18px; }
-    .party-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #64748b; margin: 0 0 8px; }
-    .party-name { font-size: 16px; font-weight: 700; color: #0f172a; margin: 0 0 4px; }
-    .party-info { font-size: 13px; color: #475569; margin: 3px 0; line-height: 1.45; word-break: break-word; }
-    .table-wrap { margin-bottom: 26px; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
-    table { width: 100%; border-collapse: collapse; text-align: left; }
-    th { background: #f8fafc; color: #475569; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 12px 18px; border-bottom: 1px solid #e2e8f0; }
-    td { padding: 14px 18px; font-size: 14px; border-top: 1px solid #f1f5f9; color: #1e293b; }
-    .amt { text-align: right; font-weight: 600; }
-    .total-highlight { background: #ecfdf5; font-weight: 700; }
-    .total-highlight td { color: #065f46; font-size: 15px; }
-    .notes-box { background: #f0f9ff; border-left: 4px solid #0284c7; padding: 14px 18px; border-radius: 0 8px 8px 0; margin-bottom: 26px; }
-    .notes-title { font-size: 12px; font-weight: 700; color: #0369a1; text-transform: uppercase; margin: 0 0 4px; }
-    .notes-text { font-size: 13px; color: #0c4a6e; margin: 0; line-height: 1.5; }
-    .footer { background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 22px 36px; text-align: center; color: #64748b; font-size: 12px; line-height: 1.6; }
-    .footer strong { color: #334155; }
-    .invoice-company-footer { display: flex; justify-content: space-between; text-align: left; gap: 20px; margin-bottom: 18px; font-size: 13px; line-height: 1.6; color: #334155; border-bottom: 1px solid #e2e8f0; padding-bottom: 16px; }
-    @media (max-width: 580px) { .invoice-company-footer { flex-direction: column; text-align: left !important; } }
+    body {
+      font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background-color: #f8f3ee;
+      color: #14233b;
+      margin: 0;
+      padding: 24px 12px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .invoice-card {
+      max-width: 680px;
+      margin: 0 auto;
+      background: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(174, 84, 49, 0.08);
+      border: 1px solid #e7cabb;
+      overflow: hidden;
+    }
+    .header {
+      background: #fffaf7;
+      border-bottom: 1px solid #e7cabb;
+      padding: 28px 36px 24px;
+      position: relative;
+    }
+    .header::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, #b63b20, #c8652d, #ad3c22);
+    }
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .logo-img {
+      height: 46px;
+      width: auto;
+      display: block;
+    }
+    .badge-paid {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: #ad3c22;
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      box-shadow: 0 2px 8px rgba(173, 60, 34, 0.25);
+    }
+    .header-title-block {
+      margin-top: 4px;
+    }
+    .brand-eyebrow {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: #ad3c22;
+      text-transform: uppercase;
+      margin: 0 0 6px;
+    }
+    .brand-title {
+      font-family: Georgia, 'Times New Roman', serif;
+      font-size: 26px;
+      line-height: 32px;
+      font-weight: 700;
+      color: #14233b;
+      margin: 0;
+    }
+    .brand-sub {
+      font-size: 13px;
+      color: #657384;
+      margin: 4px 0 0;
+    }
+    .meta-banner {
+      background: #b63b20;
+      color: #ffffff;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-top: 20px;
+      box-shadow: 0 6px 16px rgba(182, 59, 32, 0.12);
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 14px;
+    }
+    .meta-item-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: rgba(255, 255, 255, 0.8);
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+    .meta-item-val {
+      font-size: 14px;
+      font-weight: 700;
+      color: #ffffff;
+      word-break: break-word;
+    }
+    .body {
+      padding: 30px 36px;
+      background: #ffffff;
+    }
+    .parties-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-bottom: 26px;
+    }
+    @media (max-width: 580px) {
+      .parties-grid { grid-template-columns: 1fr; }
+      .header { padding: 22px 20px; }
+      .body { padding: 22px 20px; }
+      .footer { padding: 20px !important; }
+      .meta-banner { grid-template-columns: 1fr 1fr; }
+    }
+    .party-box {
+      background: #fffaf7;
+      border: 1px solid #e7cabb;
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .party-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #ad3c22;
+      margin: 0 0 8px;
+    }
+    .party-name {
+      font-size: 17px;
+      font-weight: 700;
+      color: #14233b;
+      margin: 0 0 6px;
+    }
+    .party-info {
+      font-size: 13px;
+      color: #52606f;
+      margin: 4px 0;
+      line-height: 1.48;
+      word-break: break-word;
+    }
+    .party-info strong {
+      color: #14233b;
+    }
+    .coupon-badge {
+      display: inline-block;
+      background: rgba(174, 84, 49, 0.12);
+      color: #ad3c22;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .table-wrap {
+      margin-bottom: 26px;
+      border: 1px solid #e7cabb;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+    th {
+      background: #b63b20;
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 13px 18px;
+      border: 0;
+    }
+    td {
+      padding: 14px 18px;
+      font-size: 14px;
+      border-top: 1px solid #f0ded4;
+      color: #14233b;
+    }
+    .amt {
+      text-align: right;
+      font-weight: 600;
+      color: #14233b;
+    }
+    .total-highlight {
+      background: #f5e8e1;
+      font-weight: 700;
+    }
+    .total-highlight td {
+      color: #ad3c22;
+      font-size: 16px;
+      font-weight: 800;
+      border-top: 2px solid #e7cabb;
+      border-bottom: 2px solid #e7cabb;
+    }
+    .notes-box {
+      background: #fffaf7;
+      border: 1px solid #e7cabb;
+      border-left: 4px solid #ad3c22;
+      padding: 14px 18px;
+      border-radius: 0 8px 8px 0;
+      margin-bottom: 26px;
+    }
+    .notes-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #ad3c22;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 0 0 4px;
+    }
+    .notes-text {
+      font-size: 13px;
+      color: #52606f;
+      margin: 0;
+      line-height: 1.5;
+    }
+    .footer {
+      background: #f4eee9;
+      border-top: 1px solid #ead8cd;
+      padding: 24px 36px 20px;
+      text-align: center;
+      color: #52606f;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .footer strong {
+      color: #14233b;
+    }
+    .invoice-company-footer {
+      display: flex;
+      justify-content: space-between;
+      text-align: left;
+      gap: 20px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #14233b;
+      border-bottom: 1px solid #d2a08d;
+      padding-bottom: 16px;
+    }
+    .invoice-company-footer a {
+      color: #ad3c22;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    @media (max-width: 580px) {
+      .invoice-company-footer { flex-direction: column; text-align: left !important; }
+    }
+    @media print {
+      body { background: #ffffff !important; padding: 0 !important; }
+      .invoice-card { box-shadow: none !important; border: 1px solid #e7cabb !important; max-width: 100% !important; border-radius: 0 !important; }
+    }
   </style>
 </head>
 <body>
@@ -1547,15 +1783,18 @@ module.exports = function mountMerchApi(app, {
     <div class="header">
       <div class="header-top">
         <div>
-          <img src="${escapeHtml(logoUrl)}" alt="H2 House of Health" style="height:40px;width:auto;display:block;margin-bottom:12px;filter:brightness(0) invert(1);">
-          <h1 class="brand-title">H2 House of Health</h1>
-          <p class="brand-sub">Commission Payment Receipt &amp; Invoice</p>
+          <img class="logo-img" src="${escapeHtml(logoUrl)}" alt="H2 House of Health">
         </div>
         <div>
-          <span class="badge-paid">${escapeHtml(status)}</span>
+          <span class="badge-paid">&#10003; ${escapeHtml(status)}</span>
         </div>
       </div>
-      <div class="meta-grid">
+      <div class="header-title-block">
+        <p class="brand-eyebrow">OFFICIAL COMMISSION PAYMENT RECEIPT</p>
+        <h1 class="brand-title">Commission Payment Receipt &amp; Invoice</h1>
+        <p class="brand-sub">Official Commission Settlement Record &bull; H2 House of Health</p>
+      </div>
+      <div class="meta-banner">
         <div>
           <div class="meta-item-label">Invoice Number</div>
           <div class="meta-item-val">${escapeHtml(invoiceNum)}</div>
@@ -1583,7 +1822,7 @@ module.exports = function mountMerchApi(app, {
           <p class="party-info"><strong>Email:</strong> ${escapeHtml(payment.influencer_email || payment.influencerEmail || influencer.email || 'N/A')}</p>
           ${influencer.handle ? `<p class="party-info"><strong>Handle:</strong> ${escapeHtml(influencer.handle)}</p>` : ''}
           ${influencer.phone ? `<p class="party-info"><strong>Phone:</strong> ${escapeHtml(influencer.phone)}</p>` : ''}
-          <p class="party-info"><strong>Coupon / Code:</strong> ${escapeHtml(couponList)}</p>
+          <p class="party-info"><strong>Coupon / Code:</strong> <span class="coupon-badge">${escapeHtml(couponList)}</span></p>
         </div>
 
         <div class="party-box">
@@ -1608,10 +1847,10 @@ module.exports = function mountMerchApi(app, {
           <tbody>
             <tr>
               <td>
-                <strong>Commission Paid (This Receipt)</strong><br>
-                <small style="color:#64748b;">Method: ${escapeHtml(method)} &bull; Ref: ${escapeHtml(refNum)}</small>
+                <strong style="color:#14233b;">Commission Paid (This Receipt)</strong><br>
+                <small style="color:#657384;">Method: ${escapeHtml(method)} &bull; Ref: ${escapeHtml(refNum)}</small>
               </td>
-              <td class="amt" style="font-size:15px;color:#0f172a;">${formatMerchCurrency(commissionPaidPaise)}</td>
+              <td class="amt" style="font-size:15px;color:#ad3c22;font-weight:700;">${formatMerchCurrency(commissionPaidPaise)}</td>
             </tr>
             <tr>
               <td>Total Commission Earned (Gross Referral Attribution)</td>
@@ -1627,7 +1866,7 @@ module.exports = function mountMerchApi(app, {
             </tr>
             <tr>
               <td>Remaining Balance Due</td>
-              <td class="amt" style="color:${balanceRemainingPaise > 0 ? '#b45309' : '#059669'};">${formatMerchCurrency(balanceRemainingPaise)}</td>
+              <td class="amt" style="color:${balanceRemainingPaise > 0 ? '#ad3c22' : '#059669'};">${formatMerchCurrency(balanceRemainingPaise)}</td>
             </tr>
           </tbody>
         </table>
@@ -1645,16 +1884,16 @@ module.exports = function mountMerchApi(app, {
       <div class="invoice-company-footer">
         <div>
           📞 91000 56979, 91000 86979<br>
-          ✉️ <a href="mailto:hello@h2houseofhealth.com" style="color:#0f172a;text-decoration:none;">hello@h2houseofhealth.com</a>
+          ✉️ <a href="mailto:hello@h2houseofhealth.com">hello@h2houseofhealth.com</a>
         </div>
         <div style="text-align:right;">
           📍 47A, Journalist Colony, Road No:70,<br>
           Jubilee Hills, Hyderabad - 500033<br>
-          🌐 <a href="https://www.h2houseofhealth.com" style="color:#0f172a;text-decoration:none;">www.h2houseofhealth.com</a>
+          🌐 <a href="https://www.h2houseofhealth.com">www.h2houseofhealth.com</a>
         </div>
       </div>
-      <p style="margin:0 0 4px;"><strong>H2 House of Health</strong> &bull; Wellness &amp; Merchandise Ecosystem</p>
-      <p style="margin:0;">This is an officially recorded commission payment receipt. Commission paid records are permanently locked and logged for accounting integrity.</p>
+      <p style="margin:0 0 6px;color:#ad3c22;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;">PREVENTIVE TODAY, HEALTHIER TOMORROW.</p>
+      <p style="margin:0;color:#657384;font-size:11px;">This is an officially recorded commission payment receipt. Commission paid records are permanently locked and logged for accounting integrity.</p>
     </div>
   </div>
 </body>
@@ -1900,11 +2139,11 @@ module.exports = function mountMerchApi(app, {
                 </table>
 
                 ${payment.note ? `
-                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;background:#f0f9ff;border-left:4px solid #0284c7;border-radius:0 8px 8px 0;margin-top:16px;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;background:#fffaf7;border:1px solid #e7cabb;border-left:4px solid #ad3c22;border-radius:0 8px 8px 0;margin-top:16px;">
                     <tr>
                       <td style="padding:12px 18px;">
-                        <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:#0369a1;text-transform:uppercase;">Payment Notes / Remarks</p>
-                        <p style="margin:0;font-size:13px;color:#0c4a6e;line-height:1.5;">${escapeHtml(payment.note)}</p>
+                        <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:#ad3c22;text-transform:uppercase;">Payment Notes / Remarks</p>
+                        <p style="margin:0;font-size:13px;color:#52606f;line-height:1.5;">${escapeHtml(payment.note)}</p>
                       </td>
                     </tr>
                   </table>
