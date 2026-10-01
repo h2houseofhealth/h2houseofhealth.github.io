@@ -31,13 +31,6 @@ const Mailgun = require('mailgun.js');
 const formData = require('form-data');
 const Razorpay = require('razorpay');
 const multer = require('multer');
-// Deployments may install dependencies as root while the service runs as a
-// different user. Prefer the shared application cache when it exists so the
-// PDF browser is available to the runtime user as well.
-const sharedPuppeteerCacheDir = path.resolve(__dirname, '../.cache/puppeteer');
-if (!process.env.PUPPETEER_CACHE_DIR && fs.existsSync(sharedPuppeteerCacheDir)) {
-  process.env.PUPPETEER_CACHE_DIR = sharedPuppeteerCacheDir;
-}
 let puppeteer;
 let puppeteerLoadError;
 try {
@@ -47,62 +40,7 @@ try {
   puppeteerLoadError = error;
 }
 
-function findExecutableInDir(dir, names) {
-  try {
-    if (!fs.existsSync(dir)) return null;
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isFile()) {
-        const lower = entry.name.toLowerCase();
-        if (names.some((name) => lower === name || lower === `${name}.exe`)) {
-          return fullPath;
-        }
-      } else if (entry.isDirectory()) {
-        const found = findExecutableInDir(fullPath, names);
-        if (found) return found;
-      }
-    }
-  } catch {}
-  return null;
-}
-
-function resolvePuppeteerExecutablePath() {
-  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
-    return process.env.PUPPETEER_EXECUTABLE_PATH;
-  }
-  if (puppeteer && typeof puppeteer.executablePath === 'function') {
-    try {
-      const candidate = puppeteer.executablePath();
-      if (candidate && fs.existsSync(candidate)) return candidate;
-    } catch {}
-  }
-  const systemCandidates = [
-    '/usr/bin/google-chrome-stable',
-    '/usr/bin/google-chrome',
-    '/usr/bin/chromium-browser',
-    '/usr/bin/chromium',
-    '/snap/bin/chromium',
-  ];
-  for (const candidate of systemCandidates) {
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  const cacheCandidates = [
-    path.resolve(__dirname, '../.cache/puppeteer'),
-    '/opt/h2house-dev/.cache/puppeteer',
-    '/opt/h2house/.cache/puppeteer',
-    '/root/.cache/puppeteer',
-    path.join(process.env.HOME || '', '.cache/puppeteer'),
-  ];
-  for (const cacheDir of cacheCandidates) {
-    const found = findExecutableInDir(cacheDir, ['chrome', 'chromium']);
-    if (found) return found;
-  }
-  return undefined;
-}
-
 loadEnvFromFile(path.join(__dirname, '.env'));
-const { convertInrPaiseToCurrency, normalizeCurrency, getCurrencyConfig } = require('./currency');
 
 const PORT = process.env.PORT || 3000;
 const WEBSITE_ROOT = path.resolve(__dirname, '..');
@@ -353,16 +291,16 @@ const SERVICE_CATALOG = [
   {
     category: 'EXPERIENCE SESSION',
     name: 'Demo Session',
-    priceInr: 4000,
+    priceInr: 1, // Temporary test price (original: 4000)
     includes: '30 min consultation + hydrogen session',
     description: 'Demo hydrogen session for non-members with consultation.',
   },
   {
     category: 'HYDROGEN SESSION',
     name: 'H2 Single Session',
-    priceInr: 4800,
-    nonMemberPriceInr: 9500,
-    memberPriceInr: 4800,
+    priceInr: 1, // Temporary test price (original: 4800)
+    nonMemberPriceInr: 1, // Temporary test price (original: 9500)
+    memberPriceInr: 1, // Temporary test price (original: 4800)
     includes: '1 Hydrogen Session',
     description:
       'Single hydrogen session for immediate recovery and cellular wellness support. Non-member pricing: Rs. 9,500.',
@@ -444,7 +382,7 @@ const SERVICE_CATALOG = [
   {
     category: 'IV THERAPIES',
     name: 'Gym Hero',
-    priceInr: 4800,
+    priceInr: 1, // Temporary test price (original: 4800)
     includes: 'Normal saline, B1, B2, B6, B12, Vitamin C, Magnesium, Glutathione',
     description:
       'Designed for fitness enthusiasts to support muscle recovery, hydration, energy production, and antioxidant support after intense workouts.',
@@ -561,7 +499,7 @@ const MEMBERSHIP_PLANS = [
     id: 'h2_single',
     name: '1 Person Membership',
     peopleCount: 1,
-    priceInr: 84000,
+    priceInr: 1,
     validityDays: 90,
     h2SessionsIncluded: 16,
     perks:
@@ -589,7 +527,7 @@ const MEMBERSHIP_PLANS = [
     id: 'h2_add_person',
     name: 'Add Person',
     peopleCount: 1,
-    priceInr: 78000,
+    priceInr: 1,
     validityDays: 90,
     h2SessionsIncluded: 16,
     perks:
@@ -983,8 +921,6 @@ mountMerchApi(app, {
   JWT_SECRET,
   jwt,
   merchImageUpload,
-  sendWhatsAppMessage,
-  normalizeWhatsAppMobile,
   sendMerchEmail: ({ to, subject, text, html }) => sendConfiguredEmail({
     to,
     from: MAIL_FROM,
@@ -5563,12 +5499,6 @@ app.post('/api/hydrogen/verify', requireAuth, async (req, res) => {
        AND payment_order_id = ?`
   ).run(razorpayPaymentId, paymentMethod, paymentMethod, req.user.id, razorpayOrderId);
 
-  for (const b of bookings) {
-    void sendWhatsAppBookingConfirmation(b.id).then((result) => {
-      if (!result?.ok) console.warn('[WhatsApp] Hydrogen confirmation notice:', result?.message);
-    }).catch((err) => console.error('[WhatsApp] Hydrogen confirmation error:', err?.message || err));
-  }
-
   return res.json({ paid: true, bookingCount: bookings.length });
 });
 
@@ -6041,11 +5971,7 @@ app.get('/api/payments/config', requireAuth, (_req, res) => {
     return res.status(503).json({ message: RAZORPAY_UNAVAILABLE_MESSAGE });
   }
 
-  return res.json({ keyId: RAZORPAY_KEY_ID, currency: 'INR', currencyConfig: getCurrencyConfig() });
-});
-
-app.get('/api/currency/config', (_req, res) => {
-  return res.json(getCurrencyConfig());
+  return res.json({ keyId: RAZORPAY_KEY_ID, currency: 'INR' });
 });
 
 app.get('/api/bookings/:id/payment-link', requireAuth, (req, res) => {
@@ -7370,7 +7296,6 @@ app.get('/api/public/payments/booking', (req, res) => {
         holdMinutes: BOOKING_HOLD_MINUTES,
       },
       keyId: RAZORPAY_KEY_ID,
-      currencyConfig: getCurrencyConfig(),
     });
   }
 
@@ -7448,7 +7373,6 @@ app.get('/api/public/payments/booking', (req, res) => {
       holdMinutes: BOOKING_HOLD_MINUTES,
     },
     keyId: RAZORPAY_KEY_ID,
-    currencyConfig: getCurrencyConfig(),
   });
 });
 
@@ -7608,70 +7532,8 @@ app.patch('/api/public/guest/bookings/:id/status', (req, res) => {
   } else {
     db.prepare('UPDATE bookings SET status = ? WHERE id = ?').run(status, bookingId);
   }
-
-  if (status === 'cancelled' && existingStatus !== 'cancelled') {
-    const reason = req.body?.reason || req.body?.cancellationReason || 'Cancelled by client';
-    const fullBooking = getBookingForWhatsApp(bookingId) || existing;
-    triggerBookingCancellationNotifications(fullBooking, {
-      cancelledBy: 'guest',
-      reason,
-    }).catch((err) => console.error('[Booking] Guest cancellation notification error:', err?.message || err));
-  }
-
   return res.status(204).send();
 });
-
-function isValidBookingPhone(phone, country = '') {
-  if (!phone || typeof phone !== 'string') return false;
-  const trimmed = phone.trim();
-  if (!trimmed) return false;
-  if (/[^\d\s+\-]/.test(trimmed)) return false;
-
-  if (trimmed.startsWith('+')) {
-    const digits = trimmed.slice(1).replace(/[\s\-]/g, '');
-    if (trimmed.startsWith('+91')) {
-      return /^\d{10}$/.test(digits.slice(2));
-    }
-    if (trimmed.startsWith('+1')) {
-      return /^\d{10}$/.test(digits.slice(1));
-    }
-    if (trimmed.startsWith('+44')) {
-      const local = digits.slice(2).replace(/^0/, '');
-      return /^\d{9,10}$/.test(local);
-    }
-    if (trimmed.startsWith('+971')) {
-      return /^\d{8,9}$/.test(digits.slice(3));
-    }
-    if (trimmed.startsWith('+65')) {
-      return /^\d{8}$/.test(digits.slice(2));
-    }
-    if (trimmed.startsWith('+61')) {
-      return /^\d{9}$/.test(digits.slice(2));
-    }
-    return digits.length >= 7 && digits.length <= 15;
-  }
-
-  const digits = trimmed.replace(/[\s\-]/g, '');
-  const normCountry = String(country || '').trim().toLowerCase();
-
-  if (normCountry === 'united states' || normCountry === 'us' || (digits.length === 11 && digits.startsWith('1'))) {
-    const local = digits.length === 11 ? digits.slice(1) : digits;
-    return /^\d{10}$/.test(local);
-  }
-  if (normCountry === 'united kingdom' || normCountry === 'uk' || ((digits.length === 12 || digits.length === 13) && digits.startsWith('44'))) {
-    let local = digits.startsWith('44') ? digits.slice(2) : digits;
-    if (local.startsWith('0')) local = local.slice(1);
-    return /^\d{9,10}$/.test(local);
-  }
-  if (normCountry === 'india' || normCountry === 'in' || !normCountry) {
-    if (digits.length === 12 && digits.startsWith('91')) {
-      return /^\d{10}$/.test(digits.slice(2));
-    }
-    return /^\d{10}$/.test(digits);
-  }
-
-  return digits.length >= 7 && digits.length <= 15;
-}
 
 // Guest Checkout Endpoint
 // Allows unauthenticated users to start checkout with basic info
@@ -7687,11 +7549,9 @@ app.post('/api/guest/checkout', async (req, res) => {
     return res.status(400).json({ message: 'Valid guest email is required' });
   }
 
-  if (!guestPhone || typeof guestPhone !== 'string' || !isValidBookingPhone(guestPhone)) {
-    return res.status(400).json({ message: 'Valid mobile number with country code is required' });
+  if (!guestPhone || typeof guestPhone !== 'string' || !/^[6-9]\d{9}$/.test(guestPhone.trim())) {
+    return res.status(400).json({ message: 'Valid 10-digit guest phone number is required' });
   }
-
-  const normalizedGuestPhone = normalizeWhatsAppMobile(guestPhone) || guestPhone.trim();
 
   if (!Array.isArray(bookings) || bookings.length === 0) {
     return res.status(400).json({ message: 'At least one booking is required' });
@@ -7747,7 +7607,7 @@ app.post('/api/guest/checkout', async (req, res) => {
         bookingGroupId,
         guestName.trim(),
         guestEmail.trim(),
-        normalizedGuestPhone,
+        guestPhone.trim(),
         serviceName,
         bookingDate,
         bookingTime,
@@ -7759,7 +7619,7 @@ app.post('/api/guest/checkout', async (req, res) => {
         '',
         guestName.trim(),
         guestEmail.trim(),
-        normalizedGuestPhone,
+        guestPhone.trim(),
         'guest',
         now
       );
@@ -7799,7 +7659,7 @@ app.post('/api/guest/checkout', async (req, res) => {
       membershipStatus: 'inactive',
       membershipExpiresAt: null,
       membershipStartedAt: null,
-      mobile: normalizedGuestPhone,
+      mobile: guestPhone.trim(),
     };
     const pricingSummary = finalizeSummaryWithGst(buildAggregatePaymentSummary(pricingBookings, guestPricingUser));
     let guestCouponPreview = null;
@@ -7822,7 +7682,7 @@ app.post('/api/guest/checkout', async (req, res) => {
     // Generate payment token for guest after coupon validation succeeds.
     const paymentToken = createGuestCheckoutAccessToken({
       guestEmail: guestEmail.trim(),
-      guestPhone: normalizedGuestPhone,
+      guestPhone: guestPhone.trim(),
       guestName: guestName.trim(),
       bookingIds: createdBookings.map((b) => b.id),
       couponCode: String(couponCode || '').trim(),
@@ -7842,7 +7702,7 @@ app.post('/api/guest/checkout', async (req, res) => {
         bookingCount: Number(pricingSummary.bookingCount || createdBookings.length),
         guestName: guestName.trim(),
         guestEmail: guestEmail.trim(),
-        guestPhone: normalizedGuestPhone,
+        guestPhone: guestPhone.trim(),
         items: (Array.isArray(pricingSummary.units) ? pricingSummary.units : []).map((unit) => ({
           serviceName: unit.label || 'Booking',
           bookingDate: '',
@@ -8062,14 +7922,11 @@ app.post('/api/public/payments/create-order', async (req, res) => {
       });
     }
 
-    const requestedCurrency = normalizeCurrency(req.body?.currency);
-    const convertedPayment = convertInrPaiseToCurrency(amountInPaise, requestedCurrency);
-
     const booking = paymentContext.booking;
     const bookingOwner = paymentContext.bookingOwner;
     const order = await razorpay.orders.create({
-      amount: convertedPayment.razorpayAmount,
-      currency: convertedPayment.currency,
+      amount: amountInPaise,
+      currency: 'INR',
       receipt: buildRazorpayReceipt(
         booking.bookingGroupId ? 'bkgroup' : paymentContext.kind === 'guest' ? 'guest' : 'booking',
         booking.bookingGroupId || booking.id
@@ -8080,13 +7937,11 @@ app.post('/api/public/payments/create-order', async (req, res) => {
             guestEmail: paymentContext.guestAccess?.guestEmail || '',
             guestPhone: paymentContext.guestAccess?.guestPhone || '',
             couponCode: paymentContext.guestAccess?.couponCode || '',
-            currency: convertedPayment.currency,
           }
         : {
             bookingId: String(booking.id),
             userId: String(booking.userId),
             bookingGroupId: String(booking.bookingGroupId || ''),
-            currency: convertedPayment.currency,
           },
     });
 
@@ -8097,38 +7952,26 @@ app.post('/api/public/payments/create-order', async (req, res) => {
         db.prepare(
           `UPDATE bookings
            SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-               payment_order_id = ?,
-               currency = ?,
-               exchange_rate = ?,
-               original_inr_amount = ?,
-               charged_amount = ?
+               payment_order_id = ?
            WHERE booking_group_id = ?
              AND status <> 'cancelled'
              AND payment_status <> 'paid'`
-        ).run(order.id, convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount, booking.bookingGroupId);
+        ).run(order.id, booking.bookingGroupId);
       } else {
         setPaymentAmountForBookings([booking], amountInPaise);
         db.prepare(
           `UPDATE bookings
            SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-               payment_order_id = ?,
-               currency = ?,
-               exchange_rate = ?,
-               original_inr_amount = ?,
-               charged_amount = ?
+               payment_order_id = ?
            WHERE id = ?`
-        ).run(order.id, convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount, booking.id);
+        ).run(order.id, booking.id);
       }
     } else {
       setPaymentAmountForBookings(paymentContext.payableBookings, amountInPaise);
       db.prepare(
         `UPDATE bookings
          SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-             payment_order_id = ?,
-             currency = ?,
-             exchange_rate = ?,
-             original_inr_amount = ?,
-             charged_amount = ?
+             payment_order_id = ?
          WHERE id = ?
            AND status <> 'cancelled'
            AND payment_status <> 'paid'`
@@ -8137,15 +7980,11 @@ app.post('/api/public/payments/create-order', async (req, res) => {
         db.prepare(
           `UPDATE bookings
            SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-               payment_order_id = ?,
-               currency = ?,
-               exchange_rate = ?,
-               original_inr_amount = ?,
-               charged_amount = ?
+               payment_order_id = ?
            WHERE id = ?
              AND status <> 'cancelled'
              AND payment_status <> 'paid'`
-        ).run(order.id, convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount, guestBooking.id);
+        ).run(order.id, guestBooking.id);
       }
     }
 
@@ -8154,9 +7993,6 @@ app.post('/api/public/payments/create-order', async (req, res) => {
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
-      chargedAmount: convertedPayment.chargedAmount,
-      exchangeRate: convertedPayment.exchangeRate,
-      originalInrAmount: convertedPayment.originalInrAmount,
       bookingId: Number(booking.id || 0),
       bookingIds: paymentContext.kind === 'guest'
         ? paymentContext.payableBookings.map((entry) => Number(entry.id)).filter((id) => Number.isInteger(id) && id > 0)
@@ -8181,7 +8017,6 @@ app.post('/api/public/payments/create-order', async (req, res) => {
         : {
             name: bookingOwner?.name || '',
             email: bookingOwner?.email || '',
-            mobile: bookingOwner?.mobile || '',
           },
     });
   } catch (error) {
@@ -8255,12 +8090,6 @@ app.post('/api/public/payments/verify', async (req, res) => {
            AND payment_status <> 'paid'`
       ).run(razorpayOrderId, razorpayOrderId, razorpayPaymentId, razorpayPaymentId, paymentMethod, paymentMethod, booking.bookingGroupId);
 
-      groupBookings.forEach((gb) => {
-        void sendWhatsAppBookingConfirmation(gb.id).then((result) => {
-          if (!result?.ok) console.warn('[WhatsApp] Group booking confirmation notice:', result?.message);
-        }).catch((err) => console.error('[WhatsApp] Group booking confirmation error:', err?.message || err));
-      });
-
       return res.json({ bookingId: access.bookingId, paid: true, bookingCount: groupBookings.length });
     }
 
@@ -8299,12 +8128,6 @@ app.post('/api/public/payments/verify', async (req, res) => {
       ).run(razorpayOrderId, razorpayOrderId, razorpayPaymentId, razorpayPaymentId, paymentMethod, paymentMethod, booking.id);
     }
   })();
-
-  payableGuestBookings.forEach((pb) => {
-    void sendWhatsAppBookingConfirmation(pb.id).then((result) => {
-      if (!result?.ok) console.warn('[WhatsApp] Guest booking confirmation notice:', result?.message);
-    }).catch((err) => console.error('[WhatsApp] Guest booking confirmation error:', err?.message || err));
-  });
 
   return res.json({
     bookingId: Number(payableGuestBookings[0]?.id || guestBookings[0]?.id || 0),
@@ -8415,27 +8238,23 @@ app.post('/api/payments/create-cart-order', requireAuth, async (req, res) => {
   const amountInPaise = Math.max(100, taxableAmountPaise);
   paymentSummary = finalizeSummaryWithGst(paymentSummary);
 
-  const requestedCurrency = normalizeCurrency(req.body?.currency);
-  const convertedPayment = convertInrPaiseToCurrency(amountInPaise, requestedCurrency);
-
   try {
     const order = await razorpay.orders.create({
-      amount: convertedPayment.razorpayAmount,
-      currency: convertedPayment.currency,
+      amount: amountInPaise,
+      currency: 'INR',
       receipt: buildRazorpayReceipt('cart', req.user.id),
       notes: {
         userId: String(req.user.id),
         scope: 'cart',
         couponCode: String(couponResult.couponCode || ''),
-        currency: convertedPayment.currency,
       },
     });
 
     const ids = payableBookings.map((entry) => Number(entry.id)).filter((id) => Number.isInteger(id));
     db.prepare(
       `INSERT OR REPLACE INTO cart_payment_orders (
-        order_id, user_id, original_amount_paise, discount_amount_paise, coupon_id, coupon_code, amount_paise, status, currency, exchange_rate, original_inr_amount, charged_amount, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, datetime('now'))`
+        order_id, user_id, original_amount_paise, discount_amount_paise, coupon_id, coupon_code, amount_paise, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'))`
     ).run(
       order.id,
       req.user.id,
@@ -8443,23 +8262,15 @@ app.post('/api/payments/create-cart-order', requireAuth, async (req, res) => {
       Number(couponResult.discountAmountPaise || 0),
       couponResult.coupon?.id || null,
       couponResult.couponCode || null,
-      amountInPaise,
-      convertedPayment.currency,
-      convertedPayment.exchangeRate,
-      convertedPayment.originalInrAmount,
-      convertedPayment.chargedAmount
+      amountInPaise
     );
 
     db.prepare(
       `UPDATE bookings
        SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-           payment_order_id = ?,
-           currency = ?,
-           exchange_rate = ?,
-           original_inr_amount = ?,
-           charged_amount = ?
+           payment_order_id = ?
        WHERE id IN (${ids.map(() => '?').join(', ')})`
-    ).run(order.id, convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount, ...ids);
+    ).run(order.id, ...ids);
     setPaymentAmountForBookings(payableBookings, amountInPaise);
 
     return res.json({
@@ -8467,9 +8278,6 @@ app.post('/api/payments/create-cart-order', requireAuth, async (req, res) => {
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
-      chargedAmount: convertedPayment.chargedAmount,
-      exchangeRate: convertedPayment.exchangeRate,
-      originalInrAmount: convertedPayment.originalInrAmount,
       summary: paymentSummary,
       subtotalAmountInr: Number(paymentSummary.subtotalAmountInr || subtotalAmountPaise / 100),
       gstAmountInr: Number(paymentSummary.gstAmountInr || Math.max(0, amountInPaise / 100 - subtotalAmountPaise / 100)),
@@ -8645,19 +8453,16 @@ app.post('/api/payments/create-order', requireAuth, async (req, res) => {
   }
 
   const amountInPaise = Math.round(payableTotalInr * 100);
-  const requestedCurrency = normalizeCurrency(req.body?.currency);
-  const convertedPayment = convertInrPaiseToCurrency(amountInPaise, requestedCurrency);
 
   try {
     const order = await razorpay.orders.create({
-      amount: convertedPayment.razorpayAmount,
-      currency: convertedPayment.currency,
+      amount: amountInPaise,
+      currency: 'INR',
       receipt: buildRazorpayReceipt(booking.bookingGroupId ? 'bkgroup' : 'booking', booking.bookingGroupId || booking.id),
       notes: {
         bookingId: String(booking.id),
         userId: String(booking.userId),
         bookingGroupId: String(booking.bookingGroupId || ''),
-        currency: convertedPayment.currency,
       },
     });
 
@@ -8666,27 +8471,19 @@ app.post('/api/payments/create-order', requireAuth, async (req, res) => {
       db.prepare(
         `UPDATE bookings
          SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-             payment_order_id = ?,
-             currency = ?,
-             exchange_rate = ?,
-             original_inr_amount = ?,
-             charged_amount = ?
+             payment_order_id = ?
          WHERE booking_group_id = ?
            AND status <> 'cancelled'
            AND payment_status <> 'paid'`
-      ).run(order.id, convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount, booking.bookingGroupId);
+      ).run(order.id, booking.bookingGroupId);
     } else {
       setPaymentAmountForBookings([booking], amountInPaise);
       db.prepare(
         `UPDATE bookings
          SET payment_status = CASE WHEN payment_status = 'unpaid' THEN 'payment_pending' ELSE payment_status END,
-             payment_order_id = ?,
-             currency = ?,
-             exchange_rate = ?,
-             original_inr_amount = ?,
-             charged_amount = ?
+             payment_order_id = ?
          WHERE id = ?`
-      ).run(order.id, convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount, booking.id);
+      ).run(order.id, booking.id);
     }
 
     return res.json({
@@ -8694,9 +8491,6 @@ app.post('/api/payments/create-order', requireAuth, async (req, res) => {
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
-      chargedAmount: convertedPayment.chargedAmount,
-      exchangeRate: convertedPayment.exchangeRate,
-      originalInrAmount: convertedPayment.originalInrAmount,
       bookingId: booking.id,
       bookingCount: Number(paymentSummary.bookingCount || 1),
       summary: paymentSummary,
@@ -8725,36 +8519,17 @@ function shouldDownloadInvoicePdf(req) {
   return format === 'pdf' || ['1', 'true', 'yes'].includes(download);
 }
 
-let cachedInvoicePageBase64 = null;
-function getInvoicePageBackgroundDataUri() {
-  if (cachedInvoicePageBase64) return cachedInvoicePageBase64;
-  try {
-    const imgPath = path.resolve(__dirname, 'assets/invoice-page.png');
-    if (fs.existsSync(imgPath)) {
-      const buf = fs.readFileSync(imgPath);
-      cachedInvoicePageBase64 = `data:image/png;base64,${buf.toString('base64')}`;
-      return cachedInvoicePageBase64;
-    }
-  } catch (err) {
-    console.warn('Failed to load invoice-page.png for inline data URI:', err.message);
-  }
-  return null;
-}
-
-function sanitizeInvoiceFilename(value, defaultName = 'H2_invoice.pdf') {
-  const raw = String(value || defaultName).trim();
-  const base = raw.replace(/\.pdf$/i, '').replace(/[^a-z0-9_-]+/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'invoice';
-  return `${base}.pdf`;
+function sanitizeInvoiceFilenamePart(value) {
+  return String(value || 'Invoice')
+    .replace(/[^a-z0-9_-]+/gi, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80) || 'Invoice';
 }
 
 function prepareInvoiceHtmlForPdf(html, req) {
-  let result = String(html || '');
-  const bgDataUri = getInvoicePageBackgroundDataUri();
-  if (bgDataUri) {
-    result = result.replace(/url\(['"]?\/booking\/assets\/invoice-page\.png['"]?\)/g, `url('${bgDataUri}')`);
-  }
   const origin = getRequestOrigin(req).replace(/\/+$/, '');
-  return result
+  return String(html || '')
     .replace(/<head>/i, `<head><base href="${escapeHtml(origin)}/">`)
     .replace(/url\('\/([^']+)'\)/g, `url('${origin}/$1')`)
     .replace(/url\("\/([^"]+)"\)/g, `url("${origin}/$1")`)
@@ -8763,49 +8538,27 @@ function prepareInvoiceHtmlForPdf(html, req) {
     .replace(/\shref="\/([^"]+)"/g, ` href="${origin}/$1"`);
 }
 
-async function sendInvoiceResponse(req, res, html, invoiceNo, filename = 'H2_invoice.pdf') {
+async function sendInvoiceResponse(req, res, html, invoiceNo) {
   if (!shouldDownloadInvoicePdf(req)) {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     return res.send(html);
   }
 
-  const safeFilename = sanitizeInvoiceFilename(filename, 'H2_invoice.pdf');
-
   if (!puppeteer) {
     console.error('Invoice PDF generation unavailable: Puppeteer could not be loaded.', puppeteerLoadError);
-    if (!req.xhr && !(req.headers.accept || '').includes('application/json')) {
-      const fallbackHtml = html.replace('</body>', `<script>window.addEventListener('DOMContentLoaded', () => { setTimeout(() => window.print(), 600); });</script></body>`);
-      res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      return res.send(fallbackHtml);
-    }
     return res.status(503).json({ message: 'Unable to generate the invoice. Please try again later or contact support.' });
   }
 
   let browser;
   try {
-    const executablePath = resolvePuppeteerExecutablePath();
-    const launchOptions = {
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--no-first-run',
-        '--no-zygote',
-        '--single-process',
-        '--disable-extensions',
-      ],
-    };
-    if (executablePath) {
-      launchOptions.executablePath = executablePath;
-    }
-    browser = await puppeteer.launch(launchOptions);
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
     const page = await browser.newPage();
     await page.setViewport({ width: 1200, height: 1600, deviceScaleFactor: 1 });
     await page.setContent(prepareInvoiceHtmlForPdf(html, req), {
-      waitUntil: 'load',
-      timeout: 15000,
+      waitUntil: ['load', 'networkidle0'],
     });
     const pdfBuffer = await page.pdf({
       width: '240mm',
@@ -8815,15 +8568,10 @@ async function sendInvoiceResponse(req, res, html, invoiceNo, filename = 'H2_inv
       margin: { top: '0', right: '0', bottom: '0', left: '0' },
     });
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
+    res.setHeader('Content-Disposition', 'attachment; filename=H2_invoice.pdf');
     return res.send(pdfBuffer);
   } catch (error) {
     console.error('Invoice PDF generation failed:', error);
-    if (!req.xhr && !(req.headers.accept || '').includes('application/json')) {
-      const fallbackHtml = html.replace('</body>', `<script>window.addEventListener('DOMContentLoaded', () => { setTimeout(() => window.print(), 600); });</script></body>`);
-      res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      return res.send(fallbackHtml);
-    }
     return res.status(500).json({ message: 'Unable to generate the invoice. Please try again later or contact support.' });
   } finally {
     if (browser) {
@@ -9063,7 +8811,7 @@ function getPaidBookingDiscountMeta(bookings) {
 }
 
 function merchPaiseToInr(value) {
-  return Math.max(0, Number(value || 0) / 100);
+  return Math.max(0, Math.round(Number(value || 0) / 100));
 }
 
 function parseMerchShippingAddress(value) {
@@ -9157,7 +8905,6 @@ app.get('/invoice/merch', async (req, res) => {
               gst_amount AS gstAmount,
               shipping_charge AS shippingCharge,
               discount_amount AS discountAmount,
-              coupon_code AS couponCode,
               total_amount AS totalAmount,
               payment_method AS paymentMethod,
               payment_status AS paymentStatus,
@@ -9206,11 +8953,7 @@ app.get('/invoice/merch', async (req, res) => {
   const subtotalAmountInr = merchPaiseToInr(order.subtotal);
   const discountAmountInr = merchPaiseToInr(order.discountAmount);
   const shippingAmountInr = merchPaiseToInr(order.shippingCharge);
-  // Derive GST on the discounted merchandise amount (prices are GST-inclusive at 18%: 9% CGST + 9% SGST)
-  const taxableMerchInr = Math.max(0, subtotalAmountInr - discountAmountInr);
-  const totalGstInr = taxableMerchInr > 0 ? (taxableMerchInr - (taxableMerchInr / 1.18)) : 0;
-  const cgstAmountInr = totalGstInr / 2;
-  const sgstAmountInr = totalGstInr / 2;
+  const gstAmountInr = merchPaiseToInr(order.gstAmount);
   const amountInr = merchPaiseToInr(order.totalAmount);
   const invoiceNo = `MR-${order.orderNumber || order.id}`;
   const invoiceDownloadUrl = `/invoice/merch?token=${encodeURIComponent(String(req.query.token || ''))}&format=pdf&download=1`;
@@ -9646,27 +9389,27 @@ app.get('/invoice/merch', async (req, res) => {
          </span>
        </div>
        <div class="summary-row">
+         <span>Discount</span>
+         <span>
+           - ${formatInvoiceInr(discountAmountInr)}
+         </span>
+       </div>
+       <div class="summary-row">
          <span>Shipping</span>
          <span>
            ${formatInvoiceInr(shippingAmountInr)}
          </span>
        </div>
        <div class="summary-row">
-         <span>Discount${order.couponCode ? ` (${escapeHtml(String(order.couponCode))})` : ''}</span>
-         <span>
-           - ${formatInvoiceInr(discountAmountInr)}
-         </span>
-       </div>
-       <div class="summary-row">
          <span>CGST (9%)</span>
          <span>
-           ${formatInvoiceInr(cgstAmountInr)}
+           ${formatInvoiceInr((gstAmountInr || 0) / 2)}
          </span>
        </div>
        <div class="summary-row">
          <span>SGST (9%)</span>
          <span>
-           ${formatInvoiceInr(sgstAmountInr)}
+           ${formatInvoiceInr((gstAmountInr || 0) / 2)}
          </span>
        </div>
        <div class="summary-row summary-total">
@@ -9679,59 +9422,21 @@ app.get('/invoice/merch', async (req, res) => {
     </div>
     <div class="invoice-company-footer">
       <div>
-        📞 91000 56979, 91000 86979<br>
-        ✉️ hello@h2houseofhealth.com
+        P: 91000 56979, 91000 86979<br>
+        E: hello@h2houseofhealth.com
       </div>
       <div>
-        📍 47A, Journalist Colony, Road No:70,<br>
+        A: 47A, Journalist Colony, Road No:70,<br>
         Jubilee Hills, Hyderabad - 500033<br>
-        🌐 www.h2houseofhealth.com
+        W: www.h2houseofhealth.com
       </div>
     </div>
     
     
   </div>
-  <script>
-    (function() {
-      const btn = document.querySelector('.invoice-download-btn');
-      if (!btn) return;
-      btn.addEventListener('click', async function(e) {
-        e.preventDefault();
-        const originalText = btn.textContent;
-        btn.textContent = 'Generating PDF...';
-        btn.style.pointerEvents = 'none';
-        btn.style.opacity = '0.7';
-        try {
-          const res = await fetch(btn.href, { headers: { 'Accept': 'application/pdf' } });
-          const contentType = res.headers.get('content-type') || '';
-          if (res.ok && contentType.includes('application/pdf')) {
-            const blob = await res.blob();
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            const disposition = res.headers.get('content-disposition') || '';
-            const match = disposition.match(/filename="?([^";]+)"?/i);
-            a.download = match ? match[1] : 'Merch-invoice.pdf';
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            setTimeout(() => URL.revokeObjectURL(url), 10000);
-          } else {
-            window.print();
-          }
-        } catch (err) {
-          window.print();
-        } finally {
-          btn.textContent = originalText;
-          btn.style.pointerEvents = 'auto';
-          btn.style.opacity = '1';
-        }
-      });
-    })();
-  </script>
 </body>
 </html>`;
-  return sendInvoiceResponse(req, res, invoiceHtml, invoiceNo, 'Merch-invoice.pdf');
+  return sendInvoiceResponse(req, res, invoiceHtml, invoiceNo);
 });
 
 app.get('/invoice/booking', async (req, res) => {
@@ -10263,13 +9968,13 @@ app.get('/invoice/booking', async (req, res) => {
     </div>
     <div class="invoice-company-footer">
       <div>
-        📞 91000 56979, 91000 86979<br>
-        ✉️ hello@h2houseofhealth.com
+        P: 91000 56979, 91000 86979<br>
+        E: hello@h2houseofhealth.com
       </div>
       <div>
-        📍 47A, Journalist Colony, Road No:70,<br>
+        A: 47A, Journalist Colony, Road No:70,<br>
         Jubilee Hills, Hyderabad - 500033<br>
-        🌐 www.h2houseofhealth.com
+        W: www.h2houseofhealth.com
       </div>
     </div>
     
@@ -10852,20 +10557,6 @@ app.patch('/api/bookings/:id/status', requireAuth, (req, res) => {
       syncMembershipCoveredHydrogenBookings(Number(existing.userId), targetUser);
     }
   }
-
-  if (status === 'cancelled' && existingStatus !== 'cancelled') {
-    const isGroup = Boolean(existing.bookingGroupId);
-    const cancelledBy = req.user.role === 'admin' ? 'admin' : 'user';
-    const reason = req.body?.reason || req.body?.cancellationReason || (cancelledBy === 'admin' ? 'Cancelled by clinic administration' : 'Cancelled by client');
-    const fullBooking = getBookingForWhatsApp(bookingId) || existing;
-
-    triggerBookingCancellationNotifications(fullBooking, {
-      cancelledBy,
-      reason,
-      isGroup,
-    }).catch((err) => console.error('[Booking] Cancellation notification error:', err?.message || err));
-  }
-
   res.status(204).send();
 });
 
@@ -15071,12 +14762,6 @@ function normalizeWhatsAppMobile(value) {
     if (local.startsWith('0')) local = local.slice(1);
     return `+44${local}`;
   }
-  if (/^[6-9]\d{9}$/.test(digits)) {
-    return `+91${digits}`;
-  }
-  if (/^[2-5]\d{9}$/.test(digits)) {
-    return `+1${digits}`;
-  }
   if (/^\d{10}$/.test(digits)) {
     return `+91${digits}`;
   }
@@ -15252,12 +14937,6 @@ function normalizeWhatsAppMobile(value) {
     let local = digits.slice(2);
     if (local.startsWith('0')) local = local.slice(1);
     return `+44${local}`;
-  }
-  if (/^[6-9]\d{9}$/.test(digits)) {
-    return `+91${digits}`;
-  }
-  if (/^[2-5]\d{9}$/.test(digits)) {
-    return `+1${digits}`;
   }
   if (/^\d{10}$/.test(digits)) {
     return `+91${digits}`;
@@ -15449,10 +15128,8 @@ function getBookingForWhatsApp(bookingId) {
     .prepare(
       `SELECT b.id,
               b.user_id AS userId,
-              b.booking_group_id AS bookingGroupId,
               COALESCE(NULLIF(TRIM(b.client_name), ''), NULLIF(TRIM(u.name), ''), NULLIF(TRIM(b.guest_name), ''), 'Valued Guest') AS clientName,
               COALESCE(NULLIF(TRIM(b.client_phone), ''), NULLIF(TRIM(u.mobile), ''), NULLIF(TRIM(b.guest_phone), ''), '') AS clientPhone,
-              COALESCE(NULLIF(TRIM(b.client_email), ''), NULLIF(TRIM(u.email), ''), NULLIF(TRIM(b.guest_email), ''), '') AS clientEmail,
               b.service_name AS serviceName,
               b.booking_date AS bookingDate,
               b.booking_time AS bookingTime,
@@ -15503,146 +15180,6 @@ async function sendWhatsAppBookingConfirmation(bookingOrId) {
     serviceName,
     bookingId,
   ]);
-}
-
-function resolveBookingRefundStatus(booking) {
-  const paymentStatus = String(booking?.paymentStatus || booking?.payment_status || '').trim().toLowerCase();
-  if (paymentStatus === 'refunded' || paymentStatus === 'paid') {
-    return 'No refund';
-  }
-
-  // Check if booking was a membership-covered session
-  const userId = Number(booking?.userId || booking?.user_id || 0);
-  if (userId > 0) {
-    const user = getUserProfileById(userId);
-    if (user && String(user.membershipStatus || '').toLowerCase() === 'active') {
-      const serviceName = String(booking?.serviceName || booking?.service_name || '');
-      const isHydrogen = SERVICE_CATALOG.some(
-        (s) => String(s.category || '').toUpperCase() === 'HYDROGEN SESSION' && s.name.toLowerCase() === serviceName.toLowerCase()
-      );
-      if (isHydrogen) {
-        return 'Session returned to membership balance';
-      }
-    }
-  }
-
-  return 'No payment was collected';
-}
-
-async function sendBookingCancellationWhatsApp(booking, options = {}) {
-  const rawPhone = booking?.clientPhone || booking?.client_phone || booking?.guestPhone || booking?.guest_phone || '';
-  const customerName = String(
-    booking?.clientName || booking?.client_name || booking?.guestName || booking?.guest_name || 'Valued Guest'
-  ).trim();
-  const bookingNumber = String(
-    booking?.bookingGroupId || booking?.booking_group_id || (booking?.id ? `BK${booking.id}` : 'BK-REF')
-  ).trim();
-  const reason = String(
-    options.reason || (options.cancelledBy === 'admin' ? 'Cancelled by clinic administration' : 'Cancelled by client')
-  ).trim();
-  const refundStatus = options.refundStatus || resolveBookingRefundStatus(booking);
-
-  if (!rawPhone) {
-    console.warn(`[WhatsApp] Skipping booking cancellation notification for ${bookingNumber}: no phone number provided.`);
-    return { ok: false, reason: 'missing_phone' };
-  }
-
-  const phone = normalizeWhatsAppMobile(rawPhone);
-  if (!phone) {
-    console.warn(`[WhatsApp] Skipping booking cancellation notification for ${bookingNumber}: invalid phone "${rawPhone}".`);
-    return { ok: false, reason: 'invalid_phone' };
-  }
-
-  const parameters = [
-    customerName,
-    bookingNumber,
-    reason,
-    refundStatus,
-  ];
-
-  try {
-    const result = await sendWhatsAppMessage(phone, 'order_cancelled', parameters);
-    console.log(`[WhatsApp] Sent order_cancelled notification for booking ${bookingNumber}:`, result);
-    return result;
-  } catch (err) {
-    console.error(`[WhatsApp] Error sending order_cancelled notification for booking ${bookingNumber}:`, err?.message || err);
-    return { ok: false, error: err?.message || err };
-  }
-}
-
-async function sendBookingCancellationEmail(booking, options = {}) {
-  const email = String(
-    booking?.clientEmail || booking?.client_email || booking?.guestEmail || booking?.guest_email || ''
-  ).trim().toLowerCase();
-  const customerName = String(
-    booking?.clientName || booking?.client_name || booking?.guestName || booking?.guest_name || 'Valued Guest'
-  ).trim();
-  const bookingNumber = String(
-    booking?.bookingGroupId || booking?.booking_group_id || (booking?.id ? `BK${booking.id}` : 'BK-REF')
-  ).trim();
-  const reason = String(
-    options.reason || (options.cancelledBy === 'admin' ? 'Cancelled by clinic administration' : 'Cancelled by client')
-  ).trim();
-  const refundStatus = options.refundStatus || resolveBookingRefundStatus(booking);
-
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    console.warn(`[Booking] Skipping cancellation email for ${bookingNumber}: no valid email provided.`);
-    return { status: 'skipped', reason: 'missing_email' };
-  }
-
-  const subject = `Your H2 House of Health booking ${bookingNumber} has been cancelled`;
-  const text = `Hi ${customerName},\n\nYour H2 House of Health booking ${bookingNumber} has been cancelled.\n\nCancellation reason: ${reason}\nRefund status: ${refundStatus}\n\nIf you have any questions, please contact our support team at support@h2houseofhealth.com.\n\nBest regards,\nH2 House of Health Team`;
-  const html = `<!doctype html>
-<html>
-<head><meta charset="utf-8"></head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #faf7f4; padding: 24px; color: #2d2422;">
-  <div style="max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 12px; padding: 32px; border: 1px solid #e8dfd8;">
-    <h2 style="color: #8b3e23; margin-top: 0;">Booking Cancellation Confirmation</h2>
-    <p>Hi <strong>${escapeHtml(customerName)}</strong>,</p>
-    <p>Your H2 House of Health booking <strong>${escapeHtml(bookingNumber)}</strong> has been cancelled.</p>
-    <div style="background: #f8f4f0; border-radius: 8px; padding: 16px; margin: 20px 0;">
-      <p style="margin: 6px 0;"><strong>Cancellation reason:</strong> ${escapeHtml(reason)}</p>
-      <p style="margin: 6px 0;"><strong>Refund status:</strong> ${escapeHtml(refundStatus)}</p>
-    </div>
-    <p style="color: #6d6360; font-size: 14px; margin-top: 24px;">If you have any questions, please contact our support team at <a href="mailto:support@h2houseofhealth.com" style="color: #8b3e23;">support@h2houseofhealth.com</a>.</p>
-    <p style="color: #6d6360; font-size: 14px;">Best regards,<br>H2 House of Health Team</p>
-  </div>
-</body>
-</html>`;
-
-  try {
-    await sendConfiguredEmail({
-      to: email,
-      from: MAIL_FROM,
-      subject,
-      text,
-      html,
-    });
-    return { status: 'sent' };
-  } catch (err) {
-    console.error(`[Booking] Failed to send cancellation email for booking ${bookingNumber}:`, err?.message || err);
-    return { status: 'failed', error: err?.message || err };
-  }
-}
-
-async function triggerBookingCancellationNotifications(booking, options = {}) {
-  const results = {
-    whatsapp: { status: 'pending' },
-    email: { status: 'pending' },
-  };
-  try {
-    results.whatsapp = await sendBookingCancellationWhatsApp(booking, options);
-  } catch (err) {
-    console.error('[Booking] WhatsApp cancellation notification error:', err?.message || err);
-    results.whatsapp = { ok: false, error: err?.message || err };
-  }
-  try {
-    results.email = await sendBookingCancellationEmail(booking, options);
-  } catch (err) {
-    console.error('[Booking] Email cancellation notification error:', err?.message || err);
-    results.email = { status: 'failed', error: err?.message || err };
-  }
-  return results;
 }
 function getTransporter() {
   const host = process.env.SMTP_HOST;
@@ -16878,30 +16415,6 @@ function migrate() {
   }
   if (!hasColumn('bookings', 'booking_type')) {
     db.exec("ALTER TABLE bookings ADD COLUMN booking_type TEXT NOT NULL DEFAULT 'registered'");
-  }
-  if (!hasColumn('bookings', 'currency')) {
-    db.exec("ALTER TABLE bookings ADD COLUMN currency TEXT NOT NULL DEFAULT 'INR'");
-  }
-  if (!hasColumn('bookings', 'exchange_rate')) {
-    db.exec('ALTER TABLE bookings ADD COLUMN exchange_rate REAL DEFAULT 1');
-  }
-  if (!hasColumn('bookings', 'original_inr_amount')) {
-    db.exec('ALTER TABLE bookings ADD COLUMN original_inr_amount REAL');
-  }
-  if (!hasColumn('bookings', 'charged_amount')) {
-    db.exec('ALTER TABLE bookings ADD COLUMN charged_amount REAL');
-  }
-  if (hasTable('cart_payment_orders') && !hasColumn('cart_payment_orders', 'currency')) {
-    db.exec("ALTER TABLE cart_payment_orders ADD COLUMN currency TEXT NOT NULL DEFAULT 'INR'");
-  }
-  if (hasTable('cart_payment_orders') && !hasColumn('cart_payment_orders', 'exchange_rate')) {
-    db.exec('ALTER TABLE cart_payment_orders ADD COLUMN exchange_rate REAL DEFAULT 1');
-  }
-  if (hasTable('cart_payment_orders') && !hasColumn('cart_payment_orders', 'original_inr_amount')) {
-    db.exec('ALTER TABLE cart_payment_orders ADD COLUMN original_inr_amount REAL');
-  }
-  if (hasTable('cart_payment_orders') && !hasColumn('cart_payment_orders', 'charged_amount')) {
-    db.exec('ALTER TABLE cart_payment_orders ADD COLUMN charged_amount REAL');
   }
   db.exec(`
     UPDATE bookings

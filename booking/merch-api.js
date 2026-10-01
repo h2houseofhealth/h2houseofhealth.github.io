@@ -11,7 +11,6 @@ const express = require('express');
 const FormData = require('form-data');
 const ShiprocketService = require('./shiprocket');
 const bcrypt = require('bcryptjs');
-const { convertInrPaiseToCurrency, normalizeCurrency, getCurrencyConfig } = require('./currency');
 const router = express.Router();
 
 const FIXED_ADMIN_EMAIL = 'h2houseofhealth@gmail.com';
@@ -35,19 +34,7 @@ try {
   puppeteer = null;
 }
 
-module.exports = function mountMerchApi(app, {
-  db,
-  razorpay,
-  RAZORPAY_KEY_ID,
-  RAZORPAY_KEY_SECRET,
-  JWT_SECRET,
-  jwt,
-  sendMerchEmail = null,
-  couponHelpers = {},
-  merchImageUpload = null,
-  sendWhatsAppMessage = null,
-  normalizeWhatsAppMobile = null,
-}) {
+module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, JWT_SECRET, jwt, sendMerchEmail = null, couponHelpers = {}, merchImageUpload = null }) {
   const {
     normalizeCouponCode,
     validateCouponForUser,
@@ -320,7 +307,7 @@ module.exports = function mountMerchApi(app, {
       category: 'bottles',
       basePrice: 2299000,
       image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113',
-      weight: 1000,
+      weight: 380,
       variants: [
         ['HM-BTL-460-SLV', '460ml', 'Silver', 2299000, 50, '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113'],
         ['HM-BTL-460-BLK', '460ml', 'Black', 2299000, 50, '/cdn/shop/files/products/bottle-black.png', ['/cdn/shop/files/products/bottle-black-interior.png', '/cdn/shop/files/products/bottle-black-portable.png', '/cdn/shop/files/products/bottle-black-cap.png']],
@@ -435,7 +422,7 @@ module.exports = function mountMerchApi(app, {
       },
       {
         slug: 'h2-mist-spray',
-        price: 1190000,
+        price: 100, // Temporary test price: 100 paise = Rs. 1 (original: 1190000)
         oldSkus: ['HM-SPR-050-WHT', 'HM-SPR-100-WHT', 'HM-SPR-050-RSG', 'HM-SPR-100-RSG'],
         specifications: {
           'Product Name': 'Hydrogen Mist Sprayer',
@@ -725,19 +712,6 @@ module.exports = function mountMerchApi(app, {
     db.exec('ALTER TABLE merch_orders ADD COLUMN cancelled_at TEXT');
   }
 
-  if (!hasColumn('merch_orders', 'currency')) {
-    db.exec("ALTER TABLE merch_orders ADD COLUMN currency TEXT NOT NULL DEFAULT 'INR'");
-  }
-  if (!hasColumn('merch_orders', 'exchange_rate')) {
-    db.exec('ALTER TABLE merch_orders ADD COLUMN exchange_rate REAL DEFAULT 1');
-  }
-  if (!hasColumn('merch_orders', 'original_inr_amount')) {
-    db.exec('ALTER TABLE merch_orders ADD COLUMN original_inr_amount INTEGER');
-  }
-  if (!hasColumn('merch_orders', 'charged_amount')) {
-    db.exec('ALTER TABLE merch_orders ADD COLUMN charged_amount REAL');
-  }
-
   if (!hasColumn('merch_influencers', 'avatar_url')) {
     db.exec('ALTER TABLE merch_influencers ADD COLUMN avatar_url TEXT');
   }
@@ -824,69 +798,7 @@ module.exports = function mountMerchApi(app, {
 
     CREATE INDEX IF NOT EXISTS idx_merch_influencer_commission_payments_influencer
       ON merch_influencer_commission_payments(influencer_id, datetime(COALESCE(paid_at, created_at)) DESC);
-
-    CREATE TABLE IF NOT EXISTS merch_campaigns (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      slug TEXT NOT NULL UNIQUE,
-      name TEXT NOT NULL,
-      influencer_id INTEGER NOT NULL REFERENCES merch_influencers(id) ON DELETE CASCADE,
-      coupon_id INTEGER NOT NULL REFERENCES coupons(id),
-      coupon_code TEXT NOT NULL,
-      target_product_id INTEGER NOT NULL DEFAULT 11,
-      target_variant_id INTEGER NOT NULL DEFAULT 569,
-      is_active INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS merch_campaign_clicks (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      campaign_id INTEGER NOT NULL REFERENCES merch_campaigns(id) ON DELETE CASCADE,
-      influencer_id INTEGER NOT NULL REFERENCES merch_influencers(id) ON DELETE CASCADE,
-      ip_address TEXT,
-      user_agent TEXT,
-      referer TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_merch_campaigns_slug
-      ON merch_campaigns(slug);
-
-    CREATE INDEX IF NOT EXISTS idx_merch_campaigns_influencer
-      ON merch_campaigns(influencer_id);
-
-    CREATE INDEX IF NOT EXISTS idx_merch_campaign_clicks_campaign
-      ON merch_campaign_clicks(campaign_id, datetime(created_at) DESC);
   `);
-
-  if (!hasColumn('merch_orders', 'campaign_id')) {
-    db.exec('ALTER TABLE merch_orders ADD COLUMN campaign_id INTEGER REFERENCES merch_campaigns(id)');
-  }
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_merch_orders_campaign_id
-      ON merch_orders(campaign_id);
-  `);
-
-  try {
-    const existingRyan = db.prepare("SELECT id FROM merch_influencers WHERE LOWER(name) = 'ryan' LIMIT 1").get();
-    let ryanId = existingRyan ? existingRyan.id : null;
-    if (!ryanId) {
-      const res = db.prepare(`
-        INSERT INTO merch_influencers (name, handle, email, phone, commission_rate, active, created_at)
-        VALUES ('Ryan', 'ryan_h2', 'ryan@h2houseofhealth.com', '+91 9876543210', 10, 1, datetime('now'))
-      `).run();
-      ryanId = res.lastInsertRowid;
-    }
-    const ryanCoupon = db.prepare("SELECT id FROM coupons WHERE LOWER(code) = 'ryan100' LIMIT 1").get();
-    if (!ryanCoupon && ryanId) {
-      db.prepare(`
-        INSERT INTO coupons (code, portal, discount_type, discount_value, is_active, influencer_id, created_at)
-        VALUES ('RYAN100', 'merch', 'flat', 100, 1, ?, datetime('now'))
-      `).run(ryanId);
-    }
-  } catch (seedErr) {
-    console.warn('[Seed Ryan Influencer Error]:', seedErr?.message || seedErr);
-  }
 
   function hasTable(tableName) {
     return Boolean(
@@ -2050,16 +1962,6 @@ module.exports = function mountMerchApi(app, {
         } : null,
         repeatCustomerPercentage,
       },
-      campaigns: db.prepare(`
-        SELECT c.id, c.slug, c.name, c.coupon_code AS couponCode, c.target_product_id AS targetProductId,
-               c.target_variant_id AS targetVariantId, c.is_active AS isActive, c.created_at AS createdAt,
-               (SELECT COUNT(*) FROM merch_campaign_clicks WHERE campaign_id = c.id) AS clicksCount,
-               (SELECT COUNT(*) FROM merch_orders WHERE campaign_id = c.id AND payment_status IN ('paid', 'cod_pending')) AS ordersCount,
-               (SELECT COALESCE(SUM(total_amount), 0) FROM merch_orders WHERE campaign_id = c.id AND payment_status IN ('paid', 'cod_pending')) AS revenuePaise
-        FROM merch_campaigns c
-        WHERE c.influencer_id = ? AND c.is_active = 1
-        ORDER BY c.created_at DESC
-      `).all(influencerId),
       couponPerformance: coupons,
       salesHistory: {
         page: currentPage,
@@ -4165,15 +4067,8 @@ module.exports = function mountMerchApi(app, {
   }
 
   function normalizeMerchWhatsAppPhone(phone) {
-    const raw = String(phone || '').trim();
-    if (typeof normalizeWhatsAppMobile === 'function') {
-      const normalized = normalizeWhatsAppMobile(raw);
-      if (normalized) return normalized.replace(/^\+/, '');
-    }
-    const digits = raw.replace(/\D/g, '');
+    const digits = String(phone || '').replace(/\D/g, '');
     if (!digits) return '';
-    if (/^[6-9]\d{9}$/.test(digits)) return `91${digits}`;
-    if (/^[2-5]\d{9}$/.test(digits)) return `1${digits}`;
     if (digits.length === 10) return `91${digits}`;
     return digits;
   }
@@ -4635,144 +4530,6 @@ module.exports = function mountMerchApi(app, {
     return result;
   }
 
-  function resolveMerchRefundStatus(order, options = {}) {
-    const method = String(order?.payment_method || '').toLowerCase();
-    const paymentStatus = String(order?.payment_status || '').toLowerCase();
-    const prevPaymentStatus = String(options.previousPaymentStatus || '').toLowerCase();
-
-    if (method === 'cod') {
-      return 'No refund required (COD order)';
-    }
-    if (paymentStatus === 'refunded' || paymentStatus === 'paid' || prevPaymentStatus === 'paid') {
-      return 'No refund';
-    }
-    return 'No payment was collected';
-  }
-
-  async function sendMerchCancellationWhatsApp(order, options = {}) {
-    const rawPhone = order?.customer_phone || order?.customerPhone || order?.guest_phone || order?.guestPhone || '';
-    const customerName = String(order?.customer_name || order?.customerName || order?.guest_name || order?.guestName || 'Valued Customer').trim();
-    const orderNumber = String(order?.order_number || order?.orderNumber || (order?.id ? `Order #${order.id}` : 'Order')).trim();
-    const reason = String(options.reason || (options.cancelledBy === 'customer' ? 'Requested by customer' : 'Cancelled by store administration')).trim();
-    const refundStatus = options.refundStatus || resolveMerchRefundStatus(order, options);
-
-    if (!rawPhone) {
-      console.warn(`[WhatsApp] Skipping merch cancellation notification for order ${orderNumber}: no phone number provided.`);
-      return { ok: false, reason: 'missing_phone' };
-    }
-
-    const phone = typeof normalizeWhatsAppMobile === 'function' ? normalizeWhatsAppMobile(rawPhone) : normalizeMerchWhatsAppPhone(rawPhone);
-    if (!phone) {
-      console.warn(`[WhatsApp] Skipping merch cancellation notification for order ${orderNumber}: invalid phone "${rawPhone}".`);
-      return { ok: false, reason: 'invalid_phone' };
-    }
-
-    const parameters = [
-      customerName,
-      orderNumber,
-      reason,
-      refundStatus,
-    ];
-
-    try {
-      if (typeof sendWhatsAppMessage === 'function') {
-        const result = await sendWhatsAppMessage(phone, 'order_cancelled', parameters);
-        console.log(`[WhatsApp] Sent order_cancelled notification for merch order ${orderNumber}:`, result);
-        return result;
-      }
-      const config = getMerchWhatsAppConfig();
-      if (!config.token || !config.phoneNumberId) {
-        console.warn(`[WhatsApp] Skipping cancellation notification for merch order ${orderNumber}: WhatsApp Cloud API not configured.`);
-        return { ok: false, reason: 'unconfigured' };
-      }
-      const payload = {
-        to: phone.replace(/^\+/, ''),
-        type: 'template',
-        template: {
-          name: 'order_cancelled',
-          language: { code: 'en' },
-          components: [
-            {
-              type: 'body',
-              parameters: parameters.map((param) => ({ type: 'text', text: String(param) })),
-            },
-          ],
-        },
-      };
-      const result = await sendWhatsAppGraphMessage(config, payload);
-      console.log(`[WhatsApp] Sent order_cancelled notification for merch order ${orderNumber}:`, result);
-      return { ok: true, result };
-    } catch (err) {
-      console.error(`[WhatsApp] Error sending order_cancelled notification for merch order ${orderNumber}:`, err?.message || err);
-      return { ok: false, error: err?.message || err };
-    }
-  }
-
-  async function sendMerchCancellationEmail(order, options = {}) {
-    const email = String(order?.customer_email || order?.customerEmail || order?.guest_email || order?.guestEmail || '').trim().toLowerCase();
-    const customerName = String(order?.customer_name || order?.customerName || order?.guest_name || order?.guestName || 'Valued Customer').trim();
-    const orderNumber = String(order?.order_number || order?.orderNumber || (order?.id ? `Order #${order.id}` : 'Order')).trim();
-    const reason = String(options.reason || (options.cancelledBy === 'customer' ? 'Requested by customer' : 'Cancelled by store administration')).trim();
-    const refundStatus = options.refundStatus || resolveMerchRefundStatus(order, options);
-
-    if (!email || !isValidMerchEmail(email)) {
-      console.warn(`[Merch] Skipping cancellation email for order ${orderNumber}: no valid email.`);
-      return { status: 'skipped', reason: 'missing_email' };
-    }
-    if (typeof sendMerchEmail !== 'function') {
-      console.warn(`[Merch] Cancellation email skipped for order ${orderNumber}: email service not configured.`);
-      return { status: 'skipped', reason: 'missing_service' };
-    }
-
-    const subject = `Your H2 House of Health order ${orderNumber} has been cancelled`;
-    const text = `Hi ${customerName},\n\nYour H2 House of Health order ${orderNumber} has been cancelled.\n\nCancellation reason: ${reason}\nRefund status: ${refundStatus}\n\nIf you have any questions, please contact our support team at support@h2houseofhealth.com.\n\nBest regards,\nH2 House of Health Team`;
-    const html = `<!doctype html>
-<html>
-<head><meta charset="utf-8"></head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #faf7f4; padding: 24px; color: #2d2422;">
-  <div style="max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 12px; padding: 32px; border: 1px solid #e8dfd8;">
-    <h2 style="color: #8b3e23; margin-top: 0;">Order Cancellation Confirmation</h2>
-    <p>Hi <strong>${escapeHtml(customerName)}</strong>,</p>
-    <p>Your H2 House of Health order <strong>${escapeHtml(orderNumber)}</strong> has been cancelled.</p>
-    <div style="background: #f8f4f0; border-radius: 8px; padding: 16px; margin: 20px 0;">
-      <p style="margin: 6px 0;"><strong>Cancellation reason:</strong> ${escapeHtml(reason)}</p>
-      <p style="margin: 6px 0;"><strong>Refund status:</strong> ${escapeHtml(refundStatus)}</p>
-    </div>
-    <p style="color: #6d6360; font-size: 14px; margin-top: 24px;">If you have any questions, please contact our support team at <a href="mailto:support@h2houseofhealth.com" style="color: #8b3e23;">support@h2houseofhealth.com</a>.</p>
-    <p style="color: #6d6360; font-size: 14px;">Best regards,<br>H2 House of Health Team</p>
-  </div>
-</body>
-</html>`;
-
-    try {
-      await sendMerchEmail({ to: email, subject, text, html });
-      return { status: 'sent' };
-    } catch (err) {
-      console.error(`[Merch] Failed to send cancellation email for order ${orderNumber}:`, err?.message || err);
-      return { status: 'failed', error: err?.message || err };
-    }
-  }
-
-  async function triggerMerchCancellationNotifications(order, options = {}) {
-    const results = {
-      whatsapp: { status: 'pending' },
-      email: { status: 'pending' },
-    };
-    try {
-      results.whatsapp = await sendMerchCancellationWhatsApp(order, options);
-    } catch (err) {
-      console.error('[Merch] WhatsApp cancellation error:', err?.message || err);
-      results.whatsapp = { ok: false, error: err?.message || err };
-    }
-    try {
-      results.email = await sendMerchCancellationEmail(order, options);
-    } catch (err) {
-      console.error('[Merch] Email cancellation error:', err?.message || err);
-      results.email = { status: 'failed', error: err?.message || err };
-    }
-    return results;
-  }
-
   function handleMerchWhatsAppStatusWebhook(body) {
     const entries = Array.isArray(body?.entry) ? body.entry : [];
     let updated = 0;
@@ -4952,86 +4709,6 @@ module.exports = function mountMerchApi(app, {
     };
   }
 
-  // ─── Influencer Tracking Link Routes ───
-  app.get('/c/:slug', (req, res) => {
-    const rawSlug = String(req.params.slug || '').trim();
-    if (!rawSlug) {
-      return res.redirect('/merch/');
-    }
-    const campaign = db.prepare(`
-      SELECT c.id, c.slug, c.name, c.influencer_id AS influencerId, c.coupon_id AS couponId,
-             c.coupon_code AS couponCode, c.target_product_id AS targetProductId,
-             c.target_variant_id AS targetVariantId, c.is_active AS isActive,
-             i.name AS influencerName, i.active AS influencerActive,
-             cp.is_active AS couponActive, cp.expires_at AS couponExpiresAt, cp.valid_till AS couponValidTill
-      FROM merch_campaigns c
-      JOIN merch_influencers i ON i.id = c.influencer_id
-      JOIN coupons cp ON cp.id = c.coupon_id
-      WHERE LOWER(c.slug) = LOWER(?)
-      LIMIT 1
-    `).get(rawSlug);
-
-    if (!campaign || Number(campaign.isActive) !== 1 || Number(campaign.influencerActive) !== 1 || Number(campaign.couponActive) !== 1) {
-      return res.redirect('/merch/');
-    }
-
-    const expiry = campaign.couponExpiresAt || campaign.couponValidTill;
-    if (expiry && new Date(expiry).getTime() < Date.now()) {
-      return res.redirect('/merch/');
-    }
-
-    try {
-      const ip = String(req.headers['x-forwarded-for']?.split(',')[0] || req.socket?.remoteAddress || '').slice(0, 80);
-      const userAgent = String(req.headers['user-agent'] || '').slice(0, 500);
-      const referer = String(req.headers['referer'] || req.headers['referrer'] || '').slice(0, 500);
-      db.prepare(`
-        INSERT INTO merch_campaign_clicks (campaign_id, influencer_id, ip_address, user_agent, referer, created_at)
-        VALUES (?, ?, ?, ?, ?, datetime('now'))
-      `).run(campaign.id, campaign.influencerId, ip, userAgent, referer);
-    } catch (clickErr) {
-      console.warn('[Campaign Click Error]:', clickErr?.message || clickErr);
-    }
-
-    const attribution = {
-      campaignId: campaign.id,
-      slug: campaign.slug,
-      influencerId: campaign.influencerId,
-      couponCode: campaign.couponCode,
-      targetProductId: campaign.targetProductId || 11,
-      targetVariantId: campaign.targetVariantId || 569,
-      timestamp: Date.now(),
-    };
-    res.cookie('h2_campaign_attribution', JSON.stringify(attribution), {
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-      sameSite: 'lax',
-      path: '/',
-      httpOnly: false,
-    });
-
-    return res.redirect(`/merch/?campaign=${encodeURIComponent(campaign.slug)}#checkout`);
-  });
-
-  app.get('/api/merch/campaigns/resolve', (req, res) => {
-    const rawSlug = String(req.query.slug || '').trim();
-    if (!rawSlug) return res.status(400).json({ error: 'Slug is required' });
-    const campaign = db.prepare(`
-      SELECT c.id, c.slug, c.name, c.influencer_id AS influencerId, c.coupon_id AS couponId,
-             c.coupon_code AS couponCode, c.target_product_id AS targetProductId,
-             c.target_variant_id AS targetVariantId, c.is_active AS isActive,
-             i.name AS influencerName
-      FROM merch_campaigns c
-      JOIN merch_influencers i ON i.id = c.influencer_id
-      JOIN coupons cp ON cp.id = c.coupon_id
-      WHERE LOWER(c.slug) = LOWER(?) AND c.is_active = 1 AND i.active = 1 AND cp.is_active = 1
-      LIMIT 1
-    `).get(rawSlug);
-
-    if (!campaign) {
-      return res.status(404).json({ error: 'Campaign not found or inactive' });
-    }
-    res.json({ campaign });
-  });
-
   app.get('/api/merch/products', (req, res) => {
     const hypeByProductId = new Map(
       getMerchHypeRows().map((row) => [Number(row.productId), getMerchHypeLabel(row)])
@@ -5210,38 +4887,6 @@ module.exports = function mountMerchApi(app, {
     return res.json({ coupon: buildMerchCouponPreview(couponResult) });
   });
 
-  function resolveOrderCampaignAttribution(req, couponResult) {
-    let campaignAttribution = null;
-    try {
-      const rawCookie = req.cookies?.h2_campaign_attribution;
-      if (rawCookie) {
-        campaignAttribution = typeof rawCookie === 'object' ? rawCookie : JSON.parse(rawCookie);
-      }
-    } catch {}
-    if (!campaignAttribution && req.body?.campaignSlug) {
-      const campaignRow = db.prepare('SELECT id, influencer_id, coupon_code, is_active FROM merch_campaigns WHERE LOWER(slug) = LOWER(?)').get(String(req.body.campaignSlug).trim());
-      if (campaignRow && Number(campaignRow.is_active) === 1) {
-        campaignAttribution = { campaignId: campaignRow.id, influencerId: campaignRow.influencer_id, couponCode: campaignRow.coupon_code };
-      }
-    }
-    let campaignId = null;
-    let influencerId = Number(couponResult?.coupon?.influencerId || 0) > 0 ? Number(couponResult.coupon.influencerId) : null;
-    if (campaignAttribution?.campaignId) {
-      const campaign = db.prepare('SELECT id, influencer_id, is_active FROM merch_campaigns WHERE id = ?').get(campaignAttribution.campaignId);
-      if (campaign && Number(campaign.is_active) === 1) {
-        campaignId = campaign.id;
-        if (!influencerId && campaign.influencer_id) {
-          influencerId = campaign.influencer_id;
-        }
-      }
-    }
-    return { campaignId, influencerId };
-  }
-
-  app.get('/api/merch/currency-config', (_req, res) => {
-    res.json(getCurrencyConfig());
-  });
-
   app.post('/api/merch/checkout', (req, res) => {
     if (!razorpay || !RAZORPAY_KEY_SECRET) {
       return res.status(503).json({ error: 'Payment gateway not configured' });
@@ -5377,13 +5022,12 @@ module.exports = function mountMerchApi(app, {
       couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
     }
 
-    const shippingCharge = subtotal >= 99900 ? 0 : 9900; // Free above ₹999 or ₹1 test
+    // Product prices are GST-inclusive; derive included GST for reporting only.
+    const gstAmount = Math.max(0, subtotal - Math.round(subtotal / 1.18));
+    const shippingCharge = (subtotal >= 99900 || subtotal <= 100) ? 0 : 9900; // Free above ₹999 or ₹1 test
     const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
       + getMerchBundleDiscountPaise(bundleCode, validatedItems);
-    const discountedSubtotal = Math.max(0, subtotal - discountAmount);
-    // Product prices are GST-inclusive; derive included GST on discounted amount.
-    const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
-    const { campaignId, influencerId } = resolveOrderCampaignAttribution(req, couponResult);
+    const influencerId = Number(couponResult.coupon?.influencerId || 0) > 0 ? Number(couponResult.coupon.influencerId) : null;
     const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems);
     const totalAmount = Math.max(100, subtotal + shippingCharge - discountAmount);
     const orderNumber = generateOrderNumber();
@@ -5394,27 +5038,23 @@ module.exports = function mountMerchApi(app, {
     const guestEmail = isGuestCheckout ? resolvedCustomer.email : null;
     const guestPhone = isGuestCheckout ? resolvedCustomer.phone : null;
 
-    const requestedCurrency = normalizeCurrency(req.body?.currency);
-    const convertedPayment = convertInrPaiseToCurrency(totalAmount, requestedCurrency);
-
     // Create Razorpay order
     razorpay.orders.create({
-      amount: convertedPayment.razorpayAmount,
-      currency: convertedPayment.currency,
+      amount: totalAmount,
+      currency: 'INR',
       receipt: orderNumber,
-      notes: { customerEmail: resolvedCustomer.email, orderNumber, couponCode: String(couponResult.couponCode || couponCode || ''), bundleCode, currency: convertedPayment.currency },
+      notes: { customerEmail: resolvedCustomer.email, orderNumber, couponCode: String(couponResult.couponCode || couponCode || ''), bundleCode },
     }).then(rpOrder => {
       // Save order to DB
       const insertOrder = db.prepare(`
-        INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, campaign_id, commission_amount_paise, commission_snapshot_at, total_amount, payment_method, payment_status, razorpay_order_id, shipping_address, billing_address, currency, exchange_rate, original_inr_amount, charged_amount)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'online', 'pending', ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, commission_amount_paise, commission_snapshot_at, total_amount, payment_method, payment_status, razorpay_order_id, shipping_address, billing_address)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'online', 'pending', ?, ?, ?)
       `);
       const result = insertOrder.run(
         orderNumber, resolvedCustomer.name, dbCustomerEmail, resolvedCustomer.phone,
         guestName, isGuestCheckout ? (realEmailToUse || null) : null, guestPhone, isGuestCheckout ? 1 : 0, authUser?.id || null, merchProfile?.id || null,
-        subtotal, gstAmount, shippingCharge, discountAmount, couponResult.coupon?.id || null, couponResult.couponCode || null, influencerId, campaignId, commissionSnapshot.total, totalAmount,
-        rpOrder.id, JSON.stringify(shippingAddressPayload || {}), JSON.stringify(billingAddressPayload || shippingAddressPayload || {}),
-        convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount
+        subtotal, gstAmount, shippingCharge, discountAmount, couponResult.coupon?.id || null, couponResult.couponCode || null, influencerId, commissionSnapshot.total, totalAmount,
+        rpOrder.id, JSON.stringify(shippingAddressPayload || {}), JSON.stringify(billingAddressPayload || shippingAddressPayload || {})
       );
       const orderId = result.lastInsertRowid;
 
@@ -5432,11 +5072,8 @@ module.exports = function mountMerchApi(app, {
         orderNumber,
         razorpayKeyId: RAZORPAY_KEY_ID,
         razorpayOrderId: rpOrder.id,
-        amount: convertedPayment.razorpayAmount,
-        currency: convertedPayment.currency,
-        chargedAmount: convertedPayment.chargedAmount,
-        exchangeRate: convertedPayment.exchangeRate,
-        originalInrAmount: convertedPayment.originalInrAmount,
+        amount: totalAmount,
+        currency: 'INR',
         subtotal,
         gstAmount,
         shippingCharge,
@@ -5501,8 +5138,14 @@ module.exports = function mountMerchApi(app, {
           const deliveryPostcode = parsedAddr.postalCode || parsedAddr.postal_code || parsedAddr.pincode || '452001';
           const isCod = String(order.payment_method || '').toLowerCase() === 'cod';
 
-          const metrics = shiprocket.calculatePackageMetrics(items);
-          const orderWeightKg = metrics.weight;
+          const totalWeightGrams = items.reduce((sum, item) => {
+            const itemWeight = Number(item.weight_grams ?? item.weightGrams ?? 0);
+            const qty = Math.max(1, Number(item.quantity || item.units || 1));
+            return sum + (itemWeight * qty);
+          }, 0);
+          const orderWeightKg = totalWeightGrams > 0
+            ? Math.max(0.01, Number((totalWeightGrams / 1000).toFixed(3)))
+            : shiprocket.defaultWeightKg;
 
           const couriers = await shiprocket.checkServiceability({
             deliveryPostcode,
@@ -5745,14 +5388,12 @@ module.exports = function mountMerchApi(app, {
       couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
     }
 
-    const shippingCharge = subtotal >= 99900 ? 0 : 9900;
+    const gstAmount = Math.max(0, subtotal - Math.round(subtotal / 1.18));
+    const shippingCharge = (subtotal >= 99900 || subtotal <= 100) ? 0 : 9900;
     const codSurcharge = 5000; // ₹50
     const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
       + getMerchBundleDiscountPaise(bundleCode, validatedItems);
-    const discountedSubtotal = Math.max(0, subtotal - discountAmount);
-    // Product prices are GST-inclusive; derive included GST on discounted amount.
-    const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
-    const { campaignId, influencerId } = resolveOrderCampaignAttribution(req, couponResult);
+    const influencerId = Number(couponResult.coupon?.influencerId || 0) > 0 ? Number(couponResult.coupon.influencerId) : null;
     const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems);
     const totalAmount = Math.max(100, subtotal + shippingCharge + codSurcharge - discountAmount);
     const orderNumber = generateOrderNumber();
@@ -5763,13 +5404,9 @@ module.exports = function mountMerchApi(app, {
     const guestEmail = isGuestCheckout ? resolvedCustomer.email : null;
     const guestPhone = isGuestCheckout ? resolvedCustomer.phone : null;
 
-    if (String(req.body?.currency || '').trim().toUpperCase() === 'USD') {
-      return res.status(400).json({ error: 'Cash on Delivery is only available in INR' });
-    }
-
     const result = db.prepare(`
-      INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, campaign_id, commission_amount_paise, commission_snapshot_at, total_amount, payment_method, payment_status, shipping_address, billing_address, currency, exchange_rate, original_inr_amount, charged_amount)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'cod', 'cod_pending', ?, ?, 'INR', 1, ?, ?)
+      INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, commission_amount_paise, commission_snapshot_at, total_amount, payment_method, payment_status, shipping_address, billing_address)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'cod', 'cod_pending', ?, ?)
     `).run(
       orderNumber,
       resolvedCustomer.name,
@@ -5788,13 +5425,10 @@ module.exports = function mountMerchApi(app, {
       couponResult.coupon?.id || null,
       couponResult.couponCode || null,
       influencerId,
-      campaignId,
       commissionSnapshot.total,
       totalAmount,
       JSON.stringify(shippingAddressPayload || {}),
-      JSON.stringify(billingAddressPayload || shippingAddressPayload || {}),
-      totalAmount / 100,
-      totalAmount / 100
+      JSON.stringify(billingAddressPayload || shippingAddressPayload || {})
     );
 
     const orderId = result.lastInsertRowid;
@@ -5814,7 +5448,6 @@ module.exports = function mountMerchApi(app, {
       });
     }
 
-    const customerUserId = authUser?.id || null;
     if (customerUserId) {
       const customerProfile = db.prepare('SELECT id FROM merch_customer_profiles WHERE user_id = ?').get(customerUserId);
       if (customerProfile) {
@@ -5831,7 +5464,6 @@ module.exports = function mountMerchApi(app, {
       success: true,
       orderNumber,
       orderId,
-      currency: 'INR',
       totalAmount,
       discountAmount,
       coupon: buildMerchCouponPreview(couponResult),
@@ -6454,11 +6086,6 @@ module.exports = function mountMerchApi(app, {
     if ((currentStatus === 'pending' || currentPaymentStatus === 'pending') && currentPaymentStatus !== 'paid') {
       db.prepare('DELETE FROM merch_order_items WHERE order_id = ?').run(order.id);
       db.prepare('DELETE FROM merch_orders WHERE id = ?').run(order.id);
-      triggerMerchCancellationNotifications(order, {
-        cancelledBy: 'customer',
-        reason: req.body?.reason || req.body?.cancellationReason || 'Requested by customer',
-        refundStatus: 'No payment was collected',
-      }).catch((err) => console.error('[Merch] Customer cancel unpaid order notification error:', err?.message || err));
       return res.json({ success: true, removed: true, orderId: order.id });
     }
 
@@ -6476,7 +6103,7 @@ module.exports = function mountMerchApi(app, {
         SET status = 'cancelled',
             cancelled_by = 'customer',
             cancelled_at = datetime('now'),
-            payment_status = CASE WHEN payment_status = 'cod_pending' THEN 'cancelled' ELSE payment_status END,
+            payment_status = CASE WHEN payment_status IN ('paid', 'cod_pending') THEN 'refunded' ELSE payment_status END,
             updated_at = datetime('now')
         WHERE id = ? AND status NOT IN ('delivered', 'returned', 'cancelled')
       `).run(order.id);
@@ -6495,11 +6122,6 @@ module.exports = function mountMerchApi(app, {
 
     const updated = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(order.id);
     const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
-    triggerMerchCancellationNotifications(updated || order, {
-      cancelledBy: 'customer',
-      reason: req.body?.reason || req.body?.cancellationReason || 'Requested by customer',
-      previousPaymentStatus: currentPaymentStatus,
-    }).catch((err) => console.error('[Merch] Customer cancel notification error:', err?.message || err));
     res.json({ success: true, order: buildMerchOrderRecord(updated, items) });
   });
 
@@ -7007,176 +6629,6 @@ module.exports = function mountMerchApi(app, {
     `).run(couponId, influencerId);
     const updated = loadMerchInfluencers().find((item) => Number(item.id) === influencerId);
     res.json({ influencer: updated || null });
-  });
-
-  // ─── Influencer Campaigns Admin Endpoints ───
-  app.get('/api/merch/admin/campaigns', requireAdmin, (_req, res) => {
-    try {
-      const rows = db.prepare(`
-        SELECT c.id, c.slug, c.name, c.influencer_id AS influencerId, c.coupon_id AS couponId,
-               c.coupon_code AS couponCode, c.target_product_id AS targetProductId,
-               c.target_variant_id AS targetVariantId, c.is_active AS isActive, c.created_at AS createdAt,
-               i.name AS influencerName, i.handle AS influencerHandle,
-               p.name AS targetProductName,
-               v.sku AS targetVariantSku,
-               v.color AS targetVariantColor,
-               v.size AS targetVariantSize,
-               v.price AS targetVariantPrice,
-               (SELECT COUNT(*) FROM merch_campaign_clicks WHERE campaign_id = c.id) AS clicksCount,
-               (SELECT COUNT(*) FROM merch_orders WHERE campaign_id = c.id AND payment_status IN ('paid', 'cod_pending')) AS ordersCount,
-               (SELECT COALESCE(SUM(total_amount), 0) FROM merch_orders WHERE campaign_id = c.id AND payment_status IN ('paid', 'cod_pending')) AS revenuePaise
-        FROM merch_campaigns c
-        JOIN merch_influencers i ON i.id = c.influencer_id
-        LEFT JOIN merch_products p ON p.id = c.target_product_id
-        LEFT JOIN merch_variants v ON v.id = c.target_variant_id
-        ORDER BY datetime(c.created_at) DESC, c.id DESC
-      `).all();
-
-      const campaigns = rows.map((row) => {
-        const clicks = Number(row.clicksCount || 0);
-        const orders = Number(row.ordersCount || 0);
-        const revenue = Number(row.revenuePaise || 0);
-        const conversionRate = clicks > 0 ? Math.round((orders / clicks) * 1000) / 10 : 0;
-        return {
-          id: row.id,
-          slug: row.slug,
-          name: row.name,
-          influencerId: row.influencerId,
-          influencerName: row.influencerName,
-          influencerHandle: row.influencerHandle,
-          couponId: row.couponId,
-          couponCode: row.couponCode,
-          targetProductId: row.targetProductId,
-          targetProductName: row.targetProductName || 'H2 Water Bottle',
-          targetVariantId: row.targetVariantId,
-          targetVariantSku: row.targetVariantSku || '',
-          targetVariantColor: row.targetVariantColor || '',
-          targetVariantSize: row.targetVariantSize || '',
-          targetVariantPrice: Number(row.targetVariantPrice || 0),
-          isActive: Number(row.isActive) === 1,
-          clicks,
-          orders,
-          revenue,
-          conversionRate,
-          createdAt: row.createdAt,
-          url: `/c/${row.slug}`,
-        };
-      });
-
-      res.json({ campaigns });
-    } catch (err) {
-      console.error('[Admin Campaigns Error]:', err);
-      res.status(500).json({ error: 'Failed to load campaigns' });
-    }
-  });
-
-  app.post('/api/merch/admin/campaigns', requireAdmin, (req, res) => {
-    try {
-      const influencerId = Number(req.body?.influencerId);
-      const rawCouponCode = String(req.body?.couponCode || '').trim();
-      const rawSlug = String(req.body?.slug || '').trim();
-      const campaignName = String(req.body?.name || '').trim() || `${rawSlug} Campaign`;
-      let targetProductId = Number(req.body?.targetProductId) || 11;
-      let targetVariantId = Number(req.body?.targetVariantId) || 569;
-
-      if (!influencerId || influencerId <= 0) {
-        return res.status(400).json({ error: 'Influencer is required' });
-      }
-      const influencer = db.prepare('SELECT id, name, active FROM merch_influencers WHERE id = ?').get(influencerId);
-      if (!influencer) {
-        return res.status(404).json({ error: 'Influencer not found' });
-      }
-
-      if (!rawCouponCode) {
-        return res.status(400).json({ error: 'Coupon code is required' });
-      }
-      const coupon = db.prepare(`
-        SELECT id, code, is_active, active, valid_from, valid_till, expires_at, portal, applies_to, discount_type, discount_value
-        FROM coupons
-        WHERE LOWER(TRIM(code)) = LOWER(TRIM(?)) AND portal = 'merch'
-        LIMIT 1
-      `).get(rawCouponCode);
-
-      if (!coupon) {
-        return res.status(400).json({ error: `Coupon '${rawCouponCode}' does not exist in Merch portal` });
-      }
-      if (Number(coupon.is_active ?? coupon.active ?? 1) !== 1) {
-        return res.status(400).json({ error: `Coupon '${coupon.code}' is currently inactive` });
-      }
-      const expiry = coupon.valid_till || coupon.expires_at;
-      if (expiry && new Date(expiry).getTime() < Date.now()) {
-        return res.status(400).json({ error: `Coupon '${coupon.code}' has expired` });
-      }
-
-      // Slug validation
-      if (!rawSlug || !/^[A-Za-z0-9_-]{2,50}$/.test(rawSlug)) {
-        return res.status(400).json({ error: 'Slug must be 2-50 alphanumeric characters (letters, numbers, hyphens, underscores)' });
-      }
-      const existingSlug = db.prepare('SELECT id, slug FROM merch_campaigns WHERE LOWER(slug) = LOWER(?) LIMIT 1').get(rawSlug);
-      if (existingSlug) {
-        return res.status(409).json({ error: `Campaign slug '${rawSlug}' already exists. Please choose a different slug.` });
-      }
-
-      // Verify product & variant (lookup by SKU first to handle cross-environment DB ID differences, then fallback to ID)
-      const rawSku = String(req.body?.targetVariantSku || '').trim();
-      let variant = null;
-      if (rawSku) {
-        variant = db.prepare('SELECT id, product_id, sku FROM merch_variants WHERE sku = ? LIMIT 1').get(rawSku);
-      }
-      if (!variant) {
-        variant = db.prepare('SELECT id, product_id, sku FROM merch_variants WHERE id = ?').get(targetVariantId);
-      }
-      if (!variant) {
-        variant = db.prepare('SELECT id, product_id, sku FROM merch_variants WHERE product_id = ? AND is_active = 1 LIMIT 1').get(targetProductId)
-          || db.prepare("SELECT id, product_id, sku FROM merch_variants WHERE sku LIKE '%BTL%' AND is_active = 1 LIMIT 1").get()
-          || db.prepare('SELECT id, product_id, sku FROM merch_variants WHERE is_active = 1 LIMIT 1').get();
-      }
-      if (variant) {
-        targetVariantId = variant.id;
-        targetProductId = variant.product_id;
-      } else {
-        return res.status(400).json({ error: 'Target variant not found' });
-      }
-
-      const insertResult = db.prepare(`
-        INSERT INTO merch_campaigns (slug, name, influencer_id, coupon_id, coupon_code, target_product_id, target_variant_id, is_active, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))
-      `).run(rawSlug, campaignName, influencerId, coupon.id, coupon.code, targetProductId, targetVariantId);
-
-      const campaignId = insertResult.lastInsertRowid;
-
-      // Also ensure this coupon is associated with the influencer in coupons table if not already
-      try {
-        db.prepare('UPDATE coupons SET influencer_id = ? WHERE id = ? AND (influencer_id IS NULL OR influencer_id = ?)').run(influencerId, coupon.id, influencerId);
-      } catch {}
-
-      res.status(201).json({
-        campaign: {
-          id: campaignId,
-          slug: rawSlug,
-          name: campaignName,
-          influencerId,
-          influencerName: influencer.name,
-          couponId: coupon.id,
-          couponCode: coupon.code,
-          targetProductId,
-          targetVariantId,
-          isActive: true,
-          url: `/c/${rawSlug}`,
-        }
-      });
-    } catch (err) {
-      console.error('[Create Campaign Error]:', err);
-      res.status(500).json({ error: err?.message || 'Failed to create campaign' });
-    }
-  });
-
-  app.patch('/api/merch/admin/campaigns/:id/active', requireAdmin, (req, res) => {
-    const id = Number(req.params.id);
-    if (!id || id <= 0) return res.status(400).json({ error: 'Invalid campaign id' });
-    const isActive = Boolean(req.body?.isActive);
-    db.prepare("UPDATE merch_campaigns SET is_active = ?, updated_at = datetime('now') WHERE id = ?").run(isActive ? 1 : 0, id);
-    res.json({ success: true, id, isActive });
   });
 
   function getInfluencerReportPeriod(query = {}) {
@@ -7722,16 +7174,6 @@ module.exports = function mountMerchApi(app, {
 
     const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
     const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(req.params.id);
-
-    if (String(status).toLowerCase() === 'cancelled' && existingStatus !== 'cancelled') {
-      const reason = req.body?.reason || req.body?.cancellationReason || 'Cancelled by store administration';
-      triggerMerchCancellationNotifications(order || existingOrder, {
-        cancelledBy: 'admin',
-        reason,
-        previousPaymentStatus: String(existingOrder.payment_status || '').toLowerCase(),
-      }).catch((err) => console.error('[Merch] Admin cancel notification error:', err?.message || err));
-    }
-
     res.json({ success: true, order: buildMerchOrderRecord(order, items) });
   });
 
@@ -7780,8 +7222,14 @@ module.exports = function mountMerchApi(app, {
       const isCod = String(order.payment_method || '').toLowerCase() === 'cod';
 
       const items = getOrderItemsWithProductDetails(order.id);
-      const metrics = shiprocket.calculatePackageMetrics(items);
-      const orderWeightKg = metrics.weight;
+      const totalWeightGrams = items.reduce((sum, item) => {
+        const itemWeight = Number(item.weight_grams ?? item.weightGrams ?? 0);
+        const qty = Math.max(1, Number(item.quantity || item.units || 1));
+        return sum + (itemWeight * qty);
+      }, 0);
+      const orderWeightKg = totalWeightGrams > 0
+        ? Math.max(0.01, Number((totalWeightGrams / 1000).toFixed(3)))
+        : shiprocket.defaultWeightKg;
 
       const couriers = await shiprocket.checkServiceability({
         deliveryPostcode,

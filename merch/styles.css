@@ -39,11 +39,6 @@ body.merch-page:not(.merch-admin-page) {
   --text-light: #9a8f86;
   --border: rgba(0, 0, 0, 0.08);
   --border-strong: rgba(0, 0, 0, 0.12);
-  overflow-x: hidden;
-  width: 100%;
-  -webkit-text-size-adjust: 100%;
-  text-size-adjust: 100%;
-  -webkit-tap-highlight-color: transparent;
   background:
     radial-gradient(circle at top left, rgba(200, 101, 45, 0.08), transparent 30%),
     linear-gradient(180deg, #f8f3ee 0%, #f6efe8 100%) !important;
@@ -395,7 +390,6 @@ body.is-auth-loading .merch-auth-cta {
   position: fixed;
   inset: 0;
   background: rgba(15, 15, 15, 0.42);
-  -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
   z-index: 1680;
 }
@@ -1697,7 +1691,6 @@ body.is-auth-loading .merch-auth-cta {
   justify-content: center;
   padding: 24px;
   background: rgba(15, 15, 15, 0.42);
-  -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
   opacity: 0;
   pointer-events: none;
@@ -1951,9 +1944,7 @@ body.is-auth-loading .merch-auth-cta {
   color: var(--text-dark);
   background: var(--white);
   cursor: pointer;
-  -webkit-appearance: none;
   appearance: none;
-  touch-action: manipulation;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' stroke='%236f6f6f' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
@@ -2392,14 +2383,10 @@ body.is-auth-loading .merch-auth-cta {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.72);
   color: #141414;
-  font-family: var(--font-body);
-  font-size: 15px;
-  font-weight: 500;
-  line-height: 1;
+  font: 500 14px/1 var(--font-body);
   outline: none;
   box-shadow: none;
   transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
-  -webkit-tap-highlight-color: transparent;
 }
 
 .shopify-field input::placeholder {
@@ -2408,7 +2395,6 @@ body.is-auth-loading .merch-auth-cta {
 }
 
 .shopify-field select {
-  -webkit-appearance: none;
   appearance: none;
   background-image: linear-gradient(45deg, transparent 50%, #111 50%), linear-gradient(135deg, #111 50%, transparent 50%);
   background-position: calc(100% - 22px) 31px, calc(100% - 16px) 31px;
@@ -2570,31 +2556,6 @@ body.is-auth-loading .merch-auth-cta {
   height: 20px;
 }
 
-.shopify-continue-button {
-  height: 56px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 24px;
-  border: 2px solid #c9572b;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #c9572b;
-  font: 800 14px/1 var(--font-mono);
-  letter-spacing: 0.04em;
-  text-decoration: none;
-  cursor: pointer;
-  white-space: nowrap;
-  box-sizing: border-box;
-  transition: all 150ms ease;
-}
-
-.shopify-continue-button:hover {
-  background: linear-gradient(180deg, #c9572b 0%, #b84620 100%);
-  color: #ffffff;
-  border-color: #b84620;
-}
-
 .shopify-summary {
   position: sticky;
   top: 100px;
@@ -2715,22 +2676,14 @@ body.is-auth-loading .merch-auth-cta {
 }
 
 .shopify-coupon {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 148px;
+  gap: 16px;
   padding: 24px 0;
   border-bottom: 1px solid rgba(0, 0, 0, 0.09);
 }
 
-.shopify-coupon__row {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
 .shopify-coupon__field {
-  flex: 1;
-  min-width: 0;
   height: 48px;
   display: flex;
   align-items: center;
@@ -2739,16 +2692,12 @@ body.is-auth-loading .merch-auth-cta {
   border: 1px solid rgba(0, 0, 0, 0.16);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.78);
-  box-sizing: border-box;
 }
 
 .shopify-coupon__field span {
   width: 20px;
   height: 20px;
   color: #696765;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .shopify-coupon__field input {
@@ -2765,70 +2714,25 @@ body.is-auth-loading .merch-auth-cta {
   color: #8b8784;
 }
 
-.shopify-coupon__actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-shrink: 0;
-}
-
 .shopify-coupon__apply {
   height: 48px;
-  padding: 0 18px;
   border: 1px solid #bf5630;
   border-radius: 8px;
   background: transparent;
   color: #9f3e1f;
   font: 800 13px/1 var(--font-mono);
   letter-spacing: 0.06em;
-  cursor: pointer;
-  white-space: nowrap;
-  box-sizing: border-box;
-  transition: all 0.15s ease;
-}
-
-.shopify-coupon__apply:hover:not(:disabled) {
-  background: rgba(191, 86, 48, 0.08);
 }
 
 .shopify-coupon__apply:disabled {
   opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.shopify-coupon__remove {
-  height: 48px;
-  padding: 0 14px;
-  border: 1px solid rgba(191, 86, 48, 0.4);
-  border-radius: 8px;
-  background: #ffffff;
-  color: #bf5630;
-  font: 700 12px/1 var(--font-mono);
-  letter-spacing: 0.04em;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  white-space: nowrap;
-  box-sizing: border-box;
-  transition: all 0.15s ease;
-}
-
-.shopify-coupon__remove:hover {
-  background: rgba(191, 86, 48, 0.08);
-  border-color: #bf5630;
-  color: #9f3e1f;
 }
 
 .shopify-coupon__message {
-  margin-top: -2px;
-  color: #2b7440;
+  grid-column: 1 / -1;
+  margin-top: -6px;
+  color: #356b36;
   font-size: 13px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
 
 .shopify-coupon__message.is-error {
@@ -2836,9 +2740,10 @@ body.is-auth-loading .merch-auth-cta {
 }
 
 .checkout-coupon-offers {
+  grid-column: 1 / -1;
   display: grid;
   gap: 8px;
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 .checkout-coupon-offers__title {
@@ -2848,247 +2753,6 @@ body.is-auth-loading .merch-auth-cta {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .08em;
-}
-
-/* Checkout Explore More / Recommended Products Section */
-.checkout-recommendations {
-  padding: 22px 0 24px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.09);
-}
-
-.checkout-recommendations__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 14px;
-}
-
-.checkout-recommendations__title-wrap {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.checkout-recommendations__title {
-  font-family: var(--font-display, inherit);
-  font-size: 14px;
-  font-weight: 700;
-  color: #bf5630;
-  letter-spacing: 0.02em;
-  position: relative;
-  display: inline-block;
-  padding-bottom: 3px;
-  border-bottom: 2px solid #bf5630;
-}
-
-.checkout-recommendations__sub {
-  font-size: 11px;
-  color: var(--text-muted, #777);
-}
-
-.checkout-recommendations__nav {
-  display: flex;
-  gap: 6px;
-}
-
-.checkout-rec-nav {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  border: 1px solid rgba(0, 0, 0, 0.16);
-  background: #ffffff;
-  color: #444;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  line-height: 1;
-  padding: 0;
-}
-
-.checkout-rec-nav:hover {
-  background: #f7f6f4;
-  border-color: #bf5630;
-  color: #bf5630;
-}
-
-.checkout-recommendations__scroll-wrap {
-  position: relative;
-  width: 100%;
-  overflow: hidden;
-}
-
-.checkout-recommendations__track {
-  display: flex;
-  gap: 12px;
-  overflow-x: auto;
-  scroll-snap-type: x mandatory;
-  -webkit-overflow-scrolling: touch;
-  padding: 4px 2px 8px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(191, 86, 48, 0.25) transparent;
-}
-
-.checkout-recommendations__track::-webkit-scrollbar {
-  height: 4px;
-}
-
-.checkout-recommendations__track::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.checkout-recommendations__track::-webkit-scrollbar-thumb {
-  background: rgba(191, 86, 48, 0.25);
-  border-radius: 4px;
-}
-
-.checkout-rec-card {
-  flex: 0 0 160px;
-  width: 160px;
-  scroll-snap-align: start;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  border-radius: 10px;
-  background: #ffffff;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  box-sizing: border-box;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-
-.checkout-rec-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
-}
-
-.checkout-rec-card__image-box {
-  position: relative;
-  width: 100%;
-  height: 108px;
-  border-radius: 8px;
-  overflow: hidden;
-  background: #f7f6f4;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.checkout-rec-card__image-box img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.checkout-rec-card__badge {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  background: #c9572b;
-  color: #ffffff;
-  font-size: 10px;
-  font-weight: 800;
-  line-height: 1.1;
-  padding: 3px 6px;
-  border-radius: 4px;
-  letter-spacing: 0.02em;
-  z-index: 2;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-}
-
-.checkout-rec-card__body {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  margin-top: 8px;
-}
-
-.checkout-rec-card__name {
-  font-size: 12px;
-  line-height: 1.3;
-  font-weight: 600;
-  color: var(--text, #1f2937);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  height: 31px;
-}
-
-.checkout-rec-card__pricing {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  margin: 6px 0 8px;
-  min-height: 18px;
-}
-
-.checkout-rec-card__original {
-  font-size: 11px;
-  color: var(--text-muted, #888);
-  text-decoration: line-through;
-}
-
-.checkout-rec-card__price {
-  font-size: 13px;
-  font-weight: 700;
-  color: #111827;
-}
-
-.checkout-rec-card__add-btn {
-  width: 100%;
-  height: 32px;
-  border: 1.5px solid #111827;
-  border-radius: 6px;
-  background: #ffffff;
-  color: #111827;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  letter-spacing: 0.04em;
-  transition: all 0.15s ease;
-  margin-top: auto;
-  box-sizing: border-box;
-}
-
-.checkout-rec-card__add-btn:hover {
-  background: #111827;
-  color: #ffffff;
-}
-
-.checkout-rec-card__add-btn:active {
-  transform: scale(0.97);
-}
-
-@media (max-width: 540px) {
-  .shopify-coupon__row {
-    flex-wrap: wrap;
-  }
-  .shopify-coupon__field {
-    flex: 1 1 100%;
-  }
-  .shopify-coupon__actions {
-    width: 100%;
-    display: flex;
-  }
-  .shopify-coupon__apply,
-  .shopify-coupon__remove {
-    flex: 1;
-    text-align: center;
-    justify-content: center;
-  }
-  .checkout-rec-card {
-    flex: 0 0 145px;
-    width: 145px;
-  }
 }
 
 .checkout-coupon-offer {
@@ -3652,14 +3316,9 @@ body.is-auth-loading .merch-auth-cta {
 .gallery-thumbs {
   display: flex;
   gap: 8px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-x: contain;
-  padding-bottom: 4px;
 }
 
 .gallery-thumb {
-  flex-shrink: 0;
   width: 60px;
   height: 60px;
   padding: 0;
@@ -3667,7 +3326,6 @@ body.is-auth-loading .merch-auth-cta {
   overflow: hidden;
   border: 2px solid transparent;
   cursor: pointer;
-  touch-action: manipulation;
   transition: border-color var(--transition);
 }
 
@@ -3925,10 +3583,8 @@ body.is-auth-loading .merch-auth-cta {
 }
 
 .qty-btn {
-  min-width: 38px;
-  min-height: 38px;
-  width: 38px;
-  height: 38px;
+  width: 32px;
+  height: 32px;
   border: 1px solid var(--border-strong);
   border-radius: 6px;
   background: var(--white);
@@ -3937,9 +3593,6 @@ body.is-auth-loading .merch-auth-cta {
   align-items: center;
   justify-content: center;
   transition: all var(--transition);
-  cursor: pointer;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
 }
 
 .qty-btn:hover {
@@ -4205,8 +3858,6 @@ body.is-auth-loading .merch-auth-cta {
   right: 0;
   width: min(400px, 90vw);
   height: 100vh;
-  height: 100dvh;
-  max-height: 100dvh;
   background: var(--white);
   z-index: 1600;
   display: flex;
@@ -4214,7 +3865,6 @@ body.is-auth-loading .merch-auth-cta {
   box-shadow: -4px 0 24px rgba(0, 0, 0, 0.1);
   transform: translateX(100%);
   transition: transform 0.3s ease;
-  overscroll-behavior: contain;
 }
 
 .cart-drawer[hidden] {
@@ -4240,20 +3890,13 @@ body.is-auth-loading .merch-auth-cta {
 }
 
 .cart-close-btn {
-  min-width: 44px;
-  min-height: 44px;
-  width: 44px;
-  height: 44px;
+  width: 32px;
+  height: 32px;
   border: none;
   background: none;
   font-size: 18px;
   color: var(--text-muted);
   border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  touch-action: manipulation;
 }
 
 .cart-close-btn:hover {
@@ -4263,8 +3906,6 @@ body.is-auth-loading .merch-auth-cta {
 .cart-drawer__items {
   flex: 1;
   overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
   padding: 16px 24px;
 }
 
@@ -4320,14 +3961,8 @@ body.is-auth-loading .merch-auth-cta {
   background: none;
   color: var(--text-light);
   font-size: 16px;
-  padding: 8px;
-  min-width: 40px;
-  min-height: 40px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  padding: 4px;
   cursor: pointer;
-  touch-action: manipulation;
 }
 
 .cart-item__remove:hover {
@@ -4335,7 +3970,7 @@ body.is-auth-loading .merch-auth-cta {
 }
 
 .cart-drawer__footer {
-  padding: 20px 24px max(20px, calc(16px + env(safe-area-inset-bottom, 0px)));
+  padding: 20px 24px;
   border-top: 1px solid var(--border);
 }
 
@@ -7283,8 +6918,8 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
   .shopify-field input,
   .shopify-field select {
     height: 52px;
-    padding: 18px 40px 6px 13px;
-    font-size: 16px;
+    padding: 20px 40px 8px 13px;
+    font-size: 13px;
   }
 
   .shopify-field span:first-child {
@@ -7714,198 +7349,3 @@ body.merch-page:not(.merch-admin-page) .merch-offer-card--hoodie .merch-offer-ca
   .merch-offer-card__image { min-height: 205px; border-radius: 20px; }
   .merch-offer-card__image img { height: 205px; }
 }
-
-/* Currency Selector Component */
-.checkout-currency-selector {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.65rem 0.9rem;
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(200, 101, 45, 0.22);
-  border-radius: 10px;
-  margin-bottom: 1rem;
-}
-
-.checkout-currency-label {
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: var(--primary-dark, #3b281f);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.currency-toggle-group {
-  display: inline-flex;
-  background: rgba(200, 101, 45, 0.08);
-  border-radius: 8px;
-  padding: 3px;
-  gap: 3px;
-}
-
-.currency-toggle-btn {
-  border: none;
-  background: transparent;
-  padding: 0.35rem 0.75rem;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: #7b6256;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s ease-in-out;
-  line-height: 1.2;
-}
-
-.currency-toggle-btn:hover {
-  color: #2b2523;
-}
-
-.currency-toggle-btn.is-active {
-  background: #c8652d;
-  color: #ffffff;
-  box-shadow: 0 1px 3px rgba(200, 101, 45, 0.25);
-}
-
-/* ───────────────────────────────────────────────────────────
-   Cross-Device, Mobile (iOS/Android), iPad, & Laptop Compatibility
-   ─────────────────────────────────────────────────────────── */
-
-/* 1. Global Touch & Text Scaling */
-html,
-body.merch-page {
-  overflow-x: hidden;
-  max-width: 100vw;
-  -webkit-text-size-adjust: 100%;
-  text-size-adjust: 100%;
-}
-
-button,
-a,
-input,
-select,
-textarea,
-.category-card,
-.product-card {
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
-}
-
-/* 2. Cart Coupon Input Styling & Polish */
-.cart-coupon__field input {
-  width: 100%;
-  height: 44px;
-  padding: 10px 14px;
-  border: 1px solid var(--border-strong, rgba(0, 0, 0, 0.12));
-  border-radius: var(--radius-sm, 8px);
-  font-family: var(--font-body);
-  font-size: 16px; /* Prevents iOS Safari forced zoom */
-  background: #ffffff;
-  color: var(--text-dark, #1a1a1a);
-  box-sizing: border-box;
-  outline: none;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.cart-coupon__field input:focus {
-  border-color: var(--primary, #c8652d);
-  box-shadow: 0 0 0 3px rgba(200, 101, 45, 0.15);
-}
-
-/* 3. Search Overlay Mobile Polish */
-@media (max-width: 640px) {
-  .search-overlay {
-    padding: max(24px, calc(16px + env(safe-area-inset-top, 0px))) 16px 20px;
-  }
-
-  .search-results {
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
-  }
-}
-
-/* 4. Prevent iOS Safari auto-zoom on inputs across mobile devices */
-@media (max-width: 768px) {
-  input:not([type="checkbox"]):not([type="radio"]),
-  select,
-  textarea,
-  .shop-select,
-  .shopify-field input,
-  .shopify-field select,
-  .cart-coupon__field input,
-  .account-field input,
-  .account-field textarea,
-  .influencer-month-select select,
-  .influencer-toolbar input,
-  .influencer-toolbar select,
-  .influencer-profile-form input,
-  .influencer-profile-form textarea {
-    font-size: 16px !important;
-  }
-}
-
-/* 5. Safe Area Insets for iOS Notches & Home Indicators */
-@supports (padding-bottom: env(safe-area-inset-bottom)) {
-  .cart-drawer__footer {
-    padding-bottom: max(20px, calc(14px + env(safe-area-inset-bottom)));
-  }
-
-  .account-panel-nav {
-    padding-bottom: max(10px, env(safe-area-inset-bottom));
-    height: calc(84px + env(safe-area-inset-bottom));
-  }
-
-  .merch-flow-modal {
-    padding-bottom: max(24px, env(safe-area-inset-bottom));
-  }
-}
-
-/* 6. Tablet & iPad Storefront Header Drawer Stacking */
-@media (max-width: 1099px) {
-  body.merch-page:not(.merch-admin-page) .storefront-header__drawer[open] nav {
-    z-index: 1200 !important;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
-  }
-}
-
-/* 7. Product Grid Mobile Single-Column & Overflow Guard */
-@media (max-width: 640px) {
-  .product-grid {
-    grid-template-columns: 1fr;
-    gap: 16px;
-  }
-
-  .product-card {
-    min-width: 0;
-    max-width: 100%;
-  }
-
-  .header-icon-btn {
-    min-width: 40px;
-    min-height: 40px;
-  }
-}
-
-/* 8. Extra Small Phones (iPhone SE, 320px - 375px) */
-@media (max-width: 375px) {
-  .category-card {
-    min-height: 480px;
-    padding: 18px;
-  }
-
-  .category-card__title {
-    font-size: 26px;
-  }
-
-  .btn {
-    padding: 10px 16px;
-    font-size: 11px;
-  }
-
-  .shopify-field-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-
