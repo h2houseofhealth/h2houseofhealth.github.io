@@ -1493,12 +1493,14 @@ module.exports = function mountMerchApi(app, {
     cumulativePaidPaise = 0,
     balanceRemainingPaise = 0,
     formattedDate = '',
+    req = null,
   }) {
     const couponList = coupons.map((c) => c.code || c).filter(Boolean).join(', ') || 'None';
     const invoiceNum = payment.invoice_number || payment.invoiceNumber || 'H2-INV-COM';
     const refNum = payment.reference_number || payment.referenceNumber || 'N/A';
     const method = payment.payment_method || payment.paymentMethod || 'Direct Transfer';
     const status = (payment.status || 'PAID').toUpperCase();
+    const logoUrl = 'https://h2houseofhealth.com/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=240';
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -1536,6 +1538,8 @@ module.exports = function mountMerchApi(app, {
     .notes-text { font-size: 13px; color: #0c4a6e; margin: 0; line-height: 1.5; }
     .footer { background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 22px 36px; text-align: center; color: #64748b; font-size: 12px; line-height: 1.6; }
     .footer strong { color: #334155; }
+    .invoice-company-footer { display: flex; justify-content: space-between; text-align: left; gap: 20px; margin-bottom: 18px; font-size: 13px; line-height: 1.6; color: #334155; border-bottom: 1px solid #e2e8f0; padding-bottom: 16px; }
+    @media (max-width: 580px) { .invoice-company-footer { flex-direction: column; text-align: left !important; } }
   </style>
 </head>
 <body>
@@ -1543,6 +1547,7 @@ module.exports = function mountMerchApi(app, {
     <div class="header">
       <div class="header-top">
         <div>
+          <img src="${escapeHtml(logoUrl)}" alt="H2 House of Health" style="height:40px;width:auto;display:block;margin-bottom:12px;filter:brightness(0) invert(1);">
           <h1 class="brand-title">H2 House of Health</h1>
           <p class="brand-sub">Commission Payment Receipt &amp; Invoice</p>
         </div>
@@ -1584,10 +1589,11 @@ module.exports = function mountMerchApi(app, {
         <div class="party-box">
           <p class="party-title">Issued By (Payer)</p>
           <p class="party-name">H2 House of Health</p>
-          <p class="party-info">Jubilee Hills, Hyderabad, Telangana 500033</p>
+          <p class="party-info">📍 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033</p>
           <p class="party-info"><strong>Admin Recipient:</strong> h2houseofhealth@gmail.com</p>
-          <p class="party-info"><strong>Support:</strong> hello@h2houseofhealth.com</p>
-          <p class="party-info"><strong>Contact:</strong> +91 98765 43210</p>
+          <p class="party-info"><strong>Email:</strong> hello@h2houseofhealth.com</p>
+          <p class="party-info"><strong>Phone:</strong> 91000 56979, 91000 86979</p>
+          <p class="party-info"><strong>Website:</strong> www.h2houseofhealth.com</p>
         </div>
       </div>
 
@@ -1636,6 +1642,17 @@ module.exports = function mountMerchApi(app, {
     </div>
 
     <div class="footer">
+      <div class="invoice-company-footer">
+        <div>
+          📞 91000 56979, 91000 86979<br>
+          ✉️ <a href="mailto:hello@h2houseofhealth.com" style="color:#0f172a;text-decoration:none;">hello@h2houseofhealth.com</a>
+        </div>
+        <div style="text-align:right;">
+          📍 47A, Journalist Colony, Road No:70,<br>
+          Jubilee Hills, Hyderabad - 500033<br>
+          🌐 <a href="https://www.h2houseofhealth.com" style="color:#0f172a;text-decoration:none;">www.h2houseofhealth.com</a>
+        </div>
+      </div>
       <p style="margin:0 0 4px;"><strong>H2 House of Health</strong> &bull; Wellness &amp; Merchandise Ecosystem</p>
       <p style="margin:0;">This is an officially recorded commission payment receipt. Commission paid records are permanently locked and logged for accounting integrity.</p>
     </div>
@@ -1684,17 +1701,443 @@ module.exports = function mountMerchApi(app, {
       `Remaining Balance Due: ${formatMerchCurrency(balanceRemainingPaise)}`,
       '',
       payment.note ? `Payment Notes: ${payment.note}\n` : '',
-      'ISSUER DETAILS:',
+      'COMPANY DETAILS (FROM INVOICE):',
       'H2 House of Health',
-      'Jubilee Hills, Hyderabad, Telangana 500033',
-      'Support: hello@h2houseofhealth.com',
-      'Fixed Admin Recipient: h2houseofhealth@gmail.com',
-      'Phone: +91 98765 43210',
-      'Website: https://h2houseofhealth.com',
+      '📞 Phone: 91000 56979, 91000 86979',
+      '✉️ Email: hello@h2houseofhealth.com',
+      '📍 Address: 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033',
+      '🌐 Website: www.h2houseofhealth.com',
+      'Admin Recipient: h2houseofhealth@gmail.com',
       '',
       'Thank you for partnering with H2 House of Health.',
       '============================================================',
     ].filter(Boolean).join('\n');
+  }
+
+  // ─── Image-Type Email for Commission Payments (Like Order Placed Email) ───
+  function buildInfluencerCommissionEmailHtml({
+    payment,
+    influencer,
+    coupons = [],
+    commissionEarnedPaise = 0,
+    commissionPaidPaise = 0,
+    cumulativePaidPaise = 0,
+    balanceRemainingPaise = 0,
+    formattedDate = '',
+    recipientRole = 'influencer', // 'influencer' | 'admin'
+    req = null,
+  }) {
+    const couponList = coupons.map((c) => c.code || c).filter(Boolean).join(', ') || 'None';
+    const invoiceNum = payment.invoice_number || payment.invoiceNumber || 'H2-INV-COM';
+    const refNum = payment.reference_number || payment.referenceNumber || 'N/A';
+    const method = payment.payment_method || payment.paymentMethod || 'Direct Transfer';
+    const status = (payment.status || 'PAID').toUpperCase();
+    const influencerEmail = payment.influencer_email || payment.influencerEmail || influencer.email || 'N/A';
+    const influencerName = influencer.name || 'Influencer Partner';
+    const amountInr = (commissionPaidPaise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const origin = getMerchEmailOrigin(req);
+    const logoUrl = getMerchEmailAssetUrl(req, '/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=240');
+    const homeUrl = `${origin}/`;
+
+    const heroTitle = recipientRole === 'admin'
+      ? 'Commission Payout Recorded'
+      : 'Commission Payment Received';
+
+    const heroSubtitle = recipientRole === 'admin'
+      ? `Commission amount paid to influencer: <strong style="color:#ad3c22;">${escapeHtml(influencerName)}</strong>`
+      : `Commission amount sent to influencer: <strong style="color:#ad3c22;">${escapeHtml(influencerName)}</strong>`;
+
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${escapeHtml(heroTitle)} - H2 House of Health</title>
+    <style>
+      body, table, td, p, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+      table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+      img { -ms-interpolation-mode: bicubic; }
+      @media only screen and (max-width: 620px) {
+        .email-shell { width: 100% !important; max-width: 600px !important; }
+        .mobile-pad { padding-left: 20px !important; padding-right: 20px !important; }
+        .mobile-top-pad { padding-top: 22px !important; }
+        .mobile-stack { display: block !important; width: 100% !important; }
+        .mobile-center { text-align: center !important; }
+        .mobile-left { text-align: left !important; }
+        .mobile-logo { width: 142px !important; max-width: 142px !important; margin: 0 auto !important; }
+        .hero-title { font-size: 30px !important; line-height: 38px !important; }
+        .hero-subtitle { font-size: 19px !important; line-height: 26px !important; }
+        .stat-cell { display: block !important; width: 100% !important; padding: 18px 12px !important; border-right: 0 !important; border-bottom: 1px solid rgba(255,255,255,0.45) !important; }
+        .stat-cell-last { border-bottom: 0 !important; }
+        .footer-logo-cell { border-right: 0 !important; border-bottom: 1px solid #d6a28c !important; padding: 0 0 18px !important; }
+        .footer-copy-cell { padding: 18px 0 0 !important; }
+        .footer-contact-right { text-align: left !important; padding-top: 8px !important; }
+      }
+    </style>
+  </head>
+  <body style="margin:0;padding:0;background:#f6f1ec;color:#14233b;font-family:Arial,Helvetica,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f6f1ec;">
+      <tr>
+        <td align="center" style="padding:20px 10px;">
+          <table role="presentation" class="email-shell" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:600px;border-collapse:collapse;background:#fffaf7;border-radius:12px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,0.06);border:1px solid #ebdcd3;">
+            
+            <!-- Top Logo & Help Header -->
+            <tr>
+              <td class="mobile-pad mobile-top-pad" style="padding:32px 32px 18px;background:#fffaf7;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+                  <tr>
+                    <td class="mobile-stack mobile-center" valign="middle" style="width:50%;">
+                      <a href="${escapeHtml(homeUrl)}" style="text-decoration:none;">
+                        <img class="mobile-logo" src="${escapeHtml(logoUrl)}" width="154" alt="H2 House of Health" style="display:block;border:0;width:154px;max-width:154px;height:auto;">
+                      </a>
+                    </td>
+                    <td class="mobile-stack mobile-center" valign="middle" align="right" style="width:50%;font-size:13px;line-height:20px;color:#14233b;">
+                      <p style="margin:0;font-size:14px;font-weight:600;color:#14233b;">Need Assistance?</p>
+                      <a href="mailto:hello@h2houseofhealth.com" style="color:#ad3c22;text-decoration:none;font-size:13px;line-height:18px;">hello@h2houseofhealth.com</a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Hero Title Block -->
+            <tr>
+              <td class="mobile-pad" style="padding:16px 32px 28px;background:#fffaf7;text-align:center;">
+                <h1 class="hero-title" style="margin:0;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:36px;line-height:44px;font-weight:700;">${escapeHtml(heroTitle)}</h1>
+                <p class="hero-subtitle" style="margin:8px 0 0;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:21px;line-height:28px;">${heroSubtitle}</p>
+                <div style="width:54px;height:3px;background:#b63b20;margin:16px auto 0;border-radius:2px;"></div>
+              </td>
+            </tr>
+
+            <!-- Stat Banner -->
+            <tr>
+              <td class="mobile-pad" style="padding:0 28px 28px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;background:#b63b20;border-radius:8px;box-shadow:0 8px 18px rgba(88,36,19,0.12);">
+                  <tr>
+                    <td class="stat-cell" align="center" style="width:33.33%;padding:22px 10px;border-right:1px solid rgba(255,255,255,0.48);color:#ffffff;">
+                      <div style="font-size:26px;line-height:26px;color:#ffffff;">&#8377;</div>
+                      <p style="margin:10px 0 4px;font-size:14px;line-height:18px;font-weight:500;color:#ffffff;">Amount Paid</p>
+                      <p style="margin:0;font-size:20px;line-height:26px;font-weight:700;color:#ffffff;">₹${amountInr}</p>
+                    </td>
+                    <td class="stat-cell" align="center" style="width:33.33%;padding:22px 10px;border-right:1px solid rgba(255,255,255,0.48);color:#ffffff;">
+                      <div style="font-size:26px;line-height:26px;color:#ffffff;">&#128197;</div>
+                      <p style="margin:10px 0 4px;font-size:14px;line-height:18px;font-weight:500;color:#ffffff;">Payment Date</p>
+                      <p style="margin:0;font-size:14px;line-height:20px;font-weight:600;color:#ffffff;">${escapeHtml(formattedDate)}</p>
+                    </td>
+                    <td class="stat-cell stat-cell-last" align="center" style="width:33.33%;padding:22px 10px;color:#ffffff;">
+                      <div style="font-size:26px;line-height:26px;color:#ffffff;">&#10003;</div>
+                      <p style="margin:10px 0 4px;font-size:14px;line-height:18px;font-weight:500;color:#ffffff;">Status</p>
+                      <p style="margin:0;font-size:15px;line-height:20px;font-weight:700;color:#ffffff;text-transform:uppercase;">${escapeHtml(status)}</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Payout & Ledger Details -->
+            <tr>
+              <td class="mobile-pad" style="padding:0 30px 24px;">
+                <h2 style="margin:0 0 14px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:30px;font-weight:700;">Commission Payout Details</h2>
+                
+                <!-- Party & Meta Info Box -->
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;border:1px solid #e7cabb;border-radius:8px;background:#ffffff;margin-bottom:18px;">
+                  <tr>
+                    <td style="padding:16px 20px;">
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:14px;line-height:22px;">
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;width:38%;">Influencer Name:</td>
+                          <td style="padding:5px 0;color:#0f172a;font-weight:700;">${escapeHtml(influencerName)}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Influencer Email:</td>
+                          <td style="padding:5px 0;color:#0f172a;">${escapeHtml(influencerEmail)}</td>
+                        </tr>
+                        ${influencer.handle ? `
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Social Handle:</td>
+                          <td style="padding:5px 0;color:#0f172a;">${escapeHtml(influencer.handle)}</td>
+                        </tr>
+                        ` : ''}
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Associated Coupon(s):</td>
+                          <td style="padding:5px 0;color:#0f172a;font-weight:600;">${escapeHtml(couponList)}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Payment Method:</td>
+                          <td style="padding:5px 0;color:#0f172a;">${escapeHtml(method)}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Reference / UTR ID:</td>
+                          <td style="padding:5px 0;color:#0f172a;font-weight:600;">${escapeHtml(refNum)}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Invoice Number:</td>
+                          <td style="padding:5px 0;color:#0f172a;font-weight:600;">${escapeHtml(invoiceNum)}</td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+
+                <!-- Financial Ledger Box -->
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;border:1px solid #e7cabb;border-radius:8px;background:#ffffff;table-layout:fixed;">
+                  <tr>
+                    <td style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;border-bottom:1px solid #f0ded4;">Total Commission Earned (Gross Attribution)</td>
+                    <td align="right" style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;font-weight:600;white-space:nowrap;border-bottom:1px solid #f0ded4;">${formatMerchCurrency(commissionEarnedPaise)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;border-bottom:1px solid #f0ded4;">Cumulative Commission Paid to Date</td>
+                    <td align="right" style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;font-weight:600;white-space:nowrap;border-bottom:1px solid #f0ded4;">${formatMerchCurrency(cumulativePaidPaise)}</td>
+                  </tr>
+                  <tr style="background:#f5e8e1;">
+                    <td style="padding:16px 20px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:17px;line-height:22px;font-weight:700;">Current Commission Settled</td>
+                    <td align="right" style="padding:16px 20px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:22px;line-height:26px;font-weight:700;white-space:nowrap;">${formatMerchCurrency(commissionPaidPaise)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;border-top:1px solid #f0ded4;">Remaining Balance Due</td>
+                    <td align="right" style="padding:12px 20px;font-size:14px;line-height:20px;font-weight:700;white-space:nowrap;border-top:1px solid #f0ded4;color:${balanceRemainingPaise > 0 ? '#b45309' : '#059669'};">${formatMerchCurrency(balanceRemainingPaise)}</td>
+                  </tr>
+                </table>
+
+                ${payment.note ? `
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;background:#f0f9ff;border-left:4px solid #0284c7;border-radius:0 8px 8px 0;margin-top:16px;">
+                    <tr>
+                      <td style="padding:12px 18px;">
+                        <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:#0369a1;text-transform:uppercase;">Payment Notes / Remarks</p>
+                        <p style="margin:0;font-size:13px;color:#0c4a6e;line-height:1.5;">${escapeHtml(payment.note)}</p>
+                      </td>
+                    </tr>
+                  </table>
+                ` : ''}
+              </td>
+            </tr>
+
+            <!-- Action Buttons Row -->
+            <tr>
+              <td class="mobile-pad" style="padding:0 30px 30px;">
+                <a class="mobile-button" href="${escapeHtml(homeUrl)}" style="display:block;text-align:center;padding:16px 18px;border-radius:6px;background:#b63b20;color:#ffffff;text-decoration:none;font-family:Georgia,'Times New Roman',serif;font-size:20px;line-height:26px;font-weight:700;">Visit H2 House of Health&nbsp;&nbsp;&#8594;</a>
+              </td>
+            </tr>
+
+            <!-- Footer: Matches Bottom of Invoice -->
+            <tr>
+              <td class="mobile-pad" style="padding:28px 30px 26px;background:#f4eee9;border-top:1px solid #ead8cd;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+                  <tr>
+                    <td class="mobile-stack mobile-center footer-logo-cell" valign="middle" style="width:31%;padding-right:22px;border-right:1px solid #d2a08d;">
+                      <a href="${escapeHtml(homeUrl)}">
+                        <img src="${escapeHtml(logoUrl)}" width="132" alt="H2 House of Health" style="display:block;border:0;width:132px;max-width:132px;height:auto;">
+                      </a>
+                    </td>
+                    <td class="mobile-stack mobile-center footer-copy-cell" valign="middle" style="padding-left:26px;">
+                      <p style="margin:0 0 10px;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:21px;font-weight:700;letter-spacing:1px;">PREVENTIVE TODAY, HEALTHIER TOMORROW.</p>
+                      <p style="margin:0;">
+                        <a href="https://www.instagram.com/h2houseofhealth" style="display:inline-block;width:26px;height:26px;margin-right:24px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:22px;line-height:24px;" title="Instagram">&#9678;</a>
+                        <a href="${escapeHtml(homeUrl)}" style="display:inline-block;width:26px;height:26px;margin-right:24px;color:#ad3c22;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:22px;line-height:24px;" title="Facebook">f</a>
+                        <a href="${escapeHtml(homeUrl)}" style="display:inline-block;width:30px;height:24px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:22px;line-height:24px;" title="YouTube">&#9658;</a>
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+
+                <!-- Company Details: Exactly from the Bottom of Invoice -->
+                <table role="presentation" class="invoice-company-footer" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:20px;padding-top:18px;border-top:1px solid #d2a08d;">
+                  <tr>
+                    <td class="mobile-stack mobile-center" valign="top" style="width:50%;padding-top:14px;color:#14233b;font-size:13px;line-height:1.6;">
+                      📞 91000 56979, 91000 86979<br>
+                      ✉️ <a href="mailto:hello@h2houseofhealth.com" style="color:#14233b;text-decoration:none;">hello@h2houseofhealth.com</a>
+                    </td>
+                    <td class="mobile-stack mobile-center footer-contact-right" valign="top" align="right" style="width:50%;padding-top:14px;color:#14233b;font-size:13px;line-height:1.6;">
+                      📍 47A, Journalist Colony, Road No:70,<br>
+                      Jubilee Hills, Hyderabad - 500033<br>
+                      🌐 <a href="https://www.h2houseofhealth.com" style="color:#ad3c22;text-decoration:none;">www.h2houseofhealth.com</a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+  }
+
+  function buildInfluencerCommissionEmailText({
+    payment,
+    influencer,
+    coupons = [],
+    commissionEarnedPaise = 0,
+    commissionPaidPaise = 0,
+    cumulativePaidPaise = 0,
+    balanceRemainingPaise = 0,
+    formattedDate = '',
+    recipientRole = 'influencer',
+  }) {
+    const couponList = coupons.map((c) => c.code || c).filter(Boolean).join(', ') || 'None';
+    const invoiceNum = payment.invoice_number || payment.invoiceNumber || 'H2-INV-COM';
+    const refNum = payment.reference_number || payment.referenceNumber || 'N/A';
+    const method = payment.payment_method || payment.paymentMethod || 'Direct Transfer';
+    const status = (payment.status || 'PAID').toUpperCase();
+    const influencerName = influencer.name || 'Influencer Partner';
+    const amountInr = (commissionPaidPaise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const header = recipientRole === 'admin'
+      ? `Commission amount paid to influencer: ${influencerName}`
+      : `Commission amount sent to influencer: ${influencerName}`;
+
+    return [
+      '============================================================',
+      'H2 HOUSE OF HEALTH - COMMISSION PAYMENT NOTIFICATION',
+      '============================================================',
+      '',
+      header,
+      `Amount Paid: ₹${amountInr}`,
+      `Payment Date: ${formattedDate}`,
+      `Payment Status: ${status}`,
+      `Invoice Number: ${invoiceNum}`,
+      `Payment Method: ${method}`,
+      `Reference / UTR ID: ${refNum}`,
+      '',
+      'INFLUENCER DETAILS:',
+      `Influencer Name: ${influencerName}`,
+      `Email: ${payment.influencer_email || payment.influencerEmail || influencer.email || 'N/A'}`,
+      `Coupon Code(s): ${couponList}`,
+      '',
+      'FINANCIAL BREAKDOWN:',
+      `Total Commission Earned: ${formatMerchCurrency(commissionEarnedPaise)}`,
+      `Cumulative Commission Paid: ${formatMerchCurrency(cumulativePaidPaise)}`,
+      `Current Commission Paid: ${formatMerchCurrency(commissionPaidPaise)}`,
+      `Remaining Balance Due: ${formatMerchCurrency(balanceRemainingPaise)}`,
+      '',
+      payment.note ? `Payment Notes: ${payment.note}\n` : '',
+      'COMPANY DETAILS (FROM INVOICE):',
+      'H2 House of Health',
+      '📞 Phone: 91000 56979, 91000 86979',
+      '✉️ Email: hello@h2houseofhealth.com',
+      '📍 Address: 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033',
+      '🌐 Website: www.h2houseofhealth.com',
+      'Admin Recipient: h2houseofhealth@gmail.com',
+      '',
+      'Thank you for partnering with H2 House of Health.',
+      '============================================================',
+    ].filter(Boolean).join('\n');
+  }
+
+  // ─── Dispatch Commission Payment Emails to Influencer & Admin ───
+  async function sendInfluencerCommissionNotificationEmails({
+    payment,
+    influencer,
+    coupons = [],
+    commissionEarnedPaise = 0,
+    commissionPaidPaise = 0,
+    cumulativePaidPaise = 0,
+    balanceRemainingPaise = 0,
+    formattedDate = '',
+    req = null,
+  }) {
+    const influencerEmail = String(payment.influencerEmail || payment.influencer_email || influencer.email || '').trim().toLowerCase();
+    const adminEmail = FIXED_ADMIN_EMAIL;
+    const invoiceNumber = payment.invoiceNumber || payment.invoice_number || 'H2-INV-COM';
+    const amountInr = (commissionPaidPaise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const influencerName = influencer.name || 'Influencer Partner';
+
+    const influencerHtml = buildInfluencerCommissionEmailHtml({
+      payment,
+      influencer,
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      recipientRole: 'influencer',
+      req,
+    });
+
+    const influencerText = buildInfluencerCommissionEmailText({
+      payment,
+      influencer,
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      recipientRole: 'influencer',
+    });
+
+    const adminHtml = buildInfluencerCommissionEmailHtml({
+      payment,
+      influencer,
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      recipientRole: 'admin',
+      req,
+    });
+
+    const adminText = buildInfluencerCommissionEmailText({
+      payment,
+      influencer,
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      recipientRole: 'admin',
+    });
+
+    const results = {
+      influencer: { to: influencerEmail, status: 'pending' },
+      admin: { to: adminEmail, status: 'pending' },
+    };
+
+    // 1. Send to Influencer
+    try {
+      if (typeof sendMerchEmail === 'function' && influencerEmail) {
+        await sendMerchEmail({
+          to: influencerEmail,
+          subject: `Commission amount sent to influencer: ${influencerName} - ₹${amountInr} (${invoiceNumber}) | H2 House of Health`,
+          text: influencerText,
+          html: influencerHtml,
+        });
+        results.influencer.status = 'sent';
+      } else {
+        results.influencer.status = 'skipped_no_mailer';
+      }
+    } catch (err) {
+      console.error('[Merch] Failed to email commission payout to influencer:', err.message);
+      results.influencer.status = 'failed';
+      results.influencer.error = err.message;
+    }
+
+    // 2. Send to Admin (Fixed copy: h2houseofhealth@gmail.com)
+    try {
+      if (typeof sendMerchEmail === 'function' && adminEmail) {
+        await sendMerchEmail({
+          to: adminEmail,
+          subject: `Commission amount paid to influencer: ${influencerName} - ₹${amountInr} (${invoiceNumber}) | H2 House of Health`,
+          text: adminText,
+          html: adminHtml,
+        });
+        results.admin.status = 'sent';
+      } else {
+        results.admin.status = 'skipped_no_mailer';
+      }
+    } catch (err) {
+      console.error('[Merch] Failed to email commission payout copy to admin:', err.message);
+      results.admin.status = 'failed';
+      results.admin.error = err.message;
+    }
+
+    return results;
   }
 
   function loadMerchInfluencers() {
@@ -7504,46 +7947,29 @@ module.exports = function mountMerchApi(app, {
       formattedDate,
     });
 
-    // 3. Send payment invoice to Influencer Email and h2houseofhealth@gmail.com
-    const emailResults = {
-      influencer: { to: influencerEmail, status: 'pending' },
-      admin: { to: ADMIN_INVOICE_RECIPIENT, status: 'pending' },
+    // 3. Send payment email notification to Influencer and Admin
+    let emailResults = {
+      influencer: { to: influencerEmail, status: 'skipped' },
+      admin: { to: ADMIN_INVOICE_RECIPIENT, status: 'skipped' },
     };
 
-    try {
-      if (typeof sendMerchEmail === 'function') {
-        await sendMerchEmail({
-          to: influencerEmail,
-          subject: `Commission Payment Receipt & Invoice - ${invoiceNumber} - H2 House of Health`,
-          text: invoiceText,
-          html: invoiceHtml,
-        });
-        emailResults.influencer.status = 'sent';
-      } else {
-        emailResults.influencer.status = 'skipped_no_mailer';
-      }
-    } catch (err) {
-      console.error('[Merch] Failed to email commission invoice to influencer:', err.message);
-      emailResults.influencer.status = 'failed';
-      emailResults.influencer.error = err.message;
-    }
+    const shouldSendEmail = req.body?.sendEmail !== false &&
+      req.body?.sendEmail !== 'false' &&
+      req.body?.sendPaymentEmail !== false &&
+      req.body?.sendPaymentEmail !== 'false';
 
-    try {
-      if (typeof sendMerchEmail === 'function') {
-        await sendMerchEmail({
-          to: ADMIN_INVOICE_RECIPIENT,
-          subject: `[Admin Copy] Commission Payment Invoice - ${influencer.name} - ${invoiceNumber}`,
-          text: invoiceText,
-          html: invoiceHtml,
-        });
-        emailResults.admin.status = 'sent';
-      } else {
-        emailResults.admin.status = 'skipped_no_mailer';
-      }
-    } catch (err) {
-      console.error('[Merch] Failed to email commission invoice to admin:', err.message);
-      emailResults.admin.status = 'failed';
-      emailResults.admin.error = err.message;
+    if (shouldSendEmail) {
+      emailResults = await sendInfluencerCommissionNotificationEmails({
+        payment: paymentRecord,
+        influencer: { ...influencer, email: influencerEmail },
+        coupons,
+        commissionEarnedPaise,
+        commissionPaidPaise: amountPaise,
+        cumulativePaidPaise: newCumulativePaidPaise,
+        balanceRemainingPaise,
+        formattedDate,
+        req,
+      });
     }
 
     const updatedInfluencer = loadMerchInfluencers().find((item) => Number(item.id) === influencerId);
@@ -7753,6 +8179,68 @@ module.exports = function mountMerchApi(app, {
     }
 
     return res.json({ invoiceHtml, invoiceNumber: payment.invoiceNumber, payment });
+  });
+
+  // ─── ADMIN: Dispatch Commission Payment Email to Influencer & Admin ───
+  app.post('/api/merch/admin/influencers/:id/payments/:paymentId/send-email', requireAdmin, async (req, res) => {
+    const influencerId = Number(req.params.id);
+    const paymentId = Number(req.params.paymentId);
+    if (!Number.isInteger(influencerId) || !Number.isInteger(paymentId)) {
+      return res.status(400).json({ message: 'Invalid influencer or payment id' });
+    }
+    const influencer = getInfluencerById(influencerId);
+    if (!influencer) {
+      return res.status(404).json({ message: 'Influencer not found' });
+    }
+
+    const payment = db.prepare(`
+      SELECT id, influencer_id AS influencerId, amount_paise AS amountPaise, payment_method AS paymentMethod,
+             reference_number AS referenceNumber, status, paid_at AS paidAt, note, invoice_number AS invoiceNumber,
+             influencer_email AS influencerEmail, admin_email AS adminEmail, created_by AS createdBy, created_at AS createdAt
+      FROM merch_influencer_commission_payments
+      WHERE id = ? AND influencer_id = ?
+    `).get(paymentId, influencerId);
+
+    if (!payment) {
+      return res.status(404).json({ message: 'Payment record not found' });
+    }
+
+    const influencerEmail = String(req.body?.influencerEmail || payment.influencerEmail || influencer.email || '').trim().toLowerCase();
+    if (!influencerEmail || !isValidMerchEmail(influencerEmail)) {
+      return res.status(400).json({ message: 'A valid influencer email address is required to send notification.' });
+    }
+
+    const coupons = getInfluencerCouponRows([influencerId]);
+    const statsRows = getInfluencerStatsRows([influencerId]);
+    const stats = statsRows[0] || {};
+    const commissionEarnedPaise = Math.round(Number(stats.totalCommissionEarned || 0));
+    const cumulativePaidPaise = Math.round(Number(influencer.paidCommission ?? influencer.paid_commission ?? 0));
+    const balanceRemainingPaise = Math.max(0, commissionEarnedPaise - cumulativePaidPaise);
+
+    const paidDate = payment.paidAt ? new Date(payment.paidAt) : new Date(payment.createdAt || Date.now());
+    const formattedDate = new Intl.DateTimeFormat('en-IN', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'Asia/Kolkata',
+    }).format(paidDate);
+
+    const emailResults = await sendInfluencerCommissionNotificationEmails({
+      payment: { ...payment, influencerEmail },
+      influencer: { ...influencer, email: influencerEmail },
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise: payment.amountPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      req,
+    });
+
+    return res.json({
+      success: true,
+      message: `Commission payout notification email dispatched to influencer (${influencerEmail}) and admin (${FIXED_ADMIN_EMAIL}).`,
+      emailResults,
+    });
   });
 
   // ─── ADMIN: Get order detail ───
