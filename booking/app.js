@@ -103,10 +103,6 @@ const state = {
     email: '',
     phone: '',
   },
-  currency: (function() {
-    try { return localStorage.getItem('h2_currency') || 'INR'; } catch { return 'INR'; }
-  })(),
-  currencyConfig: { defaultCurrency: 'INR', supportedCurrencies: ['INR', 'USD'], inrPerUsd: 85 },
   postLoginChoice: '',
   pendingPreAuthChoice: '',
   showAuthCard: false,
@@ -264,148 +260,6 @@ function enforceTenDigitMobileInput(input) {
   });
 }
 
-function getPhoneErrorMessage(countryCode = '+91') {
-  if (countryCode === '+91') return 'Enter a valid 10-digit mobile number for India.';
-  if (countryCode === '+1') return 'Enter a valid 10-digit mobile number for US/Canada.';
-  if (countryCode === '+44') return 'Enter a valid UK mobile number.';
-  if (countryCode === '+971') return 'Enter a valid UAE mobile number.';
-  if (countryCode === '+65') return 'Enter a valid Singapore mobile number.';
-  if (countryCode === '+61') return 'Enter a valid Australia mobile number.';
-  return 'Enter a valid mobile number with country code.';
-}
-
-function isValidPhoneNumber(phone, countryCode = '+91') {
-  if (!phone || typeof phone !== 'string') return false;
-  const trimmed = phone.trim();
-  if (!trimmed) return false;
-  if (/[^\d\s+\-]/.test(trimmed)) return false;
-
-  if (trimmed.startsWith('+')) {
-    const digits = trimmed.slice(1).replace(/[\s\-]/g, '');
-    if (trimmed.startsWith('+91')) return /^\d{10}$/.test(digits.slice(2));
-    if (trimmed.startsWith('+1')) return /^\d{10}$/.test(digits.slice(1));
-    if (trimmed.startsWith('+44')) {
-      const local = digits.slice(2).replace(/^0/, '');
-      return /^\d{9,10}$/.test(local);
-    }
-    if (trimmed.startsWith('+971')) return /^\d{8,9}$/.test(digits.slice(3));
-    if (trimmed.startsWith('+65')) return /^\d{8}$/.test(digits.slice(2));
-    if (trimmed.startsWith('+61')) return /^\d{9}$/.test(digits.slice(2));
-    return digits.length >= 7 && digits.length <= 15;
-  }
-
-  const digits = trimmed.replace(/[\s\-]/g, '');
-  const code = String(countryCode || '+91').trim();
-
-  if (code === '+1') {
-    const local = (digits.length === 11 && digits.startsWith('1')) ? digits.slice(1) : digits;
-    return /^\d{10}$/.test(local);
-  }
-  if (code === '+44') {
-    let local = digits.startsWith('44') ? digits.slice(2) : digits;
-    if (local.startsWith('0')) local = local.slice(1);
-    return /^\d{9,10}$/.test(local);
-  }
-  if (code === '+91') {
-    const local = (digits.length === 12 && digits.startsWith('91')) ? digits.slice(2) : digits;
-    return /^\d{10}$/.test(local);
-  }
-  if (code === '+971') {
-    const local = (digits.length >= 11 && digits.startsWith('971')) ? digits.slice(3) : digits;
-    return /^\d{8,9}$/.test(local);
-  }
-  if (code === '+65') {
-    const local = (digits.length === 10 && digits.startsWith('65')) ? digits.slice(2) : digits;
-    return /^\d{8}$/.test(local);
-  }
-  if (code === '+61') {
-    let local = (digits.length >= 10 && digits.startsWith('61')) ? digits.slice(2) : digits;
-    if (local.startsWith('0')) local = local.slice(1);
-    return /^\d{9}$/.test(local);
-  }
-
-  return digits.length >= 7 && digits.length <= 15;
-}
-
-function parseAuthPhone(value = '') {
-  const raw = String(value || '').trim();
-  if (raw.startsWith('+')) {
-    if (raw.startsWith('+91')) return { countryCode: '+91', localNumber: raw.slice(3).replace(/\D+/g, '') };
-    if (raw.startsWith('+44')) return { countryCode: '+44', localNumber: raw.slice(3).replace(/\D+/g, '') };
-    if (raw.startsWith('+1')) return { countryCode: '+1', localNumber: raw.slice(2).replace(/\D+/g, '') };
-    if (raw.startsWith('+971')) return { countryCode: '+971', localNumber: raw.slice(4).replace(/\D+/g, '') };
-    if (raw.startsWith('+65')) return { countryCode: '+65', localNumber: raw.slice(3).replace(/\D+/g, '') };
-    if (raw.startsWith('+61')) return { countryCode: '+61', localNumber: raw.slice(3).replace(/\D+/g, '') };
-    const match = raw.match(/^\+(\d{1,4})(\d+)$/);
-    if (match) return { countryCode: `+${match[1]}`, localNumber: match[2] };
-  }
-  const digits = raw.replace(/\D+/g, '');
-  if (digits.length === 12 && digits.startsWith('91')) return { countryCode: '+91', localNumber: digits.slice(2) };
-  if (digits.length === 11 && digits.startsWith('1')) return { countryCode: '+1', localNumber: digits.slice(1) };
-  if ((digits.length === 12 || digits.length === 13) && digits.startsWith('44')) return { countryCode: '+44', localNumber: digits.slice(2) };
-  return { countryCode: '+91', localNumber: digits };
-}
-
-function formatE164Phone(phone = '', countryCode = '+91') {
-  const trimmed = String(phone || '').trim();
-  if (!trimmed) return '';
-  const prefix = countryCode.startsWith('+') ? countryCode : `+${countryCode}`;
-
-  let digits = trimmed.replace(/\D+/g, '');
-  if (trimmed.startsWith('+')) {
-    const rawNoPlus = trimmed.slice(1).replace(/\D+/g, '');
-    const prefixDigits = prefix.replace(/\D+/g, '');
-    if (rawNoPlus.startsWith(prefixDigits)) {
-      digits = rawNoPlus.slice(prefixDigits.length);
-    } else if (rawNoPlus.startsWith('91') && rawNoPlus.length === 12) {
-      digits = rawNoPlus.slice(2);
-    } else if (rawNoPlus.startsWith('1') && rawNoPlus.length === 11) {
-      digits = rawNoPlus.slice(1);
-    } else if (rawNoPlus.startsWith('44')) {
-      digits = rawNoPlus.slice(2);
-    } else {
-      digits = rawNoPlus;
-    }
-  } else {
-    if (prefix === '+1' && digits.length === 11 && digits.startsWith('1')) {
-      digits = digits.slice(1);
-    } else if (prefix === '+91' && digits.length === 12 && digits.startsWith('91')) {
-      digits = digits.slice(2);
-    } else if (prefix === '+44' && (digits.length === 12 || digits.length === 11) && digits.startsWith('44')) {
-      digits = digits.slice(2);
-    }
-  }
-
-  if (prefix === '+44' && digits.startsWith('0')) {
-    digits = digits.slice(1);
-  }
-  if (prefix === '+61' && digits.startsWith('0')) {
-    digits = digits.slice(1);
-  }
-
-  return `${prefix}${digits}`;
-}
-
-function setupPhoneCountryInput(countrySelect, phoneInput) {
-  if (!countrySelect || !phoneInput) return;
-  const updateAttributes = () => {
-    const code = countrySelect.value || '+91';
-    const isTenDigit = code === '+91' || code === '+1';
-    const maxDigits = isTenDigit ? 10 : 15;
-    phoneInput.maxLength = maxDigits;
-    phoneInput.placeholder = isTenDigit ? '10-digit mobile number' : (code === '+44' ? 'UK mobile number' : (code === '+971' ? 'UAE mobile number' : 'Mobile number'));
-    phoneInput.value = phoneInput.value.replace(/\D/g, '').slice(0, maxDigits);
-  };
-  countrySelect.addEventListener('change', updateAttributes);
-  phoneInput.addEventListener('input', (e) => {
-    const code = countrySelect.value || '+91';
-    const isTenDigit = code === '+91' || code === '+1';
-    const maxDigits = isTenDigit ? 10 : 15;
-    e.target.value = e.target.value.replace(/\D/g, '').slice(0, maxDigits);
-  });
-  updateAttributes();
-}
-
 const adminRescheduleSearchPlaceholderQuery = window.matchMedia
   ? window.matchMedia('(max-width: 600px)')
   : null;
@@ -487,7 +341,6 @@ const elements = {
   authNameWrap: document.getElementById('authNameWrap'),
   authName: document.getElementById('authName'),
   authMobileWrap: document.getElementById('authMobileWrap'),
-  authMobileCountry: document.getElementById('authMobileCountry'),
   authMobile: document.getElementById('authMobile'),
   authRoleWrap: document.getElementById('authRoleWrap'),
   authRole: document.getElementById('authRole'),
@@ -913,14 +766,11 @@ const elements = {
   guestCheckoutForm: document.getElementById('guestCheckoutForm'),
   guestCheckoutName: document.getElementById('guestCheckoutName'),
   guestCheckoutEmail: document.getElementById('guestCheckoutEmail'),
-  guestCheckoutPhoneCountry: document.getElementById('guestCheckoutPhoneCountry'),
   guestCheckoutPhone: document.getElementById('guestCheckoutPhone'),
   guestCheckoutError: document.getElementById('guestCheckoutError'),
   guestCheckoutSubmit: document.getElementById('guestCheckoutSubmit'),
   guestCheckoutCancel: document.getElementById('guestCheckoutCancel'),
   closeGuestCheckoutDialog: document.getElementById('closeGuestCheckoutDialog'),
-  guestCurrencyInrBtn: document.getElementById('guestCurrencyInrBtn'),
-  guestCurrencyUsdBtn: document.getElementById('guestCurrencyUsdBtn'),
 
   // Checkout Options Elements
   checkoutOptionsDialog: document.getElementById('checkoutOptionsDialog'),
@@ -1230,7 +1080,7 @@ async function bootstrap() {
     }
   }
   populateTimeSlots();
-  await Promise.all([loadCurrencyConfig(), loadCurrentUser()]);
+  await loadCurrentUser();
     if (!state.user && launchGuestBooking) {
       await enterGuestBookingMode({ scrollToServices: true });
       window.history.replaceState({}, '', '/booking/');
@@ -1423,22 +1273,8 @@ function attachEvents() {
     await resendAuthOtp();
   });
 
-  setupPhoneCountryInput(elements.mobileAuthCountry, elements.mobileAuthNumber);
-  setupPhoneCountryInput(elements.authMobileCountry, elements.authMobile);
-  setupPhoneCountryInput(elements.guestCheckoutPhoneCountry, elements.guestCheckoutPhone);
-
   elements.sendWhatsappOtpBtn?.addEventListener('click', async () => {
-    const countryCode = elements.mobileAuthCountry?.value || '+91';
-    const rawNumber = elements.mobileAuthNumber.value.trim();
-    if (!rawNumber) {
-      elements.authError.textContent = 'Mobile number is required.';
-      return;
-    }
-    if (!isValidPhoneNumber(rawNumber, countryCode)) {
-      elements.authError.textContent = getPhoneErrorMessage(countryCode);
-      return;
-    }
-    const mobile = formatE164Phone(rawNumber, countryCode);
+    const mobile = `${elements.mobileAuthCountry?.value || '+91'}${elements.mobileAuthNumber.value.replace(/\D/g, '')}`;
     elements.authError.textContent = '';
     elements.sendWhatsappOtpBtn.disabled = true;
     try {
@@ -1462,8 +1298,7 @@ function attachEvents() {
 
   elements.verifyWhatsappOtpBtn?.addEventListener('click', async () => {
     if (!whatsappOtpSent) return;
-    const countryCode = elements.mobileAuthCountry?.value || '+91';
-    const mobile = formatE164Phone(elements.mobileAuthNumber.value.trim(), countryCode);
+    const mobile = `${elements.mobileAuthCountry?.value || '+91'}${elements.mobileAuthNumber.value.replace(/\D/g, '')}`;
     const otp = elements.mobileAuthOtp.value.trim();
     elements.authError.textContent = '';
     elements.verifyWhatsappOtpBtn.disabled = true;
@@ -2025,24 +1860,6 @@ function attachEvents() {
   });
 
   // Guest Form Handlers
-  function syncGuestCurrencyButtons() {
-    const isUsd = state.currency === 'USD';
-    elements.guestCurrencyInrBtn?.classList.toggle('is-active', !isUsd);
-    elements.guestCurrencyUsdBtn?.classList.toggle('is-active', isUsd);
-  }
-  elements.guestCurrencyInrBtn?.addEventListener('click', (e) => {
-    e.preventDefault();
-    state.currency = 'INR';
-    try { localStorage.setItem('h2_currency', 'INR'); } catch {}
-    syncGuestCurrencyButtons();
-  });
-  elements.guestCurrencyUsdBtn?.addEventListener('click', (e) => {
-    e.preventDefault();
-    state.currency = 'USD';
-    try { localStorage.setItem('h2_currency', 'USD'); } catch {}
-    syncGuestCurrencyButtons();
-  });
-
   elements.guestCheckoutSubmit?.addEventListener('click', handleGuestCheckoutSubmit);
   elements.guestCheckoutCancel?.addEventListener('click', () => {
     elements.guestCheckoutDialog?.close();
@@ -2068,7 +1885,6 @@ function attachEvents() {
 
   elements.checkoutAsGuest?.addEventListener('click', () => {
     elements.checkoutOptionsDialog?.close();
-    syncGuestCurrencyButtons();
     elements.guestCheckoutDialog?.showModal();
     elements.guestCheckoutName?.focus();
   });
@@ -2667,11 +2483,7 @@ function renderAuthMode(preserveMessage = false) {
   if (isEmailSignup && (isSignupOtpStep || isSignupPasswordStep) && pendingSignupEmail) {
     elements.authEmail.value = pendingSignupEmail;
   }
-  if (isMobileSignup && pendingSignupMobile) {
-    const parsed = parseAuthPhone(pendingSignupMobile);
-    if (elements.authMobileCountry) elements.authMobileCountry.value = parsed.countryCode;
-    elements.authMobile.value = parsed.localNumber;
-  }
+  if (isMobileSignup && pendingSignupMobile) elements.authMobile.value = pendingSignupMobile;
   if ((isForgotOtpStep || isForgotPasswordStep) && pendingForgotEmail) {
     elements.authEmail.value = pendingForgotEmail;
   }
@@ -2952,17 +2764,11 @@ async function submitAuth() {
       pendingSignupName = name;
       let result;
       if (signupMethod === 'mobile') {
-        const countryCode = elements.authMobileCountry?.value || '+91';
-        const rawMobile = elements.authMobile.value.trim();
-        if (!rawMobile) {
+        const mobile = elements.authMobile.value.trim();
+        if (!mobile) {
           elements.authError.textContent = 'Mobile number is required.';
           return;
         }
-        if (!isValidPhoneNumber(rawMobile, countryCode)) {
-          elements.authError.textContent = getPhoneErrorMessage(countryCode);
-          return;
-        }
-        const mobile = formatE164Phone(rawMobile, countryCode);
         result = await api('/api/auth/signup/send-whatsapp-otp', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -4774,7 +4580,6 @@ function validateGuestCheckout() {
   const name = String(elements.guestCheckoutName?.value || '').trim();
   const email = String(elements.guestCheckoutEmail?.value || '').trim();
   const phone = String(elements.guestCheckoutPhone?.value || '').trim();
-  const countryCode = String(elements.guestCheckoutPhoneCountry?.value || '+91').trim();
   
   const errors = {};
   
@@ -4794,8 +4599,8 @@ function validateGuestCheckout() {
   
   if (!phone) {
     errors.phone = 'Phone number is required';
-  } else if (!isValidPhoneNumber(phone, countryCode)) {
-    errors.phone = getPhoneErrorMessage(countryCode);
+  } else if (!/^[6-9]\d{9}$/.test(phone)) {
+    errors.phone = 'Enter a valid 10-digit Indian phone number';
   }
   
   return { valid: Object.keys(errors).length === 0, errors };
@@ -4815,15 +4620,13 @@ function handleGuestCheckoutSubmit() {
   
   const guestName = String(elements.guestCheckoutName.value).trim();
   const guestEmail = String(elements.guestCheckoutEmail.value).trim();
-  const guestCountry = String(elements.guestCheckoutPhoneCountry?.value || '+91').trim();
-  const guestPhone = formatE164Phone(elements.guestCheckoutPhone.value.trim(), guestCountry);
+  const guestPhone = String(elements.guestCheckoutPhone.value).trim();
   
   state.guestCheckout = {
     isActive: true,
     guestName,
     guestEmail,
     guestPhone,
-    guestCountry,
     formErrors: {},
   };
   
@@ -4831,7 +4634,6 @@ function handleGuestCheckoutSubmit() {
     guestName,
     guestEmail,
     guestPhone,
-    guestCountry,
   }));
   
   proceedToGuestPayment();
@@ -4855,7 +4657,6 @@ async function proceedToGuestPayment() {
         guestPhone: state.guestCheckout.guestPhone,
         bookings: state.cart,
         couponCode: String(state.cartCouponPreview?.code || state.cartCouponCode || '').trim(),
-        currency: state.currency || 'INR',
       }),
     });
     
@@ -4879,7 +4680,7 @@ async function openGuestPaymentGateway(token) {
   const order = await api('/api/public/payments/create-order', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token: trimmedToken, currency: state.currency || 'INR' }),
+    body: JSON.stringify({ token: trimmedToken }),
   });
 
   if (!window.Razorpay) {
@@ -4896,7 +4697,6 @@ async function openGuestPaymentGateway(token) {
     prefill: {
       name: order.customer?.name || '',
       email: order.customer?.email || '',
-      contact: order.customer?.mobile || order.customer?.phone || order.booking?.guestPhone || '',
     },
     theme: {
       color: '#8b5e3c',
@@ -6326,7 +6126,7 @@ async function payBooking(id) {
   const result = await api('/api/payments/create-order', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ bookingId: id, currency: state.currency || 'INR' }),
+    body: JSON.stringify({ bookingId: id }),
   });
 
   if (!window.Razorpay) {
@@ -6418,7 +6218,7 @@ async function payAllUserBookings() {
     const result = await api('/api/payments/create-cart-order', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ couponCode, currency: state.currency || 'INR' }),
+      body: JSON.stringify({ couponCode }),
     });
 
     if (!window.Razorpay) {
@@ -13936,61 +13736,20 @@ function renderUserCheckoutSummary(bookings) {
   if (elements.userCouponEntry) elements.userCouponEntry.hidden = false;
   if (elements.userCouponCode) elements.userCouponCode.disabled = false;
   if (elements.userApplyCouponBtn) elements.userApplyCouponBtn.disabled = false;
-  const isUsd = state.currency === 'USD';
-  const rate = state.currencyConfig?.inrPerUsd || 85;
-  const subtotalInr = Number(summary.subtotalAmountInr || summary.totalAmountInr || 0);
-  const payableInr = payableAmountInr;
-  const subtotalUsd = Math.round((subtotalInr / rate) * 100) / 100;
-  const discountUsd = Math.round((discountAmountInr / rate) * 100) / 100;
-  const payableUsd = Math.round((payableInr / rate) * 100) / 100;
-
-  const totalLine = isUsd
-    ? `<span>Total payable: <strong>$${payableUsd.toFixed(2)} USD</strong> (Approx. ₹${payableInr.toLocaleString('en-IN')})</span>`
-    : `<span>Total payable: Rs. ${payableInr.toLocaleString('en-IN')} (inclusive of all taxes)</span>`;
-
   elements.userCheckoutSummary.innerHTML = `
     <strong>${summary.unitCount} item${summary.unitCount === 1 ? '' : 's'} ready for one payment</strong>
-    <div class="checkout-currency-selector" aria-label="Select currency">
-      <span class="checkout-currency-label">Currency</span>
-      <div class="currency-toggle-group">
-        <button type="button" class="currency-toggle-btn ${!isUsd ? 'is-active' : ''}" data-cart-currency="INR">₹ INR</button>
-        <button type="button" class="currency-toggle-btn ${isUsd ? 'is-active' : ''}" data-cart-currency="USD">$ USD</button>
-      </div>
-    </div>
     ${
       coupon
-        ? `<span>Subtotal: ${isUsd ? `$${subtotalUsd.toFixed(2)}` : `Rs. ${subtotalInr.toLocaleString('en-IN')}`}</span>
-           <span>Coupon Savings: -${isUsd ? `$${discountUsd.toFixed(2)}` : `Rs. ${discountAmountInr.toLocaleString('en-IN')}`}</span>
-           ${totalLine}`
-        : `${totalLine}`
+        ? `<span>Subtotal: Rs. ${Number(summary.subtotalAmountInr || summary.totalAmountInr || 0).toLocaleString('en-IN')}</span>
+           <span>Coupon Savings: -Rs. ${discountAmountInr.toLocaleString('en-IN')}</span>
+           <span>Total payable: Rs. ${payableAmountInr.toLocaleString('en-IN')} (inclusive of all taxes)</span>`
+        : `<span>Total payable: Rs. ${Number(summary.payableAmountInr || summary.totalAmountInr || 0).toLocaleString('en-IN')} (inclusive of all taxes)</span>`
     }
     ${holdLine}
   `;
-
-  elements.userCheckoutSummary.querySelectorAll('[data-cart-currency]').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      const curr = btn.dataset.cartCurrency;
-      if (curr && (curr === 'INR' || curr === 'USD')) {
-        state.currency = curr;
-        try { localStorage.setItem('h2_currency', curr); } catch {}
-        renderUserCheckoutSummary(bookings);
-      }
-    });
-  });
-
   elements.bookingsPayAllBtn.hidden = false;
   elements.bookingsPayAllBtn.disabled = false;
-  elements.bookingsPayAllBtn.textContent = isUsd ? `Pay Now ($${payableUsd.toFixed(2)})` : `Pay Now`;
-}
-
-async function loadCurrencyConfig() {
-  try {
-    const cfg = await api('/api/currency/config');
-    if (cfg && cfg.inrPerUsd) {
-      state.currencyConfig = cfg;
-    }
-  } catch {}
+  elements.bookingsPayAllBtn.textContent = `Pay Now`;
 }
 
 function buildHoldNotice(entries = []) {
