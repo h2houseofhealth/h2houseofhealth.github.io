@@ -155,10 +155,6 @@
     offersLoading: false,
     availableCoupons: [],
     activeOfferId: null,
-    currency: (function() {
-      try { return localStorage.getItem('h2_currency') || 'INR'; } catch { return 'INR'; }
-    })(),
-    currencyConfig: { defaultCurrency: 'INR', supportedCurrencies: ['INR', 'USD'], inrPerUsd: 85 },
   };
 
   const FALLBACK_PRODUCT_IMAGE = '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113';
@@ -852,12 +848,14 @@
     if (normalized === 'shipped') return 'shipped';
     if (normalized === 'out_for_delivery') return 'out_for_delivery';
     if (normalized === 'delivered') return 'delivered';
-    if (normalized === 'cancelled' || normalized === 'canceled') return 'cancelled';
     return normalized === 'processing' ? 'processing' : normalized;
   }
 
   function getTrackingSteps(order) {
+    const statusOrder = ['processing', 'packed', 'shipped', 'out_for_delivery', 'delivered'];
+    const labels = ['Order Placed', 'Packed', 'Shipped', 'Out for Delivery', 'Delivered'];
     const status = normalizeTrackingStatus(order?.status);
+    const currentIndex = Math.max(0, statusOrder.indexOf(status));
     const createdAt = order?.createdAt || null;
     const updatedAt = order?.updatedAt || createdAt;
     const backendTimeline = Array.isArray(order?.timeline) ? order.timeline : [];
@@ -865,72 +863,6 @@
       const match = backendTimeline.find((entry) => String(entry?.label || '').toLowerCase().includes(label));
       return match?.time || null;
     };
-
-    // When an order is cancelled, show an Amazon-style cancellation flow:
-    // Order Placed -> (Optional: Packed if previously packed) -> Order Cancelled
-    // Do NOT show remaining forward delivery steps (Packed, Shipped, Out for Delivery, Delivered)
-    if (status === 'cancelled') {
-      const cancelledBy = String(order?.cancelledBy || order?.cancelled_by || '').toLowerCase();
-      let cancelledNote = 'Order Cancelled';
-      if (cancelledBy === 'customer') {
-        cancelledNote = 'Cancelled by you';
-      } else if (cancelledBy === 'admin' || cancelledBy === 'seller' || cancelledBy === 'merchant') {
-        cancelledNote = 'Cancelled by seller';
-      } else {
-        const cancelEntry = backendTimeline.find((e) => String(e?.label || '').toLowerCase().includes('cancel'));
-        if (cancelEntry?.note) {
-          if (cancelEntry.note.toLowerCase().includes('customer')) {
-            cancelledNote = 'Cancelled by you';
-          } else if (cancelEntry.note.toLowerCase().includes('admin') || cancelEntry.note.toLowerCase().includes('seller') || cancelEntry.note.toLowerCase().includes('merchant')) {
-            cancelledNote = 'Cancelled by seller';
-          } else {
-            cancelledNote = cancelEntry.note;
-          }
-        } else {
-          cancelledNote = 'Cancelled';
-        }
-      }
-
-      const cancelTime = order?.cancelledAt || order?.cancelled_at || timelineTime('cancel') || updatedAt;
-
-      const steps = [
-        {
-          label: 'Order Placed',
-          time: createdAt,
-          isComplete: true,
-          isCurrent: false,
-          isCancelled: false,
-          note: '',
-        },
-      ];
-
-      const packTime = timelineTime('pack');
-      if (packTime) {
-        steps.push({
-          label: 'Packed',
-          time: packTime,
-          isComplete: true,
-          isCurrent: false,
-          isCancelled: false,
-          note: '',
-        });
-      }
-
-      steps.push({
-        label: 'Order Cancelled',
-        time: cancelTime,
-        isComplete: true,
-        isCurrent: true,
-        isCancelled: true,
-        note: cancelledNote,
-      });
-
-      return steps;
-    }
-
-    const statusOrder = ['processing', 'packed', 'shipped', 'out_for_delivery', 'delivered'];
-    const labels = ['Order Placed', 'Packed', 'Shipped', 'Out for Delivery', 'Delivered'];
-    const currentIndex = Math.max(0, statusOrder.indexOf(status));
     const fallbackTimes = [
       createdAt,
       currentIndex >= 1 ? timelineTime('pack') || addTrackingOffset(createdAt, 6) || updatedAt : null,
@@ -944,7 +876,6 @@
       time: fallbackTimes[index],
       isComplete: index <= currentIndex,
       isCurrent: index === currentIndex,
-      isCancelled: false,
       note: index === 2 && (order?.carrier || order?.carrierName || order?.trackingNumber)
         ? [order.carrier || order.carrierName, order.trackingNumber].filter(Boolean).join(' - ')
         : '',
@@ -1006,16 +937,15 @@
   }
 
   function renderTrackingTimeline(order) {
-    const isCancelled = String(order?.status || '').toLowerCase() === 'cancelled';
     return `
-      <div class="tracking-timeline${isCancelled ? ' is-cancelled-flow' : ''}" aria-label="Order tracking timeline">
+      <div class="tracking-timeline" aria-label="Order tracking timeline">
         ${getTrackingSteps(order).map((step) => `
-          <article class="tracking-step${step.isComplete ? ' is-complete' : ''}${step.isCurrent ? ' is-current' : ''}${step.isCancelled ? ' is-cancelled' : ''}">
-            <div class="tracking-step__marker" aria-hidden="true">${step.isCancelled ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>' : (step.isComplete ? confirmationIcon('check') : '')}</div>
+          <article class="tracking-step${step.isComplete ? ' is-complete' : ''}${step.isCurrent ? ' is-current' : ''}">
+            <div class="tracking-step__marker" aria-hidden="true">${step.isComplete ? confirmationIcon('check') : ''}</div>
             <div class="tracking-step__body">
               <h3>${escapeHtml(step.label)}</h3>
               <p>${escapeHtml(formatTrackingDateTime(step.time))}</p>
-              ${step.note ? `<small class="${step.isCancelled ? 'tracking-step__cancelled-note' : ''}">${escapeHtml(step.note)}</small>` : ''}
+              ${step.note ? `<small>${escapeHtml(step.note)}</small>` : ''}
             </div>
           </article>
         `).join('')}
@@ -1040,8 +970,7 @@
     }
 
     const product = getTrackingProductSummary(order);
-    const isCancelled = String(order.status || '').toLowerCase() === 'cancelled';
-    const statusLabel = isCancelled ? 'Cancelled' : formatOrderStatus(order.status || 'processing');
+    const statusLabel = formatOrderStatus(order.status || 'processing');
     return `
       <div class="order-tracking__inner">
         ${trackingBackButton}
@@ -1053,7 +982,7 @@
               <p>${escapeHtml([product.variantLabel, `Qty: ${product.quantity}`].filter(Boolean).join(' - '))}</p>
               ${product.extraCount ? `<small>+${product.extraCount} more item${product.extraCount > 1 ? 's' : ''}</small>` : ''}
             </div>
-            <span class="tracking-status-badge ${isCancelled ? 'tracking-status-badge--cancelled' : ''}">${escapeHtml(statusLabel)}</span>
+            <span class="tracking-status-badge">${escapeHtml(statusLabel)}</span>
           </header>
           ${renderTrackingTimeline(order)}
           <footer class="tracking-details">
@@ -1063,7 +992,7 @@
             </div>
             <div>
               <span>Courier / AWB</span>
-              <strong>${isCancelled ? 'Order Cancelled' : (order.trackingNumber ? `${escapeHtml(order.trackingNumber)}${order.carrier ? ` (${escapeHtml(order.carrier)})` : ''}` : (order.status === 'delivered' ? 'Delivered' : 'Processing'))}</strong>
+              <strong>${order.trackingNumber ? `${escapeHtml(order.trackingNumber)}${order.carrier ? ` (${escapeHtml(order.carrier)})` : ''}` : (order.status === 'delivered' ? 'Delivered' : 'Processing')}</strong>
             </div>
             <button class="btn btn-outline account-action-btn" type="button" data-tracking-action="invoice" data-order-id="${escapeHtml(String(order.id || ''))}">Invoice</button>
           </footer>
@@ -1862,7 +1791,7 @@ function getWishlistProductPrice(item) {
   }
 
   function addToCart(variantId, quantity, product, options = {}) {
-    const { openDrawerAfterAdd = true, preserveCoupon = false } = options;
+    const { openDrawerAfterAdd = true } = options;
     const variant = product.variants.find(v => v.id === variantId);
     if (!variant || variant.stock <= 0) return false;
 
@@ -1892,9 +1821,7 @@ function getWishlistProductPrice(item) {
         sku: variant.sku,
       });
     }
-    if (!preserveCoupon) {
-      clearMerchCoupon();
-    }
+    clearMerchCoupon();
     saveCart();
     loadMerchCoupons();
     if (openDrawerAfterAdd) {
@@ -1934,12 +1861,9 @@ function getWishlistProductPrice(item) {
     addToCart(variant.id, 1, product);
   }
 
-  function removeFromCart(variantId, options = {}) {
-    const { preserveCoupon = false } = options;
+  function removeFromCart(variantId) {
     state.cart = state.cart.filter(item => item.variantId !== variantId);
-    if (!preserveCoupon) {
-      clearMerchCoupon();
-    }
+    clearMerchCoupon();
     getMerchBundleDiscountAmount();
     saveCart();
     loadMerchCoupons();
@@ -1997,7 +1921,7 @@ function getWishlistProductPrice(item) {
   }
 
   function getMerchShippingCharge(subtotalInr = getCartTotal()) {
-    return Number(subtotalInr || 0) >= 999 ? 0 : 99;
+    return Number(subtotalInr || 0) >= 999 || Number(subtotalInr || 0) <= 1 ? 0 : 99;
   }
 
   function getIncludedGstAmount(subtotalInr = getCartTotal()) {
@@ -2006,14 +1930,6 @@ function getWishlistProductPrice(item) {
   }
 
   function formatCheckoutMoney(amountInr) {
-    if (state.currency === 'USD') {
-      const rate = state.currencyConfig?.inrPerUsd || 85;
-      const usd = Math.round((Number(amountInr || 0) / rate) * 100) / 100;
-      return '$' + usd.toLocaleString('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
-    }
     return '₹' + Number(amountInr || 0).toLocaleString('en-IN', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
@@ -2109,8 +2025,7 @@ function getWishlistProductPrice(item) {
     `;
   }
 
-  async function applyMerchCouponFromCart(options = {}) {
-    const isSilent = Boolean(options?.silent);
+  async function applyMerchCouponFromCart() {
     const checkoutCoupon = document.getElementById('checkoutCouponCode');
     const rawCode = state.currentView === 'checkout'
       ? (checkoutCoupon?.value || state.merchCouponCode || '')
@@ -2146,15 +2061,11 @@ function getWishlistProductPrice(item) {
       state.merchCouponPreview = result.coupon || null;
       if (els.cartCouponCode) els.cartCouponCode.value = code;
       if (checkoutCoupon) checkoutCoupon.value = code;
-      if (!isSilent) {
-        showCheckoutNotice('Coupon applied', `${code} is ready for checkout.`);
-      }
+      showCheckoutNotice('Coupon applied', `${code} is ready for checkout.`);
     } catch (error) {
-      clearMerchCoupon();
+      clearMerchCoupon({ preserveCode: true });
       state.merchCouponError = error.message || 'Unable to validate coupon.';
-      if (!isSilent) {
-        showCheckoutNotice('Coupon error', state.merchCouponError, { variant: 'error' });
-      }
+      showCheckoutNotice('Coupon error', state.merchCouponError, { variant: 'error' });
     } finally {
       state.merchCouponLoading = false;
       renderCart();
@@ -2256,21 +2167,6 @@ function getWishlistProductPrice(item) {
       bundleDiscountRow.querySelector('span:last-child').textContent = `- ${formatPrice(bundleDiscount)}`;
     }
     if (cartPayable) cartPayable.textContent = formatPrice(payable);
-
-    // Hide coupon section when a bundle discount is active
-    const cartCouponSection = document.querySelector('.cart-coupon');
-    if (cartCouponSection) {
-      const hasBundleDiscount = bundleDiscount > 0;
-      cartCouponSection.hidden = hasBundleDiscount;
-      // Clear any applied coupon when bundle discount kicks in (they shouldn't stack)
-      if (hasBundleDiscount && state.merchCouponCode) {
-        state.merchCouponCode = '';
-        state.merchCouponPreview = null;
-        state.merchCouponError = '';
-        if (els.cartCouponCode) els.cartCouponCode.value = '';
-        renderMerchCouponPreview();
-      }
-    }
 
     // Bind remove buttons
     els.cartItems.querySelectorAll('.cart-item__remove').forEach(btn => {
@@ -2933,14 +2829,17 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   function renderSparklineBars(rows = [], valueKey = 'value', labelKey = 'label', formatter = null) {
     const items = Array.isArray(rows) ? rows : [];
+    const maxValue = items.reduce((max, item) => Math.max(max, Number(item?.[valueKey] || 0)), 0) || 1;
     return items.map((item) => {
       const value = Number(item?.[valueKey] || 0);
+      const width = Math.max(8, Math.round((value / maxValue) * 100));
       const formattedValue = typeof formatter === 'function' ? formatter(value, item) : formatPrice(value || 0);
       return `
-        <article class="influencer-kpi">
-          <p>${escapeHtml(item?.[labelKey] || '')}</p>
-          <strong>${escapeHtml(formattedValue)}</strong>
-        </article>
+        <div class="influencer-chart__row">
+          <span class="influencer-chart__label">${escapeHtml(item?.[labelKey] || '')}</span>
+          <span class="influencer-chart__bar"><span style="width:${width}%"></span></span>
+          <strong class="influencer-chart__value">${escapeHtml(formattedValue)}</strong>
+        </div>
       `;
     }).join('');
   }
@@ -3043,9 +2942,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             <div class="influencer-coupon-hero__actions">
               <span class="account-badge ${primaryCoupon && !primaryCouponUnavailable ? 'account-badge--live' : 'account-badge--muted'}">${escapeHtml(primaryCoupon ? getCouponStatus(primaryCoupon) : 'No coupon')}</span>
               <button type="button" class="btn btn-outline account-action-btn" data-account-action="copy-influencer-coupon" data-coupon-code="${escapeHtml(primaryCoupon?.code || '')}" ${primaryCoupon?.code && !primaryCouponUnavailable ? '' : 'disabled'}>Copy code</button>
-              ${Array.isArray(dashboard.campaigns) && dashboard.campaigns[0] ? `
-                <button type="button" class="btn btn-outline account-action-btn" data-account-action="copy-influencer-link" data-campaign-url="${window.location.origin}/c/${escapeHtml(dashboard.campaigns[0].slug)}">Copy Story Link</button>
-              ` : ''}
             </div>
           </div>
           <div class="influencer-coupon-hero__stats">
@@ -3061,26 +2957,12 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
               <small>Expires</small>
               <strong>${escapeHtml(primaryCoupon ? formatDateLabel(primaryCoupon.expiresAt) : 'No expiry')}</strong>
             </div>
-          </div>
-        </article>
-
-        ${Array.isArray(dashboard.campaigns) && dashboard.campaigns.length ? `
-          <div class="influencer-campaigns-list" style="margin-bottom:20px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:16px;">
-            <p class="account-section__eyebrow" style="margin-bottom:8px;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;font-weight:700;">Instagram Story Tracking Links</p>
-            <div style="display:flex;flex-direction:column;gap:10px;">
-              ${dashboard.campaigns.map(c => `
-                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;background:#fff;padding:12px 14px;border-radius:8px;border:1px solid #e5e7eb;">
-                  <div>
-                    <strong>${escapeHtml(c.name || `${c.slug} Campaign`)}</strong>
-                    <div style="font-family:monospace;font-size:13px;color:#374151;margin-top:2px;">${window.location.origin}/c/${escapeHtml(c.slug)}</div>
-                    <small style="color:#6b7280;">Coupon: <code>${escapeHtml(c.couponCode)}</code> &bull; Clicks: <strong>${Number(c.clicksCount || 0)}</strong> &bull; Orders: <strong>${Number(c.ordersCount || 0)}</strong></small>
-                  </div>
-                  <button type="button" class="btn btn-outline account-action-btn" data-account-action="copy-influencer-link" data-campaign-url="${window.location.origin}/c/${escapeHtml(c.slug)}">Copy Story Link</button>
-                </div>
-              `).join('')}
+            <div class="influencer-coupon-hero__stat">
+              <small>Usage</small>
+              <strong>${escapeHtml(primaryCoupon ? Number(primaryCoupon.usageCount || 0).toLocaleString('en-IN') : '0')}</strong>
             </div>
           </div>
-        ` : ''}
+        </article>
 
         <div class="influencer-kpi-grid">
           ${kpis.map((item) => `
@@ -3376,7 +3258,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             </ul>
             <p class="account-card__note">${profile.hasRealEmail ? 'Email is your account identity and cannot be changed here.' : 'Add your email to receive order updates and receipts.'}</p>
           `}
-          ${state.accountProfileMessage ? `<p class="account-success-message ${state.accountProfileIsError ? 'account-error-message' : ''}" style="${state.accountProfileIsError ? 'color:#dc2626;' : ''}">${escapeHtml(state.accountProfileMessage)}</p>` : ''}
+          ${state.accountProfileMessage ? `<p class="account-success-message">${escapeHtml(state.accountProfileMessage)}</p>` : ''}
         </div>
       </section>
 
@@ -3447,9 +3329,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         ` : ''}
         ${filteredOrders.length ? `
           <div class="account-list account-order-list">
-            ${visibleOrders.map((order) => {
-              const isOrderPending = (String(order.status || '').toLowerCase() === 'pending' || String(order.paymentStatus || '').toLowerCase() === 'pending') && String(order.status || '').toLowerCase() !== 'cancelled';
-              return `
+            ${visibleOrders.map((order) => `
               <article class="account-list__item account-list__item--stacked account-order-card">
                 <div class="account-list__row">
                   <strong>${escapeHtml(order.orderNumber || `Order #${order.id}`)}</strong>
@@ -3467,18 +3347,12 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
                 ${(order.influencerCoupon || order.couponCode || order.coupon_code) ? `<p class="account-order-coupon"><span>Coupon applied</span><strong>${escapeHtml(order.influencerCoupon || order.couponCode || order.coupon_code)}</strong></p>` : ''}
                 <div class="account-item-actions account-item-actions--inline account-order-actions">
                   <button type="button" data-account-action="view-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="View details for ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('eye')}<span>View Details</span></button>
-                  ${isOrderPending ? `
-                    <button type="button" data-account-action="proceed-checkout" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Proceed to checkout for ${escapeHtml(order.orderNumber || `Order #${order.id}`)}"><span style="color: var(--primary, #0f172a); font-weight: 600;">Proceed to Checkout</span></button>
-                    <button type="button" data-account-action="cancel-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Cancel ${escapeHtml(order.orderNumber || `Order #${order.id}`)}" style="color: #dc2626;">Cancel</button>
-                  ` : `
-                    <button type="button" data-account-action="track-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Track ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('truck')}<span>Track Order</span></button>
-                    <button type="button" data-account-action="invoice-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Open invoice for ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('document')}<span>Invoice</span></button>
-                    ${canCancelMerchOrder(order) ? `<button type="button" data-account-action="cancel-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Cancel ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">Cancel Order</button>` : ''}
-                  `}
+                  <button type="button" data-account-action="track-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Track ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('truck')}<span>Track Order</span></button>
+                  <button type="button" data-account-action="invoice-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Open invoice for ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('document')}<span>Invoice</span></button>
+                  ${canCancelMerchOrder(order) ? `<button type="button" data-account-action="cancel-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Cancel ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">Cancel Order</button>` : ''}
                 </div>
               </article>
-            `;
-            }).join('')}
+            `).join('')}
           </div>
           ${hasActiveOrderFilter && filteredOrders.length > visibleOrders.length ? `<p class="account-order-filter__summary">Showing ${visibleOrders.length} of ${filteredOrders.length} matching orders.</p>` : ''}
         ` : orders.length ? `
@@ -3729,133 +3603,15 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       showCheckoutNotice('Cancellation unavailable', 'This order has already been shipped or completed.', { variant: 'error' });
       return;
     }
-    const isPending = (String(order.status || '').toLowerCase() === 'pending' || String(order.paymentStatus || '').toLowerCase() === 'pending') && String(order.status || '').toLowerCase() !== 'cancelled';
-    const confirmPrompt = isPending
-      ? `Cancel ${order.orderNumber || `Order #${order.id}`}? This order will be removed from your orders.`
-      : `Cancel ${order.orderNumber || `Order #${order.id}`}? No refund.`;
-    if (!window.confirm(confirmPrompt)) return;
+    if (!window.confirm(`Cancel ${order.orderNumber || `Order #${order.id}`}? Any payment will be refunded.`)) return;
     try {
       const result = await api(`/api/merch/orders/${encodeURIComponent(order.id)}/cancel`, { method: 'POST' });
-      if (result?.removed || isPending) {
-        state.merchOrders = (Array.isArray(state.merchOrders) ? state.merchOrders : []).filter((item) => String(item.id) !== String(order.id));
-        renderAccountDrawer();
-        showCheckoutNotice('Order cancelled', `${order.orderNumber || `Order #${order.id}`} was cancelled and removed.`);
-      } else {
-        state.merchOrders = state.merchOrders.map((item) => String(item.id) === String(order.id) ? (result.order || { ...order, status: 'cancelled', paymentStatus: order.paymentStatus }) : item);
-        renderAccountDrawer();
-        showCheckoutNotice('Order cancelled', `${order.orderNumber || `Order #${order.id}`} was cancelled successfully.`);
-      }
+      state.merchOrders = state.merchOrders.map((item) => String(item.id) === String(order.id) ? (result.order || { ...order, status: 'cancelled', paymentStatus: 'refunded' }) : item);
+      renderAccountDrawer();
+      showCheckoutNotice('Order cancelled', `${order.orderNumber || `Order #${order.id}`} was cancelled successfully.`);
     } catch (error) {
       showCheckoutNotice('Cancellation unavailable', error.message || 'Unable to cancel this order.', { variant: 'error' });
     }
-  }
-
-  async function proceedToCheckoutFromOrder(order) {
-    if (!order) return;
-    closeMerchModal();
-    if (state.accountDrawerOpen) closeAccountDrawer();
-
-    const items = Array.isArray(order.items) ? order.items : [];
-    if (!items.length) {
-      showCheckoutNotice('Order items unavailable', 'Unable to retrieve items for this order.', { variant: 'error' });
-      return;
-    }
-
-    const restoredCart = [];
-    for (const item of items) {
-      const variantId = Number(item.variantId || item.variant_id || 0);
-      let matchedProduct = null;
-      let matchedVariant = null;
-      if (variantId > 0 && Array.isArray(state.products)) {
-        for (const p of state.products) {
-          const v = (p.variants || []).find((vEntry) => Number(vEntry.id) === variantId);
-          if (v) {
-            matchedProduct = p;
-            matchedVariant = v;
-            break;
-          }
-        }
-      }
-      if (matchedProduct && matchedVariant) {
-        restoredCart.push({
-          variantId: matchedVariant.id,
-          productId: matchedProduct.id,
-          productName: matchedProduct.name,
-          variantLabel: [matchedVariant.size, matchedVariant.color].filter(Boolean).join(' / ') || item.variantLabel || '',
-          price: Number(matchedVariant.price || item.unitPrice || item.price || 0),
-          originalPrice: null,
-          discountLabel: null,
-          offerName: null,
-          quantity: Math.max(1, Number(item.quantity || item.qty || 1)),
-          image: getVariantImageUrl(matchedVariant, matchedProduct) || getItemImageForOrderModal(item),
-          sku: matchedVariant.sku || item.sku || '',
-        });
-      } else {
-        restoredCart.push({
-          variantId: variantId || Number(item.id || 0),
-          productId: item.productId || null,
-          productName: item.productName || item.name || 'Product',
-          variantLabel: item.variantLabel || '',
-          price: Number(item.unitPrice || item.price || 0),
-          originalPrice: null,
-          discountLabel: null,
-          offerName: null,
-          quantity: Math.max(1, Number(item.quantity || item.qty || 1)),
-          image: getItemImageForOrderModal(item),
-          sku: item.sku || '',
-        });
-      }
-    }
-
-    if (restoredCart.length > 0) {
-      state.cart = restoredCart;
-      saveCart();
-      syncCartToBackend(state.cart);
-      renderCartBadge();
-    }
-
-    const couponCode = order.influencerCoupon || order.couponCode || order.coupon_code || '';
-    if (couponCode) {
-      state.merchCouponCode = couponCode;
-      state.merchCouponPreview = { code: couponCode };
-    }
-
-    const addressData = parseOrderModalAddress(order.shippingAddress, order.customerName, order.customerPhone);
-    let checkoutAddress = null;
-    if (addressData) {
-      const lineParts = Array.isArray(addressData.lines) ? addressData.lines : [];
-      checkoutAddress = {
-        recipientName: addressData.name || '',
-        phone: addressData.phone || '',
-        line1: lineParts[0] || '',
-        line2: lineParts.slice(1, -1).join(', ') || '',
-        city: '',
-        state: '',
-        postalCode: '',
-        country: 'India',
-      };
-      if (typeof order.shippingAddress === 'string' && order.shippingAddress.trim().startsWith('{')) {
-        try {
-          const parsedRaw = JSON.parse(order.shippingAddress);
-          checkoutAddress.line1 = parsedRaw.line1 || checkoutAddress.line1;
-          checkoutAddress.line2 = parsedRaw.line2 || checkoutAddress.line2;
-          checkoutAddress.city = parsedRaw.city || '';
-          checkoutAddress.state = parsedRaw.state || '';
-          checkoutAddress.postalCode = parsedRaw.postalCode || parsedRaw.postal_code || '';
-          checkoutAddress.country = parsedRaw.country || 'India';
-        } catch {}
-      } else if (typeof order.shippingAddress === 'object' && order.shippingAddress !== null) {
-        checkoutAddress.line1 = order.shippingAddress.line1 || checkoutAddress.line1;
-        checkoutAddress.line2 = order.shippingAddress.line2 || checkoutAddress.line2;
-        checkoutAddress.city = order.shippingAddress.city || '';
-        checkoutAddress.state = order.shippingAddress.state || '';
-        checkoutAddress.postalCode = order.shippingAddress.postalCode || order.shippingAddress.postal_code || '';
-        checkoutAddress.country = order.shippingAddress.country || 'India';
-      }
-    }
-
-    const customer = getAuthenticatedCheckoutCustomer(checkoutAddress);
-    showCheckoutPage(customer, checkoutAddress ? serializeAddress(checkoutAddress) : null);
   }
 
   function handleAccountOrderFilterSubmit(event) {
@@ -4090,12 +3846,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       </div>
     `;
 
-    const isOrderPending = (statusKey === 'pending' || paymentStatusKey === 'pending') && statusKey !== 'cancelled';
-
-    const footerHtml = isOrderPending ? `
-      <button type="button" class="btn btn-outline" style="color: #dc2626; border-color: #fca5a5;" data-order-modal-action="cancel" data-order-id="${escapeHtml(String(order.id || ''))}">Cancel</button>
-      <button type="button" class="btn btn-primary" data-order-modal-action="proceed-checkout" data-order-id="${escapeHtml(String(order.id || ''))}">Proceed to Checkout</button>
-    ` : `
+    const footerHtml = `
       ${canCancelMerchOrder(order) ? `<button type="button" class="btn btn-outline" style="color: #dc2626; border-color: #fca5a5;" data-order-modal-action="cancel" data-order-id="${escapeHtml(String(order.id || ''))}">Cancel Order</button>` : ''}
       <button type="button" class="btn btn-outline" data-order-modal-action="invoice" data-order-id="${escapeHtml(String(order.id || ''))}">Invoice</button>
       <button type="button" class="btn btn-primary" data-order-modal-action="track" data-order-id="${escapeHtml(String(order.id || ''))}">Track Order</button>
@@ -4112,10 +3863,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     modal.querySelector('[data-order-modal-action="cancel"]')?.addEventListener('click', async () => {
       closeMerchModal();
       await cancelMerchOrder(order);
-    });
-
-    modal.querySelector('[data-order-modal-action="proceed-checkout"]')?.addEventListener('click', async () => {
-      await proceedToCheckoutFromOrder(order);
     });
 
     modal.querySelector('[data-order-modal-action="invoice"]')?.addEventListener('click', async () => {
@@ -4221,19 +3968,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       return;
     }
 
-    if (action === 'proceed-checkout') {
-      const orderId = button.dataset.orderId;
-      const order = getOrderById(orderId);
-      if (order) {
-        await proceedToCheckoutFromOrder(order);
-      } else {
-        api(`/api/merch/orders/${encodeURIComponent(orderId)}/tracking`)
-          .then((res) => res?.order && proceedToCheckoutFromOrder(res.order))
-          .catch(() => showCheckoutNotice('Order unavailable', 'Could not open checkout for this order.', { variant: 'error' }));
-      }
-      return;
-    }
-
     if (action === 'cancel-order') {
       await cancelMerchOrder(getOrderById(button.dataset.orderId));
       return;
@@ -4284,20 +4018,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         showCheckoutNotice('Copied', `${code} copied to clipboard.`);
       } catch {
         showCheckoutNotice('Copy failed', 'Unable to copy the coupon code right now.', { variant: 'error' });
-      }
-      return;
-    }
-
-    if (action === 'copy-influencer-link') {
-      const url = String(button.dataset.campaignUrl || '').trim();
-      if (!url) return;
-      try {
-        if (navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(url);
-        }
-        showCheckoutNotice('Copied', `Story link copied to clipboard.`);
-      } catch {
-        prompt('Copy your Instagram story link:', url);
       }
       return;
     }
@@ -4440,10 +4160,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       }
       state.accountProfileEditing = false;
       state.accountProfileMessage = 'Profile saved.';
-      state.accountProfileIsError = false;
     } catch (err) {
       state.accountProfileMessage = err.message || 'Unable to update profile.';
-      state.accountProfileIsError = true;
     }
 
     renderAccountTrigger();
@@ -4772,8 +4490,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         : (isHoodie || isHoodieCombo
           ? HOODIE_CARD_IMAGE
           : (product.images?.[0] || product.imageUrl || getProductFallbackImage(product)));
-      const cardSizes = displayVariant?.size ? [displayVariant.size] : [];
-      const cardColors = displayVariant?.color ? [displayVariant.color] : [];
+      const cardSizes = [...new Set((product.variants || []).map((variant) => variant.size).filter(Boolean))];
+      const cardColors = [...new Set((product.variants || []).map((variant) => variant.color).filter(Boolean))];
       const cardSpecifications = Object.entries(getProductSpecifications(product, displayVariant))
         .filter(([label, value]) => String(label).trim() && String(value).trim())
         .slice(0, 2);
@@ -4950,8 +4668,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     document.querySelector('.merch-categories').hidden = false;
     const _shopOffersSection2 = document.getElementById('shopOffersSection');
     if (_shopOffersSection2) _shopOffersSection2.hidden = state.offers.length === 0;
-    if (window.location.hash === '#booking-confirmation' || window.location.hash === '#checkout' || getTrackingOrderIdFromHash() || window.location.search) {
-      history.replaceState(null, '', window.location.pathname);
+    if (window.location.hash === '#booking-confirmation' || window.location.hash === '#checkout' || getTrackingOrderIdFromHash()) {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
     }
   }
 
@@ -5270,8 +4988,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     els.searchResults.innerHTML = results.map(p => `
       <div class="search-result-item" data-product-id="${p.id}" style="
         display: flex; gap: 12px; padding: 12px; cursor: pointer; border-bottom: 1px solid var(--border);
-        border-radius: 8px; transition: background 0.2s; touch-action: manipulation;
-      ">
+        border-radius: 8px; transition: background 0.2s;
+      " onmouseover="this.style.background='rgba(0,0,0,0.03)'" onmouseout="this.style.background='transparent'">
         <img src="${escapeHtml(p.images?.[0] || p.imageUrl || FALLBACK_PRODUCT_IMAGE)}" alt="" style="width: 48px; height: 48px; border-radius: 6px; object-fit: cover;" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
         <div>
           <p style="font-weight: 600; font-size: 14px; margin: 0 0 2px;">${escapeHtml(p.name)}</p>
@@ -5675,66 +5393,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     `;
   }
 
-  function renderCheckoutRecommendations() {
-    if (!state.products || !state.products.length) return '';
-
-    const cartProductIds = new Set(state.cart.map((item) => Number(item.productId)));
-    const candidates = state.products.filter((product) => {
-      if (cartProductIds.has(Number(product.id))) return false;
-      return (product.variants || []).some((v) => Number(v.stock || 0) > 0);
-    });
-
-    if (!candidates.length) return '';
-
-    const recommendations = candidates.slice(0, 6);
-
-    return `
-      <div class="checkout-recommendations" aria-label="Explore more products">
-        <div class="checkout-recommendations__header">
-          <div class="checkout-recommendations__title-wrap">
-            <span class="checkout-recommendations__title">Best offers</span>
-            <span class="checkout-recommendations__sub">Explore more</span>
-          </div>
-          <div class="checkout-recommendations__nav">
-            <button type="button" class="checkout-rec-nav checkout-rec-nav--prev" aria-label="Previous items" data-action="rec-scroll-prev" hidden>‹</button>
-            <button type="button" class="checkout-rec-nav checkout-rec-nav--next" aria-label="Next items" data-action="rec-scroll-next" ${recommendations.length > 2 ? '' : 'hidden'}>›</button>
-          </div>
-        </div>
-        <div class="checkout-recommendations__scroll-wrap">
-          <div class="checkout-recommendations__track" id="checkoutRecTrack">
-            ${recommendations.map((product) => {
-              const variant = product.variants.find((v) => Number(v.stock || 0) > 0) || product.variants[0];
-              const offerInfo = variant ? getVariantOfferDetails(variant, product) : null;
-              const effectivePrice = offerInfo ? offerInfo.offerPrice : Number(variant?.price || product.price || 0);
-              const originalPrice = offerInfo ? offerInfo.originalPrice : (product.basePrice && product.basePrice > effectivePrice ? product.basePrice : null);
-              const discountLabel = offerInfo?.discountLabel || (originalPrice && originalPrice > effectivePrice ? `${Math.round(((originalPrice - effectivePrice) / originalPrice) * 100)}% OFF` : '');
-              const imageUrl = variant?.imageUrl || product.imageUrl || product.image || (Array.isArray(product.images) && product.images[0]) || FALLBACK_PRODUCT_IMAGE;
-
-              return `
-                <div class="checkout-rec-card">
-                  <div class="checkout-rec-card__image-box">
-                    ${discountLabel ? `<span class="checkout-rec-card__badge">${escapeHtml(discountLabel)}</span>` : ''}
-                    <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(product.name)}" loading="lazy" />
-                  </div>
-                  <div class="checkout-rec-card__body">
-                    <strong class="checkout-rec-card__name" title="${escapeHtml(product.name)}">${escapeHtml(product.name)}</strong>
-                    <div class="checkout-rec-card__pricing">
-                      ${originalPrice && originalPrice > effectivePrice ? `<span class="checkout-rec-card__original">${formatCheckoutMoney(originalPrice)}</span>` : ''}
-                      <span class="checkout-rec-card__price">${formatCheckoutMoney(effectivePrice)}</span>
-                    </div>
-                    <button type="button" class="checkout-rec-card__add-btn" data-checkout-add-variant="${variant.id}" data-checkout-add-product="${product.id}" aria-label="Add ${escapeHtml(product.name)} to cart">
-                      + ADD
-                    </button>
-                  </div>
-                </div>
-              `;
-            }).join('')}
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
   function renderCheckoutSummary() {
     const totals = getCheckoutTotals();
     const hasShippingAddress = Boolean(state.checkoutDraft?.line1 && state.checkoutDraft?.city && state.checkoutDraft?.state && state.checkoutDraft?.postalCode);
@@ -5768,21 +5426,13 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         </div>
 
         <div class="shopify-coupon">
-          <div class="shopify-coupon__row">
-            <label class="shopify-coupon__field">
-              <span aria-hidden="true">
-                <svg viewBox="0 0 24 24"><path d="m20 12-8 8-9-9V3h8l9 9Z"/><circle cx="7.5" cy="7.5" r="1.2"/></svg>
-              </span>
-              <input id="checkoutCouponCode" value="${escapeHtml(state.merchCouponCode || '')}" placeholder="Enter coupon code" autocomplete="off" aria-label="Coupon code" />
-            </label>
-            <div class="shopify-coupon__actions">
-              <button id="checkoutCouponApplyBtn" class="shopify-coupon__apply" type="button" ${state.merchCouponLoading ? 'disabled' : ''}>${state.merchCouponLoading ? 'APPLYING' : 'APPLY'}</button>
-              ${state.merchCouponPreview ? `<button id="checkoutCouponRemoveBtn" class="shopify-coupon__remove" type="button" aria-label="Remove coupon">✕ REMOVE</button>` : ''}
-            </div>
-          </div>
-          <div class="shopify-coupon__message${state.merchCouponError ? ' is-error' : ''}" ${state.merchCouponPreview || state.merchCouponError ? '' : 'hidden'}>
-            ${state.merchCouponPreview ? `✓ ${escapeHtml(state.merchCouponPreview.code || state.merchCouponCode)} applied — ${escapeHtml(getCouponDiscountLabel(state.availableCoupons.find((coupon) => coupon.code === state.merchCouponPreview.code) || state.merchCouponPreview))}` : escapeHtml(state.merchCouponError || '')}
-          </div>
+          <label class="shopify-coupon__field">
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="m20 12-8 8-9-9V3h8l9 9Z"/><circle cx="7.5" cy="7.5" r="1.2"/></svg>
+            </span>
+            <input id="checkoutCouponCode" value="${escapeHtml(state.merchCouponCode || '')}" placeholder="Enter coupon code" autocomplete="off" aria-label="Coupon code" />
+          </label>
+          <button id="checkoutCouponApplyBtn" class="shopify-coupon__apply" type="button" ${state.merchCouponLoading ? 'disabled' : ''}>${state.merchCouponLoading ? 'APPLYING' : 'APPLY'}</button>
           ${state.availableCoupons.length ? `<div class="checkout-coupon-offers" aria-label="Available coupons">
             <p class="checkout-coupon-offers__title">Available coupons</p>
             ${state.availableCoupons.filter(isPublicMerchCoupon).map((coupon) => `
@@ -5792,15 +5442,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
               </button>
             `).join('')}
           </div>` : ''}
-        </div>
-
-        ${renderCheckoutRecommendations()}
-
-        <div class="checkout-currency-selector" aria-label="Select currency">
-          <span class="checkout-currency-label">Currency</span>
-          <div class="currency-toggle-group">
-            <button type="button" class="currency-toggle-btn ${state.currency === 'INR' ? 'is-active' : ''}" data-currency="INR">₹ INR</button>
-            <button type="button" class="currency-toggle-btn ${state.currency === 'USD' ? 'is-active' : ''}" data-currency="USD">$ USD</button>
+          ${state.merchCouponPreview ? `<button id="checkoutCouponRemoveBtn" class="shopify-coupon__apply" type="button">REMOVE</button>` : ''}
+          <div class="shopify-coupon__message${state.merchCouponError ? ' is-error' : ''}" ${state.merchCouponPreview || state.merchCouponError ? '' : 'hidden'}>
+            ${state.merchCouponPreview ? `✓ ${escapeHtml(state.merchCouponPreview.code || state.merchCouponCode)} applied — ${escapeHtml(getCouponDiscountLabel(state.availableCoupons.find((coupon) => coupon.code === state.merchCouponPreview.code) || state.merchCouponPreview))}` : escapeHtml(state.merchCouponError || '')}
           </div>
         </div>
 
@@ -5813,8 +5457,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
         <div class="shopify-total">
           <span>Total</span>
-          <strong><small>${state.currency}</small> ${formatCheckoutMoney(totals.total)}</strong>
-          <p>${state.currency === 'USD' ? `Approx. ${formatCheckoutMoney(totals.total)} USD · Base ₹${Number(totals.total).toLocaleString('en-IN')}` : `Including ${formatCheckoutMoney(totals.gstIncluded)} in taxes`}</p>
+          <strong><small>INR</small> ${formatCheckoutMoney(totals.total)}</strong>
+          <p>Including ${formatCheckoutMoney(totals.gstIncluded)} in taxes</p>
         </div>
 
         <div class="shopify-trust">
@@ -5845,7 +5489,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           <section class="shopify-section shopify-section--contact">
             <div class="shopify-section__head">
               <h1 id="checkoutPageTitle">Contact</h1>
-              ${Boolean(state.currentUser || state.merchProfile?.id) ? '' : '<p>Already have an account? <a href="/merch/auth.html">Sign in</a></p>'}
+              <p>Already have an account? <a href="/merch/auth.html">Sign in</a></p>
             </div>
             ${renderCheckoutField({ name: 'email', label: 'Email', value: draft.email, type: 'email', placeholder: '', autocomplete: 'email', wide: true, icon: mailIcon, required: false })}
             <label class="shopify-check"><input name="emailOffers" type="checkbox" ${draft.emailOffers ? 'checked' : ''} /><span>Email me with news and offers</span></label>
@@ -5884,15 +5528,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             </label>
           </section>
 
-          <div class="shopify-checkout-actions" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:20px;">
-            <button class="shopify-pay-button" type="submit" style="flex:1;min-width:200px;" ${state.checkoutSubmitting ? 'disabled' : ''}>
-              <span>${state.checkoutSubmitting ? 'PROCESSING...' : 'CONTINUE TO PAYMENT'}</span>
-              <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
-            </button>
-            <a href="/merch/" class="shopify-continue-button" data-action="continue-shopping">
-              CONTINUE SHOPPING
-            </a>
-          </div>
+          <button class="shopify-pay-button" type="submit" ${state.checkoutSubmitting ? 'disabled' : ''}>
+            <span>${state.checkoutSubmitting ? 'PROCESSING...' : 'CONTINUE TO PAYMENT'}</span>
+            <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+          </button>
         </form>
         ${renderCheckoutSummary()}
       </div>
@@ -5901,14 +5540,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   function showCheckoutPage(customer = null, address = null) {
-    if (state.authResolved && !state.cart.length) {
+    if (!state.cart.length) {
       showShop();
       return;
-    }
-    if (!state.products || !state.products.length) {
-      loadMerchProducts().then(() => {
-        if (state.currentView === 'checkout') renderCheckoutPage();
-      });
     }
     if (customer || address || !state.checkoutDraft) {
       state.checkoutDraft = buildCheckoutDraft(customer || getAuthenticatedCheckoutCustomer(), address || serializeAddress(getDefaultAddress()));
@@ -5944,17 +5578,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       state.checkoutDraft = getCheckoutDraftFromForm(form);
       renderCheckoutPage();
     });
-    els.checkoutPage?.querySelectorAll('.currency-toggle-btn').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        const curr = btn.dataset.currency;
-        if (curr && (curr === 'INR' || curr === 'USD')) {
-          state.currency = curr;
-          try { localStorage.setItem('h2_currency', curr); } catch {}
-          renderCheckoutPage();
-        }
-      });
-    });
     form.addEventListener('submit', handleCheckoutPageSubmit);
     els.checkoutPage?.querySelector('#checkoutCouponApplyBtn')?.addEventListener('click', applyMerchCouponFromCheckout);
     els.checkoutPage?.querySelector('#checkoutCouponRemoveBtn')?.addEventListener('click', () => {
@@ -5976,62 +5599,16 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       });
     });
     els.checkoutPage?.querySelectorAll('[data-checkout-remove-variant]').forEach((button) => {
-      button.addEventListener('click', async () => {
+      button.addEventListener('click', () => {
         const variantId = Number(button.dataset.checkoutRemoveVariant);
-        const hadCoupon = Boolean(state.merchCouponCode);
-        removeFromCart(variantId, { preserveCoupon: hadCoupon });
+        removeFromCart(variantId);
         if (!state.cart.length) {
           showShop();
         } else {
-          if (hadCoupon) {
-            await applyMerchCouponFromCart({ silent: true });
-          }
           renderCheckoutPage();
         }
       });
     });
-    els.checkoutPage?.querySelectorAll('[data-checkout-add-variant]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        const variantId = Number(button.dataset.checkoutAddVariant);
-        const productId = Number(button.dataset.checkoutAddProduct);
-        const product = (state.products || []).find((p) => Number(p.id) === productId);
-        if (!product || !variantId) return;
-
-        button.disabled = true;
-        button.textContent = 'ADDING...';
-
-        const hadCoupon = Boolean(state.merchCouponCode);
-        const added = addToCart(variantId, 1, product, { openDrawerAfterAdd: false, preserveCoupon: hadCoupon });
-        if (added) {
-          if (hadCoupon) {
-            await applyMerchCouponFromCart({ silent: true });
-          }
-          renderCheckoutPage();
-        } else {
-          button.disabled = false;
-          button.textContent = '+ ADD';
-        }
-      });
-    });
-
-    const track = els.checkoutPage?.querySelector('#checkoutRecTrack');
-    const prevBtn = els.checkoutPage?.querySelector('[data-action="rec-scroll-prev"]');
-    const nextBtn = els.checkoutPage?.querySelector('[data-action="rec-scroll-next"]');
-    if (track && (prevBtn || nextBtn)) {
-      const updateNav = () => {
-        if (prevBtn) prevBtn.hidden = track.scrollLeft <= 5;
-        if (nextBtn) nextBtn.hidden = track.scrollLeft + track.clientWidth >= track.scrollWidth - 5;
-      };
-      track.addEventListener('scroll', updateNav, { passive: true });
-      updateNav();
-
-      prevBtn?.addEventListener('click', () => {
-        track.scrollBy({ left: -180, behavior: 'smooth' });
-      });
-      nextBtn?.addEventListener('click', () => {
-        track.scrollBy({ left: 180, behavior: 'smooth' });
-      });
-    }
   }
 
   async function applyMerchCouponFromCheckout() {
@@ -6354,15 +5931,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       }
     });
 
-    document.addEventListener('click', (event) => {
-      const continueBtn = event.target.closest('[data-action="continue-shopping"]');
-      if (continueBtn) {
-        event.preventDefault();
-        showShop();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      }
-    });
-
     window.addEventListener('hashchange', () => {
       if (!routeFromLocation()) {
         showShop();
@@ -6396,14 +5964,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   async function startRazorpayCheckout(customer, address) {
     const items = state.cart.map(item => ({ variantId: item.variantId, quantity: item.quantity }));
-    const couponCode = state.merchCouponPreview?.code ? normalizeCouponCode(state.merchCouponPreview.code) : '';
+      const couponCode = normalizeCouponCode(state.merchCouponCode || els.cartCouponCode?.value || '');
 
     try {
       const res = await fetch(buildApiUrl('/api/merch/checkout'), {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items, customer, address, couponCode, bundleCode: state.merchBundleCode, campaignSlug: state.campaignAttribution?.slug || '', currency: state.currency || 'INR' }),
+        body: JSON.stringify({ items, customer, address, couponCode, bundleCode: state.merchBundleCode }),
       });
 
       if (!res.ok) {
@@ -6519,13 +6087,11 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   async function loadCustomerContext() {
     const adminTrackingRequest = isAdminTrackingRequest();
-    const urlParams = new URLSearchParams(window.location.search);
-    const isCampaignOrCheckout = Boolean(urlParams.get('campaign') || urlParams.get('c') || window.location.hash === '#checkout');
     const previousUserId = state.cartOwnerId;
     try {
       const authResult = await api('/api/auth/me');
       state.currentUser = authResult.user || null;
-      if (state.currentUser && String(state.currentUser.role || '').toLowerCase() === 'admin' && !adminTrackingRequest && !isCampaignOrCheckout) {
+      if (state.currentUser && String(state.currentUser.role || '').toLowerCase() === 'admin' && !adminTrackingRequest) {
         window.location.replace('/merch/admin/index.html');
         return;
       }
@@ -6732,113 +6298,21 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     });
   }
 
-  async function resolveCampaignAttribution() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const paramSlug = urlParams.get('campaign') || urlParams.get('c');
-
-    let attribution = null;
-    const cookieMatch = document.cookie.match(/(?:^|;\s*)h2_campaign_attribution=([^;]+)/);
-    if (cookieMatch) {
-      try {
-        attribution = JSON.parse(decodeURIComponent(cookieMatch[1]));
-      } catch {}
-    }
-
-    if (paramSlug) {
-      try {
-        const res = await api(`/api/merch/campaigns/resolve?slug=${encodeURIComponent(paramSlug)}`);
-        if (res?.campaign) {
-          attribution = {
-            campaignId: res.campaign.id,
-            slug: res.campaign.slug,
-            influencerId: res.campaign.influencerId,
-            couponCode: res.campaign.couponCode,
-            targetProductId: Number(res.campaign.targetProductId || 11),
-            targetVariantId: Number(res.campaign.targetVariantId || 569),
-            timestamp: Date.now(),
-          };
-          document.cookie = `h2_campaign_attribution=${encodeURIComponent(JSON.stringify(attribution))}; max-age=${30 * 24 * 60 * 60}; path=/; SameSite=Lax`;
-        }
-      } catch (err) {
-        console.warn('[Campaign resolve error]:', err?.message || err);
-      }
-    }
-
-    if (!attribution) return;
-
-    state.campaignAttribution = attribution;
-
-    // Check if target bottle should be seeded or updated to the campaign's target variant
-    const isTargetingCheckout = window.location.hash === '#checkout' || Boolean(paramSlug);
-    if (isTargetingCheckout) {
-      const targetProductId = Number(attribution.targetProductId || 11);
-      const targetVariantId = Number(attribution.targetVariantId || 569);
-      const bottleProduct = (state.products || []).find((p) => Number(p.id) === targetProductId)
-        || (state.products || []).find((p) => p.slug === 'h2-water-bottle')
-        || (state.products || []).find((p) => String(p.name || '').toLowerCase().includes('bottle'));
-
-      if (bottleProduct && Array.isArray(bottleProduct.variants) && bottleProduct.variants.length) {
-        const targetVariant = bottleProduct.variants.find((v) => Number(v.id) === targetVariantId)
-          || bottleProduct.variants.find((v) => Number(v.stock || 0) > 0)
-          || bottleProduct.variants[0];
-
-        if (targetVariant) {
-          const bottleIndex = (state.cart || []).findIndex((item) => Number(item.productId) === Number(bottleProduct.id));
-
-          if (bottleIndex >= 0) {
-            const currentItem = state.cart[bottleIndex];
-            // If user arrived via campaign link and current bottle variant is different, swap to the campaign variant
-            if (Number(currentItem.variantId) !== Number(targetVariant.id) && Boolean(paramSlug)) {
-              state.cart.splice(bottleIndex, 1);
-              addToCart(targetVariant.id, currentItem.quantity || 1, bottleProduct, { openDrawerAfterAdd: false, preserveCoupon: true });
-            }
-          } else if (!state.cart || state.cart.length === 0) {
-            addToCart(targetVariant.id, 1, bottleProduct, { openDrawerAfterAdd: false, preserveCoupon: true });
-          }
-        }
-      }
-    }
-
-    // Auto-apply coupon from campaign if not already applied
-    if (attribution.couponCode) {
-      state.merchCouponCode = attribution.couponCode;
-      if (state.cart && state.cart.length > 0) {
-        await applyMerchCouponFromCart({ silent: true });
-      }
-    }
-
-    if (state.currentView === 'checkout') {
-      renderCheckoutPage();
-    }
-  }
-
-  async function loadCurrencyConfig() {
-    try {
-      const res = await fetch(buildApiUrl('/api/currency/config'));
-      if (res.ok) {
-        const cfg = await res.json();
-        if (cfg && cfg.inrPerUsd) {
-          state.currencyConfig = cfg;
-        }
-      }
-    } catch {}
-  }
-
   // ─── Initialize ───
-  async function init() {
+  function init() {
     cleanupLegacySharedCartStorage();
+    loadCart(null);
+    renderCartBadge();
+    renderProductGrid();
+    bindEvents();
+    routeFromLocation();
     setBodyAuthLoading(true);
     renderAccountTrigger();
-    await loadCustomerContext();
-    loadCart(state.currentUser);
-    renderCartBadge();
-    bindEvents();
-    await Promise.all([loadCurrencyConfig(), loadMerchProducts(), resolveCampaignAttribution()]);
-    renderProductGrid();
-    routeFromLocation();
+    loadMerchProducts();
     loadTrendingProducts();
     loadMerchOffers();
     loadMerchCoupons();
+    loadCustomerContext();
   }
 
   // Boot

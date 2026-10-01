@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -118,17 +118,7 @@
             </label>
             <label id="authMobileWrap" hidden>
               Mobile number
-              <div class="mobile-auth-number-row">
-                <select id="authMobileCountry" aria-label="Country code">
-                  <option value="+91">India (+91)</option>
-                  <option value="+1">United States / Canada (+1)</option>
-                  <option value="+44">United Kingdom (+44)</option>
-                  <option value="+971">UAE (+971)</option>
-                  <option value="+65">Singapore (+65)</option>
-                  <option value="+61">Australia (+61)</option>
-                </select>
-                <input id="authMobile" type="tel" inputmode="numeric" autocomplete="tel" maxlength="10" placeholder="10-digit mobile number" />
-              </div>
+              <input id="authMobile" type="tel" inputmode="tel" autocomplete="tel" placeholder="+91 98765 43210" />
             </label>
             <label id="authRoleWrap" hidden>
               Register as
@@ -178,14 +168,9 @@
                 <span class="mobile-auth-field-label">Mobile Number</span>
                 <div class="mobile-auth-number-row">
                   <select id="mobileAuthCountry" aria-label="Country code">
-                    <option value="+91">India (+91)</option>
-                    <option value="+1">United States / Canada (+1)</option>
-                    <option value="+44">United Kingdom (+44)</option>
-                    <option value="+971">UAE (+971)</option>
-                    <option value="+65">Singapore (+65)</option>
-                    <option value="+61">Australia (+61)</option>
+                    <option value="+91">+91</option>
                   </select>
-                  <input id="mobileAuthNumber" type="tel" inputmode="numeric" autocomplete="tel" maxlength="10" placeholder="10-digit mobile number" aria-label="Mobile number" />
+                  <input id="mobileAuthNumber" type="tel" inputmode="numeric" autocomplete="tel" maxlength="10" placeholder="98765 43210" aria-label="Mobile number" />
                 </div>
               </div>
               <button id="sendWhatsappOtpBtn" class="btn mobile-auth-send" type="button">
@@ -1813,25 +1798,14 @@
             
             <label>
               Phone Number *
-              <div class="mobile-auth-number-row">
-                <select id="guestCheckoutPhoneCountry" aria-label="Country code">
-                  <option value="+91">India (+91)</option>
-                  <option value="+1">United States / Canada (+1)</option>
-                  <option value="+44">United Kingdom (+44)</option>
-                  <option value="+971">UAE (+971)</option>
-                  <option value="+65">Singapore (+65)</option>
-                  <option value="+61">Australia (+61)</option>
-                </select>
-                <input 
-                  id="guestCheckoutPhone" 
-                  type="tel" 
-                  inputmode="numeric"
-                  autocomplete="tel"
-                  maxlength="10" 
-                  placeholder="10-digit mobile number"
-                  required
-                />
-              </div>
+              <input 
+                id="guestCheckoutPhone" 
+                type="tel" 
+                inputmode="numeric"
+                maxlength="10" 
+                placeholder="10-digit mobile number"
+                required
+              />
             </label>
             
             <p id="guestCheckoutError" class="form-error-message" hidden></p>
@@ -1842,14 +1816,6 @@
               We'll use your contact info to confirm your booking and send session reminders. 
               <a href="#" target="_blank">Privacy Policy</a>
             </small>
-          </div>
-
-          <div class="checkout-currency-selector" aria-label="Select currency">
-            <span class="checkout-currency-label">Currency</span>
-            <div class="currency-toggle-group">
-              <button type="button" class="currency-toggle-btn is-active" id="guestCurrencyInrBtn" data-currency="INR">₹ INR</button>
-              <button type="button" class="currency-toggle-btn" id="guestCurrencyUsdBtn" data-currency="USD">$ USD</button>
-            </div>
           </div>
 
           <div class="dialog-actions">
@@ -1910,7 +1876,7 @@
     </div>
 
     <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-    <script src="app.js?v=28"></script>
+    <script src="app.js?v=27"></script>
 
   </body>
 </html>
