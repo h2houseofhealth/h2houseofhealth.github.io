@@ -695,6 +695,18 @@
                 <input class="admin-input" name="paymentNote" type="text" placeholder="e.g. Commission payout for recent referral sales" />
               </label>
 
+              <div class="admin-mail-option-box admin-field--wide" style="margin-top:10px;background:#fff8f5;border:1px solid #fed7aa;border-radius:8px;padding:12px 14px;">
+                <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin:0;">
+                  <input type="checkbox" name="sendPaymentEmail" value="true" checked style="margin-top:3px;accent-color:#c2410c;" />
+                  <div>
+                    <strong style="color:#9a3412;font-size:13px;display:block;">✉️ Option of Mail: Send Notification to Influencer &amp; Admin</strong>
+                    <span style="font-size:12px;color:#7c2d12;display:block;line-height:1.45;margin-top:3px;">
+                      When selected, influencer (${escapeHtml(influencer.name)}) will receive the official payment mail regarding commission amount sent to influencer: <strong>${escapeHtml(influencer.name)}</strong>, and admin will receive the copy regarding commission amount paid to influencer: <strong>${escapeHtml(influencer.name)}</strong>.
+                    </span>
+                  </div>
+                </label>
+              </div>
+
               <label class="admin-check admin-field--wide" style="margin-top:10px;background:var(--admin-surface-subtle);padding:12px;border-radius:8px;border:1px solid var(--admin-border);">
                 <input type="checkbox" name="confirmPayment" required />
                 <span><strong>I confirm that this commission payment has been executed and verified.</strong> Upon submission, Commission Paid will be permanently locked and the official payment invoice/receipt will be generated and emailed to both the influencer and ${FIXED_ADMIN_EMAIL}.</span>
@@ -705,7 +717,7 @@
       `,
       footer: `
         <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button>
-        <button class="admin-btn admin-btn--primary" type="button" data-action="submit-commission-payment" data-id="${escapeHtml(influencer.id)}">Confirm Payment &amp; Send Invoice</button>
+        <button class="admin-btn admin-btn--primary" type="button" data-action="submit-commission-payment" data-id="${escapeHtml(influencer.id)}">✉️ Confirm Payment &amp; Send Mail</button>
       `,
     });
   }
@@ -720,6 +732,7 @@
     const refInput = form.querySelector('[name="referenceNumber"]');
     const noteInput = form.querySelector('[name="paymentNote"]');
     const confirmCheckbox = form.querySelector('[name="confirmPayment"]');
+    const sendEmailCheckbox = form.querySelector('[name="sendPaymentEmail"]');
 
     const influencerEmail = String(emailInput?.value || '').trim();
     const paymentAmount = Number(amountInput?.value || 0);
@@ -727,6 +740,7 @@
     const referenceNumber = String(refInput?.value || '').trim();
     const note = String(noteInput?.value || '').trim();
     const isConfirmed = Boolean(confirmCheckbox?.checked);
+    const sendPaymentEmail = sendEmailCheckbox ? Boolean(sendEmailCheckbox.checked) : true;
 
     if (!influencerEmail || !isValidInfluencerEmail(influencerEmail)) {
       toast('Invalid Influencer Email', 'Please enter a valid influencer email address. The invoice cannot be sent without it.', 'danger');
@@ -755,7 +769,7 @@
     const submitBtn = els.adminModalDialog.querySelector('[data-action="submit-commission-payment"]');
     if (submitBtn) {
       submitBtn.disabled = true;
-      submitBtn.textContent = 'Processing & Sending Invoice...';
+      submitBtn.textContent = 'Processing & Sending...';
     }
 
     const targetInfluencerId = Number(influencerId || form.dataset.influencerId);
@@ -763,6 +777,9 @@
       toast('Influencer ID missing', 'Unable to determine influencer for payment.', 'danger');
       return;
     }
+
+    const targetInfObj = state.influencers.find((item) => Number(item.id) === targetInfluencerId);
+    const influencerName = targetInfObj?.name || 'Influencer';
 
     try {
       const result = await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(targetInfluencerId)}/payments`, {
@@ -775,14 +792,15 @@
           referenceNumber,
           note,
           confirmed: true,
+          sendEmail: sendPaymentEmail,
         }),
       });
 
-      toast(
-        'Payment Confirmed',
-        `Payment recorded! Invoice ${result.invoiceNumber} emailed to ${influencerEmail} and ${FIXED_ADMIN_EMAIL}.`,
-        'success'
-      );
+      const confirmToastMsg = sendPaymentEmail
+        ? `Payment recorded! Email regarding commission amount sent to influencer: ${influencerName}, and admin copy delivered to ${FIXED_ADMIN_EMAIL}.`
+        : `Payment recorded! Invoice ${result.invoiceNumber} generated.`;
+
+      toast('Payment Confirmed', confirmToastMsg, 'success');
 
       await loadInfluencerData();
       await loadReportData();
@@ -793,12 +811,15 @@
         influencerEmail,
         adminEmail: FIXED_ADMIN_EMAIL,
         emailResults: result.emailResults,
+        influencerId: targetInfluencerId,
+        paymentId: result.payment?.id,
+        influencerName,
       });
     } catch (error) {
       toast('Payment Failed', error.message || 'Unable to record commission payment.', 'danger');
       if (submitBtn) {
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Confirm Payment & Send Invoice';
+        submitBtn.textContent = '✉️ Confirm Payment & Send Mail';
       }
     }
   }
@@ -1127,7 +1148,10 @@
                       <td><code>${escapeHtml(p.referenceNumber || 'N/A')}</code></td>
                       <td>${escapeHtml(p.influencerEmail || 'N/A')}</td>
                       <td>
-                        <button class="admin-btn admin-btn--soft admin-btn--sm" type="button" data-action="view-payment-invoice" data-influencer-id="${escapeHtml(influencer.id)}" data-payment-id="${escapeHtml(p.id)}">View Invoice</button>
+                        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                          <button class="admin-btn admin-btn--soft admin-btn--sm" type="button" data-action="view-payment-invoice" data-influencer-id="${escapeHtml(influencer.id)}" data-payment-id="${escapeHtml(p.id)}">View Invoice</button>
+                          <button class="admin-btn admin-btn--outline admin-btn--sm" type="button" data-action="send-commission-email" data-influencer-id="${escapeHtml(influencer.id)}" data-payment-id="${escapeHtml(p.id)}" data-influencer-name="${escapeHtml(influencer.name)}">✉️ Send Mail</button>
+                        </div>
                       </td>
                     </tr>
                   `).join('') : '<tr><td colspan="7"><p class="admin-table__muted">No commission payments recorded yet.</p></td></tr>'}
@@ -1183,11 +1207,15 @@
 
     try {
       const data = await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencerId)}/payments/${encodeURIComponent(paymentId)}/invoice`);
+      const targetInf = state.influencers.find((i) => Number(i.id) === Number(influencerId));
       renderInvoiceReceiptModal({
         invoiceHtml: data.invoiceHtml,
         invoiceNumber: data.invoiceNumber || 'H2-INV-COM',
         influencerEmail: data.payment?.influencerEmail || 'Influencer',
         adminEmail: FIXED_ADMIN_EMAIL,
+        influencerId,
+        paymentId,
+        influencerName: targetInf?.name || 'Influencer',
       });
     } catch (err) {
       toast('Invoice error', err.message || 'Unable to load invoice.', 'danger');
@@ -1195,7 +1223,7 @@
     }
   }
 
-  function renderInvoiceReceiptModal({ invoiceHtml, invoiceNumber, influencerEmail, adminEmail }) {
+  function renderInvoiceReceiptModal({ invoiceHtml, invoiceNumber, influencerEmail, adminEmail, influencerId, paymentId, influencerName }) {
     const blob = new Blob([invoiceHtml], { type: 'text/html' });
     const blobUrl = URL.createObjectURL(blob);
 
@@ -1207,20 +1235,59 @@
         <div class="admin-invoice-modal-content">
           <div style="background:#ecfdf5;border:1px solid #a7f3d0;padding:12px 16px;border-radius:8px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
             <div>
-              <p style="margin:0;font-size:13px;font-weight:700;color:#065f46;">✓ Payment Confirmed &amp; Invoices Dispatched</p>
-              <p style="margin:2px 0 0;font-size:12px;color:#047857;">Sent to Influencer: <strong>${escapeHtml(influencerEmail)}</strong> &bull; Admin Copy: <strong>${escapeHtml(adminEmail)}</strong></p>
+              <p style="margin:0;font-size:13px;font-weight:700;color:#065f46;">✓ Payment Recorded &amp; Invoice Generated</p>
+              <p style="margin:2px 0 0;font-size:12px;color:#047857;">Influencer: <strong>${escapeHtml(influencerEmail)}</strong> &bull; Admin Copy: <strong>${escapeHtml(adminEmail)}</strong></p>
             </div>
-            <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="print-invoice">Print / Save Invoice</button>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              ${influencerId && paymentId ? `
+                <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="send-commission-email" data-influencer-id="${escapeHtml(influencerId)}" data-payment-id="${escapeHtml(paymentId)}" data-influencer-name="${escapeHtml(influencerName || '')}">✉️ Send Mail</button>
+              ` : ''}
+              <button class="admin-btn admin-btn--soft admin-btn--sm" type="button" data-action="print-invoice">Print / Save Invoice</button>
+            </div>
           </div>
 
           <iframe class="admin-invoice-preview-frame" src="${blobUrl}" style="width:100%;height:520px;border:1px solid var(--admin-border);border-radius:8px;background:#f8fafc;" title="Invoice Preview"></iframe>
         </div>
       `,
       footer: `
-        <button class="admin-btn admin-btn--primary" type="button" data-action="print-invoice">Print / Save PDF</button>
+        ${influencerId && paymentId ? `
+          <button class="admin-btn admin-btn--primary" type="button" data-action="send-commission-email" data-influencer-id="${escapeHtml(influencerId)}" data-payment-id="${escapeHtml(paymentId)}" data-influencer-name="${escapeHtml(influencerName || '')}">✉️ Send Mail to Influencer &amp; Admin</button>
+        ` : ''}
+        <button class="admin-btn admin-btn--soft" type="button" data-action="print-invoice">Print / Save PDF</button>
         <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Done</button>
       `,
     });
+  }
+
+  async function handleSendCommissionEmail(influencerId, paymentId, targetBtn) {
+    if (!influencerId || !paymentId) {
+      toast('Error', 'Missing payment or influencer identifier.', 'danger');
+      return;
+    }
+    const origText = targetBtn ? targetBtn.textContent : '';
+    if (targetBtn) {
+      targetBtn.disabled = true;
+      targetBtn.textContent = 'Sending Mail...';
+    }
+    try {
+      const res = await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencerId)}/payments/${encodeURIComponent(paymentId)}/send-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const infName = targetBtn?.dataset?.influencerName || (state.influencers.find((i) => Number(i.id) === Number(influencerId))?.name) || 'Influencer';
+      toast(
+        'Mail Sent Successfully',
+        `Influencer received mail regarding commission amount sent to influencer: ${infName}, and admin copy delivered to ${FIXED_ADMIN_EMAIL}.`,
+        'success'
+      );
+    } catch (err) {
+      toast('Failed to Send Mail', err.message || 'Unable to dispatch commission payment email.', 'danger');
+    } finally {
+      if (targetBtn) {
+        targetBtn.disabled = false;
+        targetBtn.textContent = origText || '✉️ Send Mail';
+      }
+    }
   }
 
   function renderInfluencerActionLinks(influencer) {
@@ -8491,7 +8558,7 @@
       case 'pay-influencer-commission': {
         const targetInfluencer = influencer || state.influencers.find((item) => Number(item.id) === Number(target?.dataset?.id));
         if (targetInfluencer) {
-          renderCommissionCorrectionModal(targetInfluencer);
+          renderPayCommissionModal(targetInfluencer);
         }
         return;
       }
@@ -8542,6 +8609,12 @@
         if (influencerId && paymentId) {
           await viewPaymentInvoice(influencerId, paymentId);
         }
+        return;
+      }
+      case 'send-commission-email': {
+        const influencerId = target?.dataset?.influencerId || id;
+        const paymentId = target?.dataset?.paymentId;
+        await handleSendCommissionEmail(influencerId, paymentId, target);
         return;
       }
       case 'print-invoice': {
