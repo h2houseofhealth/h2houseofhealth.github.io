@@ -628,200 +628,11 @@
   }
 
   function renderPayCommissionModal(influencer) {
-    if (!influencer) return;
-    const stats = getInfluencerMonthStats(influencer);
-    const commissionEarned = Math.max(0, Number(stats.commission || 0));
-    const commissionPaid = Math.max(0, Number(influencer.paidCommission || 0));
-    const commissionBalance = Math.max(0, commissionEarned - commissionPaid);
-    const couponList = getInfluencerCouponRecords(influencer).map((c) => c.code).join(', ') || 'None';
-    const prefillEmail = String(influencer.email || '').trim();
-
-    openModal({
-      title: `Pay Commission: ${influencer.name}`,
-      subtitle: 'Influencer Commission Payout & Invoice',
-      size: 'lg',
-      body: `
-        <div class="admin-commission-pay-modal">
-          <div class="admin-grid admin-grid--stats" style="grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px;margin-bottom:16px;">
-            <article class="admin-stat"><p class="admin-stat__label">Commission Earned</p><p class="admin-stat__value">${money(commissionEarned)}</p></article>
-            <article class="admin-stat"><p class="admin-stat__label">Already Paid</p><p class="admin-stat__value">${money(commissionPaid)} <span style="font-size:10px;" class="admin-badge admin-badge--neutral">🔒 Locked</span></p></article>
-            <article class="admin-stat"><p class="admin-stat__label">Balance Due</p><p class="admin-stat__value" style="color:var(--admin-primary);">${money(commissionBalance)}</p></article>
-            <article class="admin-stat"><p class="admin-stat__label">Coupons</p><p class="admin-stat__value" style="font-size:13px;word-break:break-word;">${escapeHtml(couponList)}</p></article>
-          </div>
-
-          <form class="admin-form" id="commissionPaymentForm" data-influencer-id="${escapeHtml(influencer.id)}" onsubmit="return false;">
-            <div class="admin-form__grid">
-              <label class="admin-field admin-field--wide">
-                <span>Influencer Email <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
-                <input class="admin-input" name="influencerEmail" type="email" value="${escapeHtml(prefillEmail)}" placeholder="influencer@example.com" required />
-                <small class="admin-field__hint">Required. The official payment invoice and receipt will be emailed to this address upon confirmation.</small>
-              </label>
-
-              <label class="admin-field admin-field--wide">
-                <span>Business Admin Recipient (Fixed Copy)</span>
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <input class="admin-input" type="text" value="${FIXED_ADMIN_EMAIL}" readonly disabled style="background:var(--admin-surface-subtle);cursor:not-allowed;" />
-                  <span class="admin-badge admin-badge--neutral" style="font-size:11px;padding:6px 10px;white-space:nowrap;">Fixed Business Admin</span>
-                </div>
-                <small class="admin-field__hint">The admin invoice copy is permanently routed to ${FIXED_ADMIN_EMAIL} and cannot be altered.</small>
-              </label>
-
-              <label class="admin-field">
-                <span>Payment Amount (₹) <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
-                <input class="admin-input" name="paymentAmount" type="number" min="1" step="any" value="${commissionBalance > 0 ? (commissionBalance / 100) : ''}" placeholder="0.00" required />
-                <small class="admin-field__hint">Amount in Rupees (₹) to disburse now.</small>
-              </label>
-
-              <label class="admin-field">
-                <span>Payment Method <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
-                <select class="admin-input" name="paymentMethod">
-                  <option value="Bank Transfer (NEFT/RTGS/IMPS)">Bank Transfer (NEFT/RTGS/IMPS)</option>
-                  <option value="UPI / GPay / PhonePe">UPI / GPay / PhonePe</option>
-                  <option value="Razorpay Payout">Razorpay Payout</option>
-                  <option value="Cheque">Cheque</option>
-                  <option value="Cash">Cash</option>
-                  <option value="Other">Other</option>
-                </select>
-              </label>
-
-              <label class="admin-field admin-field--wide">
-                <span>Payment / Reference ID <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
-                <input class="admin-input" name="referenceNumber" type="text" placeholder="e.g. UTR12345678 or TXN-98765" required />
-                <small class="admin-field__hint">Bank UTR, UPI transaction ID, or payment gateway reference number.</small>
-              </label>
-
-              <label class="admin-field admin-field--wide">
-                <span>Payment Notes / Remarks</span>
-                <input class="admin-input" name="paymentNote" type="text" placeholder="e.g. Commission payout for recent referral sales" />
-              </label>
-
-              <div class="admin-mail-option-box admin-field--wide" style="margin-top:10px;background:#fff8f5;border:1px solid #fed7aa;border-radius:8px;padding:12px 14px;">
-                <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin:0;">
-                  <input type="checkbox" name="sendPaymentEmail" value="true" checked style="margin-top:3px;accent-color:#c2410c;" />
-                  <div>
-                    <strong style="color:#9a3412;font-size:13px;display:block;">✉️ Option of Mail: Send Notification to Influencer &amp; Admin</strong>
-                    <span style="font-size:12px;color:#7c2d12;display:block;line-height:1.45;margin-top:3px;">
-                      When selected, influencer (${escapeHtml(influencer.name)}) will receive the official payment mail regarding commission amount sent to influencer: <strong>${escapeHtml(influencer.name)}</strong>, and admin will receive the copy regarding commission amount paid to influencer: <strong>${escapeHtml(influencer.name)}</strong>.
-                    </span>
-                  </div>
-                </label>
-              </div>
-
-              <label class="admin-check admin-field--wide" style="margin-top:10px;background:var(--admin-surface-subtle);padding:12px;border-radius:8px;border:1px solid var(--admin-border);">
-                <input type="checkbox" name="confirmPayment" required />
-                <span><strong>I confirm that this commission payment has been executed and verified.</strong> Upon submission, Commission Paid will be permanently locked and the official payment invoice/receipt will be generated and emailed to both the influencer and ${FIXED_ADMIN_EMAIL}.</span>
-              </label>
-            </div>
-          </form>
-        </div>
-      `,
-      footer: `
-        <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button>
-        <button class="admin-btn admin-btn--primary" type="button" data-action="submit-commission-payment" data-id="${escapeHtml(influencer.id)}">✉️ Confirm Payment &amp; Send Mail</button>
-      `,
-    });
+    return renderCommissionCorrectionModal(influencer);
   }
 
   async function handlePayCommissionSubmit(influencerId) {
-    const form = document.getElementById('commissionPaymentForm');
-    if (!form) return;
-
-    const emailInput = form.querySelector('[name="influencerEmail"]');
-    const amountInput = form.querySelector('[name="paymentAmount"]');
-    const methodSelect = form.querySelector('[name="paymentMethod"]');
-    const refInput = form.querySelector('[name="referenceNumber"]');
-    const noteInput = form.querySelector('[name="paymentNote"]');
-    const confirmCheckbox = form.querySelector('[name="confirmPayment"]');
-    const sendEmailCheckbox = form.querySelector('[name="sendPaymentEmail"]');
-
-    const influencerEmail = String(emailInput?.value || '').trim();
-    const paymentAmount = Number(amountInput?.value || 0);
-    const paymentMethod = String(methodSelect?.value || 'Bank Transfer').trim();
-    const referenceNumber = String(refInput?.value || '').trim();
-    const note = String(noteInput?.value || '').trim();
-    const isConfirmed = Boolean(confirmCheckbox?.checked);
-    const sendPaymentEmail = sendEmailCheckbox ? Boolean(sendEmailCheckbox.checked) : true;
-
-    if (!influencerEmail || !isValidInfluencerEmail(influencerEmail)) {
-      toast('Invalid Influencer Email', 'Please enter a valid influencer email address. The invoice cannot be sent without it.', 'danger');
-      emailInput?.focus();
-      return;
-    }
-
-    if (!paymentAmount || paymentAmount <= 0) {
-      toast('Invalid Amount', 'Payment amount must be greater than 0.', 'warning');
-      amountInput?.focus();
-      return;
-    }
-
-    if (!referenceNumber) {
-      toast('Reference ID required', 'Please provide a payment reference number or transaction ID.', 'warning');
-      refInput?.focus();
-      return;
-    }
-
-    if (!isConfirmed) {
-      toast('Confirmation required', 'Please check the confirmation box to confirm this payment has been verified.', 'warning');
-      confirmCheckbox?.focus();
-      return;
-    }
-
-    const submitBtn = els.adminModalDialog.querySelector('[data-action="submit-commission-payment"]');
-    if (submitBtn) {
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Processing & Sending...';
-    }
-
-    const targetInfluencerId = Number(influencerId || form.dataset.influencerId);
-    if (!targetInfluencerId) {
-      toast('Influencer ID missing', 'Unable to determine influencer for payment.', 'danger');
-      return;
-    }
-
-    const targetInfObj = state.influencers.find((item) => Number(item.id) === targetInfluencerId);
-    const influencerName = targetInfObj?.name || 'Influencer';
-
-    try {
-      const result = await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(targetInfluencerId)}/payments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          influencerEmail,
-          amountPaise: Math.round(paymentAmount * 100),
-          paymentMethod,
-          referenceNumber,
-          note,
-          confirmed: true,
-          sendEmail: sendPaymentEmail,
-        }),
-      });
-
-      const confirmToastMsg = sendPaymentEmail
-        ? `Payment recorded! Email regarding commission amount sent to influencer: ${influencerName}, and admin copy delivered to ${FIXED_ADMIN_EMAIL}.`
-        : `Payment recorded! Invoice ${result.invoiceNumber} generated.`;
-
-      toast('Payment Confirmed', confirmToastMsg, 'success');
-
-      await loadInfluencerData();
-      await loadReportData();
-
-      renderInvoiceReceiptModal({
-        invoiceHtml: result.invoiceHtml,
-        invoiceNumber: result.invoiceNumber,
-        influencerEmail,
-        adminEmail: FIXED_ADMIN_EMAIL,
-        emailResults: result.emailResults,
-        influencerId: targetInfluencerId,
-        paymentId: result.payment?.id,
-        influencerName,
-      });
-    } catch (error) {
-      toast('Payment Failed', error.message || 'Unable to record commission payment.', 'danger');
-      if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.textContent = '✉️ Confirm Payment & Send Mail';
-      }
-    }
+    return handleCommissionCorrectionSubmit(influencerId);
   }
 
   async function loadSecurityQuestion(force = false) {
@@ -928,11 +739,22 @@
   async function renderCommissionCorrectionModal(influencer) {
     if (!influencer) return;
     const stats = getInfluencerMonthStats(influencer);
+    const monthlySumCommission = (influencer.monthlySales || []).reduce((sum, r) => sum + Number(r.commission || 0), 0);
+    const commissionEarned = Math.max(
+      0,
+      Number(influencer.commission || 0),
+      monthlySumCommission,
+      Number(influencer.totalCommissionEarned || 0),
+      Number(stats.commission || 0)
+    );
     const currentPaid = Number(influencer.paidCommission || 0);
-    const commissionEarned = Math.max(0, Number(influencer.commission ?? stats.commission ?? 0));
     const balanceRemaining = Math.max(0, commissionEarned - currentPaid);
-    const maxNewAttr = commissionEarned > 0 ? `max="${Math.floor(commissionEarned / 100)}"` : '';
-    const maxBalAttr = balanceRemaining > 0 ? `max="${Math.floor(balanceRemaining / 100)}"` : '';
+    const maxNewRupees = Math.floor(commissionEarned / 100);
+    const maxBalRupees = Math.floor(balanceRemaining / 100);
+    const maxNewAttr = `max="${maxNewRupees}"`;
+    const maxBalAttr = `max="${maxBalRupees}"`;
+    const couponList = getInfluencerCouponRecords(influencer).map((c) => c.code).join(', ') || 'None';
+    const prefillEmail = String(influencer.email || '').trim();
 
     const secData = await loadSecurityQuestion();
     const isConfigured = Boolean(secData?.isConfigured);
@@ -941,38 +763,90 @@
     openModal({
       title: `Adjust Commission: ${influencer.name}`,
       subtitle: 'Security Authorization Required',
-      size: 'md',
+      size: 'lg',
       body: `
         <div class="admin-commission-correction-modal">
           <div style="background:#fef2f2;border:1px solid #fecaca;padding:12px 14px;border-radius:8px;margin-bottom:16px;">
             <p style="margin:0;font-size:13px;color:#991b1b;font-weight:600;">🔒 Secured Admin Authorization Required</p>
-            <p style="margin:4px 0 0;font-size:12px;color:#b91c1c;line-height:1.45;">Commission Paid is locked after payment. Any correction must be accompanied by an audit reason and security question verification.</p>
+            <p style="margin:4px 0 0;font-size:12px;color:#b91c1c;line-height:1.45;">Commission Paid is locked after payment. Any payout or correction must be accompanied by payment details, an audit reason, and security question verification.</p>
           </div>
 
-          <form class="admin-form" id="commissionCorrectionForm" data-influencer-id="${escapeHtml(influencer.id)}" data-current-paid-paise="${currentPaid}" onsubmit="return false;">
+          <div class="admin-grid admin-grid--stats" style="grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px;margin-bottom:16px;">
+            <article class="admin-stat"><p class="admin-stat__label">Commission Earned</p><p class="admin-stat__value">${money(commissionEarned)}</p></article>
+            <article class="admin-stat"><p class="admin-stat__label">Already Paid</p><p class="admin-stat__value">${money(currentPaid)} <span style="font-size:10px;" class="admin-badge admin-badge--neutral">🔒 Locked</span></p></article>
+            <article class="admin-stat"><p class="admin-stat__label">Balance Due</p><p class="admin-stat__value" style="color:var(--admin-primary);">${money(balanceRemaining)}</p></article>
+            <article class="admin-stat"><p class="admin-stat__label">Coupons</p><p class="admin-stat__value" style="font-size:13px;word-break:break-word;">${escapeHtml(couponList)}</p></article>
+          </div>
+
+          <form class="admin-form" id="commissionCorrectionForm" data-influencer-id="${escapeHtml(influencer.id)}" data-current-paid-paise="${currentPaid}" data-earned-paise="${commissionEarned}" data-balance-paise="${balanceRemaining}" onsubmit="return false;">
             <div class="admin-form__grid">
               <label class="admin-field admin-field--wide">
                 <span>Current Commission Paid</span>
                 <input class="admin-input" type="text" value="${money(currentPaid)}" readonly disabled style="background:var(--admin-surface-subtle);cursor:not-allowed;" />
               </label>
 
-              <label class="admin-field admin-field--wide">
-                <span>Corrected Amount (₹)</span>
-                <input class="admin-input" name="newAmount" type="number" min="0" ${maxNewAttr} step="1" value="${Math.round(currentPaid / 100)}" placeholder="0" />
-                <small class="admin-field__hint">Use this for a manual cumulative correction. Leave it unchanged when using Pay Balance Amount.</small>
+              <label class="admin-field">
+                <span>Corrected Amount (₹) <strong style="color:var(--admin-danger);font-size:12px;">(Max ₹${maxNewRupees})</strong></span>
+                <input class="admin-input" name="newAmount" type="number" min="0" ${maxNewAttr} step="1" value="${Math.min(Math.round(currentPaid / 100), maxNewRupees)}" placeholder="0" />
+                <small class="admin-field__hint">Manual cumulative correction (cannot exceed earned commission of ${money(commissionEarned)}). Leave unchanged when using Pay Balance Amount.</small>
+              </label>
+
+              <label class="admin-field">
+                <span>Pay Balance Amount (₹) <strong style="color:var(--admin-danger);font-size:12px;">(Max ₹${maxBalRupees})</strong></span>
+                <input class="admin-input" name="balanceAmount" type="number" min="0" ${maxBalAttr} step="1" value="${balanceRemaining > 0 ? maxBalRupees : 0}" placeholder="0" />
+                <small class="admin-field__hint">Adds this amount to Commission Paid (max ₹${maxBalRupees}). Remaining balance: ${money(balanceRemaining)}.</small>
               </label>
 
               <label class="admin-field admin-field--wide">
-                <span>Pay Balance Amount (₹)</span>
-                <input class="admin-input" name="balanceAmount" type="number" min="0" ${maxBalAttr} step="1" value="0" placeholder="0" />
-                <small class="admin-field__hint">Adds this amount to the current Commission Paid. Remaining balance: ${money(balanceRemaining)}.</small>
+                <span>Influencer Email <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
+                <input class="admin-input" name="influencerEmail" type="email" value="${escapeHtml(prefillEmail)}" placeholder="influencer@example.com" required />
+                <small class="admin-field__hint">Required. The official payment invoice and receipt will be emailed to this address upon confirmation.</small>
               </label>
 
               <label class="admin-field admin-field--wide">
-                <span>Reason for Correction <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
-                <textarea class="admin-textarea" name="correctionReason" rows="3" placeholder="Provide a detailed explanation for this manual correction..." required></textarea>
+                <span>Business Admin Recipient (Fixed Copy)</span>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <input class="admin-input" type="text" value="${FIXED_ADMIN_EMAIL}" readonly disabled style="background:var(--admin-surface-subtle);cursor:not-allowed;" />
+                  <span class="admin-badge admin-badge--neutral" style="font-size:11px;padding:6px 10px;white-space:nowrap;">Fixed Business Admin</span>
+                </div>
+                <small class="admin-field__hint">The admin invoice copy is permanently routed to ${FIXED_ADMIN_EMAIL} and cannot be altered.</small>
+              </label>
+
+              <label class="admin-field">
+                <span>Payment Method <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
+                <select class="admin-input" name="paymentMethod">
+                  <option value="Bank Transfer (NEFT/RTGS/IMPS)">Bank Transfer (NEFT/RTGS/IMPS)</option>
+                  <option value="UPI / GPay / PhonePe">UPI / GPay / PhonePe</option>
+                  <option value="Razorpay Payout">Razorpay Payout</option>
+                  <option value="Cheque">Cheque</option>
+                  <option value="Cash">Cash</option>
+                  <option value="Other">Other</option>
+                </select>
+              </label>
+
+              <label class="admin-field">
+                <span>Payment / Reference ID <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
+                <input class="admin-input" name="referenceNumber" type="text" placeholder="e.g. UTR12345678 or TXN-98765" value="UTR${Date.now().toString().slice(-8)}" required />
+                <small class="admin-field__hint">Bank UTR, UPI transaction ID, or payment gateway reference number.</small>
+              </label>
+
+              <label class="admin-field admin-field--wide">
+                <span>Reason for Correction / Notes <strong style="color:var(--admin-danger);font-size:14px;">*</strong></span>
+                <textarea class="admin-textarea" name="correctionReason" rows="2" placeholder="Provide a detailed explanation for this commission payment or manual correction..." required></textarea>
                 <small class="admin-field__hint">Required for accounting and compliance audit logging.</small>
               </label>
+
+              <div class="admin-mail-option-box admin-field--wide" style="margin-top:6px;background:#fff8f5;border:1px solid #fed7aa;border-radius:8px;padding:12px 14px;">
+                <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin:0;">
+                  <input type="checkbox" name="sendPaymentEmail" value="true" checked style="margin-top:3px;accent-color:#c2410c;" />
+                  <div>
+                    <strong style="color:#9a3412;font-size:13px;display:block;">✉️ Option of Mail: Send Notification to Influencer &amp; Admin</strong>
+                    <span style="font-size:12px;color:#7c2d12;display:block;line-height:1.45;margin-top:3px;">
+                      When selected, influencer (<strong>${escapeHtml(influencer.name)}</strong>) will receive the official payment mail regarding commission amount sent to influencer: <strong>${escapeHtml(influencer.name)}</strong>, and admin will receive the copy regarding commission amount paid to influencer: <strong>${escapeHtml(influencer.name)}</strong>.
+                    </span>
+                  </div>
+                </label>
+              </div>
 
               ${!isConfigured ? `
                 <div class="admin-field admin-field--wide" style="background:#f8fafc;border:1px dashed #cbd5e1;padding:14px 16px;border-radius:8px;margin-top:6px;">
@@ -1002,7 +876,7 @@
                     </button>
                   </div>
                   <input class="admin-input" name="securityAnswer" type="text" placeholder="Enter your answer" required autocomplete="off" style="background:#ffffff;" />
-                  <small class="admin-field__hint">Answer the security question to authorize this commission correction.</small>
+                  <small class="admin-field__hint">Answer the security question to authorize this commission payout or correction.</small>
                 </label>
               `}
             </div>
@@ -1011,42 +885,123 @@
       `,
       footer: `
         <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button>
-        <button class="admin-btn admin-btn--danger" type="button" data-action="submit-commission-correction" data-id="${escapeHtml(influencer.id)}">Authorize &amp; Update Amount</button>
+        <button class="admin-btn admin-btn--primary" type="button" data-action="submit-commission-correction" data-id="${escapeHtml(influencer.id)}">✉️ Authorize &amp; Process Commission</button>
       `,
     });
+
+    // Attach real-time validation to prevent values greater than commission earned
+    window.setTimeout(() => {
+      const modalForm = document.getElementById('commissionCorrectionForm');
+      if (!modalForm) return;
+      const newAmtInp = modalForm.querySelector('[name="newAmount"]');
+      const balAmtInp = modalForm.querySelector('[name="balanceAmount"]');
+      if (newAmtInp) {
+        newAmtInp.addEventListener('input', () => {
+          const val = Number(newAmtInp.value);
+          if (val > maxNewRupees) {
+            newAmtInp.value = maxNewRupees;
+            toast('Limit Reached', `Corrected Amount (₹) cannot be greater than the commission earned by influencer (${money(commissionEarned)}).`, 'warning');
+          }
+        });
+      }
+      if (balAmtInp) {
+        balAmtInp.addEventListener('input', () => {
+          const val = Number(balAmtInp.value);
+          if (val > maxBalRupees) {
+            balAmtInp.value = maxBalRupees;
+            toast('Limit Reached', `Pay Balance Amount (₹) cannot exceed the remaining balance due (${money(balanceRemaining)}).`, 'warning');
+          }
+        });
+      }
+    }, 50);
   }
 
   async function handleCommissionCorrectionSubmit(influencerId) {
-    const form = document.getElementById('commissionCorrectionForm');
+    const form = document.getElementById('commissionCorrectionForm') || document.getElementById('commissionPaymentForm');
     if (!form) return;
 
     const newAmountInput = form.querySelector('[name="newAmount"]');
     const balanceAmountInput = form.querySelector('[name="balanceAmount"]');
-    const reasonInput = form.querySelector('[name="correctionReason"]');
+    const emailInput = form.querySelector('[name="influencerEmail"]');
+    const methodSelect = form.querySelector('[name="paymentMethod"]');
+    const refInput = form.querySelector('[name="referenceNumber"]');
+    const reasonInput = form.querySelector('[name="correctionReason"]') || form.querySelector('[name="paymentNote"]');
     const answerInput = form.querySelector('[name="securityAnswer"]');
+    const sendEmailCheckbox = form.querySelector('[name="sendPaymentEmail"]');
 
-    const newAmount = Number(newAmountInput?.value);
-    const balanceAmount = Number(balanceAmountInput?.value || 0);
+    const newAmount = Number(newAmountInput ? newAmountInput.value : 0);
+    const balanceAmount = Number(balanceAmountInput ? balanceAmountInput.value : 0);
+    const influencerEmail = String(emailInput?.value || '').trim();
+    const paymentMethod = String(methodSelect?.value || 'Bank Transfer (NEFT/RTGS/IMPS)').trim();
+    const referenceNumber = String(refInput?.value || '').trim();
     const reason = String(reasonInput?.value || '').trim();
     const securityAnswer = String(answerInput?.value || '').trim();
+    const sendPaymentEmail = sendEmailCheckbox ? Boolean(sendEmailCheckbox.checked) : true;
 
     if (isNaN(newAmount) || newAmount < 0 || !Number.isFinite(balanceAmount) || balanceAmount < 0) {
       toast('Invalid amount', 'Enter a valid non-negative amount in Rupees.', 'warning');
-      newAmountInput?.focus();
+      (balanceAmountInput || newAmountInput)?.focus();
       return;
     }
 
     const currentPaid = Number(form.dataset.currentPaidPaise || 0) / 100;
-    const cumulativeAmount = balanceAmount > 0 ? currentPaid + balanceAmount : newAmount;
     const targetInf = state.influencers.find((item) => Number(item.id) === Number(influencerId));
-    const earnedAmount = Number(influencerId && (targetInf?.commission ?? getInfluencerMonthStats(targetInf)?.commission ?? 0)) / 100;
-    if (earnedAmount > 0 && cumulativeAmount > earnedAmount) {
-      toast('Amount exceeds commission earned', `Commission Paid cannot be greater than the earned commission of ${money(Math.round(earnedAmount * 100))}.`, 'warning');
+    const monthlySumCommission = (targetInf?.monthlySales || []).reduce((sum, r) => sum + Number(r.commission || 0), 0);
+    const earnedAmountPaise = Math.max(
+      0,
+      Number(form.dataset.earnedPaise || 0),
+      Number(targetInf?.commission || 0),
+      monthlySumCommission,
+      Number(targetInf?.totalCommissionEarned || 0)
+    );
+    const earnedAmount = earnedAmountPaise / 100;
+    const balanceRemaining = Math.max(0, earnedAmount - currentPaid);
+
+    // Strict validation: Corrected Amount (₹) CANNOT be greater than commission earned by influencer
+    if (newAmount > earnedAmount + 0.001) {
+      toast(
+        'Amount exceeds commission earned',
+        `Corrected Amount (₹${newAmount}) cannot be greater than the total commission earned by influencer (${money(Math.round(earnedAmount * 100))}).`,
+        'warning'
+      );
+      newAmountInput?.focus();
+      return;
+    }
+
+    // Validate balance amount doesn't exceed balance
+    if (balanceAmount > 0 && balanceAmount > balanceRemaining + 0.001) {
+      toast('Amount exceeds balance', `Pay Balance Amount (₹${balanceAmount}) cannot exceed the remaining balance due of ${money(Math.round(balanceRemaining * 100))}.`, 'warning');
+      balanceAmountInput?.focus();
+      return;
+    }
+
+    const cumulativeAmount = balanceAmount > 0 ? (currentPaid + balanceAmount) : newAmount;
+
+    // Strict validation: cumulative amount cannot exceed earned amount!
+    if (cumulativeAmount > earnedAmount + 0.001) {
+      toast(
+        'Amount exceeds commission earned',
+        `Commission Paid (₹${cumulativeAmount}) cannot be greater than the earned commission of ${money(Math.round(earnedAmount * 100))}.`,
+        'warning'
+      );
+      (balanceAmountInput || newAmountInput)?.focus();
+      return;
+    }
+
+    if (influencerEmail && !isValidInfluencerEmail(influencerEmail)) {
+      toast('Invalid Email', 'Please enter a valid influencer email address.', 'danger');
+      emailInput?.focus();
+      return;
+    }
+
+    if (!referenceNumber) {
+      toast('Reference ID required', 'Please provide a payment reference number or transaction ID (UTR).', 'warning');
+      refInput?.focus();
       return;
     }
 
     if (!reason || reason.length < 3) {
-      toast('Reason required', 'Please provide a specific reason for this commission correction.', 'warning');
+      toast('Reason required', 'Please provide a specific reason or notes for this commission payout/correction.', 'warning');
       reasonInput?.focus();
       return;
     }
@@ -1062,38 +1017,63 @@
       return;
     }
 
-    const submitBtn = els.adminModalDialog.querySelector('[data-action="submit-commission-correction"]');
+    const submitBtn = els.adminModalDialog.querySelector('[data-action="submit-commission-correction"]') ||
+                      els.adminModalDialog.querySelector('[data-action="submit-commission-payment"]');
     if (submitBtn) {
       submitBtn.disabled = true;
-      submitBtn.textContent = 'Verifying Answer...';
+      submitBtn.textContent = 'Verifying & Processing...';
     }
 
     try {
-      await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencerId)}/commission-correction`, {
+      const result = await apiRequest(`/api/merch/admin/influencers/${encodeURIComponent(influencerId)}/commission-correction`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           newAmountPaise: balanceAmount > 0 ? Math.round(currentPaid * 100) : Math.round(newAmount * 100),
           payBalancePaise: Math.round(balanceAmount * 100),
+          influencerEmail,
+          paymentMethod,
+          referenceNumber,
           reason,
           securityAnswer,
+          sendEmail: sendPaymentEmail,
         }),
       });
 
-      toast('Commission Adjusted', `Commission paid updated to ${money(Math.round(cumulativeAmount * 100))} and logged.`, 'success');
-      closeModal();
+      const influencerName = targetInf?.name || 'Influencer';
+      const confirmToastMsg = sendPaymentEmail
+        ? `Commission authorized! Email regarding commission amount sent to influencer: ${influencerName}, and admin copy delivered to ${FIXED_ADMIN_EMAIL}.`
+        : `Commission paid updated to ${money(Math.round(cumulativeAmount * 100))} and logged.`;
+
+      toast('Commission Authorized', confirmToastMsg, 'success');
+
       await loadInfluencerData();
       await loadReportData();
+
+      if (result.invoiceHtml) {
+        renderInvoiceReceiptModal({
+          invoiceHtml: result.invoiceHtml,
+          invoiceNumber: result.invoiceNumber,
+          influencerEmail: influencerEmail || result.payment?.influencerEmail || 'Influencer',
+          adminEmail: FIXED_ADMIN_EMAIL,
+          emailResults: result.emailResults,
+          influencerId,
+          paymentId: result.payment?.id,
+          influencerName,
+        });
+      } else {
+        closeModal();
+      }
     } catch (error) {
       const rawMsg = String(error?.message || '');
       const isWrongAnswer = rawMsg.toLowerCase().includes('wrong answer') || rawMsg.toLowerCase().includes('wrong');
       const displayMsg = isWrongAnswer ? 'Wrong answer' : (error.message || 'Authorization failed.');
-      toast('Wrong answer', displayMsg, 'danger');
+      toast(isWrongAnswer ? 'Wrong answer' : 'Failed', displayMsg, 'danger');
       if (submitBtn) {
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Authorize & Update Amount';
+        submitBtn.textContent = '✉️ Authorize & Process Commission';
       }
-      if (answerInput) {
+      if (isWrongAnswer && answerInput) {
         answerInput.focus();
         answerInput.select();
       }
