@@ -2062,6 +2062,14 @@ function getWishlistProductPrice(item) {
             if (productId) totals[productId] = Number(totals[productId] || 0) + Math.round(item.price * item.quantity * 100);
             return totals;
           }, {}),
+          variantIds: state.cart.map((item) => Number(item.variantId)).filter(Boolean),
+          variantLineTotals: state.cart.reduce((totals, item) => {
+            const variantId = Number(item.variantId || 0);
+            if (variantId) totals[variantId] = Number(totals[variantId] || 0) + Math.round(item.price * item.quantity * 100);
+            return totals;
+          }, {}),
+          campaignSlug: state.campaignAttribution?.slug || null,
+          campaignId: state.campaignAttribution?.campaignId || null,
         }),
       });
       state.merchCouponPreview = result.coupon || null;
