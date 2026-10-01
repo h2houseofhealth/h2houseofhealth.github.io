@@ -4884,11 +4884,86 @@ module.exports = function mountMerchApi(app, {
       return { error: 'Coupon validation is unavailable.' };
     }
     const result = validateCouponForUser({ ...args, appliesTo: 'merch', portal: 'merch' });
-    if (result?.error || !result?.coupon?.influencerId) return result;
-    const influencer = db.prepare('SELECT active FROM merch_influencers WHERE id = ?').get(Number(result.coupon.influencerId));
-    if (!influencer || Number(influencer.active) !== 1) {
-      return { error: 'This influencer coupon is no longer active.' };
+    if (result?.error || !result?.coupon) return result;
+
+    if (result.coupon.influencerId) {
+      const influencer = db.prepare('SELECT active FROM merch_influencers WHERE id = ?').get(Number(result.coupon.influencerId));
+      if (!influencer || Number(influencer.active) !== 1) {
+        return { error: 'This influencer coupon is no longer active.' };
+      }
     }
+
+    // Check if this coupon is linked to a campaign with a specific target variant
+    let campaign = null;
+    if (args.campaignId) {
+      campaign = db.prepare(`
+        SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
+               v.color AS variantColor, v.size AS variantSize, p.name AS productName
+        FROM merch_campaigns c
+        LEFT JOIN merch_variants v ON v.id = c.target_variant_id
+        LEFT JOIN merch_products p ON p.id = c.target_product_id
+        WHERE c.id = ? AND c.is_active = 1
+      `).get(Number(args.campaignId));
+    }
+    if (!campaign && args.campaignSlug) {
+      campaign = db.prepare(`
+        SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
+               v.color AS variantColor, v.size AS variantSize, p.name AS productName
+        FROM merch_campaigns c
+        LEFT JOIN merch_variants v ON v.id = c.target_variant_id
+        LEFT JOIN merch_products p ON p.id = c.target_product_id
+        WHERE LOWER(c.slug) = LOWER(?) AND c.is_active = 1
+      `).get(String(args.campaignSlug).trim());
+    }
+    if (!campaign) {
+      campaign = db.prepare(`
+        SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
+               v.color AS variantColor, v.size AS variantSize, p.name AS productName
+        FROM merch_campaigns c
+        LEFT JOIN merch_variants v ON v.id = c.target_variant_id
+        LEFT JOIN merch_products p ON p.id = c.target_product_id
+        WHERE (c.coupon_id = ? OR LOWER(c.coupon_code) = LOWER(?)) AND c.is_active = 1
+        ORDER BY c.id DESC
+        LIMIT 1
+      `).get(Number(result.coupon.id), String(result.coupon.code || ''));
+    }
+
+    if (campaign && campaign.targetVariantId) {
+      const targetVariantId = Number(campaign.targetVariantId);
+      const cartVariantIds = (Array.isArray(args.variantIds) ? args.variantIds : []).map((id) => Number(id));
+      const hasTargetVariant = cartVariantIds.includes(targetVariantId);
+      const variantLabel = [campaign.variantColor, campaign.variantSize].filter(Boolean).join(' ') || 'selected';
+
+      if (!hasTargetVariant) {
+        return {
+          error: `This coupon is only valid for the ${variantLabel} variant of ${campaign.productName || 'the product'}.`,
+        };
+      }
+
+      // If the target variant is in the cart, calculate discount ONLY on the target variant's line total
+      const targetVariantSubtotalPaise = Number(args.variantLineTotals?.[targetVariantId] || 0);
+      if (targetVariantSubtotalPaise > 0) {
+        let recalculatedDiscountPaise = 0;
+        const discountType = String(result.coupon.discountType || '').trim().toLowerCase();
+        const discountValue = Number(result.coupon.discountValue || 0);
+
+        if (discountType === 'percentage') {
+          recalculatedDiscountPaise = Math.round(targetVariantSubtotalPaise * (discountValue / 100));
+        } else if (discountType === 'flat' || discountType === 'fixed') {
+          recalculatedDiscountPaise = Math.min(targetVariantSubtotalPaise, Math.round(discountValue * 100));
+        } else {
+          recalculatedDiscountPaise = Math.min(targetVariantSubtotalPaise, Number(result.discountAmountPaise || 0));
+        }
+
+        result.discountAmountPaise = recalculatedDiscountPaise;
+        result.finalAmountPaise = Math.max(0, Number(args.subtotalAmountPaise || 0) - recalculatedDiscountPaise);
+        if (result.coupon) {
+          result.coupon.targetVariantId = targetVariantId;
+          result.coupon.targetVariantName = variantLabel;
+        }
+      }
+    }
+
     return result;
   }
 
@@ -5204,6 +5279,10 @@ module.exports = function mountMerchApi(app, {
       userId: authUser?.id ?? null,
       productIds: req.body?.productIds || [],
       productLineTotals: req.body?.productLineTotals || {},
+      variantIds: req.body?.variantIds || [],
+      variantLineTotals: req.body?.variantLineTotals || {},
+      campaignSlug: req.body?.campaignSlug || null,
+      campaignId: req.body?.campaignId || null,
       subtotalAmountPaise,
     });
 
@@ -5374,6 +5453,9 @@ module.exports = function mountMerchApi(app, {
           userId: authUser?.id,
           productIds: validatedItems.map((item) => item.productId),
           productLineTotals: validatedItems.reduce((totals, item) => ({ ...totals, [item.productId]: Number(totals[item.productId] || 0) + item.lineTotal }), {}),
+          variantIds: validatedItems.map((item) => Number(item.variantId)),
+          variantLineTotals: validatedItems.reduce((totals, item) => ({ ...totals, [item.variantId]: Number(totals[item.variantId] || 0) + item.lineTotal }), {}),
+          campaignSlug: req.body?.campaignSlug || null,
           subtotalAmountPaise: subtotal,
         })
       : { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
@@ -5744,6 +5826,9 @@ module.exports = function mountMerchApi(app, {
           userId: authUser?.id,
           productIds: validatedItems.map((item) => item.productId),
           productLineTotals: validatedItems.reduce((totals, item) => ({ ...totals, [item.productId]: Number(totals[item.productId] || 0) + item.lineTotal }), {}),
+          variantIds: validatedItems.map((item) => Number(item.variantId)),
+          variantLineTotals: validatedItems.reduce((totals, item) => ({ ...totals, [item.variantId]: Number(totals[item.variantId] || 0) + item.lineTotal }), {}),
+          campaignSlug: req.body?.campaignSlug || null,
           subtotalAmountPaise: subtotal,
         })
       : { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
