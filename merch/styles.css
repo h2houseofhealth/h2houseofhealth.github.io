@@ -499,6 +499,8 @@ body.is-auth-loading .merch-auth-cta {
 .account-drawer__content {
   flex: 1;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
   padding: 20px 30px 30px;
   display: grid;
   gap: 20px;
@@ -513,6 +515,10 @@ body.is-auth-loading .merch-auth-cta {
   border-radius: 16px;
   background: #faf6f2;
   box-shadow: 0 2px 10px rgba(33, 24, 18, 0.04);
+  position: relative;
+  z-index: 1;
+  height: auto;
+  overflow: visible;
 }
 
 .account-panel-nav button {
@@ -847,14 +853,21 @@ body.is-auth-loading .merch-auth-cta {
 
 .account-order-filter {
   display: grid;
-  grid-template-columns: minmax(0, 149px) minmax(0, 149px) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
   align-items: end;
-  gap: 13px;
+  gap: 12px;
   margin: -2px 0 20px;
-  padding: 18px;
-  border-radius: 8px;
+  padding: 16px;
+  border-radius: 12px;
   background: #fbf7f4;
   border: 1px solid #eadfd8;
+}
+
+.account-order-filter .account-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
 
 .account-order-filter .account-field span {
@@ -863,35 +876,57 @@ body.is-auth-loading .merch-auth-cta {
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .account-order-filter .account-field input {
-  height: 48px;
-  border-color: #e5ddd6;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  height: 46px;
+  border: 1px solid #e5ddd6;
   border-radius: 8px;
-  color: #686868;
-  font-size: 15px;
+  background: #ffffff;
+  color: #333333;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1.2;
-  padding: 12px 12px;
+  padding: 10px 12px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.account-order-filter .account-field input:focus {
+  border-color: #df4b1b;
+  box-shadow: 0 0 0 3px rgba(223, 75, 27, 0.12);
 }
 
 .account-order-filter__actions {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 10px;
 }
 
 .account-order-filter__actions .account-action-btn {
-  min-height: 48px;
-  width: 68px;
-  padding: 13px 0;
+  min-height: 46px;
+  padding: 0 20px;
   border-radius: 8px;
   background: linear-gradient(180deg, #df5525 0%, #c83c14 100%);
   color: #ffffff;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: 0;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.account-order-filter__actions .account-action-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(200, 60, 20, 0.25);
 }
 
 .account-order-filter__clear {
@@ -903,8 +938,8 @@ body.is-auth-loading .merch-auth-cta {
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  min-height: 48px;
-  padding: 14px 0;
+  min-height: 46px;
+  padding: 0 12px;
   cursor: pointer;
   transition: color var(--transition);
 }
@@ -6362,13 +6397,15 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
     bottom: 0;
     z-index: 2;
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
     height: 92px;
     padding: 12px 8px 10px;
     border-width: 1px 0 0;
     border-radius: 0;
     background: #ffffff;
     box-shadow: 0 -8px 24px rgba(33, 24, 18, 0.08);
+    overflow: visible;
   }
 
   .account-panel-nav button,
@@ -6376,6 +6413,7 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
     display: flex !important;
     flex-direction: column;
     justify-content: center;
+    align-items: center;
     gap: 6px;
     height: 70px;
     padding: 0 4px;
@@ -6384,10 +6422,11 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
     font-size: 10px;
     line-height: 1.1;
     letter-spacing: 0;
+    min-width: 0;
   }
 
   .account-panel-nav__icon {
-    flex-basis: 22px;
+    flex: 0 0 22px;
     width: 22px;
     height: 22px;
   }
@@ -6397,11 +6436,14 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
   }
 
   .account-logout-btn {
-    display: none !important;
+    display: block !important;
+    margin-top: 16px;
   }
 
+  .account-card,
+  .account-section,
   .account-section--orders {
-    margin: 0;
+    margin-top: 0;
   }
 }
 
@@ -6445,11 +6487,26 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
   }
 
   .account-order-filter {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 10px;
+    padding: 14px 12px;
+  }
+
+  .account-order-filter__actions {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
 
   .account-order-filter__actions .account-action-btn {
     flex: 1 1 auto;
+    width: auto;
+  }
+
+  .account-order-filter__clear {
+    flex: 0 0 auto;
+    padding: 0 14px;
   }
 
   .account-order-card {
@@ -7850,9 +7907,11 @@ textarea,
     padding-bottom: max(20px, calc(14px + env(safe-area-inset-bottom)));
   }
 
-  .account-panel-nav {
-    padding-bottom: max(10px, env(safe-area-inset-bottom));
-    height: calc(84px + env(safe-area-inset-bottom));
+  @media (max-width: 900px) {
+    .account-panel-nav {
+      padding-bottom: max(10px, env(safe-area-inset-bottom));
+      height: calc(84px + env(safe-area-inset-bottom));
+    }
   }
 
   .merch-flow-modal {

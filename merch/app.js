@@ -1996,8 +1996,8 @@ function getWishlistProductPrice(item) {
     return state.cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   }
 
-  function getMerchShippingCharge(subtotalInr = getCartTotal()) {
-    return Number(subtotalInr || 0) >= 999 ? 0 : 99;
+  function getMerchShippingCharge(_subtotalInr = getCartTotal()) {
+    return 0;
   }
 
   function getIncludedGstAmount(subtotalInr = getCartTotal()) {
@@ -3314,7 +3314,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const icons = {
       eye: '<svg class="account-order-action__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.8"/></svg>',
       truck: '<svg class="account-order-action__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 7h11v9H3V7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 10h4l3 3v3h-7v-6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM18 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" stroke="currentColor" stroke-width="1.8"/></svg>',
-      document: '<svg class="account-order-action__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3h7l4 4v14H7V3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3v5h4M10 12h5M10 16h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'
+      document: '<svg class="account-order-action__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3h7l4 4v14H7V3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3v5h4M10 12h5M10 16h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+      cancel: '<svg class="account-order-action__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="m15 9-6 6M9 9l6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'
     };
     return icons[name] || '';
   }
@@ -3497,7 +3498,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
                   ` : `
                     <button type="button" data-account-action="track-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Track ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('truck')}<span>Track Order</span></button>
                     <button type="button" data-account-action="invoice-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Open invoice for ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('document')}<span>Invoice</span></button>
-                    ${canCancelMerchOrder(order) ? `<button type="button" data-account-action="cancel-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Cancel ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">Cancel Order</button>` : ''}
+                    ${canCancelMerchOrder(order) ? `<button type="button" data-account-action="cancel-order" data-order-id="${escapeHtml(String(order.id || ''))}" aria-label="Cancel ${escapeHtml(order.orderNumber || `Order #${order.id}`)}">${renderOrderActionIcon('cancel')}<span>Cancel Order</span></button>` : ''}
                   `}
                 </div>
               </article>
@@ -4367,8 +4368,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   function openMerchDocument(url) {
     const targetUrl = buildApiUrl(url);
     const opened = window.open(targetUrl, '_blank');
-    if (!opened) {
-      showCheckoutNotice('Invoice', 'The invoice could not open. Please allow popups and try again.', { variant: 'error' });
+    if (!opened || opened.closed || typeof opened.closed === 'undefined') {
+      // Mobile Safari / popup blocked: open directly so user can view/download
+      window.location.assign(targetUrl);
       return;
     }
     try {
