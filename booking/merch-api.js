@@ -1493,12 +1493,14 @@ module.exports = function mountMerchApi(app, {
     cumulativePaidPaise = 0,
     balanceRemainingPaise = 0,
     formattedDate = '',
+    req = null,
   }) {
     const couponList = coupons.map((c) => c.code || c).filter(Boolean).join(', ') || 'None';
     const invoiceNum = payment.invoice_number || payment.invoiceNumber || 'H2-INV-COM';
     const refNum = payment.reference_number || payment.referenceNumber || 'N/A';
     const method = payment.payment_method || payment.paymentMethod || 'Direct Transfer';
     const status = (payment.status || 'PAID').toUpperCase();
+    const logoUrl = 'https://h2houseofhealth.com/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=240';
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -1506,36 +1508,274 @@ module.exports = function mountMerchApi(app, {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Commission Invoice ${escapeHtml(invoiceNum)} - H2 House of Health</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..800;1,9..40,400..800&display=swap" rel="stylesheet">
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f1f5f9; color: #0f172a; margin: 0; padding: 24px 12px; }
-    .invoice-card { max-width: 680px; margin: 0 auto; background: #ffffff; border-radius: 14px; box-shadow: 0 4px 20px rgba(0,0,0,0.07); border: 1px solid #e2e8f0; overflow: hidden; }
-    .header { background: #0b1329; color: #ffffff; padding: 32px 36px 26px; }
-    .header-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 22px; }
-    .brand-title { font-size: 22px; font-weight: 800; letter-spacing: 0.04em; color: #38bdf8; text-transform: uppercase; margin: 0; }
-    .brand-sub { font-size: 13px; color: #94a3b8; margin: 4px 0 0; }
-    .badge-paid { display: inline-block; background: #10b981; color: #ffffff; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; padding: 6px 14px; border-radius: 9999px; text-transform: uppercase; }
-    .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 14px; border-top: 1px solid #1e293b; padding-top: 18px; }
-    .meta-item-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; margin-bottom: 4px; }
-    .meta-item-val { font-size: 13px; font-weight: 600; color: #f8fafc; word-break: break-word; }
-    .body { padding: 30px 36px; }
-    .parties-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 28px; }
-    @media (max-width: 580px) { .parties-grid { grid-template-columns: 1fr; } }
-    .party-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 18px; }
-    .party-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #64748b; margin: 0 0 8px; }
-    .party-name { font-size: 16px; font-weight: 700; color: #0f172a; margin: 0 0 4px; }
-    .party-info { font-size: 13px; color: #475569; margin: 3px 0; line-height: 1.45; word-break: break-word; }
-    .table-wrap { margin-bottom: 26px; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
-    table { width: 100%; border-collapse: collapse; text-align: left; }
-    th { background: #f8fafc; color: #475569; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 12px 18px; border-bottom: 1px solid #e2e8f0; }
-    td { padding: 14px 18px; font-size: 14px; border-top: 1px solid #f1f5f9; color: #1e293b; }
-    .amt { text-align: right; font-weight: 600; }
-    .total-highlight { background: #ecfdf5; font-weight: 700; }
-    .total-highlight td { color: #065f46; font-size: 15px; }
-    .notes-box { background: #f0f9ff; border-left: 4px solid #0284c7; padding: 14px 18px; border-radius: 0 8px 8px 0; margin-bottom: 26px; }
-    .notes-title { font-size: 12px; font-weight: 700; color: #0369a1; text-transform: uppercase; margin: 0 0 4px; }
-    .notes-text { font-size: 13px; color: #0c4a6e; margin: 0; line-height: 1.5; }
-    .footer { background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 22px 36px; text-align: center; color: #64748b; font-size: 12px; line-height: 1.6; }
-    .footer strong { color: #334155; }
+    body {
+      font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background-color: #f8f3ee;
+      color: #14233b;
+      margin: 0;
+      padding: 24px 12px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .invoice-card {
+      max-width: 680px;
+      margin: 0 auto;
+      background: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(174, 84, 49, 0.08);
+      border: 1px solid #e7cabb;
+      overflow: hidden;
+    }
+    .header {
+      background: #fffaf7;
+      border-bottom: 1px solid #e7cabb;
+      padding: 28px 36px 24px;
+      position: relative;
+    }
+    .header::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, #b63b20, #c8652d, #ad3c22);
+    }
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .logo-img {
+      height: 46px;
+      width: auto;
+      display: block;
+    }
+    .badge-paid {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: #ad3c22;
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      box-shadow: 0 2px 8px rgba(173, 60, 34, 0.25);
+    }
+    .header-title-block {
+      margin-top: 4px;
+    }
+    .brand-eyebrow {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: #ad3c22;
+      text-transform: uppercase;
+      margin: 0 0 6px;
+    }
+    .brand-title {
+      font-family: Georgia, 'Times New Roman', serif;
+      font-size: 26px;
+      line-height: 32px;
+      font-weight: 700;
+      color: #14233b;
+      margin: 0;
+    }
+    .brand-sub {
+      font-size: 13px;
+      color: #657384;
+      margin: 4px 0 0;
+    }
+    .meta-banner {
+      background: #b63b20;
+      color: #ffffff;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-top: 20px;
+      box-shadow: 0 6px 16px rgba(182, 59, 32, 0.12);
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 14px;
+    }
+    .meta-item-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: rgba(255, 255, 255, 0.8);
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+    .meta-item-val {
+      font-size: 14px;
+      font-weight: 700;
+      color: #ffffff;
+      word-break: break-word;
+    }
+    .body {
+      padding: 30px 36px;
+      background: #ffffff;
+    }
+    .parties-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-bottom: 26px;
+    }
+    @media (max-width: 580px) {
+      .parties-grid { grid-template-columns: 1fr; }
+      .header { padding: 22px 20px; }
+      .body { padding: 22px 20px; }
+      .footer { padding: 20px !important; }
+      .meta-banner { grid-template-columns: 1fr 1fr; }
+    }
+    .party-box {
+      background: #fffaf7;
+      border: 1px solid #e7cabb;
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .party-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #ad3c22;
+      margin: 0 0 8px;
+    }
+    .party-name {
+      font-size: 17px;
+      font-weight: 700;
+      color: #14233b;
+      margin: 0 0 6px;
+    }
+    .party-info {
+      font-size: 13px;
+      color: #52606f;
+      margin: 4px 0;
+      line-height: 1.48;
+      word-break: break-word;
+    }
+    .party-info strong {
+      color: #14233b;
+    }
+    .coupon-badge {
+      display: inline-block;
+      background: rgba(174, 84, 49, 0.12);
+      color: #ad3c22;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .table-wrap {
+      margin-bottom: 26px;
+      border: 1px solid #e7cabb;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+    th {
+      background: #b63b20;
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 13px 18px;
+      border: 0;
+    }
+    td {
+      padding: 14px 18px;
+      font-size: 14px;
+      border-top: 1px solid #f0ded4;
+      color: #14233b;
+    }
+    .amt {
+      text-align: right;
+      font-weight: 600;
+      color: #14233b;
+    }
+    .total-highlight {
+      background: #f5e8e1;
+      font-weight: 700;
+    }
+    .total-highlight td {
+      color: #ad3c22;
+      font-size: 16px;
+      font-weight: 800;
+      border-top: 2px solid #e7cabb;
+      border-bottom: 2px solid #e7cabb;
+    }
+    .notes-box {
+      background: #fffaf7;
+      border: 1px solid #e7cabb;
+      border-left: 4px solid #ad3c22;
+      padding: 14px 18px;
+      border-radius: 0 8px 8px 0;
+      margin-bottom: 26px;
+    }
+    .notes-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #ad3c22;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 0 0 4px;
+    }
+    .notes-text {
+      font-size: 13px;
+      color: #52606f;
+      margin: 0;
+      line-height: 1.5;
+    }
+    .footer {
+      background: #f4eee9;
+      border-top: 1px solid #ead8cd;
+      padding: 24px 36px 20px;
+      text-align: center;
+      color: #52606f;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .footer strong {
+      color: #14233b;
+    }
+    .invoice-company-footer {
+      display: flex;
+      justify-content: space-between;
+      text-align: left;
+      gap: 20px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #14233b;
+      border-bottom: 1px solid #d2a08d;
+      padding-bottom: 16px;
+    }
+    .invoice-company-footer a {
+      color: #ad3c22;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    @media (max-width: 580px) {
+      .invoice-company-footer { flex-direction: column; text-align: left !important; }
+    }
+    @media print {
+      body { background: #ffffff !important; padding: 0 !important; }
+      .invoice-card { box-shadow: none !important; border: 1px solid #e7cabb !important; max-width: 100% !important; border-radius: 0 !important; }
+    }
   </style>
 </head>
 <body>
@@ -1543,14 +1783,18 @@ module.exports = function mountMerchApi(app, {
     <div class="header">
       <div class="header-top">
         <div>
-          <h1 class="brand-title">H2 House of Health</h1>
-          <p class="brand-sub">Commission Payment Receipt &amp; Invoice</p>
+          <img class="logo-img" src="${escapeHtml(logoUrl)}" alt="H2 House of Health">
         </div>
         <div>
-          <span class="badge-paid">${escapeHtml(status)}</span>
+          <span class="badge-paid">&#10003; ${escapeHtml(status)}</span>
         </div>
       </div>
-      <div class="meta-grid">
+      <div class="header-title-block">
+        <p class="brand-eyebrow">OFFICIAL COMMISSION PAYMENT RECEIPT</p>
+        <h1 class="brand-title">Commission Payment Receipt &amp; Invoice</h1>
+        <p class="brand-sub">Official Commission Settlement Record &bull; H2 House of Health</p>
+      </div>
+      <div class="meta-banner">
         <div>
           <div class="meta-item-label">Invoice Number</div>
           <div class="meta-item-val">${escapeHtml(invoiceNum)}</div>
@@ -1578,16 +1822,17 @@ module.exports = function mountMerchApi(app, {
           <p class="party-info"><strong>Email:</strong> ${escapeHtml(payment.influencer_email || payment.influencerEmail || influencer.email || 'N/A')}</p>
           ${influencer.handle ? `<p class="party-info"><strong>Handle:</strong> ${escapeHtml(influencer.handle)}</p>` : ''}
           ${influencer.phone ? `<p class="party-info"><strong>Phone:</strong> ${escapeHtml(influencer.phone)}</p>` : ''}
-          <p class="party-info"><strong>Coupon / Code:</strong> ${escapeHtml(couponList)}</p>
+          <p class="party-info"><strong>Coupon / Code:</strong> <span class="coupon-badge">${escapeHtml(couponList)}</span></p>
         </div>
 
         <div class="party-box">
           <p class="party-title">Issued By (Payer)</p>
           <p class="party-name">H2 House of Health</p>
-          <p class="party-info">Jubilee Hills, Hyderabad, Telangana 500033</p>
+          <p class="party-info">📍 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033</p>
           <p class="party-info"><strong>Admin Recipient:</strong> h2houseofhealth@gmail.com</p>
-          <p class="party-info"><strong>Support:</strong> hello@h2houseofhealth.com</p>
-          <p class="party-info"><strong>Contact:</strong> +91 98765 43210</p>
+          <p class="party-info"><strong>Email:</strong> hello@h2houseofhealth.com</p>
+          <p class="party-info"><strong>Phone:</strong> 91000 56979, 91000 86979</p>
+          <p class="party-info"><strong>Website:</strong> www.h2houseofhealth.com</p>
         </div>
       </div>
 
@@ -1602,10 +1847,10 @@ module.exports = function mountMerchApi(app, {
           <tbody>
             <tr>
               <td>
-                <strong>Commission Paid (This Receipt)</strong><br>
-                <small style="color:#64748b;">Method: ${escapeHtml(method)} &bull; Ref: ${escapeHtml(refNum)}</small>
+                <strong style="color:#14233b;">Commission Paid (This Receipt)</strong><br>
+                <small style="color:#657384;">Method: ${escapeHtml(method)} &bull; Ref: ${escapeHtml(refNum)}</small>
               </td>
-              <td class="amt" style="font-size:15px;color:#0f172a;">${formatMerchCurrency(commissionPaidPaise)}</td>
+              <td class="amt" style="font-size:15px;color:#ad3c22;font-weight:700;">${formatMerchCurrency(commissionPaidPaise)}</td>
             </tr>
             <tr>
               <td>Total Commission Earned (Gross Referral Attribution)</td>
@@ -1621,7 +1866,7 @@ module.exports = function mountMerchApi(app, {
             </tr>
             <tr>
               <td>Remaining Balance Due</td>
-              <td class="amt" style="color:${balanceRemainingPaise > 0 ? '#b45309' : '#059669'};">${formatMerchCurrency(balanceRemainingPaise)}</td>
+              <td class="amt" style="color:${balanceRemainingPaise > 0 ? '#ad3c22' : '#059669'};">${formatMerchCurrency(balanceRemainingPaise)}</td>
             </tr>
           </tbody>
         </table>
@@ -1636,8 +1881,19 @@ module.exports = function mountMerchApi(app, {
     </div>
 
     <div class="footer">
-      <p style="margin:0 0 4px;"><strong>H2 House of Health</strong> &bull; Wellness &amp; Merchandise Ecosystem</p>
-      <p style="margin:0;">This is an officially recorded commission payment receipt. Commission paid records are permanently locked and logged for accounting integrity.</p>
+      <div class="invoice-company-footer">
+        <div>
+          📞 91000 56979, 91000 86979<br>
+          ✉️ <a href="mailto:hello@h2houseofhealth.com">hello@h2houseofhealth.com</a>
+        </div>
+        <div style="text-align:right;">
+          📍 47A, Journalist Colony, Road No:70,<br>
+          Jubilee Hills, Hyderabad - 500033<br>
+          🌐 <a href="https://www.h2houseofhealth.com">www.h2houseofhealth.com</a>
+        </div>
+      </div>
+      <p style="margin:0 0 6px;color:#ad3c22;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;">PREVENTIVE TODAY, HEALTHIER TOMORROW.</p>
+      <p style="margin:0;color:#657384;font-size:11px;">This is an officially recorded commission payment receipt. Commission paid records are permanently locked and logged for accounting integrity.</p>
     </div>
   </div>
 </body>
@@ -1684,17 +1940,443 @@ module.exports = function mountMerchApi(app, {
       `Remaining Balance Due: ${formatMerchCurrency(balanceRemainingPaise)}`,
       '',
       payment.note ? `Payment Notes: ${payment.note}\n` : '',
-      'ISSUER DETAILS:',
+      'COMPANY DETAILS (FROM INVOICE):',
       'H2 House of Health',
-      'Jubilee Hills, Hyderabad, Telangana 500033',
-      'Support: hello@h2houseofhealth.com',
-      'Fixed Admin Recipient: h2houseofhealth@gmail.com',
-      'Phone: +91 98765 43210',
-      'Website: https://h2houseofhealth.com',
+      '📞 Phone: 91000 56979, 91000 86979',
+      '✉️ Email: hello@h2houseofhealth.com',
+      '📍 Address: 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033',
+      '🌐 Website: www.h2houseofhealth.com',
+      'Admin Recipient: h2houseofhealth@gmail.com',
       '',
       'Thank you for partnering with H2 House of Health.',
       '============================================================',
     ].filter(Boolean).join('\n');
+  }
+
+  // ─── Image-Type Email for Commission Payments (Like Order Placed Email) ───
+  function buildInfluencerCommissionEmailHtml({
+    payment,
+    influencer,
+    coupons = [],
+    commissionEarnedPaise = 0,
+    commissionPaidPaise = 0,
+    cumulativePaidPaise = 0,
+    balanceRemainingPaise = 0,
+    formattedDate = '',
+    recipientRole = 'influencer', // 'influencer' | 'admin'
+    req = null,
+  }) {
+    const couponList = coupons.map((c) => c.code || c).filter(Boolean).join(', ') || 'None';
+    const invoiceNum = payment.invoice_number || payment.invoiceNumber || 'H2-INV-COM';
+    const refNum = payment.reference_number || payment.referenceNumber || 'N/A';
+    const method = payment.payment_method || payment.paymentMethod || 'Direct Transfer';
+    const status = (payment.status || 'PAID').toUpperCase();
+    const influencerEmail = payment.influencer_email || payment.influencerEmail || influencer.email || 'N/A';
+    const influencerName = influencer.name || 'Influencer Partner';
+    const amountInr = (commissionPaidPaise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const origin = getMerchEmailOrigin(req);
+    const logoUrl = getMerchEmailAssetUrl(req, '/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=240');
+    const homeUrl = `${origin}/`;
+
+    const heroTitle = recipientRole === 'admin'
+      ? 'Commission Payout Recorded'
+      : 'Commission Payment Received';
+
+    const heroSubtitle = recipientRole === 'admin'
+      ? `Commission amount paid to influencer: <strong style="color:#ad3c22;">${escapeHtml(influencerName)}</strong>`
+      : `Commission amount sent to influencer: <strong style="color:#ad3c22;">${escapeHtml(influencerName)}</strong>`;
+
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${escapeHtml(heroTitle)} - H2 House of Health</title>
+    <style>
+      body, table, td, p, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+      table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+      img { -ms-interpolation-mode: bicubic; }
+      @media only screen and (max-width: 620px) {
+        .email-shell { width: 100% !important; max-width: 600px !important; }
+        .mobile-pad { padding-left: 20px !important; padding-right: 20px !important; }
+        .mobile-top-pad { padding-top: 22px !important; }
+        .mobile-stack { display: block !important; width: 100% !important; }
+        .mobile-center { text-align: center !important; }
+        .mobile-left { text-align: left !important; }
+        .mobile-logo { width: 142px !important; max-width: 142px !important; margin: 0 auto !important; }
+        .hero-title { font-size: 30px !important; line-height: 38px !important; }
+        .hero-subtitle { font-size: 19px !important; line-height: 26px !important; }
+        .stat-cell { display: block !important; width: 100% !important; padding: 18px 12px !important; border-right: 0 !important; border-bottom: 1px solid rgba(255,255,255,0.45) !important; }
+        .stat-cell-last { border-bottom: 0 !important; }
+        .footer-logo-cell { border-right: 0 !important; border-bottom: 1px solid #d6a28c !important; padding: 0 0 18px !important; }
+        .footer-copy-cell { padding: 18px 0 0 !important; }
+        .footer-contact-right { text-align: left !important; padding-top: 8px !important; }
+      }
+    </style>
+  </head>
+  <body style="margin:0;padding:0;background:#f6f1ec;color:#14233b;font-family:Arial,Helvetica,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f6f1ec;">
+      <tr>
+        <td align="center" style="padding:20px 10px;">
+          <table role="presentation" class="email-shell" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:600px;border-collapse:collapse;background:#fffaf7;border-radius:12px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,0.06);border:1px solid #ebdcd3;">
+            
+            <!-- Top Logo & Help Header -->
+            <tr>
+              <td class="mobile-pad mobile-top-pad" style="padding:32px 32px 18px;background:#fffaf7;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+                  <tr>
+                    <td class="mobile-stack mobile-center" valign="middle" style="width:50%;">
+                      <a href="${escapeHtml(homeUrl)}" style="text-decoration:none;">
+                        <img class="mobile-logo" src="${escapeHtml(logoUrl)}" width="154" alt="H2 House of Health" style="display:block;border:0;width:154px;max-width:154px;height:auto;">
+                      </a>
+                    </td>
+                    <td class="mobile-stack mobile-center" valign="middle" align="right" style="width:50%;font-size:13px;line-height:20px;color:#14233b;">
+                      <p style="margin:0;font-size:14px;font-weight:600;color:#14233b;">Need Assistance?</p>
+                      <a href="mailto:hello@h2houseofhealth.com" style="color:#ad3c22;text-decoration:none;font-size:13px;line-height:18px;">hello@h2houseofhealth.com</a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Hero Title Block -->
+            <tr>
+              <td class="mobile-pad" style="padding:16px 32px 28px;background:#fffaf7;text-align:center;">
+                <h1 class="hero-title" style="margin:0;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:36px;line-height:44px;font-weight:700;">${escapeHtml(heroTitle)}</h1>
+                <p class="hero-subtitle" style="margin:8px 0 0;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:21px;line-height:28px;">${heroSubtitle}</p>
+                <div style="width:54px;height:3px;background:#b63b20;margin:16px auto 0;border-radius:2px;"></div>
+              </td>
+            </tr>
+
+            <!-- Stat Banner -->
+            <tr>
+              <td class="mobile-pad" style="padding:0 28px 28px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;background:#b63b20;border-radius:8px;box-shadow:0 8px 18px rgba(88,36,19,0.12);">
+                  <tr>
+                    <td class="stat-cell" align="center" style="width:33.33%;padding:22px 10px;border-right:1px solid rgba(255,255,255,0.48);color:#ffffff;">
+                      <div style="font-size:26px;line-height:26px;color:#ffffff;">&#8377;</div>
+                      <p style="margin:10px 0 4px;font-size:14px;line-height:18px;font-weight:500;color:#ffffff;">Amount Paid</p>
+                      <p style="margin:0;font-size:20px;line-height:26px;font-weight:700;color:#ffffff;">₹${amountInr}</p>
+                    </td>
+                    <td class="stat-cell" align="center" style="width:33.33%;padding:22px 10px;border-right:1px solid rgba(255,255,255,0.48);color:#ffffff;">
+                      <div style="font-size:26px;line-height:26px;color:#ffffff;">&#128197;</div>
+                      <p style="margin:10px 0 4px;font-size:14px;line-height:18px;font-weight:500;color:#ffffff;">Payment Date</p>
+                      <p style="margin:0;font-size:14px;line-height:20px;font-weight:600;color:#ffffff;">${escapeHtml(formattedDate)}</p>
+                    </td>
+                    <td class="stat-cell stat-cell-last" align="center" style="width:33.33%;padding:22px 10px;color:#ffffff;">
+                      <div style="font-size:26px;line-height:26px;color:#ffffff;">&#10003;</div>
+                      <p style="margin:10px 0 4px;font-size:14px;line-height:18px;font-weight:500;color:#ffffff;">Status</p>
+                      <p style="margin:0;font-size:15px;line-height:20px;font-weight:700;color:#ffffff;text-transform:uppercase;">${escapeHtml(status)}</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Payout & Ledger Details -->
+            <tr>
+              <td class="mobile-pad" style="padding:0 30px 24px;">
+                <h2 style="margin:0 0 14px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:30px;font-weight:700;">Commission Payout Details</h2>
+                
+                <!-- Party & Meta Info Box -->
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;border:1px solid #e7cabb;border-radius:8px;background:#ffffff;margin-bottom:18px;">
+                  <tr>
+                    <td style="padding:16px 20px;">
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:14px;line-height:22px;">
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;width:38%;">Influencer Name:</td>
+                          <td style="padding:5px 0;color:#0f172a;font-weight:700;">${escapeHtml(influencerName)}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Influencer Email:</td>
+                          <td style="padding:5px 0;color:#0f172a;">${escapeHtml(influencerEmail)}</td>
+                        </tr>
+                        ${influencer.handle ? `
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Social Handle:</td>
+                          <td style="padding:5px 0;color:#0f172a;">${escapeHtml(influencer.handle)}</td>
+                        </tr>
+                        ` : ''}
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Associated Coupon(s):</td>
+                          <td style="padding:5px 0;color:#0f172a;font-weight:600;">${escapeHtml(couponList)}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Payment Method:</td>
+                          <td style="padding:5px 0;color:#0f172a;">${escapeHtml(method)}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Reference / UTR ID:</td>
+                          <td style="padding:5px 0;color:#0f172a;font-weight:600;">${escapeHtml(refNum)}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Invoice Number:</td>
+                          <td style="padding:5px 0;color:#0f172a;font-weight:600;">${escapeHtml(invoiceNum)}</td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+
+                <!-- Financial Ledger Box -->
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;border:1px solid #e7cabb;border-radius:8px;background:#ffffff;table-layout:fixed;">
+                  <tr>
+                    <td style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;border-bottom:1px solid #f0ded4;">Total Commission Earned (Gross Attribution)</td>
+                    <td align="right" style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;font-weight:600;white-space:nowrap;border-bottom:1px solid #f0ded4;">${formatMerchCurrency(commissionEarnedPaise)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;border-bottom:1px solid #f0ded4;">Cumulative Commission Paid to Date</td>
+                    <td align="right" style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;font-weight:600;white-space:nowrap;border-bottom:1px solid #f0ded4;">${formatMerchCurrency(cumulativePaidPaise)}</td>
+                  </tr>
+                  <tr style="background:#f5e8e1;">
+                    <td style="padding:16px 20px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:17px;line-height:22px;font-weight:700;">Current Commission Settled</td>
+                    <td align="right" style="padding:16px 20px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:22px;line-height:26px;font-weight:700;white-space:nowrap;">${formatMerchCurrency(commissionPaidPaise)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;border-top:1px solid #f0ded4;">Remaining Balance Due</td>
+                    <td align="right" style="padding:12px 20px;font-size:14px;line-height:20px;font-weight:700;white-space:nowrap;border-top:1px solid #f0ded4;color:${balanceRemainingPaise > 0 ? '#b45309' : '#059669'};">${formatMerchCurrency(balanceRemainingPaise)}</td>
+                  </tr>
+                </table>
+
+                ${payment.note ? `
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;background:#fffaf7;border:1px solid #e7cabb;border-left:4px solid #ad3c22;border-radius:0 8px 8px 0;margin-top:16px;">
+                    <tr>
+                      <td style="padding:12px 18px;">
+                        <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:#ad3c22;text-transform:uppercase;">Payment Notes / Remarks</p>
+                        <p style="margin:0;font-size:13px;color:#52606f;line-height:1.5;">${escapeHtml(payment.note)}</p>
+                      </td>
+                    </tr>
+                  </table>
+                ` : ''}
+              </td>
+            </tr>
+
+            <!-- Action Buttons Row -->
+            <tr>
+              <td class="mobile-pad" style="padding:0 30px 30px;">
+                <a class="mobile-button" href="${escapeHtml(homeUrl)}" style="display:block;text-align:center;padding:16px 18px;border-radius:6px;background:#b63b20;color:#ffffff;text-decoration:none;font-family:Georgia,'Times New Roman',serif;font-size:20px;line-height:26px;font-weight:700;">Visit H2 House of Health&nbsp;&nbsp;&#8594;</a>
+              </td>
+            </tr>
+
+            <!-- Footer: Matches Bottom of Invoice -->
+            <tr>
+              <td class="mobile-pad" style="padding:28px 30px 26px;background:#f4eee9;border-top:1px solid #ead8cd;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+                  <tr>
+                    <td class="mobile-stack mobile-center footer-logo-cell" valign="middle" style="width:31%;padding-right:22px;border-right:1px solid #d2a08d;">
+                      <a href="${escapeHtml(homeUrl)}">
+                        <img src="${escapeHtml(logoUrl)}" width="132" alt="H2 House of Health" style="display:block;border:0;width:132px;max-width:132px;height:auto;">
+                      </a>
+                    </td>
+                    <td class="mobile-stack mobile-center footer-copy-cell" valign="middle" style="padding-left:26px;">
+                      <p style="margin:0 0 10px;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:21px;font-weight:700;letter-spacing:1px;">PREVENTIVE TODAY, HEALTHIER TOMORROW.</p>
+                      <p style="margin:0;">
+                        <a href="https://www.instagram.com/h2houseofhealth" style="display:inline-block;width:26px;height:26px;margin-right:24px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:22px;line-height:24px;" title="Instagram">&#9678;</a>
+                        <a href="${escapeHtml(homeUrl)}" style="display:inline-block;width:26px;height:26px;margin-right:24px;color:#ad3c22;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:22px;line-height:24px;" title="Facebook">f</a>
+                        <a href="${escapeHtml(homeUrl)}" style="display:inline-block;width:30px;height:24px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:22px;line-height:24px;" title="YouTube">&#9658;</a>
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+
+                <!-- Company Details: Exactly from the Bottom of Invoice -->
+                <table role="presentation" class="invoice-company-footer" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:20px;padding-top:18px;border-top:1px solid #d2a08d;">
+                  <tr>
+                    <td class="mobile-stack mobile-center" valign="top" style="width:50%;padding-top:14px;color:#14233b;font-size:13px;line-height:1.6;">
+                      📞 91000 56979, 91000 86979<br>
+                      ✉️ <a href="mailto:hello@h2houseofhealth.com" style="color:#14233b;text-decoration:none;">hello@h2houseofhealth.com</a>
+                    </td>
+                    <td class="mobile-stack mobile-center footer-contact-right" valign="top" align="right" style="width:50%;padding-top:14px;color:#14233b;font-size:13px;line-height:1.6;">
+                      📍 47A, Journalist Colony, Road No:70,<br>
+                      Jubilee Hills, Hyderabad - 500033<br>
+                      🌐 <a href="https://www.h2houseofhealth.com" style="color:#ad3c22;text-decoration:none;">www.h2houseofhealth.com</a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+  }
+
+  function buildInfluencerCommissionEmailText({
+    payment,
+    influencer,
+    coupons = [],
+    commissionEarnedPaise = 0,
+    commissionPaidPaise = 0,
+    cumulativePaidPaise = 0,
+    balanceRemainingPaise = 0,
+    formattedDate = '',
+    recipientRole = 'influencer',
+  }) {
+    const couponList = coupons.map((c) => c.code || c).filter(Boolean).join(', ') || 'None';
+    const invoiceNum = payment.invoice_number || payment.invoiceNumber || 'H2-INV-COM';
+    const refNum = payment.reference_number || payment.referenceNumber || 'N/A';
+    const method = payment.payment_method || payment.paymentMethod || 'Direct Transfer';
+    const status = (payment.status || 'PAID').toUpperCase();
+    const influencerName = influencer.name || 'Influencer Partner';
+    const amountInr = (commissionPaidPaise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const header = recipientRole === 'admin'
+      ? `Commission amount paid to influencer: ${influencerName}`
+      : `Commission amount sent to influencer: ${influencerName}`;
+
+    return [
+      '============================================================',
+      'H2 HOUSE OF HEALTH - COMMISSION PAYMENT NOTIFICATION',
+      '============================================================',
+      '',
+      header,
+      `Amount Paid: ₹${amountInr}`,
+      `Payment Date: ${formattedDate}`,
+      `Payment Status: ${status}`,
+      `Invoice Number: ${invoiceNum}`,
+      `Payment Method: ${method}`,
+      `Reference / UTR ID: ${refNum}`,
+      '',
+      'INFLUENCER DETAILS:',
+      `Influencer Name: ${influencerName}`,
+      `Email: ${payment.influencer_email || payment.influencerEmail || influencer.email || 'N/A'}`,
+      `Coupon Code(s): ${couponList}`,
+      '',
+      'FINANCIAL BREAKDOWN:',
+      `Total Commission Earned: ${formatMerchCurrency(commissionEarnedPaise)}`,
+      `Cumulative Commission Paid: ${formatMerchCurrency(cumulativePaidPaise)}`,
+      `Current Commission Paid: ${formatMerchCurrency(commissionPaidPaise)}`,
+      `Remaining Balance Due: ${formatMerchCurrency(balanceRemainingPaise)}`,
+      '',
+      payment.note ? `Payment Notes: ${payment.note}\n` : '',
+      'COMPANY DETAILS (FROM INVOICE):',
+      'H2 House of Health',
+      '📞 Phone: 91000 56979, 91000 86979',
+      '✉️ Email: hello@h2houseofhealth.com',
+      '📍 Address: 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033',
+      '🌐 Website: www.h2houseofhealth.com',
+      'Admin Recipient: h2houseofhealth@gmail.com',
+      '',
+      'Thank you for partnering with H2 House of Health.',
+      '============================================================',
+    ].filter(Boolean).join('\n');
+  }
+
+  // ─── Dispatch Commission Payment Emails to Influencer & Admin ───
+  async function sendInfluencerCommissionNotificationEmails({
+    payment,
+    influencer,
+    coupons = [],
+    commissionEarnedPaise = 0,
+    commissionPaidPaise = 0,
+    cumulativePaidPaise = 0,
+    balanceRemainingPaise = 0,
+    formattedDate = '',
+    req = null,
+  }) {
+    const influencerEmail = String(payment.influencerEmail || payment.influencer_email || influencer.email || '').trim().toLowerCase();
+    const adminEmail = FIXED_ADMIN_EMAIL;
+    const invoiceNumber = payment.invoiceNumber || payment.invoice_number || 'H2-INV-COM';
+    const amountInr = (commissionPaidPaise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const influencerName = influencer.name || 'Influencer Partner';
+
+    const influencerHtml = buildInfluencerCommissionEmailHtml({
+      payment,
+      influencer,
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      recipientRole: 'influencer',
+      req,
+    });
+
+    const influencerText = buildInfluencerCommissionEmailText({
+      payment,
+      influencer,
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      recipientRole: 'influencer',
+    });
+
+    const adminHtml = buildInfluencerCommissionEmailHtml({
+      payment,
+      influencer,
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      recipientRole: 'admin',
+      req,
+    });
+
+    const adminText = buildInfluencerCommissionEmailText({
+      payment,
+      influencer,
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      recipientRole: 'admin',
+    });
+
+    const results = {
+      influencer: { to: influencerEmail, status: 'pending' },
+      admin: { to: adminEmail, status: 'pending' },
+    };
+
+    // 1. Send to Influencer
+    try {
+      if (typeof sendMerchEmail === 'function' && influencerEmail) {
+        await sendMerchEmail({
+          to: influencerEmail,
+          subject: `Commission amount sent to influencer: ${influencerName} - ₹${amountInr} (${invoiceNumber}) | H2 House of Health`,
+          text: influencerText,
+          html: influencerHtml,
+        });
+        results.influencer.status = 'sent';
+      } else {
+        results.influencer.status = 'skipped_no_mailer';
+      }
+    } catch (err) {
+      console.error('[Merch] Failed to email commission payout to influencer:', err.message);
+      results.influencer.status = 'failed';
+      results.influencer.error = err.message;
+    }
+
+    // 2. Send to Admin (Fixed copy: h2houseofhealth@gmail.com)
+    try {
+      if (typeof sendMerchEmail === 'function' && adminEmail) {
+        await sendMerchEmail({
+          to: adminEmail,
+          subject: `Commission amount paid to influencer: ${influencerName} - ₹${amountInr} (${invoiceNumber}) | H2 House of Health`,
+          text: adminText,
+          html: adminHtml,
+        });
+        results.admin.status = 'sent';
+      } else {
+        results.admin.status = 'skipped_no_mailer';
+      }
+    } catch (err) {
+      console.error('[Merch] Failed to email commission payout copy to admin:', err.message);
+      results.admin.status = 'failed';
+      results.admin.error = err.message;
+    }
+
+    return results;
   }
 
   function loadMerchInfluencers() {
@@ -5464,7 +6146,7 @@ module.exports = function mountMerchApi(app, {
       couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
     }
 
-    const shippingCharge = (subtotal >= 99900 || subtotal <= 100) ? 0 : 9900; // Free above ₹999 or ₹1 test
+    const shippingCharge = 0; // Free shipping by default as of now
     const discountAmount = bundleDiscountPaise > 0
       ? bundleDiscountPaise
       : Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
@@ -5837,7 +6519,7 @@ module.exports = function mountMerchApi(app, {
       couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
     }
 
-    const shippingCharge = subtotal >= 99900 ? 0 : 9900;
+    const shippingCharge = 0; // Free shipping by default as of now
     const codSurcharge = 5000; // ₹50
     const discountAmount = bundleDiscountPaise > 0
       ? bundleDiscountPaise
@@ -7504,46 +8186,29 @@ module.exports = function mountMerchApi(app, {
       formattedDate,
     });
 
-    // 3. Send payment invoice to Influencer Email and h2houseofhealth@gmail.com
-    const emailResults = {
-      influencer: { to: influencerEmail, status: 'pending' },
-      admin: { to: ADMIN_INVOICE_RECIPIENT, status: 'pending' },
+    // 3. Send payment email notification to Influencer and Admin
+    let emailResults = {
+      influencer: { to: influencerEmail, status: 'skipped' },
+      admin: { to: ADMIN_INVOICE_RECIPIENT, status: 'skipped' },
     };
 
-    try {
-      if (typeof sendMerchEmail === 'function') {
-        await sendMerchEmail({
-          to: influencerEmail,
-          subject: `Commission Payment Receipt & Invoice - ${invoiceNumber} - H2 House of Health`,
-          text: invoiceText,
-          html: invoiceHtml,
-        });
-        emailResults.influencer.status = 'sent';
-      } else {
-        emailResults.influencer.status = 'skipped_no_mailer';
-      }
-    } catch (err) {
-      console.error('[Merch] Failed to email commission invoice to influencer:', err.message);
-      emailResults.influencer.status = 'failed';
-      emailResults.influencer.error = err.message;
-    }
+    const shouldSendEmail = req.body?.sendEmail !== false &&
+      req.body?.sendEmail !== 'false' &&
+      req.body?.sendPaymentEmail !== false &&
+      req.body?.sendPaymentEmail !== 'false';
 
-    try {
-      if (typeof sendMerchEmail === 'function') {
-        await sendMerchEmail({
-          to: ADMIN_INVOICE_RECIPIENT,
-          subject: `[Admin Copy] Commission Payment Invoice - ${influencer.name} - ${invoiceNumber}`,
-          text: invoiceText,
-          html: invoiceHtml,
-        });
-        emailResults.admin.status = 'sent';
-      } else {
-        emailResults.admin.status = 'skipped_no_mailer';
-      }
-    } catch (err) {
-      console.error('[Merch] Failed to email commission invoice to admin:', err.message);
-      emailResults.admin.status = 'failed';
-      emailResults.admin.error = err.message;
+    if (shouldSendEmail) {
+      emailResults = await sendInfluencerCommissionNotificationEmails({
+        payment: paymentRecord,
+        influencer: { ...influencer, email: influencerEmail },
+        coupons,
+        commissionEarnedPaise,
+        commissionPaidPaise: amountPaise,
+        cumulativePaidPaise: newCumulativePaidPaise,
+        balanceRemainingPaise,
+        formattedDate,
+        req,
+      });
     }
 
     const updatedInfluencer = loadMerchInfluencers().find((item) => Number(item.id) === influencerId);
@@ -7753,6 +8418,68 @@ module.exports = function mountMerchApi(app, {
     }
 
     return res.json({ invoiceHtml, invoiceNumber: payment.invoiceNumber, payment });
+  });
+
+  // ─── ADMIN: Dispatch Commission Payment Email to Influencer & Admin ───
+  app.post('/api/merch/admin/influencers/:id/payments/:paymentId/send-email', requireAdmin, async (req, res) => {
+    const influencerId = Number(req.params.id);
+    const paymentId = Number(req.params.paymentId);
+    if (!Number.isInteger(influencerId) || !Number.isInteger(paymentId)) {
+      return res.status(400).json({ message: 'Invalid influencer or payment id' });
+    }
+    const influencer = getInfluencerById(influencerId);
+    if (!influencer) {
+      return res.status(404).json({ message: 'Influencer not found' });
+    }
+
+    const payment = db.prepare(`
+      SELECT id, influencer_id AS influencerId, amount_paise AS amountPaise, payment_method AS paymentMethod,
+             reference_number AS referenceNumber, status, paid_at AS paidAt, note, invoice_number AS invoiceNumber,
+             influencer_email AS influencerEmail, admin_email AS adminEmail, created_by AS createdBy, created_at AS createdAt
+      FROM merch_influencer_commission_payments
+      WHERE id = ? AND influencer_id = ?
+    `).get(paymentId, influencerId);
+
+    if (!payment) {
+      return res.status(404).json({ message: 'Payment record not found' });
+    }
+
+    const influencerEmail = String(req.body?.influencerEmail || payment.influencerEmail || influencer.email || '').trim().toLowerCase();
+    if (!influencerEmail || !isValidMerchEmail(influencerEmail)) {
+      return res.status(400).json({ message: 'A valid influencer email address is required to send notification.' });
+    }
+
+    const coupons = getInfluencerCouponRows([influencerId]);
+    const statsRows = getInfluencerStatsRows([influencerId]);
+    const stats = statsRows[0] || {};
+    const commissionEarnedPaise = Math.round(Number(stats.totalCommissionEarned || 0));
+    const cumulativePaidPaise = Math.round(Number(influencer.paidCommission ?? influencer.paid_commission ?? 0));
+    const balanceRemainingPaise = Math.max(0, commissionEarnedPaise - cumulativePaidPaise);
+
+    const paidDate = payment.paidAt ? new Date(payment.paidAt) : new Date(payment.createdAt || Date.now());
+    const formattedDate = new Intl.DateTimeFormat('en-IN', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'Asia/Kolkata',
+    }).format(paidDate);
+
+    const emailResults = await sendInfluencerCommissionNotificationEmails({
+      payment: { ...payment, influencerEmail },
+      influencer: { ...influencer, email: influencerEmail },
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise: payment.amountPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      req,
+    });
+
+    return res.json({
+      success: true,
+      message: `Commission payout notification email dispatched to influencer (${influencerEmail}) and admin (${FIXED_ADMIN_EMAIL}).`,
+      emailResults,
+    });
   });
 
   // ─── ADMIN: Get order detail ───
