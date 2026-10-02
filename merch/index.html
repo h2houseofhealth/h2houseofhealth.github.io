@@ -260,6 +260,19 @@
       </aside>
       <div id="cartOverlay" class="cart-overlay" hidden></div>
 
+      <!-- Checkout Add More Products Drawer -->
+      <aside id="checkoutAddProductsDrawer" class="checkout-add-drawer" hidden aria-label="Add more products to order">
+        <div class="checkout-add-drawer__header">
+          <div class="checkout-add-drawer__header-copy">
+            <h2>Add More Products</h2>
+            <p>Add items directly to your current order</p>
+          </div>
+          <button id="checkoutAddProductsCloseBtn" class="checkout-add-drawer__close" type="button" aria-label="Close add products drawer">&#10005;</button>
+        </div>
+        <div id="checkoutAddProductsList" class="checkout-add-drawer__list"></div>
+      </aside>
+      <div id="checkoutAddProductsOverlay" class="checkout-add-overlay" hidden></div>
+
       <!-- Shopify-style Checkout (SPA view) -->
       <section id="checkoutPage" class="shopify-checkout" hidden aria-labelledby="checkoutPageTitle"></section>
 
