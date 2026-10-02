@@ -4701,7 +4701,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       // Clear the merch UI even if the server could not be reached.
     }
 
-    // 1. Immediately clear cart and promotional state from memory AND storage
+    // 1. Clear promotional state and legacy storage (do NOT delete guest cart)
     state.cart = [];
     state.cartOwnerId = null;
     state.merchBundleCode = '';
@@ -4709,17 +4709,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     state.merchCouponPreview = null;
     state.merchCouponError = '';
 
-    try {
-      localStorage.removeItem('merch_cart_guest');
-      localStorage.removeItem('merch_bundle_guest');
-      localStorage.removeItem('merch_coupon_guest');
-      localStorage.removeItem('merch_cart');
-      localStorage.removeItem('merch_bundle_code');
-    } catch {}
-
-    renderCartBadge();
-    if (state.cartDrawerOpen) renderCart();
-    closeCart();
+    cleanupLegacySharedCartStorage();
 
     // 2. Clear user state
     state.currentUser = null;
@@ -4740,6 +4730,12 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     state.accountDrawerTrigger = null;
     closeAccountDrawer();
     renderAccountTrigger();
+
+    // 3. Switch back to guest state: restore isolated guest cart
+    loadCart(null);
+    renderCartBadge();
+    if (state.cartDrawerOpen) renderCart();
+    closeCart();
 
     // 3. Return to shop if on checkout page
     if (state.currentView === 'checkout') {
@@ -6879,11 +6875,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
       if (currentUserId) {
         await syncCartFromBackend();
-        try {
-          localStorage.removeItem('merch_cart_guest');
-          localStorage.removeItem('merch_bundle_guest');
-          localStorage.removeItem('merch_coupon_guest');
-        } catch {}
       }
 
       renderCartBadge();
@@ -7178,6 +7169,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     loadTrendingProducts();
     loadMerchOffers();
     loadMerchCoupons();
+    window.__MERCH_APP_STATE__ = state;
   }
 
   // Boot
