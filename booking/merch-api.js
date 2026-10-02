@@ -1631,10 +1631,13 @@ module.exports = function mountMerchApi(app, {
     }
     @media (max-width: 580px) {
       .parties-grid { grid-template-columns: 1fr; }
-      .header { padding: 22px 20px; }
+      .header { padding: 22px 20px; text-align: center; }
+      .header-top { flex-direction: column; align-items: center; text-align: center; gap: 14px; }
+      .logo-img { margin: 0 auto; }
+      .header-title-block { text-align: center; }
       .body { padding: 22px 20px; }
-      .footer { padding: 20px !important; }
-      .meta-banner { grid-template-columns: 1fr 1fr; }
+      .footer { padding: 22px 18px 20px !important; text-align: center !important; }
+      .meta-banner { grid-template-columns: 1fr 1fr; text-align: center; }
     }
     .party-box {
       background: #fffaf7;
@@ -1770,7 +1773,8 @@ module.exports = function mountMerchApi(app, {
       font-weight: 600;
     }
     @media (max-width: 580px) {
-      .invoice-company-footer { flex-direction: column; text-align: left !important; }
+      .invoice-company-footer { flex-direction: column; text-align: center !important; gap: 10px; }
+      .invoice-company-footer div { text-align: center !important; }
     }
     @media print {
       body { background: #ffffff !important; padding: 0 !important; }
@@ -2160,39 +2164,34 @@ module.exports = function mountMerchApi(app, {
 
             <!-- Footer: Matches Bottom of Invoice -->
             <tr>
-              <td class="mobile-pad" style="padding:28px 30px 26px;background:#f4eee9;border-top:1px solid #ead8cd;">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-                  <tr>
-                    <td class="mobile-stack mobile-center footer-logo-cell" valign="middle" style="width:31%;padding-right:22px;border-right:1px solid #d2a08d;">
-                      <a href="${escapeHtml(homeUrl)}">
-                        <img src="${escapeHtml(logoUrl)}" width="132" alt="H2 House of Health" style="display:block;border:0;width:132px;max-width:132px;height:auto;">
-                      </a>
-                    </td>
-                    <td class="mobile-stack mobile-center footer-copy-cell" valign="middle" style="padding-left:26px;">
-                      <p style="margin:0 0 10px;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:21px;font-weight:700;letter-spacing:1px;">PREVENTIVE TODAY, HEALTHIER TOMORROW.</p>
-                      <p style="margin:0;">
-                        <a href="https://www.instagram.com/h2houseofhealth" style="display:inline-block;width:26px;height:26px;margin-right:24px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:22px;line-height:24px;" title="Instagram">&#9678;</a>
-                        <a href="${escapeHtml(homeUrl)}" style="display:inline-block;width:26px;height:26px;margin-right:24px;color:#ad3c22;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:22px;line-height:24px;" title="Facebook">f</a>
-                        <a href="${escapeHtml(homeUrl)}" style="display:inline-block;width:30px;height:24px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:22px;line-height:24px;" title="YouTube">&#9658;</a>
-                      </p>
-                    </td>
-                  </tr>
-                </table>
+              <td class="mobile-pad" align="center" style="padding:28px 24px 26px;background:#f4eee9;border-top:1px solid #ead8cd;text-align:center;">
+                <!-- Centered Logo -->
+                <div align="center" style="text-align:center;margin:0 auto 14px;">
+                  <a href="${escapeHtml(homeUrl)}" style="display:inline-block;text-decoration:none;margin:0 auto;text-align:center;">
+                    <img src="${escapeHtml(logoUrl)}" width="140" alt="H2 House of Health" style="display:block;border:0;width:140px;max-width:140px;height:auto;margin:0 auto;text-align:center;">
+                  </a>
+                </div>
 
-                <!-- Company Details: Exactly from the Bottom of Invoice -->
-                <table role="presentation" class="invoice-company-footer" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:20px;padding-top:18px;border-top:1px solid #d2a08d;">
-                  <tr>
-                    <td class="mobile-stack mobile-center" valign="top" style="width:50%;padding-top:14px;color:#14233b;font-size:13px;line-height:1.6;">
-                      📞 91000 56979, 91000 86979<br>
-                      ✉️ <a href="mailto:hello@h2houseofhealth.com" style="color:#14233b;text-decoration:none;">hello@h2houseofhealth.com</a>
-                    </td>
-                    <td class="mobile-stack mobile-center footer-contact-right" valign="top" align="right" style="width:50%;padding-top:14px;color:#14233b;font-size:13px;line-height:1.6;">
-                      📍 47A, Journalist Colony, Road No:70,<br>
-                      Jubilee Hills, Hyderabad - 500033<br>
-                      🌐 <a href="https://www.h2houseofhealth.com" style="color:#ad3c22;text-decoration:none;">www.h2houseofhealth.com</a>
-                    </td>
-                  </tr>
-                </table>
+                <!-- Brand Slogan -->
+                <p style="margin:0 0 12px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:22px;font-weight:700;letter-spacing:1px;text-transform:uppercase;text-align:center;">PREVENTIVE TODAY, HEALTHIER TOMORROW.</p>
+
+                <!-- Social Links -->
+                <div align="center" style="text-align:center;margin:0 auto 16px;">
+                  <a href="https://www.instagram.com/h2houseofhealth" style="display:inline-block;width:28px;height:28px;margin:0 10px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:22px;line-height:28px;text-align:center;" title="Instagram">&#9678;</a>
+                  <a href="${escapeHtml(homeUrl)}" style="display:inline-block;width:28px;height:28px;margin:0 10px;color:#ad3c22;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:22px;line-height:28px;text-align:center;" title="Facebook">f</a>
+                  <a href="${escapeHtml(homeUrl)}" style="display:inline-block;width:32px;height:28px;margin:0 10px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:22px;line-height:28px;text-align:center;" title="YouTube">&#9658;</a>
+                </div>
+
+                <!-- Divider -->
+                <div style="border-top:1px solid #d2a08d;margin:16px auto;width:100%;max-width:520px;"></div>
+
+                <!-- Company Details: Fully Centered -->
+                <div align="center" style="text-align:center;color:#14233b;font-size:13px;line-height:1.7;margin:0 auto;max-width:520px;">
+                  <p style="margin:0 0 6px;text-align:center;">📞 <strong>91000 56979, 91000 86979</strong> &nbsp;&bull;&nbsp; ✉️ <a href="mailto:hello@h2houseofhealth.com" style="color:#14233b;text-decoration:none;font-weight:600;">hello@h2houseofhealth.com</a></p>
+                  <p style="margin:0 0 6px;text-align:center;">📍 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033</p>
+                  <p style="margin:0 0 10px;text-align:center;">🌐 <a href="https://www.h2houseofhealth.com" style="color:#ad3c22;text-decoration:none;font-weight:700;">www.h2houseofhealth.com</a></p>
+                  <p style="margin:12px 0 0;color:#788696;font-size:11px;line-height:1.5;text-align:center;">Official Influencer Commission Settlement Receipt &bull; H2 House of Health</p>
+                </div>
               </td>
             </tr>
 
@@ -4771,42 +4770,36 @@ module.exports = function mountMerchApi(app, {
               </td>
             </tr>
             <tr>
-              <td class="mobile-pad" style="padding:28px 30px 26px;background:#f4eee9;border-top:1px solid #ead8cd;">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-                  <tr>
-                    <td class="mobile-stack mobile-center footer-logo-cell" valign="middle" style="width:31%;padding-right:22px;border-right:1px solid #d2a08d;">
-                      <a href="${escapeHtml(links.home)}"><img src="${escapeHtml(links.logo)}" width="132" alt="H2 House of Health logo" style="display:block;border:0;width:132px;max-width:132px;height:auto;"></a>
-                    </td>
-                    <td class="mobile-stack mobile-center footer-copy-cell" valign="middle" style="padding-left:26px;">
-                      <p style="margin:0 0 15px;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:21px;font-weight:700;letter-spacing:1px;">PREVENTIVE TODAY, HEALTHIER TOMORROW.</p>
-                      <p style="margin:0 0 18px;">
-                        <a href="${escapeHtml(links.instagram)}" style="display:inline-block;width:26px;height:26px;margin-right:28px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:24px;line-height:26px;text-align:center;" title="Instagram">&#9678;</a>
-                        <a href="${escapeHtml(links.facebook)}" style="display:inline-block;width:26px;height:26px;margin-right:28px;color:#ad3c22;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:24px;line-height:26px;text-align:center;" title="Facebook">f</a>
-                        <a href="${escapeHtml(links.youtube)}" style="display:inline-block;width:30px;height:24px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:24px;line-height:24px;text-align:center;" title="YouTube">&#9658;</a>
-                      </p>
-                    </td>
-                  </tr>
-                </table>
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:24px;">
-                  <tr>
-                    <td class="mobile-stack mobile-center footer-contact-cell" valign="top" style="width:100%;">
-                      <p style="margin:0 0 8px;color:#14233b;font-size:15px;line-height:22px;">
-                        <span style="color:#ad3c22;font-size:18px;line-height:18px;">&#9993;</span>
-                        <span>&nbsp;&nbsp;</span>
-                        <span class="footer-contact"><a href="${escapeHtml(links.email)}" style="color:#111827;text-decoration:none;">hello@h2houseofhealth.com</a></span>
-                        <span class="footer-separator">&nbsp;&nbsp; | &nbsp;&nbsp;</span>
-                        <span style="color:#ad3c22;font-size:18px;line-height:18px;">&#9742;</span>
-                        <span>&nbsp;&nbsp;</span>
-                        <span class="footer-contact"><a href="${escapeHtml(links.phone)}" style="color:#111827;text-decoration:none;">+91 98765 43210</a></span>
-                      </p>
-                      <p style="margin:0;color:#14233b;font-size:15px;line-height:22px;">
-                        <span style="color:#ad3c22;font-size:18px;line-height:18px;">&#9679;</span>
-                        <span>&nbsp;&nbsp;</span>
-                        H2 House of Health, Hyderabad
-                      </p>
-                    </td>
-                  </tr>
-                </table>
+              <td class="mobile-pad" align="center" style="padding:28px 24px 26px;background:#f4eee9;border-top:1px solid #ead8cd;text-align:center;">
+                <!-- Centered Logo -->
+                <div align="center" style="text-align:center;margin:0 auto 14px;">
+                  <a href="${escapeHtml(links.home)}" style="display:inline-block;text-decoration:none;margin:0 auto;text-align:center;">
+                    <img src="${escapeHtml(links.logo)}" width="140" alt="H2 House of Health logo" style="display:block;border:0;width:140px;max-width:140px;height:auto;margin:0 auto;text-align:center;">
+                  </a>
+                </div>
+
+                <!-- Brand Slogan -->
+                <p style="margin:0 0 12px;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:22px;font-weight:700;letter-spacing:1px;text-align:center;">PREVENTIVE TODAY, HEALTHIER TOMORROW.</p>
+
+                <!-- Social Links -->
+                <div align="center" style="text-align:center;margin:0 auto 16px;">
+                  <a href="${escapeHtml(links.instagram)}" style="display:inline-block;width:28px;height:28px;margin:0 10px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:22px;line-height:28px;text-align:center;" title="Instagram">&#9678;</a>
+                  <a href="${escapeHtml(links.facebook)}" style="display:inline-block;width:28px;height:28px;margin:0 10px;color:#ad3c22;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:22px;line-height:28px;text-align:center;" title="Facebook">f</a>
+                  <a href="${escapeHtml(links.youtube)}" style="display:inline-block;width:32px;height:28px;margin:0 10px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:22px;line-height:28px;text-align:center;" title="YouTube">&#9658;</a>
+                </div>
+
+                <!-- Divider -->
+                <div style="border-top:1px solid #d2a08d;margin:16px auto;width:100%;max-width:520px;"></div>
+
+                <!-- Contact Info Centered -->
+                <div align="center" style="text-align:center;color:#14233b;font-size:14px;line-height:1.7;margin:0 auto;max-width:520px;">
+                  <p style="margin:0 0 6px;text-align:center;">
+                    ✉️ <a href="${escapeHtml(links.email)}" style="color:#14233b;text-decoration:none;font-weight:600;">hello@h2houseofhealth.com</a>
+                    &nbsp;&bull;&nbsp;
+                    📞 <a href="${escapeHtml(links.phone)}" style="color:#14233b;text-decoration:none;font-weight:600;">+91 91000 56979</a>
+                  </p>
+                  <p style="margin:0;text-align:center;">📍 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033</p>
+                </div>
               </td>
             </tr>
           </table>
@@ -8092,12 +8085,30 @@ module.exports = function mountMerchApi(app, {
       return res.status(400).json({ message: 'Payment confirmation is required before proceeding.' });
     }
 
+    // Verify security question answer if configured
+    const securityRow = db.prepare('SELECT answer FROM merch_admin_security_questions WHERE id = 1').get();
+    if (securityRow && securityRow.answer && String(securityRow.answer).trim()) {
+      const submittedAnswer = String(req.body?.securityAnswer || req.body?.answer || '').trim();
+      const expectedAnswer = String(securityRow.answer || '').trim();
+      if (!submittedAnswer || submittedAnswer.toLowerCase() !== expectedAnswer.toLowerCase()) {
+        return res.status(401).json({ message: 'Wrong answer' });
+      }
+    }
+
     // Calculate current commission stats
     const statsRows = getInfluencerStatsRows([influencerId]);
     const stats = statsRows[0] || {};
     const commissionEarnedPaise = Math.round(Number(stats.totalCommissionEarned || 0));
     const previousPaidPaise = Math.round(Number(influencer.paidCommission ?? influencer.paid_commission ?? 0));
     const newCumulativePaidPaise = previousPaidPaise + amountPaise;
+
+    // Strict validation: cumulative paid CANNOT exceed earned commission
+    if (commissionEarnedPaise > 0 && newCumulativePaidPaise > commissionEarnedPaise) {
+      return res.status(400).json({
+        message: `Payment amount (${formatMerchCurrency(amountPaise)}) exceeds remaining commission balance (${formatMerchCurrency(Math.max(0, commissionEarnedPaise - previousPaidPaise))}). Commission paid cannot exceed total earned commission of ${formatMerchCurrency(commissionEarnedPaise)}.`,
+      });
+    }
+
     const balanceRemainingPaise = Math.max(0, commissionEarnedPaise - newCumulativePaidPaise);
 
     const now = new Date();
@@ -8224,8 +8235,8 @@ module.exports = function mountMerchApi(app, {
     });
   });
 
-  // ─── ADMIN: Correct Commission Paid (Secured with Authorization Audit) ───
-  app.post('/api/merch/admin/influencers/:id/commission-correction', requireAdmin, (req, res) => {
+  // ─── ADMIN: Correct Commission Paid (Secured with Authorization Audit & Email Integration) ───
+  app.post('/api/merch/admin/influencers/:id/commission-correction', requireAdmin, async (req, res) => {
     const influencerId = Number(req.params.id);
     if (!Number.isInteger(influencerId) || influencerId <= 0) {
       return res.status(400).json({ message: 'Invalid influencer id' });
@@ -8247,7 +8258,7 @@ module.exports = function mountMerchApi(app, {
       return res.status(401).json({ message: 'Wrong answer' });
     }
 
-    const reason = String(req.body?.reason || '').trim();
+    const reason = String(req.body?.reason || req.body?.correctionReason || req.body?.note || '').trim();
     if (!reason || reason.length < 3) {
       return res.status(400).json({ message: 'A reason for the commission correction is required.' });
     }
@@ -8262,23 +8273,73 @@ module.exports = function mountMerchApi(app, {
     const stats = getInfluencerStatsRows([influencerId])[0] || {};
     const commissionEarnedPaise = Math.max(0, Math.round(Number(stats.totalCommissionEarned || 0)));
     const cumulativePaidPaise = payBalancePaise > 0 ? prevAmountPaise + payBalancePaise : newAmountPaise;
-    if (commissionEarnedPaise > 0 && cumulativePaidPaise > commissionEarnedPaise) {
-      return res.status(400).json({ message: `Commission paid cannot exceed earned commission (${commissionEarnedPaise / 100}).` });
+
+    // Strict validation: Corrected Amount (₹) CANNOT be greater than commission earned by influencer
+    if (newAmountPaise > commissionEarnedPaise) {
+      return res.status(400).json({
+        message: `Corrected Amount (${formatMerchCurrency(newAmountPaise)}) cannot be greater than commission earned by influencer (${formatMerchCurrency(commissionEarnedPaise)}).`,
+      });
     }
+
+    // Strict validation: cumulative paid CANNOT exceed earned commission
+    if (cumulativePaidPaise > commissionEarnedPaise) {
+      return res.status(400).json({
+        message: `Commission paid (${formatMerchCurrency(cumulativePaidPaise)}) cannot exceed earned commission (${formatMerchCurrency(commissionEarnedPaise)}). Remaining balance is ${formatMerchCurrency(Math.max(0, commissionEarnedPaise - prevAmountPaise))}.`,
+      });
+    }
+
     const changedBy = String(req.user?.email || req.user?.name || 'admin');
+    const influencerEmail = String(req.body?.influencerEmail || req.body?.email || influencer.email || '').trim().toLowerCase();
+    const paymentMethod = String(req.body?.paymentMethod || req.body?.payment_method || 'Bank Transfer (NEFT/RTGS/IMPS)').trim();
+    const referenceNumber = String(req.body?.referenceNumber || req.body?.reference_number || `ADJ-${Date.now().toString().slice(-6)}`).trim();
+    const paymentDeltaPaise = Math.max(0, cumulativePaidPaise - prevAmountPaise);
+
+    const now = new Date();
+    const datePart = now.toISOString().slice(0, 10).replace(/-/g, '');
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const invoiceNumber = `H2-INV-COM-${datePart}-${randomSuffix}`;
+    const formattedDate = new Intl.DateTimeFormat('en-IN', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'Asia/Kolkata',
+    }).format(now);
+
+    let paymentId = null;
 
     const update = db.transaction(() => {
+      // 1. Audit log
       db.prepare(`
         INSERT INTO merch_influencer_commission_adjustments
           (influencer_id, previous_amount_paise, new_amount_paise, reason, changed_by, created_at)
         VALUES (?, ?, ?, ?, ?, datetime('now'))
       `).run(influencerId, prevAmountPaise, cumulativePaidPaise, reason, changedBy);
 
+      // 2. Update influencer record
       db.prepare(`
         UPDATE merch_influencers
-        SET paid_commission = ?, updated_at = datetime('now')
+        SET paid_commission = ?,
+            email = COALESCE(NULLIF(?, ''), email),
+            updated_at = datetime('now')
         WHERE id = ?
-      `).run(cumulativePaidPaise, influencerId);
+      `).run(cumulativePaidPaise, influencerEmail, influencerId);
+
+      // 3. Insert payment invoice record
+      const payResult = db.prepare(`
+        INSERT INTO merch_influencer_commission_payments
+          (influencer_id, amount_paise, payment_method, reference_number, status, paid_at, note, invoice_number, influencer_email, admin_email, created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'paid', datetime('now'), ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      `).run(
+        influencerId,
+        paymentDeltaPaise > 0 ? paymentDeltaPaise : cumulativePaidPaise,
+        paymentMethod,
+        referenceNumber,
+        reason,
+        invoiceNumber,
+        influencerEmail || (influencer.email || ''),
+        FIXED_ADMIN_EMAIL,
+        changedBy
+      );
+      paymentId = payResult.lastInsertRowid;
     });
 
     try {
@@ -8288,13 +8349,74 @@ module.exports = function mountMerchApi(app, {
       return res.status(500).json({ message: 'Database error adjusting commission.' });
     }
 
-    const updatedInfluencer = loadMerchInfluencers().find((item) => Number(item.id) === influencerId);
+    const updatedInfluencer = loadMerchInfluencers().find((item) => Number(item.id) === influencerId) || influencer;
+    const coupons = getInfluencerCouponRows([influencerId]);
+    const balanceRemainingPaise = Math.max(0, commissionEarnedPaise - cumulativePaidPaise);
+
+    const paymentRecord = {
+      id: paymentId,
+      influencerId,
+      amountPaise: paymentDeltaPaise > 0 ? paymentDeltaPaise : cumulativePaidPaise,
+      paymentMethod,
+      referenceNumber,
+      status: 'paid',
+      paidAt: now.toISOString(),
+      note: reason,
+      invoiceNumber,
+      influencerEmail: influencerEmail || updatedInfluencer.email,
+      adminEmail: FIXED_ADMIN_EMAIL,
+      createdBy: changedBy,
+    };
+
+    const invoiceHtml = buildInfluencerCommissionInvoiceHtml({
+      payment: paymentRecord,
+      influencer: { ...updatedInfluencer, email: influencerEmail || updatedInfluencer.email },
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise: paymentRecord.amountPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+    });
+
+    let emailResults = {
+      influencer: { to: influencerEmail || updatedInfluencer.email, status: 'skipped' },
+      admin: { to: FIXED_ADMIN_EMAIL, status: 'skipped' },
+    };
+
+    const shouldSendEmail = req.body?.sendEmail === true ||
+      req.body?.sendEmail === 'true' ||
+      req.body?.sendPaymentEmail === true ||
+      req.body?.sendPaymentEmail === 'true';
+
+    if (shouldSendEmail && (influencerEmail || updatedInfluencer.email)) {
+      try {
+        emailResults = await sendInfluencerCommissionNotificationEmails({
+          payment: paymentRecord,
+          influencer: { ...updatedInfluencer, email: influencerEmail || updatedInfluencer.email },
+          coupons,
+          commissionEarnedPaise,
+          commissionPaidPaise: paymentRecord.amountPaise,
+          cumulativePaidPaise,
+          balanceRemainingPaise,
+          formattedDate,
+          req,
+        });
+      } catch (mailErr) {
+        console.error('[Merch] Failed to dispatch commission email:', mailErr);
+      }
+    }
 
     return res.json({
       success: true,
       message: 'Commission paid adjusted successfully.',
       prevAmountPaise,
       newAmountPaise: cumulativePaidPaise,
+      paymentDeltaPaise,
+      payment: paymentRecord,
+      invoiceNumber,
+      invoiceHtml,
+      emailResults,
       changedBy,
       reason,
       influencer: updatedInfluencer,
