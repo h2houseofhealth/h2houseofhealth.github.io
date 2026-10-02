@@ -1743,6 +1743,10 @@ function getWishlistProductPrice(item) {
     accountDrawerOverlay: document.getElementById('accountDrawerOverlay'),
     accountDrawerCloseBtn: document.getElementById('accountDrawerCloseBtn'),
     accountDrawerContent: document.getElementById('accountDrawerContent'),
+    checkoutAddProductsDrawer: document.getElementById('checkoutAddProductsDrawer'),
+    checkoutAddProductsOverlay: document.getElementById('checkoutAddProductsOverlay'),
+    checkoutAddProductsCloseBtn: document.getElementById('checkoutAddProductsCloseBtn'),
+    checkoutAddProductsList: document.getElementById('checkoutAddProductsList'),
   };
 
   // ─── Cart (Account-Isolated Storage & Backend Sync) ───
@@ -5778,6 +5782,257 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     `;
   }
 
+  function showCheckoutToast(message) {
+    let toast = document.getElementById('checkoutToast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'checkoutToast';
+      toast.className = 'checkout-toast';
+      document.body.appendChild(toast);
+    }
+    toast.innerHTML = `
+      <span class="checkout-toast__icon">✓</span>
+      <span>${escapeHtml(message)}</span>
+    `;
+    toast.classList.add('is-visible');
+    clearTimeout(toast._timeout);
+    toast._timeout = setTimeout(() => {
+      toast.classList.remove('is-visible');
+    }, 3000);
+  }
+
+  async function openCheckoutAddProductsDrawer() {
+    if (!els.checkoutAddProductsDrawer) return;
+    const form = els.checkoutPage?.querySelector('#shopifyCheckoutForm');
+    if (form) {
+      state.checkoutDraft = getCheckoutDraftFromForm(form);
+    }
+    if (!state.products || !state.products.length) {
+      if (els.checkoutAddProductsList) {
+        els.checkoutAddProductsList.innerHTML = '<div style="padding:40px 20px;text-align:center;color:#6f6f6f;"><p>Loading products...</p></div>';
+      }
+      await loadMerchProducts();
+    }
+    renderCheckoutAddProductsList();
+    els.checkoutAddProductsDrawer.hidden = false;
+    if (els.checkoutAddProductsOverlay) els.checkoutAddProductsOverlay.hidden = false;
+    requestAnimationFrame(() => {
+      els.checkoutAddProductsDrawer.classList.add('is-open');
+      if (els.checkoutAddProductsOverlay) els.checkoutAddProductsOverlay.classList.add('is-open');
+    });
+    document.body.classList.add('has-drawer-open');
+  }
+
+  function closeCheckoutAddProductsDrawer() {
+    if (!els.checkoutAddProductsDrawer) return;
+    els.checkoutAddProductsDrawer.classList.remove('is-open');
+    if (els.checkoutAddProductsOverlay) els.checkoutAddProductsOverlay.classList.remove('is-open');
+    document.body.classList.remove('has-drawer-open');
+    setTimeout(() => {
+      els.checkoutAddProductsDrawer.hidden = true;
+      if (els.checkoutAddProductsOverlay) els.checkoutAddProductsOverlay.hidden = true;
+    }, 300);
+  }
+
+  function renderCheckoutAddProductsList() {
+    if (!els.checkoutAddProductsList) return;
+    const products = Array.isArray(state.products) ? state.products : [];
+
+    const availableProducts = products.filter((p) => {
+      const inStockVariants = (p.variants || []).filter((v) => Number(v.stock || 0) > 0);
+      return inStockVariants.length > 0;
+    });
+
+    if (!availableProducts.length) {
+      els.checkoutAddProductsList.innerHTML = `
+        <div style="padding:40px 20px;text-align:center;color:#6f6f6f;">
+          <p style="font-size:1rem;margin:0 0 8px 0;font-weight:600;">No additional products available</p>
+          <small>All current items are already in your cart or out of stock.</small>
+        </div>
+      `;
+      return;
+    }
+
+    els.checkoutAddProductsList.innerHTML = availableProducts.map((product) => {
+      const activeVariants = (product.variants || []).filter((v) => Number(v.stock || 0) > 0);
+      const firstVariant = activeVariants[0];
+      const offerInfo = firstVariant ? getVariantOfferDetails(firstVariant, product) : null;
+      const effectivePrice = offerInfo ? offerInfo.offerPrice : Number(firstVariant?.price || product.price || 0);
+      const originalPrice = offerInfo ? offerInfo.originalPrice : (product.basePrice && product.basePrice > effectivePrice ? product.basePrice : null);
+      const discountLabel = offerInfo?.discountLabel || (originalPrice && originalPrice > effectivePrice ? `${Math.round(((originalPrice - effectivePrice) / originalPrice) * 100)}% OFF` : '');
+      const imageUrl = getVariantImageUrl(firstVariant, product) || FALLBACK_PRODUCT_IMAGE;
+
+      const cartItem = state.cart.find((item) => Number(item.variantId) === Number(firstVariant.id));
+      const inCartQty = cartItem ? Number(cartItem.quantity || 0) : 0;
+      const hasMultipleVariants = activeVariants.length > 1;
+
+      return `
+        <div class="checkout-add-card" data-product-id="${product.id}" data-selected-variant-id="${firstVariant.id}">
+          <div class="checkout-add-card__img-wrap">
+            ${discountLabel ? `<span class="checkout-add-card__badge">${escapeHtml(discountLabel)}</span>` : ''}
+            <img class="checkout-add-card__img" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(product.name)}" loading="lazy" />
+          </div>
+          <div class="checkout-add-card__details">
+            <div class="checkout-add-card__top">
+              <strong class="checkout-add-card__name" title="${escapeHtml(product.name)}">${escapeHtml(product.name)}</strong>
+              ${inCartQty > 0 ? `<span class="checkout-add-card__incart">In Order (${inCartQty})</span>` : ''}
+            </div>
+
+            <div class="checkout-add-card__pricing">
+              <span class="checkout-add-card__price">${formatCheckoutMoney(effectivePrice)}</span>
+              ${originalPrice && originalPrice > effectivePrice ? `<span class="checkout-add-card__original">${formatCheckoutMoney(originalPrice)}</span>` : ''}
+            </div>
+
+            ${hasMultipleVariants ? `
+              <div class="checkout-add-card__variant-wrap">
+                <select class="checkout-add-card__variant-select" aria-label="Select variant for ${escapeHtml(product.name)}">
+                  ${activeVariants.map((v) => {
+                    const label = [v.size, v.color].filter(Boolean).join(' / ') || v.sku || 'Standard';
+                    const vOffer = getVariantOfferDetails(v, product);
+                    const vPrice = vOffer ? vOffer.offerPrice : v.price;
+                    const vImg = getVariantImageUrl(v, product);
+                    const vInCart = state.cart.find((item) => Number(item.variantId) === Number(v.id));
+                    const vInCartQty = vInCart ? Number(vInCart.quantity || 0) : 0;
+                    return `<option value="${v.id}" data-price="${vPrice}" data-stock="${v.stock}" data-image="${escapeHtml(vImg)}" data-incart="${vInCartQty}">
+                      ${escapeHtml(label)} (${formatCheckoutMoney(vPrice)})${vInCartQty ? ` · In Cart: ${vInCartQty}` : ''}
+                    </option>`;
+                  }).join('')}
+                </select>
+              </div>
+            ` : ''}
+
+            <div class="checkout-add-card__actions">
+              <div class="checkout-add-qty-selector">
+                <button type="button" class="checkout-add-qty-btn" data-action="dec" aria-label="Decrease quantity">−</button>
+                <input type="number" class="checkout-add-qty-input" value="1" min="1" max="${firstVariant.stock || 99}" readonly />
+                <button type="button" class="checkout-add-qty-btn" data-action="inc" aria-label="Increase quantity">+</button>
+              </div>
+              <button type="button" class="checkout-add-card__submit-btn" data-action="add-to-order" data-product-id="${product.id}" data-variant-id="${firstVariant.id}">
+                <span>+ Add to Order</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    bindCheckoutAddProductsListEvents();
+  }
+
+  function bindCheckoutAddProductsListEvents() {
+    if (!els.checkoutAddProductsList) return;
+
+    // 1. Variant select changes
+    els.checkoutAddProductsList.querySelectorAll('.checkout-add-card__variant-select').forEach((select) => {
+      select.addEventListener('change', () => {
+        const card = select.closest('.checkout-add-card');
+        if (!card) return;
+        const opt = select.selectedOptions[0];
+        if (!opt) return;
+
+        const variantId = Number(opt.value);
+        const price = Number(opt.dataset.price);
+        const stock = Number(opt.dataset.stock);
+        const image = opt.dataset.image;
+        const inCartQty = Number(opt.dataset.incart || 0);
+
+        card.dataset.selectedVariantId = variantId;
+
+        const imgEl = card.querySelector('.checkout-add-card__img');
+        if (imgEl && image) imgEl.src = image;
+
+        const priceEl = card.querySelector('.checkout-add-card__price');
+        if (priceEl && !isNaN(price)) priceEl.textContent = formatCheckoutMoney(price);
+
+        let inCartBadge = card.querySelector('.checkout-add-card__incart');
+        if (inCartQty > 0) {
+          if (!inCartBadge) {
+            inCartBadge = document.createElement('span');
+            inCartBadge.className = 'checkout-add-card__incart';
+            card.querySelector('.checkout-add-card__top')?.appendChild(inCartBadge);
+          }
+          inCartBadge.textContent = `In Order (${inCartQty})`;
+          inCartBadge.hidden = false;
+        } else if (inCartBadge) {
+          inCartBadge.hidden = true;
+        }
+
+        const qtyInput = card.querySelector('.checkout-add-qty-input');
+        if (qtyInput) {
+          qtyInput.max = stock || 99;
+          qtyInput.value = '1';
+        }
+
+        const submitBtn = card.querySelector('.checkout-add-card__submit-btn');
+        if (submitBtn) {
+          submitBtn.dataset.variantId = variantId;
+        }
+      });
+    });
+
+    // 2. Quantity stepper buttons
+    els.checkoutAddProductsList.querySelectorAll('.checkout-add-qty-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const card = btn.closest('.checkout-add-card');
+        const input = card?.querySelector('.checkout-add-qty-input');
+        if (!input) return;
+        let current = parseInt(input.value, 10) || 1;
+        const min = parseInt(input.min, 10) || 1;
+        const max = parseInt(input.max, 10) || 99;
+
+        if (btn.dataset.action === 'inc') {
+          if (current < max) input.value = current + 1;
+        } else if (btn.dataset.action === 'dec') {
+          if (current > min) input.value = current - 1;
+        }
+      });
+    });
+
+    // 3. Add to order submit buttons
+    els.checkoutAddProductsList.querySelectorAll('.checkout-add-card__submit-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const card = btn.closest('.checkout-add-card');
+        const productId = Number(btn.dataset.productId);
+        const variantId = Number(btn.dataset.variantId || card?.dataset.selectedVariantId);
+        const input = card?.querySelector('.checkout-add-qty-input');
+        const quantity = parseInt(input?.value, 10) || 1;
+
+        const product = (state.products || []).find((p) => Number(p.id) === productId);
+        if (!product || !variantId) return;
+
+        btn.disabled = true;
+        btn.innerHTML = '<span>Adding...</span>';
+
+        // 1. Save entered checkout draft from form so no entered data is lost!
+        const form = els.checkoutPage?.querySelector('#shopifyCheckoutForm');
+        if (form) {
+          state.checkoutDraft = getCheckoutDraftFromForm(form);
+        }
+
+        // 2. Add to cart with preserveCoupon: true, openDrawerAfterAdd: false
+        const hadCoupon = Boolean(state.merchCouponCode);
+        const added = addToCart(variantId, quantity, product, { openDrawerAfterAdd: false, preserveCoupon: hadCoupon });
+
+        if (added) {
+          // 3. Close the drawer immediately as requested
+          closeCheckoutAddProductsDrawer();
+
+          // 4. Re-evaluate coupon if applied
+          if (hadCoupon) {
+            await applyMerchCouponFromCart({ silent: true });
+          }
+
+          // 5. Immediately update Order Summary, item count, subtotal, discounts, total
+          renderCheckoutPage();
+          showCheckoutToast(`Added ${quantity} × ${product.name} to order`);
+        } else {
+          btn.disabled = false;
+          btn.innerHTML = '<span>+ Add to Order</span>';
+        }
+      });
+    });
+  }
+
   function renderCheckoutSummary() {
     const totals = getCheckoutTotals();
     const hasBundleDiscount = totals.bundleDiscount > 0;
@@ -5815,6 +6070,13 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             </div>
           `).join('')}
         </div>
+        <button type="button" class="checkout-add-more-btn" id="checkoutAddMoreProductsBtn" aria-label="Add more products">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          <span>Add more products</span>
+        </button>
 
         ${hasBundleDiscount ? `
           <div class="shopify-bundle-badge" style="background:#fef7f2;border:1px dashed #ae5431;border-radius:10px;padding:12px 14px;margin-bottom:18px;display:flex;align-items:flex-start;gap:10px;">
@@ -6015,6 +6277,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       });
     });
     form.addEventListener('submit', handleCheckoutPageSubmit);
+    els.checkoutPage?.querySelector('#checkoutAddMoreProductsBtn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      openCheckoutAddProductsDrawer();
+    });
     els.checkoutPage?.querySelector('#checkoutCouponApplyBtn')?.addEventListener('click', applyMerchCouponFromCheckout);
     els.checkoutPage?.querySelector('#checkoutCouponRemoveBtn')?.addEventListener('click', () => {
       clearMerchCoupon();
@@ -6410,6 +6676,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     els.accountDrawer?.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
         closeAccountDrawer();
+      }
+    });
+
+    els.checkoutAddProductsCloseBtn?.addEventListener('click', closeCheckoutAddProductsDrawer);
+    els.checkoutAddProductsOverlay?.addEventListener('click', closeCheckoutAddProductsDrawer);
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !els.checkoutAddProductsDrawer?.hidden && els.checkoutAddProductsDrawer?.classList.contains('is-open')) {
+        closeCheckoutAddProductsDrawer();
       }
     });
 
