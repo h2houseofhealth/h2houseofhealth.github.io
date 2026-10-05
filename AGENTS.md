@@ -8,6 +8,11 @@ Single-service Node 20 (CommonJS) app: static marketing site + booking portal + 
 - Open `http://localhost:3000` (server auto-bumps up to 10 ports if busy — check console for actual port)
 - No test/lint/typecheck scripts exist; verify by booting the server and hitting `GET /health`
 
+## Git Workflow & PRs
+
+- **Always pull latest `dev` first**: Before pushing any feature/fix branch, fetch and merge the latest `origin/dev` (`git fetch origin dev && git merge origin/dev`).
+- **Raise PR from feature branch**: After merging `dev` and verifying the feature, push the branch to `origin` and raise a PR into `dev`.
+
 ## Architecture
 
 - Entrypoint: `booking/server.js` (~16k lines, all `/api/*` routes + `migrate()` + `seedAdmin()`). Read via grep/offsets, never whole-file.
