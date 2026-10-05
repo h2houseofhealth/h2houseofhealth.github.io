@@ -1613,7 +1613,12 @@ function getWishlistProductPrice(item) {
     `;
   }
 
-  function renderReplacementPolicyAccordion() {
+  function renderReplacementPolicyAccordion(product = null) {
+    const isHoodie = product ? isHoodieProduct(product) : false;
+    const warrantyHtml = isHoodie ? '' : `
+            <h3>6-Month Parts Warranty</h3>
+            <p>Replacement of eligible mechanical and electronic product parts is covered by a 6-month parts warranty.</p>
+    `;
     return `
       <div class="replacement-policy-accordion">
         <button class="replacement-policy-accordion__button" id="replacementPolicyButton" type="button" aria-expanded="false" aria-controls="replacementPolicyContent">
@@ -1624,16 +1629,15 @@ function getWishlistProductPrice(item) {
               <path d="M4 13a8.1 8.1 0 0 0 14.4 4.8L20 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
               <path d="M20 20v-4h-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
-            <span>10-Day Replacement Policy</span>
+            <span>${isHoodie ? '7-Day Return Policy (Shipment Damage)' : '7-Day Return &amp; 6-Month Parts Warranty'}</span>
           </span>
           <span class="replacement-policy-accordion__toggle" aria-hidden="true">+</span>
         </button>
         <div class="replacement-policy-accordion__content" id="replacementPolicyContent" aria-hidden="true">
           <div class="replacement-policy-accordion__body">
-            <p>Damaged or defective products are eligible for replacement within 10 days of delivery.</p>
-            <p>Please contact support with your order details.</p>
-            <h3>6-Month Warranty</h3>
-            <p>This product includes a 6-month warranty on the mechanical parts of the bottle and mist spray.</p>
+            <p><strong>7-Day Return:</strong> A product can be returned within 7 days of delivery only if it arrives damaged or is not working due to a shipment/transport issue. This is not a general return policy and does not apply to change of mind.</p>
+            ${warrantyHtml}
+            <p><a href="/refund/" target="_blank" style="color:#ae5431;text-decoration:underline;font-weight:600;">View full return &amp; warranty policy &rarr;</a></p>
           </div>
         </div>
       </div>
@@ -2575,10 +2579,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   function BookingFeatureCards() {
     const features = [
-      { icon: 'shield', title: 'Secure Booking', text: 'Your booking is safe with us.' },
-      { icon: 'calendar', title: 'Easy Reschedule', text: 'Reschedule or modify your booking anytime.' },
-      { icon: 'bell', title: 'Timely Reminders', text: "We'll remind you before your session." },
-      { icon: 'heart', title: 'Premium Experience', text: 'We are here to make your experience exceptional.' },
+      { icon: 'shield', title: 'Secure Payment', text: 'Encrypted and verified transactions.' },
+      { icon: 'truck', title: 'Insured Delivery', text: 'Tamper-evident packaging and shipment tracking.' },
+      { icon: 'heart', title: '7-Day Return Coverage', text: 'Covered for items damaged or non-working due to shipment.' },
+      { icon: 'bell', title: '6-Month Parts Warranty', text: 'Coverage for eligible hardware components.' },
     ];
     return `
       <div class="booking-feature-cards">
@@ -5182,7 +5186,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         <button class="qty-btn" id="qtyInc" type="button">+</button>
       </div>
 
-      ${renderReplacementPolicyAccordion()}
+      ${renderReplacementPolicyAccordion(product)}
 
       <div class="detail-actions">
         <button id="addToCartBtn" class="btn btn-primary btn-lg" type="button" ${variant.stock <= 0 ? 'disabled' : ''}>
@@ -5718,60 +5722,158 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     `;
   }
 
-  function renderCheckoutRecommendations() {
-    if (!state.products || !state.products.length) return '';
+  async function addMerchBundleToCheckoutOrder() {
+    const bundleItems = getMerchBundleCartItems();
+    if (bundleItems.length !== 2) {
+      showCheckoutNotice('Bundle unavailable', 'The H2 Hydrogen Bottle and H2 Hydrogen Mist Spray must both be in stock.', { variant: 'error' });
+      return false;
+    }
 
-    const cartProductIds = new Set(state.cart.map((item) => Number(item.productId)));
-    const candidates = state.products.filter((product) => {
-      if (cartProductIds.has(Number(product.id))) return false;
-      return (product.variants || []).some((v) => Number(v.stock || 0) > 0);
+    bundleItems.forEach(({ product, variant }) => {
+      const inCart = state.cart.find((item) => Number(item.productId) === Number(product.id) || Number(item.variantId) === Number(variant.id));
+      if (!inCart) {
+        addToCart(variant.id, 1, product, { openDrawerAfterAdd: false, preserveCoupon: true });
+      }
     });
 
-    if (!candidates.length) return '';
+    state.merchBundleCode = 'H2BUNDLE15';
+    try {
+      localStorage.setItem(getBundleStorageKey(state.cartOwnerId), state.merchBundleCode);
+      localStorage.setItem('merch_bundle_code', state.merchBundleCode);
+    } catch {}
 
-    const recommendations = candidates.slice(0, 6);
+    const bundleTotal = bundleItems.reduce((sum, item) => sum + Number(item.variant.price || 0), 0);
+    state.merchBundlePreview = {
+      code: state.merchBundleCode,
+      description: 'Bundle & Save — 15% off Bottle + Mist',
+      discountAmountInr: Math.round(bundleTotal * 0.15),
+    };
+
+    saveCart();
+    showCheckoutToast('Bottle + Mist Bundle added to order with 15% savings!');
+    renderCheckoutPage();
+    return true;
+  }
+
+  function renderCheckoutRecommendations() {
+    const bundleDef = getMerchBundleDefinition();
+    const hasBundle = bundleDef && bundleDef.products && bundleDef.products.length === 2 && bundleDef.available;
+
+    const bundleProductIds = hasBundle ? new Set(bundleDef.products.map((p) => Number(p.id))) : new Set();
+    const cartProductIds = new Set(state.cart.map((item) => Number(item.productId)));
+    const promoProducts = (state.products || []).filter((product) => {
+      if (cartProductIds.has(Number(product.id))) return false;
+      if (bundleProductIds.has(Number(product.id))) return false;
+      const activeVariants = (product.variants || []).filter((v) => Number(v.stock || 0) > 0);
+      if (!activeVariants.length) return false;
+      const variant = activeVariants[0];
+      const offerInfo = variant ? getVariantOfferDetails(variant, product) : null;
+      const effectivePrice = offerInfo ? offerInfo.offerPrice : Number(variant?.price || product.price || 0);
+      const originalPrice = offerInfo ? offerInfo.originalPrice : (product.basePrice && product.basePrice > effectivePrice ? product.basePrice : null);
+      // Strictly require an actual promotional discount so regular products (e.g. ₹11,900 Mist) are NEVER displayed as an offer
+      return Boolean(originalPrice && originalPrice > effectivePrice);
+    });
+
+    if (!hasBundle && !promoProducts.length) return '';
+
+    const isBundleInOrder = state.merchBundleCode === 'H2BUNDLE15' && getMerchBundleDiscountAmount() > 0;
+
+    let bundleCardHtml = '';
+    if (hasBundle) {
+      const bottleProduct = bundleDef.products[0];
+      const mistProduct = bundleDef.products[1];
+      const bottleVariant = getDefaultPurchasableVariant(bottleProduct);
+      const mistVariant = getDefaultPurchasableVariant(mistProduct);
+      const bottlePrice = Number(bottleVariant?.price || bottleProduct.basePrice || 22990);
+      const mistPrice = Number(mistVariant?.price || mistProduct.basePrice || 11900);
+      const regularTotal = bottlePrice + mistPrice;
+      const discountRate = Number(bundleDef.discount || 0.85);
+      const bundleOfferPrice = Math.round(regularTotal * discountRate);
+      const savingsAmount = regularTotal - bundleOfferPrice;
+      const savingsPercent = Math.round((savingsAmount / regularTotal) * 100);
+
+      const bottleImg = getVariantImageUrl(bottleVariant, bottleProduct) || bottleProduct.images?.[0] || FALLBACK_PRODUCT_IMAGE;
+      const mistImg = getVariantImageUrl(mistVariant, mistProduct) || mistProduct.images?.[0] || FALLBACK_PRODUCT_IMAGE;
+
+      bundleCardHtml = `
+        <div class="checkout-rec-card checkout-rec-card--bundle" data-bundle-code="H2BUNDLE15">
+          <div class="checkout-rec-bundle__header">
+            <span class="checkout-rec-bundle__badge">SAVE ${savingsPercent}%</span>
+            <span class="checkout-rec-bundle__tag">Bundle Offer</span>
+          </div>
+          <div class="checkout-rec-bundle__images">
+            <div class="checkout-rec-bundle__img-item">
+              <img src="${escapeHtml(bottleImg)}" alt="${escapeHtml(bottleProduct.name)}" loading="lazy" />
+              <span>Bottle</span>
+            </div>
+            <span class="checkout-rec-bundle__plus" aria-hidden="true">+</span>
+            <div class="checkout-rec-bundle__img-item">
+              <img src="${escapeHtml(mistImg)}" alt="${escapeHtml(mistProduct.name)}" loading="lazy" />
+              <span>Mist Spray</span>
+            </div>
+          </div>
+          <div class="checkout-rec-bundle__info">
+            <strong class="checkout-rec-bundle__name">Bottle + Mist Bundle</strong>
+            <p class="checkout-rec-bundle__includes">Includes: ${escapeHtml(bottleProduct.name)} + ${escapeHtml(mistProduct.name)}</p>
+            <div class="checkout-rec-bundle__pricing">
+              <span class="checkout-rec-bundle__price">${formatCheckoutMoney(bundleOfferPrice)}</span>
+              <span class="checkout-rec-bundle__original">${formatCheckoutMoney(regularTotal)}</span>
+              <span class="checkout-rec-bundle__savings">Save ${formatCheckoutMoney(savingsAmount)} (${savingsPercent}% OFF)</span>
+            </div>
+          </div>
+          <button type="button" class="checkout-rec-card__add-btn ${isBundleInOrder ? 'is-added' : ''}" data-checkout-add-bundle="H2BUNDLE15" ${isBundleInOrder ? 'disabled' : ''} aria-label="${isBundleInOrder ? 'Bundle already in order' : 'Add Bottle + Mist Bundle to order'}">
+            ${isBundleInOrder ? '✓ ADDED' : '+ ADD'}
+          </button>
+        </div>
+      `;
+    }
+
+    const promoCardsHtml = promoProducts.map((product) => {
+      const variant = product.variants.find((v) => Number(v.stock || 0) > 0) || product.variants[0];
+      const offerInfo = variant ? getVariantOfferDetails(variant, product) : null;
+      const effectivePrice = offerInfo ? offerInfo.offerPrice : Number(variant?.price || product.price || 0);
+      const originalPrice = offerInfo ? offerInfo.originalPrice : (product.basePrice && product.basePrice > effectivePrice ? product.basePrice : null);
+      const discountLabel = offerInfo?.discountLabel || `${Math.round(((originalPrice - effectivePrice) / originalPrice) * 100)}% OFF`;
+      const imageUrl = variant?.imageUrl || product.imageUrl || product.image || (Array.isArray(product.images) && product.images[0]) || FALLBACK_PRODUCT_IMAGE;
+
+      return `
+        <div class="checkout-rec-card">
+          <div class="checkout-rec-card__image-box">
+            <span class="checkout-rec-card__badge">${escapeHtml(discountLabel)}</span>
+            <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(product.name)}" loading="lazy" />
+          </div>
+          <div class="checkout-rec-card__body">
+            <strong class="checkout-rec-card__name" title="${escapeHtml(product.name)}">${escapeHtml(product.name)}</strong>
+            <div class="checkout-rec-card__pricing">
+              <span class="checkout-rec-card__price">${formatCheckoutMoney(effectivePrice)}</span>
+              <span class="checkout-rec-card__original">${formatCheckoutMoney(originalPrice)}</span>
+            </div>
+            <button type="button" class="checkout-rec-card__add-btn" data-checkout-add-variant="${variant.id}" data-checkout-add-product="${product.id}" aria-label="Add ${escapeHtml(product.name)} to cart">
+              + ADD
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const totalOfferCount = (hasBundle ? 1 : 0) + promoProducts.length;
 
     return `
-      <div class="checkout-recommendations" aria-label="Explore more products">
+      <div class="checkout-recommendations" aria-label="Best offers">
         <div class="checkout-recommendations__header">
           <div class="checkout-recommendations__title-wrap">
-            <span class="checkout-recommendations__title">Best offers</span>
+            <span class="checkout-recommendations__title">BEST OFFERS</span>
             <span class="checkout-recommendations__sub">Explore more</span>
           </div>
           <div class="checkout-recommendations__nav">
             <button type="button" class="checkout-rec-nav checkout-rec-nav--prev" aria-label="Previous items" data-action="rec-scroll-prev" hidden>‹</button>
-            <button type="button" class="checkout-rec-nav checkout-rec-nav--next" aria-label="Next items" data-action="rec-scroll-next" ${recommendations.length > 2 ? '' : 'hidden'}>›</button>
+            <button type="button" class="checkout-rec-nav checkout-rec-nav--next" aria-label="Next items" data-action="rec-scroll-next" ${totalOfferCount > 2 ? '' : 'hidden'}>›</button>
           </div>
         </div>
         <div class="checkout-recommendations__scroll-wrap">
           <div class="checkout-recommendations__track" id="checkoutRecTrack">
-            ${recommendations.map((product) => {
-              const variant = product.variants.find((v) => Number(v.stock || 0) > 0) || product.variants[0];
-              const offerInfo = variant ? getVariantOfferDetails(variant, product) : null;
-              const effectivePrice = offerInfo ? offerInfo.offerPrice : Number(variant?.price || product.price || 0);
-              const originalPrice = offerInfo ? offerInfo.originalPrice : (product.basePrice && product.basePrice > effectivePrice ? product.basePrice : null);
-              const discountLabel = offerInfo?.discountLabel || (originalPrice && originalPrice > effectivePrice ? `${Math.round(((originalPrice - effectivePrice) / originalPrice) * 100)}% OFF` : '');
-              const imageUrl = variant?.imageUrl || product.imageUrl || product.image || (Array.isArray(product.images) && product.images[0]) || FALLBACK_PRODUCT_IMAGE;
-
-              return `
-                <div class="checkout-rec-card">
-                  <div class="checkout-rec-card__image-box">
-                    ${discountLabel ? `<span class="checkout-rec-card__badge">${escapeHtml(discountLabel)}</span>` : ''}
-                    <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(product.name)}" loading="lazy" />
-                  </div>
-                  <div class="checkout-rec-card__body">
-                    <strong class="checkout-rec-card__name" title="${escapeHtml(product.name)}">${escapeHtml(product.name)}</strong>
-                    <div class="checkout-rec-card__pricing">
-                      ${originalPrice && originalPrice > effectivePrice ? `<span class="checkout-rec-card__original">${formatCheckoutMoney(originalPrice)}</span>` : ''}
-                      <span class="checkout-rec-card__price">${formatCheckoutMoney(effectivePrice)}</span>
-                    </div>
-                    <button type="button" class="checkout-rec-card__add-btn" data-checkout-add-variant="${variant.id}" data-checkout-add-product="${product.id}" aria-label="Add ${escapeHtml(product.name)} to cart">
-                      + ADD
-                    </button>
-                  </div>
-                </div>
-              `;
-            }).join('')}
+            ${bundleCardHtml}
+            ${promoCardsHtml}
           </div>
         </div>
       </div>
@@ -6210,6 +6312,13 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
               CONTINUE SHOPPING
             </a>
           </div>
+          <div class="shopify-checkout-policies" style="margin-top:16px;font-size:12px;color:#717171;line-height:1.6;">
+            By placing your order, you agree to our 
+            <a href="/terms/" target="_blank" style="color:#ae5431;text-decoration:underline;">Terms of Service</a>, 
+            <a href="/privacy/" target="_blank" style="color:#ae5431;text-decoration:underline;">Privacy Policy</a>, 
+            <a href="/shipping/" target="_blank" style="color:#ae5431;text-decoration:underline;">Shipping Policy</a>, and 
+            <a href="/refund/" target="_blank" style="color:#ae5431;text-decoration:underline;">Return &amp; Warranty Policy</a> (7-Day shipment-damage returns; 6-Month parts warranty).
+          </div>
         </form>
         ${renderCheckoutSummary()}
       </div>
@@ -6304,10 +6413,26 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         if (!state.cart.length) {
           showShop();
         } else {
-          if (hadCoupon) {
+          // If bundle was cleared and user arrived via an influencer campaign link, restore campaign coupon
+          if (state.campaignAttribution?.couponCode && !state.merchCouponCode && !state.merchBundleCode) {
+            state.merchCouponCode = state.campaignAttribution.couponCode;
+            await applyMerchCouponFromCart({ silent: true });
+          } else if (hadCoupon) {
             await applyMerchCouponFromCart({ silent: true });
           }
           renderCheckoutPage();
+        }
+      });
+    });
+    els.checkoutPage?.querySelectorAll('[data-checkout-add-bundle]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        button.textContent = 'ADDING...';
+
+        const added = await addMerchBundleToCheckoutOrder();
+        if (!added) {
+          button.disabled = false;
+          button.textContent = '+ ADD';
         }
       });
     });

@@ -32,6 +32,19 @@
     return new Date(`${parts.year}-${parts.month}-${parts.day}T12:00:00`);
   }
 
+  function getViewFromLocation() {
+    const hash = String(window.location.hash || '').replace(/^#\/?/, '').trim().toLowerCase();
+    if (hash && SECTION_TITLES[hash]) {
+      return hash;
+    }
+    const searchParams = new URLSearchParams(window.location.search);
+    const sectionParam = String(searchParams.get('section') || searchParams.get('view') || '').trim().toLowerCase();
+    if (sectionParam && SECTION_TITLES[sectionParam]) {
+      return sectionParam;
+    }
+    return 'dashboard';
+  }
+
   const today = getAppToday();
   const LOW_STOCK_THRESHOLD = 15;
   const NOTIFICATION_STATE_STORAGE_KEY = 'merch_admin_notification_state_v1';
@@ -1908,7 +1921,8 @@
     } catch (error) {
       toast('Admin sign-in required', error.message || 'Please sign in with the admin account.', 'warning');
       window.setTimeout(() => {
-        window.location.replace('/merch/auth.html?returnTo=/merch/admin/index.html');
+        const returnUrl = window.location.pathname + window.location.search + window.location.hash;
+        window.location.replace(`/merch/auth.html?returnTo=${encodeURIComponent(returnUrl)}`);
       }, 250);
       return false;
     }
@@ -1969,7 +1983,7 @@
   const notificationsList = [];
 
   const initialState = {
-    view: 'dashboard',
+    view: getViewFromLocation(),
     sidebarOpen: false,
     notificationsExpanded: false,
     activityFilter: 'all',
@@ -3768,13 +3782,13 @@
             </div>
           </div>
 
-          <div class="admin-grid admin-grid--two" ${showCustomerDetails ? '' : 'style="grid-template-columns:1fr;"'}>
+          <div class="admin-grid admin-grid--two" ${showCustomerDetails ? '' : 'style="grid-template-columns:minmax(0, 1fr);"'}>
             <section class="admin-card">
               <div class="admin-card__head">
                 <h3 class="admin-card__title">Customer List</h3>
                 <p class="admin-card__sub">${filtered.length} customer(s) matched</p>
               </div>
-              <div class="admin-card__body admin-table-wrap">
+              <div class="admin-card__body admin-table-wrap customers-table-scroll">
                 <table class="admin-table admin-customer-table">
                   <thead>
                     <tr>
@@ -8698,9 +8712,15 @@
     }
   }
 
-  function handleNav(view) {
+  function handleNav(view, updateUrl = true) {
     if (!SECTION_TITLES[view]) return;
     state.view = view;
+    if (updateUrl) {
+      const targetHash = `#${view}`;
+      if (window.location.hash !== targetHash) {
+        window.location.hash = targetHash;
+      }
+    }
     setSidebarOpen(false);
     renderAll();
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -9219,10 +9239,18 @@
         closeModal();
       }
     });
+
+    window.addEventListener('hashchange', () => {
+      const routeView = getViewFromLocation();
+      if (routeView && routeView !== state.view) {
+        handleNav(routeView, false);
+      }
+    });
   }
 
   async function init() {
     if (!(await ensureAdminSession())) return;
+    state.view = getViewFromLocation();
     bindEvents();
     renderAll();
     loadDashboardStats();

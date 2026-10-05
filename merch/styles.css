@@ -3540,6 +3540,167 @@ body.is-auth-loading .merch-auth-cta {
   transform: scale(0.97);
 }
 
+.checkout-rec-card__add-btn.is-added {
+  background: #ecfdf5;
+  border-color: #059669;
+  color: #059669;
+  cursor: default;
+}
+
+.checkout-rec-card__add-btn.is-added:hover {
+  background: #ecfdf5;
+  border-color: #059669;
+  color: #059669;
+}
+
+/* Bundle Offer Card in Best Offers */
+.checkout-rec-card--bundle {
+  flex: 0 0 100%;
+  width: 100%;
+  max-width: 100%;
+  border: 1.5px solid rgba(191, 86, 48, 0.22);
+  border-radius: 12px;
+  background: linear-gradient(135deg, #ffffff 0%, #fffaf7 100%);
+  padding: 12px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.checkout-rec-card--bundle:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(191, 86, 48, 0.1);
+  border-color: #bf5630;
+}
+
+.checkout-rec-bundle__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.checkout-rec-bundle__badge {
+  background: #c9572b;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.checkout-rec-bundle__tag {
+  font-size: 10px;
+  font-weight: 700;
+  color: #bf5630;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.checkout-rec-bundle__images {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: #fbf7f4;
+  border-radius: 10px;
+  padding: 10px 14px;
+  border: 1px solid rgba(191, 86, 48, 0.08);
+}
+
+.checkout-rec-bundle__img-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  max-width: 110px;
+}
+
+.checkout-rec-bundle__img-item img {
+  width: 54px;
+  height: 54px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 3px;
+  box-sizing: border-box;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.03);
+}
+
+.checkout-rec-bundle__img-item span {
+  font-size: 10px;
+  font-weight: 600;
+  color: #555;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.checkout-rec-bundle__plus {
+  font-size: 18px;
+  font-weight: 700;
+  color: #bf5630;
+  line-height: 1;
+  user-select: none;
+}
+
+.checkout-rec-bundle__info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.checkout-rec-bundle__name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1f2937;
+  line-height: 1.3;
+}
+
+.checkout-rec-bundle__includes {
+  font-size: 11px;
+  color: #6b7280;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.checkout-rec-bundle__pricing {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 2px;
+}
+
+.checkout-rec-bundle__price {
+  font-size: 14px;
+  font-weight: 800;
+  color: #111827;
+}
+
+.checkout-rec-bundle__original {
+  font-size: 11px;
+  color: #9ca3af;
+  text-decoration: line-through;
+}
+
+.checkout-rec-bundle__savings {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #059669;
+  background: #ecfdf5;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
 @media (max-width: 540px) {
   .shopify-coupon__row {
     flex-wrap: wrap;

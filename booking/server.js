@@ -11273,6 +11273,32 @@ app.get(/^\/booking(?:\/.*)?$/, (_req, res) => {
 
 app.use(express.static(WEBSITE_ROOT));
 
+// ─── Support & Legal Page Routes ──────────────────────────────────────────
+app.get(['/shipping', '/shipping/', '/shipping-policy', '/shipping-policy/'], (_req, res) => {
+  res.sendFile(path.join(WEBSITE_ROOT, 'shipping', 'index.html'));
+});
+
+app.get(['/refund', '/refund/', '/refund-policy', '/refund-policy/', '/returns', '/returns/', '/return-policy', '/return-policy/', '/replacement-policy', '/replacement-policy/', '/warranty', '/warranty/', '/warranty-policy', '/warranty-policy/'], (_req, res) => {
+  res.sendFile(path.join(WEBSITE_ROOT, 'refund', 'index.html'));
+});
+
+
+app.get(['/faq', '/faq/'], (_req, res) => {
+  res.sendFile(path.join(WEBSITE_ROOT, 'faq', 'index.html'));
+});
+
+app.get(['/privacy', '/privacy/', '/privacy-policy', '/privacy-policy/'], (_req, res) => {
+  res.sendFile(path.join(WEBSITE_ROOT, 'privacy', 'index.html'));
+});
+
+app.get(['/terms', '/terms/', '/terms-of-service', '/terms-of-service/'], (_req, res) => {
+  res.sendFile(path.join(WEBSITE_ROOT, 'terms', 'index.html'));
+});
+
+app.get(['/contact', '/contact/', '/contact-us', '/contact-us/'], (_req, res) => {
+  res.sendFile(path.join(WEBSITE_ROOT, 'pages', 'contact.html'));
+});
+
 app.get(/.*/, (_req, res) => {
   res.sendFile(path.join(WEBSITE_ROOT, 'index.html'));
 });
