@@ -3,7 +3,9 @@ const Database = require('better-sqlite3');
 
 const dataDir = path.resolve(process.env.DATA_DIR || path.join(__dirname, '..', 'data'));
 const dbPath = path.join(dataDir, 'booking.db');
-const db = new Database(dbPath);
+const db = new Database(dbPath, { timeout: 5000 });
+db.pragma('journal_mode = WAL');
+db.pragma('busy_timeout = 5000');
 
 function query(sql, callback) {
   try {

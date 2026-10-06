@@ -11,6 +11,7 @@ const express = require('express');
 const FormData = require('form-data');
 const ShiprocketService = require('./shiprocket');
 const bcrypt = require('bcryptjs');
+const { convertInrPaiseToCurrency, normalizeCurrency, getCurrencyConfig } = require('./currency');
 const router = express.Router();
 
 const FIXED_ADMIN_EMAIL = 'h2houseofhealth@gmail.com';
@@ -34,7 +35,19 @@ try {
   puppeteer = null;
 }
 
-module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, JWT_SECRET, jwt, sendMerchEmail = null, couponHelpers = {}, merchImageUpload = null }) {
+module.exports = function mountMerchApi(app, {
+  db,
+  razorpay,
+  RAZORPAY_KEY_ID,
+  RAZORPAY_KEY_SECRET,
+  JWT_SECRET,
+  jwt,
+  sendMerchEmail = null,
+  couponHelpers = {},
+  merchImageUpload = null,
+  sendWhatsAppMessage = null,
+  normalizeWhatsAppMobile = null,
+}) {
   const {
     normalizeCouponCode,
     validateCouponForUser,
@@ -88,6 +101,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       settings_json TEXT NOT NULL DEFAULT '{}',
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS merch_admin_security_questions (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      question TEXT NOT NULL DEFAULT 'First name of H2 House of Health..??',
+      answer TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Product specifications are optional so existing databases continue to work.
@@ -115,6 +135,25 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   if (!hasColumn('merch_products', 'deleted_previous_is_active')) {
     db.exec('ALTER TABLE merch_products ADD COLUMN deleted_previous_is_active INTEGER NOT NULL DEFAULT 1');
   }
+  if (!hasColumn('merch_products', 'length_cm')) {
+    db.exec('ALTER TABLE merch_products ADD COLUMN length_cm REAL');
+  }
+  if (!hasColumn('merch_products', 'breadth_cm')) {
+    db.exec('ALTER TABLE merch_products ADD COLUMN breadth_cm REAL');
+  }
+  if (!hasColumn('merch_products', 'height_cm')) {
+    db.exec('ALTER TABLE merch_products ADD COLUMN height_cm REAL');
+  }
+
+  // Backfill package dimensions for default catalog items
+  try {
+    db.prepare("UPDATE merch_products SET length_cm = 24, breadth_cm = 7, height_cm = 7 WHERE (length_cm IS NULL OR length_cm = 0) AND (lower(slug) LIKE '%bottle%' OR lower(name) LIKE '%bottle%')").run();
+    db.prepare("UPDATE merch_products SET length_cm = 10.3, breadth_cm = 4, height_cm = 4 WHERE (length_cm IS NULL OR length_cm = 0) AND (lower(slug) LIKE '%mist%' OR lower(slug) LIKE '%spray%' OR lower(name) LIKE '%spray%')").run();
+    db.prepare("UPDATE merch_products SET length_cm = 30, breadth_cm = 25, height_cm = 5 WHERE (length_cm IS NULL OR length_cm = 0) AND (lower(slug) LIKE '%hoodie%' OR lower(name) LIKE '%hoodie%')").run();
+  } catch (err) {
+    console.warn('[Merch DB] Dimension backfill note:', err.message);
+  }
+
   // combo_purchase was the old flag-only implementation. Real combo cards
   // are represented by is_combo products and their component rows below.
   db.prepare('UPDATE merch_products SET combo_purchase = 0 WHERE is_combo = 0').run();
@@ -281,7 +320,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       category: 'bottles',
       basePrice: 2299000,
       image: '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113',
-      weight: 380,
+      weight: 1000,
       variants: [
         ['HM-BTL-460-SLV', '460ml', 'Silver', 2299000, 50, '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113'],
         ['HM-BTL-460-BLK', '460ml', 'Black', 2299000, 50, '/cdn/shop/files/products/bottle-black.png', ['/cdn/shop/files/products/bottle-black-interior.png', '/cdn/shop/files/products/bottle-black-portable.png', '/cdn/shop/files/products/bottle-black-cap.png']],
@@ -561,7 +600,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   if (!hasColumn('merch_orders', 'commission_amount_paise')) db.exec('ALTER TABLE merch_orders ADD COLUMN commission_amount_paise INTEGER NOT NULL DEFAULT 0');
   if (!hasColumn('merch_orders', 'commission_snapshot_at')) db.exec('ALTER TABLE merch_orders ADD COLUMN commission_snapshot_at TEXT');
   if (!hasColumn('merch_order_items', 'commission_amount_paise')) db.exec('ALTER TABLE merch_order_items ADD COLUMN commission_amount_paise INTEGER NOT NULL DEFAULT 0');
-  if (!hasColumn('merch_influencers', 'commission_per_order_paise')) db.exec('ALTER TABLE merch_influencers ADD COLUMN commission_per_order_paise INTEGER NOT NULL DEFAULT 0');
   db.exec("UPDATE merch_orders SET commission_amount_paise = COALESCE((SELECT commission_per_order_paise FROM merch_influencers WHERE merch_influencers.id = merch_orders.influencer_id), 0), commission_snapshot_at = datetime('now') WHERE commission_snapshot_at IS NULL");
 
   db.exec(`
@@ -598,9 +636,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       customer_id INTEGER NOT NULL REFERENCES merch_customer_profiles(id) ON DELETE CASCADE,
       variant_id INTEGER NOT NULL,
       quantity INTEGER NOT NULL DEFAULT 1,
+      is_bundle INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      UNIQUE(customer_id, variant_id)
+      UNIQUE(customer_id, variant_id, is_bundle)
     );
 
     CREATE TABLE IF NOT EXISTS merch_customer_wishlist_items (
@@ -613,6 +652,25 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       UNIQUE(customer_id, product_id, variant_id)
     );
   `);
+
+  if (!hasColumn('merch_customer_cart_items', 'is_bundle')) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS merch_customer_cart_items_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL REFERENCES merch_customer_profiles(id) ON DELETE CASCADE,
+        variant_id INTEGER NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 1,
+        is_bundle INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(customer_id, variant_id, is_bundle)
+      );
+      INSERT OR IGNORE INTO merch_customer_cart_items_new (id, customer_id, variant_id, quantity, is_bundle, created_at, updated_at)
+        SELECT id, customer_id, variant_id, quantity, 0, created_at, updated_at FROM merch_customer_cart_items;
+      DROP TABLE merch_customer_cart_items;
+      ALTER TABLE merch_customer_cart_items_new RENAME TO merch_customer_cart_items;
+    `);
+  }
 
   if (!hasColumn('merch_orders', 'customer_user_id')) {
     db.exec('ALTER TABLE merch_orders ADD COLUMN customer_user_id INTEGER');
@@ -680,6 +738,25 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   if (!hasColumn('merch_orders', 'shiprocket_pickup_token')) {
     db.exec('ALTER TABLE merch_orders ADD COLUMN shiprocket_pickup_token TEXT');
   }
+  if (!hasColumn('merch_orders', 'cancelled_by')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN cancelled_by TEXT');
+  }
+  if (!hasColumn('merch_orders', 'cancelled_at')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN cancelled_at TEXT');
+  }
+
+  if (!hasColumn('merch_orders', 'currency')) {
+    db.exec("ALTER TABLE merch_orders ADD COLUMN currency TEXT NOT NULL DEFAULT 'INR'");
+  }
+  if (!hasColumn('merch_orders', 'exchange_rate')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN exchange_rate REAL DEFAULT 1');
+  }
+  if (!hasColumn('merch_orders', 'original_inr_amount')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN original_inr_amount INTEGER');
+  }
+  if (!hasColumn('merch_orders', 'charged_amount')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN charged_amount REAL');
+  }
 
   if (!hasColumn('merch_influencers', 'avatar_url')) {
     db.exec('ALTER TABLE merch_influencers ADD COLUMN avatar_url TEXT');
@@ -702,6 +779,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   if (hasTable('coupons') && !hasColumn('coupons', 'influencer_id')) {
     db.exec('ALTER TABLE coupons ADD COLUMN influencer_id INTEGER REFERENCES merch_influencers(id)');
+  }
+  if (hasTable('coupons') && !hasColumn('coupons', 'commission_type')) {
+    db.exec("ALTER TABLE coupons ADD COLUMN commission_type TEXT NOT NULL DEFAULT 'flat'");
+  }
+  if (hasTable('coupons') && !hasColumn('coupons', 'commission_rate')) {
+    db.exec('ALTER TABLE coupons ADD COLUMN commission_rate REAL NOT NULL DEFAULT 0');
   }
 
   if (!hasTable('merch_influencer_commission_payments')) {
@@ -1084,6 +1167,91 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return digits.length >= 7 && digits.length <= 15;
   }
 
+  function getMobileVariants(mobile) {
+    const raw = String(mobile || '').trim();
+    if (!raw) return [];
+    const digits = raw.replace(/\D/g, '');
+    const withoutPlus = raw.replace(/^\+/, '').replace(/[\s\-()]/g, '');
+    let local = digits;
+    if (digits.length === 12 && digits.startsWith('91')) {
+      local = digits.slice(2);
+    } else if (digits.length === 11 && digits.startsWith('1')) {
+      local = digits.slice(1);
+    } else if ((digits.length === 12 || digits.length === 13) && digits.startsWith('44')) {
+      local = digits.slice(2);
+      if (local.startsWith('0')) local = local.slice(1);
+    } else if (digits.length === 11 && digits.startsWith('0')) {
+      local = digits.slice(1);
+    }
+
+    const variants = new Set();
+    variants.add(raw);
+    variants.add(withoutPlus);
+    variants.add(digits);
+    variants.add(local);
+    if (local.length === 10) {
+      variants.add(`+91${local}`);
+      variants.add(`91${local}`);
+      variants.add(`0${local}`);
+    }
+    return Array.from(variants).filter(Boolean);
+  }
+
+  function normalizeWhatsAppMobile(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/[^\d\s+\-]/.test(raw)) return '';
+
+    if (raw.startsWith('+')) {
+      const digits = raw.slice(1).replace(/[\s\-]/g, '');
+      if (digits.length >= 7 && digits.length <= 15) {
+        if (digits.startsWith('440')) {
+          return `+44${digits.slice(3)}`;
+        }
+        return `+${digits}`;
+      }
+      return '';
+    }
+
+    const digits = raw.replace(/[\s\-]/g, '');
+    if (digits.length === 12 && digits.startsWith('91')) {
+      return `+${digits}`;
+    }
+    if (digits.length === 11 && digits.startsWith('1')) {
+      return `+${digits}`;
+    }
+    if ((digits.length === 12 || digits.length === 13) && digits.startsWith('44')) {
+      let local = digits.slice(2);
+      if (local.startsWith('0')) local = local.slice(1);
+      return `+44${local}`;
+    }
+    if (/^\d{10}$/.test(digits)) {
+      return `+91${digits}`;
+    }
+    if (digits.length >= 7 && digits.length <= 15) {
+      return `+${digits}`;
+    }
+    return '';
+  }
+
+  function findUserByMobile(mobile, excludeUserId = null) {
+    const variants = getMobileVariants(mobile);
+    if (!variants.length) return null;
+    const placeholders = variants.map(() => '?').join(', ');
+    let sql = `SELECT * FROM users WHERE (mobile IN (${placeholders}) OR (length(replace(replace(replace(replace(mobile, ' ', ''), '-', ''), '+', ''), '(', '')) >= 10 AND substr(replace(replace(replace(replace(mobile, ' ', ''), '-', ''), '+', ''), '(', ''), -10) = ?))`;
+    const params = [...variants];
+    const digits = String(mobile || '').replace(/\D/g, '');
+    const last10 = digits.slice(-10);
+    params.push(last10.length === 10 ? last10 : digits);
+
+    if (excludeUserId) {
+      sql += ' AND id != ?';
+      params.push(Number(excludeUserId));
+    }
+    sql += ' ORDER BY CASE WHEN email IS NOT NULL AND email != \'\' AND email NOT LIKE \'%@h2houseofhealth.local\' AND email NOT LIKE \'%@h2health.local\' THEN 0 ELSE 1 END, id ASC LIMIT 1';
+    return db.prepare(sql).get(...params);
+  }
+
   function getMerchReportTransporter() {
     const host = process.env.SMTP_HOST;
     const port = Number(process.env.SMTP_PORT || 587);
@@ -1168,6 +1336,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!normalizedCode) return null;
     return db.prepare(`
       SELECT c.id, c.code, c.description, c.discount_type AS discountType, c.discount_value AS discountValue,
+             c.commission_type AS commissionType, c.commission_rate AS commissionRate,
              c.commission_per_order_paise AS commissionPerOrderPaise,
              c.applies_to AS appliesTo, c.active, c.is_active AS isActive, c.portal,
              c.influencer_id AS influencerId, i.name AS influencerName, i.handle AS influencerHandle,
@@ -1186,10 +1355,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!ids.length) return [];
     return db.prepare(`
       SELECT c.id, c.code, c.description, c.discount_type AS discountType, c.discount_value AS discountValue,
+             c.commission_type AS commissionType, c.commission_rate AS commissionRate,
              c.commission_per_order_paise AS commissionPerOrderPaise,
              c.active, c.is_active AS isActive, c.influencer_id AS influencerId,
-             COUNT(mo.id) AS usageCount,
-             COALESCE(SUM(CASE WHEN mo.payment_status IN ('paid', 'cod_pending') THEN mo.total_amount ELSE 0 END), 0) AS revenue
+             COUNT(CASE WHEN mo.status NOT IN ('cancelled', 'refunded', 'failed') THEN mo.id END) AS usageCount,
+             COALESCE(SUM(CASE WHEN mo.status NOT IN ('cancelled', 'refunded', 'failed') AND mo.payment_status IN ('paid', 'cod_pending') THEN mo.total_amount ELSE 0 END), 0) AS revenue
       FROM coupons c
       LEFT JOIN merch_orders mo ON mo.coupon_id = c.id AND mo.influencer_id = c.influencer_id
       WHERE c.portal = 'merch'
@@ -1208,8 +1378,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       SELECT influencer_id AS influencerId,
              COUNT(*) AS totalOrders,
              COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'cod_pending') THEN total_amount ELSE 0 END), 0) AS revenue,
-             COALESCE(SUM(CASE WHEN payment_status IN ('paid', 'cod_pending') THEN commission_amount_paise ELSE 0 END), 0) AS totalCommissionEarned,
-             COALESCE(SUM(CASE WHEN coupon_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS couponUsage
+             COALESCE(SUM(CASE WHEN status NOT IN ('cancelled', 'refunded', 'failed') AND payment_status IN ('paid', 'cod_pending') THEN commission_amount_paise ELSE 0 END), 0) AS totalCommissionEarned,
+             COALESCE(SUM(CASE WHEN status NOT IN ('cancelled', 'refunded', 'failed') AND coupon_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS couponUsage
       FROM merch_orders
       WHERE influencer_id IN (${ids.map(() => '?').join(', ')})
         AND payment_status IN ('paid', 'cod_pending')
@@ -1343,12 +1513,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     cumulativePaidPaise = 0,
     balanceRemainingPaise = 0,
     formattedDate = '',
+    req = null,
   }) {
     const couponList = coupons.map((c) => c.code || c).filter(Boolean).join(', ') || 'None';
     const invoiceNum = payment.invoice_number || payment.invoiceNumber || 'H2-INV-COM';
     const refNum = payment.reference_number || payment.referenceNumber || 'N/A';
     const method = payment.payment_method || payment.paymentMethod || 'Direct Transfer';
     const status = (payment.status || 'PAID').toUpperCase();
+    const logoUrl = 'https://h2houseofhealth.com/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=240';
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -1356,36 +1528,278 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Commission Invoice ${escapeHtml(invoiceNum)} - H2 House of Health</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..800;1,9..40,400..800&display=swap" rel="stylesheet">
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f1f5f9; color: #0f172a; margin: 0; padding: 24px 12px; }
-    .invoice-card { max-width: 680px; margin: 0 auto; background: #ffffff; border-radius: 14px; box-shadow: 0 4px 20px rgba(0,0,0,0.07); border: 1px solid #e2e8f0; overflow: hidden; }
-    .header { background: #0b1329; color: #ffffff; padding: 32px 36px 26px; }
-    .header-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 22px; }
-    .brand-title { font-size: 22px; font-weight: 800; letter-spacing: 0.04em; color: #38bdf8; text-transform: uppercase; margin: 0; }
-    .brand-sub { font-size: 13px; color: #94a3b8; margin: 4px 0 0; }
-    .badge-paid { display: inline-block; background: #10b981; color: #ffffff; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; padding: 6px 14px; border-radius: 9999px; text-transform: uppercase; }
-    .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 14px; border-top: 1px solid #1e293b; padding-top: 18px; }
-    .meta-item-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; margin-bottom: 4px; }
-    .meta-item-val { font-size: 13px; font-weight: 600; color: #f8fafc; word-break: break-word; }
-    .body { padding: 30px 36px; }
-    .parties-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 28px; }
-    @media (max-width: 580px) { .parties-grid { grid-template-columns: 1fr; } }
-    .party-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 18px; }
-    .party-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #64748b; margin: 0 0 8px; }
-    .party-name { font-size: 16px; font-weight: 700; color: #0f172a; margin: 0 0 4px; }
-    .party-info { font-size: 13px; color: #475569; margin: 3px 0; line-height: 1.45; word-break: break-word; }
-    .table-wrap { margin-bottom: 26px; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
-    table { width: 100%; border-collapse: collapse; text-align: left; }
-    th { background: #f8fafc; color: #475569; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 12px 18px; border-bottom: 1px solid #e2e8f0; }
-    td { padding: 14px 18px; font-size: 14px; border-top: 1px solid #f1f5f9; color: #1e293b; }
-    .amt { text-align: right; font-weight: 600; }
-    .total-highlight { background: #ecfdf5; font-weight: 700; }
-    .total-highlight td { color: #065f46; font-size: 15px; }
-    .notes-box { background: #f0f9ff; border-left: 4px solid #0284c7; padding: 14px 18px; border-radius: 0 8px 8px 0; margin-bottom: 26px; }
-    .notes-title { font-size: 12px; font-weight: 700; color: #0369a1; text-transform: uppercase; margin: 0 0 4px; }
-    .notes-text { font-size: 13px; color: #0c4a6e; margin: 0; line-height: 1.5; }
-    .footer { background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 22px 36px; text-align: center; color: #64748b; font-size: 12px; line-height: 1.6; }
-    .footer strong { color: #334155; }
+    body {
+      font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background-color: #f8f3ee;
+      color: #14233b;
+      margin: 0;
+      padding: 24px 12px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .invoice-card {
+      max-width: 680px;
+      margin: 0 auto;
+      background: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(174, 84, 49, 0.08);
+      border: 1px solid #e7cabb;
+      overflow: hidden;
+    }
+    .header {
+      background: #fffaf7;
+      border-bottom: 1px solid #e7cabb;
+      padding: 28px 36px 24px;
+      position: relative;
+    }
+    .header::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, #b63b20, #c8652d, #ad3c22);
+    }
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .logo-img {
+      height: 46px;
+      width: auto;
+      display: block;
+    }
+    .badge-paid {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: #ad3c22;
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      box-shadow: 0 2px 8px rgba(173, 60, 34, 0.25);
+    }
+    .header-title-block {
+      margin-top: 4px;
+    }
+    .brand-eyebrow {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: #ad3c22;
+      text-transform: uppercase;
+      margin: 0 0 6px;
+    }
+    .brand-title {
+      font-family: Georgia, 'Times New Roman', serif;
+      font-size: 26px;
+      line-height: 32px;
+      font-weight: 700;
+      color: #14233b;
+      margin: 0;
+    }
+    .brand-sub {
+      font-size: 13px;
+      color: #657384;
+      margin: 4px 0 0;
+    }
+    .meta-banner {
+      background: #b63b20;
+      color: #ffffff;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-top: 20px;
+      box-shadow: 0 6px 16px rgba(182, 59, 32, 0.12);
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 14px;
+    }
+    .meta-item-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: rgba(255, 255, 255, 0.8);
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+    .meta-item-val {
+      font-size: 14px;
+      font-weight: 700;
+      color: #ffffff;
+      word-break: break-word;
+    }
+    .body {
+      padding: 30px 36px;
+      background: #ffffff;
+    }
+    .parties-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-bottom: 26px;
+    }
+    @media (max-width: 580px) {
+      .parties-grid { grid-template-columns: 1fr; }
+      .header { padding: 22px 20px; text-align: center; }
+      .header-top { flex-direction: column; align-items: center; text-align: center; gap: 14px; }
+      .logo-img { margin: 0 auto; }
+      .header-title-block { text-align: center; }
+      .body { padding: 22px 20px; }
+      .footer { padding: 22px 18px 20px !important; text-align: center !important; }
+      .meta-banner { grid-template-columns: 1fr 1fr; text-align: center; }
+    }
+    .party-box {
+      background: #fffaf7;
+      border: 1px solid #e7cabb;
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .party-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #ad3c22;
+      margin: 0 0 8px;
+    }
+    .party-name {
+      font-size: 17px;
+      font-weight: 700;
+      color: #14233b;
+      margin: 0 0 6px;
+    }
+    .party-info {
+      font-size: 13px;
+      color: #52606f;
+      margin: 4px 0;
+      line-height: 1.48;
+      word-break: break-word;
+    }
+    .party-info strong {
+      color: #14233b;
+    }
+    .coupon-badge {
+      display: inline-block;
+      background: rgba(174, 84, 49, 0.12);
+      color: #ad3c22;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .table-wrap {
+      margin-bottom: 26px;
+      border: 1px solid #e7cabb;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+    th {
+      background: #b63b20;
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 13px 18px;
+      border: 0;
+    }
+    td {
+      padding: 14px 18px;
+      font-size: 14px;
+      border-top: 1px solid #f0ded4;
+      color: #14233b;
+    }
+    .amt {
+      text-align: right;
+      font-weight: 600;
+      color: #14233b;
+    }
+    .total-highlight {
+      background: #f5e8e1;
+      font-weight: 700;
+    }
+    .total-highlight td {
+      color: #ad3c22;
+      font-size: 16px;
+      font-weight: 800;
+      border-top: 2px solid #e7cabb;
+      border-bottom: 2px solid #e7cabb;
+    }
+    .notes-box {
+      background: #fffaf7;
+      border: 1px solid #e7cabb;
+      border-left: 4px solid #ad3c22;
+      padding: 14px 18px;
+      border-radius: 0 8px 8px 0;
+      margin-bottom: 26px;
+    }
+    .notes-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #ad3c22;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 0 0 4px;
+    }
+    .notes-text {
+      font-size: 13px;
+      color: #52606f;
+      margin: 0;
+      line-height: 1.5;
+    }
+    .footer {
+      background: #f4eee9;
+      border-top: 1px solid #ead8cd;
+      padding: 24px 36px 20px;
+      text-align: center;
+      color: #52606f;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .footer strong {
+      color: #14233b;
+    }
+    .invoice-company-footer {
+      display: flex;
+      justify-content: space-between;
+      text-align: left;
+      gap: 20px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #14233b;
+      border-bottom: 1px solid #d2a08d;
+      padding-bottom: 16px;
+    }
+    .invoice-company-footer a {
+      color: #ad3c22;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    @media (max-width: 580px) {
+      .invoice-company-footer { flex-direction: column; text-align: center !important; gap: 10px; }
+      .invoice-company-footer div { text-align: center !important; }
+    }
+    @media print {
+      body { background: #ffffff !important; padding: 0 !important; }
+      .invoice-card { box-shadow: none !important; border: 1px solid #e7cabb !important; max-width: 100% !important; border-radius: 0 !important; }
+    }
   </style>
 </head>
 <body>
@@ -1393,14 +1807,18 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     <div class="header">
       <div class="header-top">
         <div>
-          <h1 class="brand-title">H2 House of Health</h1>
-          <p class="brand-sub">Commission Payment Receipt &amp; Invoice</p>
+          <img class="logo-img" src="${escapeHtml(logoUrl)}" alt="H2 House of Health">
         </div>
         <div>
-          <span class="badge-paid">${escapeHtml(status)}</span>
+          <span class="badge-paid">&#10003; ${escapeHtml(status)}</span>
         </div>
       </div>
-      <div class="meta-grid">
+      <div class="header-title-block">
+        <p class="brand-eyebrow">OFFICIAL COMMISSION PAYMENT RECEIPT</p>
+        <h1 class="brand-title">Commission Payment Receipt &amp; Invoice</h1>
+        <p class="brand-sub">Official Commission Settlement Record &bull; H2 House of Health</p>
+      </div>
+      <div class="meta-banner">
         <div>
           <div class="meta-item-label">Invoice Number</div>
           <div class="meta-item-val">${escapeHtml(invoiceNum)}</div>
@@ -1428,16 +1846,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           <p class="party-info"><strong>Email:</strong> ${escapeHtml(payment.influencer_email || payment.influencerEmail || influencer.email || 'N/A')}</p>
           ${influencer.handle ? `<p class="party-info"><strong>Handle:</strong> ${escapeHtml(influencer.handle)}</p>` : ''}
           ${influencer.phone ? `<p class="party-info"><strong>Phone:</strong> ${escapeHtml(influencer.phone)}</p>` : ''}
-          <p class="party-info"><strong>Coupon / Code:</strong> ${escapeHtml(couponList)}</p>
+          <p class="party-info"><strong>Coupon / Code:</strong> <span class="coupon-badge">${escapeHtml(couponList)}</span></p>
         </div>
 
         <div class="party-box">
           <p class="party-title">Issued By (Payer)</p>
           <p class="party-name">H2 House of Health</p>
-          <p class="party-info">Jubilee Hills, Hyderabad, Telangana 500033</p>
+          <p class="party-info">📍 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033</p>
           <p class="party-info"><strong>Admin Recipient:</strong> h2houseofhealth@gmail.com</p>
-          <p class="party-info"><strong>Support:</strong> hello@h2houseofhealth.com</p>
-          <p class="party-info"><strong>Contact:</strong> +91 98765 43210</p>
+          <p class="party-info"><strong>Email:</strong> hello@h2houseofhealth.com</p>
+          <p class="party-info"><strong>Phone:</strong> 91000 56979, 91000 86979</p>
+          <p class="party-info"><strong>Website:</strong> www.h2houseofhealth.com</p>
         </div>
       </div>
 
@@ -1452,10 +1871,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           <tbody>
             <tr>
               <td>
-                <strong>Commission Paid (This Receipt)</strong><br>
-                <small style="color:#64748b;">Method: ${escapeHtml(method)} &bull; Ref: ${escapeHtml(refNum)}</small>
+                <strong style="color:#14233b;">Commission Paid (This Receipt)</strong><br>
+                <small style="color:#657384;">Method: ${escapeHtml(method)} &bull; Ref: ${escapeHtml(refNum)}</small>
               </td>
-              <td class="amt" style="font-size:15px;color:#0f172a;">${formatMerchCurrency(commissionPaidPaise)}</td>
+              <td class="amt" style="font-size:15px;color:#ad3c22;font-weight:700;">${formatMerchCurrency(commissionPaidPaise)}</td>
             </tr>
             <tr>
               <td>Total Commission Earned (Gross Referral Attribution)</td>
@@ -1471,7 +1890,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
             </tr>
             <tr>
               <td>Remaining Balance Due</td>
-              <td class="amt" style="color:${balanceRemainingPaise > 0 ? '#b45309' : '#059669'};">${formatMerchCurrency(balanceRemainingPaise)}</td>
+              <td class="amt" style="color:${balanceRemainingPaise > 0 ? '#ad3c22' : '#059669'};">${formatMerchCurrency(balanceRemainingPaise)}</td>
             </tr>
           </tbody>
         </table>
@@ -1486,8 +1905,19 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     </div>
 
     <div class="footer">
-      <p style="margin:0 0 4px;"><strong>H2 House of Health</strong> &bull; Wellness &amp; Merchandise Ecosystem</p>
-      <p style="margin:0;">This is an officially recorded commission payment receipt. Commission paid records are permanently locked and logged for accounting integrity.</p>
+      <div class="invoice-company-footer">
+        <div>
+          📞 91000 56979, 91000 86979<br>
+          ✉️ <a href="mailto:hello@h2houseofhealth.com">hello@h2houseofhealth.com</a>
+        </div>
+        <div style="text-align:right;">
+          📍 47A, Journalist Colony, Road No:70,<br>
+          Jubilee Hills, Hyderabad - 500033<br>
+          🌐 <a href="https://www.h2houseofhealth.com">www.h2houseofhealth.com</a>
+        </div>
+      </div>
+      <p style="margin:0 0 6px;color:#ad3c22;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;">PREVENTIVE TODAY, HEALTHIER TOMORROW.</p>
+      <p style="margin:0;color:#657384;font-size:11px;">This is an officially recorded commission payment receipt. Commission paid records are permanently locked and logged for accounting integrity.</p>
     </div>
   </div>
 </body>
@@ -1534,17 +1964,438 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       `Remaining Balance Due: ${formatMerchCurrency(balanceRemainingPaise)}`,
       '',
       payment.note ? `Payment Notes: ${payment.note}\n` : '',
-      'ISSUER DETAILS:',
+      'COMPANY DETAILS (FROM INVOICE):',
       'H2 House of Health',
-      'Jubilee Hills, Hyderabad, Telangana 500033',
-      'Support: hello@h2houseofhealth.com',
-      'Fixed Admin Recipient: h2houseofhealth@gmail.com',
-      'Phone: +91 98765 43210',
-      'Website: https://h2houseofhealth.com',
+      '📞 Phone: 91000 56979, 91000 86979',
+      '✉️ Email: hello@h2houseofhealth.com',
+      '📍 Address: 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033',
+      '🌐 Website: www.h2houseofhealth.com',
+      'Admin Recipient: h2houseofhealth@gmail.com',
       '',
       'Thank you for partnering with H2 House of Health.',
       '============================================================',
     ].filter(Boolean).join('\n');
+  }
+
+  // ─── Image-Type Email for Commission Payments (Like Order Placed Email) ───
+  function buildInfluencerCommissionEmailHtml({
+    payment,
+    influencer,
+    coupons = [],
+    commissionEarnedPaise = 0,
+    commissionPaidPaise = 0,
+    cumulativePaidPaise = 0,
+    balanceRemainingPaise = 0,
+    formattedDate = '',
+    recipientRole = 'influencer', // 'influencer' | 'admin'
+    req = null,
+  }) {
+    const couponList = coupons.map((c) => c.code || c).filter(Boolean).join(', ') || 'None';
+    const invoiceNum = payment.invoice_number || payment.invoiceNumber || 'H2-INV-COM';
+    const refNum = payment.reference_number || payment.referenceNumber || 'N/A';
+    const method = payment.payment_method || payment.paymentMethod || 'Direct Transfer';
+    const status = (payment.status || 'PAID').toUpperCase();
+    const influencerEmail = payment.influencer_email || payment.influencerEmail || influencer.email || 'N/A';
+    const influencerName = influencer.name || 'Influencer Partner';
+    const amountInr = (commissionPaidPaise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const origin = getMerchEmailOrigin(req);
+    const logoUrl = getMerchEmailAssetUrl(req, '/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=240');
+    const homeUrl = `${origin}/`;
+
+    const heroTitle = recipientRole === 'admin'
+      ? 'Commission Payout Recorded'
+      : 'Commission Payment Received';
+
+    const heroSubtitle = recipientRole === 'admin'
+      ? `Commission amount paid to influencer: <strong style="color:#ad3c22;">${escapeHtml(influencerName)}</strong>`
+      : `Commission amount sent to influencer: <strong style="color:#ad3c22;">${escapeHtml(influencerName)}</strong>`;
+
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${escapeHtml(heroTitle)} - H2 House of Health</title>
+    <style>
+      body, table, td, p, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+      table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+      img { -ms-interpolation-mode: bicubic; }
+      @media only screen and (max-width: 620px) {
+        .email-shell { width: 100% !important; max-width: 600px !important; }
+        .mobile-pad { padding-left: 20px !important; padding-right: 20px !important; }
+        .mobile-top-pad { padding-top: 22px !important; }
+        .mobile-stack { display: block !important; width: 100% !important; }
+        .mobile-center { text-align: center !important; }
+        .mobile-left { text-align: left !important; }
+        .mobile-logo { width: 142px !important; max-width: 142px !important; margin: 0 auto !important; }
+        .hero-title { font-size: 30px !important; line-height: 38px !important; }
+        .hero-subtitle { font-size: 19px !important; line-height: 26px !important; }
+        .stat-cell { display: block !important; width: 100% !important; padding: 18px 12px !important; border-right: 0 !important; border-bottom: 1px solid rgba(255,255,255,0.45) !important; }
+        .stat-cell-last { border-bottom: 0 !important; }
+        .footer-logo-cell { border-right: 0 !important; border-bottom: 1px solid #d6a28c !important; padding: 0 0 18px !important; }
+        .footer-copy-cell { padding: 18px 0 0 !important; }
+        .footer-contact-right { text-align: left !important; padding-top: 8px !important; }
+      }
+    </style>
+  </head>
+  <body style="margin:0;padding:0;background:#f6f1ec;color:#14233b;font-family:Arial,Helvetica,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f6f1ec;">
+      <tr>
+        <td align="center" style="padding:20px 10px;">
+          <table role="presentation" class="email-shell" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:600px;border-collapse:collapse;background:#fffaf7;border-radius:12px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,0.06);border:1px solid #ebdcd3;">
+            
+            <!-- Top Logo & Help Header -->
+            <tr>
+              <td class="mobile-pad mobile-top-pad" style="padding:32px 32px 18px;background:#fffaf7;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+                  <tr>
+                    <td class="mobile-stack mobile-center" valign="middle" style="width:50%;">
+                      <a href="${escapeHtml(homeUrl)}" style="text-decoration:none;">
+                        <img class="mobile-logo" src="${escapeHtml(logoUrl)}" width="154" alt="H2 House of Health" style="display:block;border:0;width:154px;max-width:154px;height:auto;">
+                      </a>
+                    </td>
+                    <td class="mobile-stack mobile-center" valign="middle" align="right" style="width:50%;font-size:13px;line-height:20px;color:#14233b;">
+                      <p style="margin:0;font-size:14px;font-weight:600;color:#14233b;">Need Assistance?</p>
+                      <a href="mailto:hello@h2houseofhealth.com" style="color:#ad3c22;text-decoration:none;font-size:13px;line-height:18px;">hello@h2houseofhealth.com</a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Hero Title Block -->
+            <tr>
+              <td class="mobile-pad" style="padding:16px 32px 28px;background:#fffaf7;text-align:center;">
+                <h1 class="hero-title" style="margin:0;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:36px;line-height:44px;font-weight:700;">${escapeHtml(heroTitle)}</h1>
+                <p class="hero-subtitle" style="margin:8px 0 0;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:21px;line-height:28px;">${heroSubtitle}</p>
+                <div style="width:54px;height:3px;background:#b63b20;margin:16px auto 0;border-radius:2px;"></div>
+              </td>
+            </tr>
+
+            <!-- Stat Banner -->
+            <tr>
+              <td class="mobile-pad" style="padding:0 28px 28px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;background:#b63b20;border-radius:8px;box-shadow:0 8px 18px rgba(88,36,19,0.12);">
+                  <tr>
+                    <td class="stat-cell" align="center" style="width:33.33%;padding:22px 10px;border-right:1px solid rgba(255,255,255,0.48);color:#ffffff;">
+                      <div style="font-size:26px;line-height:26px;color:#ffffff;">&#8377;</div>
+                      <p style="margin:10px 0 4px;font-size:14px;line-height:18px;font-weight:500;color:#ffffff;">Amount Paid</p>
+                      <p style="margin:0;font-size:20px;line-height:26px;font-weight:700;color:#ffffff;">₹${amountInr}</p>
+                    </td>
+                    <td class="stat-cell" align="center" style="width:33.33%;padding:22px 10px;border-right:1px solid rgba(255,255,255,0.48);color:#ffffff;">
+                      <div style="font-size:26px;line-height:26px;color:#ffffff;">&#128197;</div>
+                      <p style="margin:10px 0 4px;font-size:14px;line-height:18px;font-weight:500;color:#ffffff;">Payment Date</p>
+                      <p style="margin:0;font-size:14px;line-height:20px;font-weight:600;color:#ffffff;">${escapeHtml(formattedDate)}</p>
+                    </td>
+                    <td class="stat-cell stat-cell-last" align="center" style="width:33.33%;padding:22px 10px;color:#ffffff;">
+                      <div style="font-size:26px;line-height:26px;color:#ffffff;">&#10003;</div>
+                      <p style="margin:10px 0 4px;font-size:14px;line-height:18px;font-weight:500;color:#ffffff;">Status</p>
+                      <p style="margin:0;font-size:15px;line-height:20px;font-weight:700;color:#ffffff;text-transform:uppercase;">${escapeHtml(status)}</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Payout & Ledger Details -->
+            <tr>
+              <td class="mobile-pad" style="padding:0 30px 24px;">
+                <h2 style="margin:0 0 14px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:30px;font-weight:700;">Commission Payout Details</h2>
+                
+                <!-- Party & Meta Info Box -->
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;border:1px solid #e7cabb;border-radius:8px;background:#ffffff;margin-bottom:18px;">
+                  <tr>
+                    <td style="padding:16px 20px;">
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:14px;line-height:22px;">
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;width:38%;">Influencer Name:</td>
+                          <td style="padding:5px 0;color:#0f172a;font-weight:700;">${escapeHtml(influencerName)}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Influencer Email:</td>
+                          <td style="padding:5px 0;color:#0f172a;">${escapeHtml(influencerEmail)}</td>
+                        </tr>
+                        ${influencer.handle ? `
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Social Handle:</td>
+                          <td style="padding:5px 0;color:#0f172a;">${escapeHtml(influencer.handle)}</td>
+                        </tr>
+                        ` : ''}
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Associated Coupon(s):</td>
+                          <td style="padding:5px 0;color:#0f172a;font-weight:600;">${escapeHtml(couponList)}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Payment Method:</td>
+                          <td style="padding:5px 0;color:#0f172a;">${escapeHtml(method)}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Reference / UTR ID:</td>
+                          <td style="padding:5px 0;color:#0f172a;font-weight:600;">${escapeHtml(refNum)}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Invoice Number:</td>
+                          <td style="padding:5px 0;color:#0f172a;font-weight:600;">${escapeHtml(invoiceNum)}</td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+
+                <!-- Financial Ledger Box -->
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;border:1px solid #e7cabb;border-radius:8px;background:#ffffff;table-layout:fixed;">
+                  <tr>
+                    <td style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;border-bottom:1px solid #f0ded4;">Total Commission Earned (Gross Attribution)</td>
+                    <td align="right" style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;font-weight:600;white-space:nowrap;border-bottom:1px solid #f0ded4;">${formatMerchCurrency(commissionEarnedPaise)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;border-bottom:1px solid #f0ded4;">Cumulative Commission Paid to Date</td>
+                    <td align="right" style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;font-weight:600;white-space:nowrap;border-bottom:1px solid #f0ded4;">${formatMerchCurrency(cumulativePaidPaise)}</td>
+                  </tr>
+                  <tr style="background:#f5e8e1;">
+                    <td style="padding:16px 20px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:17px;line-height:22px;font-weight:700;">Current Commission Settled</td>
+                    <td align="right" style="padding:16px 20px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:22px;line-height:26px;font-weight:700;white-space:nowrap;">${formatMerchCurrency(commissionPaidPaise)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;border-top:1px solid #f0ded4;">Remaining Balance Due</td>
+                    <td align="right" style="padding:12px 20px;font-size:14px;line-height:20px;font-weight:700;white-space:nowrap;border-top:1px solid #f0ded4;color:${balanceRemainingPaise > 0 ? '#b45309' : '#059669'};">${formatMerchCurrency(balanceRemainingPaise)}</td>
+                  </tr>
+                </table>
+
+                ${payment.note ? `
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;background:#fffaf7;border:1px solid #e7cabb;border-left:4px solid #ad3c22;border-radius:0 8px 8px 0;margin-top:16px;">
+                    <tr>
+                      <td style="padding:12px 18px;">
+                        <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:#ad3c22;text-transform:uppercase;">Payment Notes / Remarks</p>
+                        <p style="margin:0;font-size:13px;color:#52606f;line-height:1.5;">${escapeHtml(payment.note)}</p>
+                      </td>
+                    </tr>
+                  </table>
+                ` : ''}
+              </td>
+            </tr>
+
+            <!-- Action Buttons Row -->
+            <tr>
+              <td class="mobile-pad" style="padding:0 30px 30px;">
+                <a class="mobile-button" href="${escapeHtml(homeUrl)}" style="display:block;text-align:center;padding:16px 18px;border-radius:6px;background:#b63b20;color:#ffffff;text-decoration:none;font-family:Georgia,'Times New Roman',serif;font-size:20px;line-height:26px;font-weight:700;">Visit H2 House of Health&nbsp;&nbsp;&#8594;</a>
+              </td>
+            </tr>
+
+            <!-- Footer: Matches Bottom of Invoice -->
+            <tr>
+              <td class="mobile-pad" align="center" style="padding:28px 24px 26px;background:#f4eee9;border-top:1px solid #ead8cd;text-align:center;">
+                <!-- Centered Logo -->
+                <div align="center" style="text-align:center;margin:0 auto 14px;">
+                  <a href="${escapeHtml(homeUrl)}" style="display:inline-block;text-decoration:none;margin:0 auto;text-align:center;">
+                    <img src="${escapeHtml(logoUrl)}" width="140" alt="H2 House of Health" style="display:block;border:0;width:140px;max-width:140px;height:auto;margin:0 auto;text-align:center;">
+                  </a>
+                </div>
+
+                <!-- Brand Slogan -->
+                <p style="margin:0 0 12px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:22px;font-weight:700;letter-spacing:1px;text-transform:uppercase;text-align:center;">PREVENTIVE TODAY, HEALTHIER TOMORROW.</p>
+
+                <!-- Social Links -->
+                <div align="center" style="text-align:center;margin:0 auto 16px;">
+                  <a href="https://www.instagram.com/h2houseofhealth" style="display:inline-block;width:28px;height:28px;margin:0 10px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:22px;line-height:28px;text-align:center;" title="Instagram">&#9678;</a>
+                  <a href="${escapeHtml(homeUrl)}" style="display:inline-block;width:28px;height:28px;margin:0 10px;color:#ad3c22;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:22px;line-height:28px;text-align:center;" title="Facebook">f</a>
+                  <a href="${escapeHtml(homeUrl)}" style="display:inline-block;width:32px;height:28px;margin:0 10px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:22px;line-height:28px;text-align:center;" title="YouTube">&#9658;</a>
+                </div>
+
+                <!-- Divider -->
+                <div style="border-top:1px solid #d2a08d;margin:16px auto;width:100%;max-width:520px;"></div>
+
+                <!-- Company Details: Fully Centered -->
+                <div align="center" style="text-align:center;color:#14233b;font-size:13px;line-height:1.7;margin:0 auto;max-width:520px;">
+                  <p style="margin:0 0 6px;text-align:center;">📞 <strong>91000 56979, 91000 86979</strong> &nbsp;&bull;&nbsp; ✉️ <a href="mailto:hello@h2houseofhealth.com" style="color:#14233b;text-decoration:none;font-weight:600;">hello@h2houseofhealth.com</a></p>
+                  <p style="margin:0 0 6px;text-align:center;">📍 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033</p>
+                  <p style="margin:0 0 10px;text-align:center;">🌐 <a href="https://www.h2houseofhealth.com" style="color:#ad3c22;text-decoration:none;font-weight:700;">www.h2houseofhealth.com</a></p>
+                  <p style="margin:12px 0 0;color:#788696;font-size:11px;line-height:1.5;text-align:center;">Official Influencer Commission Settlement Receipt &bull; H2 House of Health</p>
+                </div>
+              </td>
+            </tr>
+
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+  }
+
+  function buildInfluencerCommissionEmailText({
+    payment,
+    influencer,
+    coupons = [],
+    commissionEarnedPaise = 0,
+    commissionPaidPaise = 0,
+    cumulativePaidPaise = 0,
+    balanceRemainingPaise = 0,
+    formattedDate = '',
+    recipientRole = 'influencer',
+  }) {
+    const couponList = coupons.map((c) => c.code || c).filter(Boolean).join(', ') || 'None';
+    const invoiceNum = payment.invoice_number || payment.invoiceNumber || 'H2-INV-COM';
+    const refNum = payment.reference_number || payment.referenceNumber || 'N/A';
+    const method = payment.payment_method || payment.paymentMethod || 'Direct Transfer';
+    const status = (payment.status || 'PAID').toUpperCase();
+    const influencerName = influencer.name || 'Influencer Partner';
+    const amountInr = (commissionPaidPaise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const header = recipientRole === 'admin'
+      ? `Commission amount paid to influencer: ${influencerName}`
+      : `Commission amount sent to influencer: ${influencerName}`;
+
+    return [
+      '============================================================',
+      'H2 HOUSE OF HEALTH - COMMISSION PAYMENT NOTIFICATION',
+      '============================================================',
+      '',
+      header,
+      `Amount Paid: ₹${amountInr}`,
+      `Payment Date: ${formattedDate}`,
+      `Payment Status: ${status}`,
+      `Invoice Number: ${invoiceNum}`,
+      `Payment Method: ${method}`,
+      `Reference / UTR ID: ${refNum}`,
+      '',
+      'INFLUENCER DETAILS:',
+      `Influencer Name: ${influencerName}`,
+      `Email: ${payment.influencer_email || payment.influencerEmail || influencer.email || 'N/A'}`,
+      `Coupon Code(s): ${couponList}`,
+      '',
+      'FINANCIAL BREAKDOWN:',
+      `Total Commission Earned: ${formatMerchCurrency(commissionEarnedPaise)}`,
+      `Cumulative Commission Paid: ${formatMerchCurrency(cumulativePaidPaise)}`,
+      `Current Commission Paid: ${formatMerchCurrency(commissionPaidPaise)}`,
+      `Remaining Balance Due: ${formatMerchCurrency(balanceRemainingPaise)}`,
+      '',
+      payment.note ? `Payment Notes: ${payment.note}\n` : '',
+      'COMPANY DETAILS (FROM INVOICE):',
+      'H2 House of Health',
+      '📞 Phone: 91000 56979, 91000 86979',
+      '✉️ Email: hello@h2houseofhealth.com',
+      '📍 Address: 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033',
+      '🌐 Website: www.h2houseofhealth.com',
+      'Admin Recipient: h2houseofhealth@gmail.com',
+      '',
+      'Thank you for partnering with H2 House of Health.',
+      '============================================================',
+    ].filter(Boolean).join('\n');
+  }
+
+  // ─── Dispatch Commission Payment Emails to Influencer & Admin ───
+  async function sendInfluencerCommissionNotificationEmails({
+    payment,
+    influencer,
+    coupons = [],
+    commissionEarnedPaise = 0,
+    commissionPaidPaise = 0,
+    cumulativePaidPaise = 0,
+    balanceRemainingPaise = 0,
+    formattedDate = '',
+    req = null,
+  }) {
+    const influencerEmail = String(payment.influencerEmail || payment.influencer_email || influencer.email || '').trim().toLowerCase();
+    const adminEmail = FIXED_ADMIN_EMAIL;
+    const invoiceNumber = payment.invoiceNumber || payment.invoice_number || 'H2-INV-COM';
+    const amountInr = (commissionPaidPaise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const influencerName = influencer.name || 'Influencer Partner';
+
+    const influencerHtml = buildInfluencerCommissionEmailHtml({
+      payment,
+      influencer,
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      recipientRole: 'influencer',
+      req,
+    });
+
+    const influencerText = buildInfluencerCommissionEmailText({
+      payment,
+      influencer,
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      recipientRole: 'influencer',
+    });
+
+    const adminHtml = buildInfluencerCommissionEmailHtml({
+      payment,
+      influencer,
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      recipientRole: 'admin',
+      req,
+    });
+
+    const adminText = buildInfluencerCommissionEmailText({
+      payment,
+      influencer,
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      recipientRole: 'admin',
+    });
+
+    const results = {
+      influencer: { to: influencerEmail, status: 'pending' },
+      admin: { to: adminEmail, status: 'pending' },
+    };
+
+    // 1. Send to Influencer
+    try {
+      if (typeof sendMerchEmail === 'function' && influencerEmail) {
+        await sendMerchEmail({
+          to: influencerEmail,
+          subject: `Commission amount sent to influencer: ${influencerName} - ₹${amountInr} (${invoiceNumber}) | H2 House of Health`,
+          text: influencerText,
+          html: influencerHtml,
+        });
+        results.influencer.status = 'sent';
+      } else {
+        results.influencer.status = 'skipped_no_mailer';
+      }
+    } catch (err) {
+      console.error('[Merch] Failed to email commission payout to influencer:', err.message);
+      results.influencer.status = 'failed';
+      results.influencer.error = err.message;
+    }
+
+    // 2. Send to Admin (Fixed copy: h2houseofhealth@gmail.com)
+    try {
+      if (typeof sendMerchEmail === 'function' && adminEmail) {
+        await sendMerchEmail({
+          to: adminEmail,
+          subject: `Commission amount paid to influencer: ${influencerName} - ₹${amountInr} (${invoiceNumber}) | H2 House of Health`,
+          text: adminText,
+          html: adminHtml,
+        });
+        results.admin.status = 'sent';
+      } else {
+        results.admin.status = 'skipped_no_mailer';
+      }
+    } catch (err) {
+      console.error('[Merch] Failed to email commission payout copy to admin:', err.message);
+      results.admin.status = 'failed';
+      results.admin.error = err.message;
+    }
+
+    return results;
   }
 
   function loadMerchInfluencers() {
@@ -1681,6 +2532,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     const coupons = db.prepare(`
       SELECT c.id, c.code, c.description, c.discount_type AS discountType, c.discount_value AS discountValue,
+             c.commission_type AS commissionType, c.commission_rate AS commissionRate,
              c.commission_per_order_paise AS commissionPerOrderPaise,
              c.applies_to AS appliesTo, c.max_redemptions AS maxRedemptions, c.per_user_limit AS perUserLimit,
              c.expires_at AS expiresAt, c.active, c.coupon_type AS couponType,
@@ -1692,8 +2544,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     `).all(influencerId).map((coupon) => {
       const usageStats = db.prepare(`
         SELECT COUNT(*) AS total,
-               COALESCE(SUM(CASE WHEN mo.payment_status IN ('paid', 'cod_pending') THEN mo.total_amount ELSE 0 END), 0) AS revenue,
-               COALESCE(COUNT(CASE WHEN mo.payment_status IN ('paid', 'cod_pending') THEN 1 END), 0) AS orders
+               COALESCE(SUM(CASE WHEN mo.status NOT IN ('cancelled', 'refunded', 'failed') AND mo.payment_status IN ('paid', 'cod_pending') THEN mo.total_amount ELSE 0 END), 0) AS revenue,
+               COALESCE(COUNT(CASE WHEN mo.status NOT IN ('cancelled', 'refunded', 'failed') AND mo.payment_status IN ('paid', 'cod_pending') THEN 1 END), 0) AS orders
         FROM merch_orders mo
         WHERE mo.influencer_id = ?
           AND (mo.coupon_id = ? OR LOWER(TRIM(mo.coupon_code)) = LOWER(TRIM(?)))
@@ -1706,6 +2558,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         description: String(coupon.description || ''),
         discountType: String(coupon.discountType || ''),
         discountValue: Number(coupon.discountValue || 0),
+        commissionType: String(coupon.commissionType || 'flat'),
+        commissionRate: Number(coupon.commissionRate || 0),
+        commissionPerOrderPaise: Number(coupon.commissionPerOrderPaise || 0),
         appliesTo: String(coupon.appliesTo || 'all'),
         maxRedemptions: Number.isFinite(maxRedemptions) && maxRedemptions > 0 ? maxRedemptions : null,
         perUserLimit: Number(coupon.perUserLimit || 1),
@@ -1749,7 +2604,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const customerEmailCounts = new Map();
     const allOrders = orderRows.map((order) => {
       const items = itemsByOrderId.get(Number(order.id)) || [];
-      const commissionEarned = Math.max(0, Number(order.commissionAmountPaise || 0));
+      const orderStatus = String(order.status || 'pending').toLowerCase();
+      const paymentStatus = String(order.paymentStatus || 'pending').toLowerCase();
+      const isActiveOrder = !['cancelled', 'refunded', 'failed'].includes(orderStatus);
+      const isCommissionableOrder = isActiveOrder && ['paid', 'cod_pending'].includes(paymentStatus);
+      const commissionEarned = isCommissionableOrder ? Math.max(0, Number(order.commissionAmountPaise || 0)) : 0;
       const productSummary = items.length
         ? items.map((item) => `${String(item.productName || 'Item')} x${Number(item.quantity || 0)}`).join(', ')
         : 'Merch order';
@@ -1757,9 +2616,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const monthKey = String(orderDate || '').slice(0, 7);
       if (monthKey) {
         const entry = monthlyMap.get(monthKey) || { sales: 0, commission: 0, orders: 0 };
-        entry.sales += Number(order.totalAmount || 0);
+        if (isCommissionableOrder) entry.sales += Number(order.totalAmount || 0);
         entry.commission += commissionEarned;
-        entry.orders += 1;
+        if (isActiveOrder) entry.orders += 1;
         monthlyMap.set(monthKey, entry);
       }
       const normalizedEmail = normalizeMerchCustomerEmail(order.customerEmail);
@@ -1782,8 +2641,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         couponUsed: String(order.couponCode || ''),
         orderAmount: Number(order.totalAmount || 0),
         commissionEarned,
-        orderStatus: String(order.status || 'pending'),
-        paymentStatus: String(order.paymentStatus || 'pending'),
+        orderStatus,
+        paymentStatus,
       };
     });
 
@@ -1810,7 +2669,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const offset = (currentPage - 1) * pageLimit;
     const pagedOrders = filteredOrders.slice(offset, offset + pageLimit);
 
-    const paidOrders = allOrders.filter((order) => ['paid', 'cod_pending'].includes(String(order.paymentStatus || '').toLowerCase()));
+    const paidOrders = allOrders.filter((order) => !['cancelled', 'refunded', 'failed'].includes(String(order.orderStatus || '').toLowerCase()) && ['paid', 'cod_pending'].includes(String(order.paymentStatus || '').toLowerCase()));
     const activeOrders = allOrders.filter((order) => !['cancelled', 'refunded'].includes(String(order.orderStatus || '').toLowerCase()));
     const salesGenerated = paidOrders.reduce((sum, order) => sum + Number(order.orderAmount || 0), 0);
     const totalOrdersReferred = activeOrders.length;
@@ -1823,7 +2682,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const commissionPaid = Math.max(commissionPaidFromPayments, commissionPaidRecorded);
     const commissionPending = Math.max(0, commissionEarned - commissionPaid);
     const activeCoupons = coupons.filter((coupon) => Number(coupon.active) === 1).length;
-    const couponUsage = allOrders.filter((order) => Boolean(order.couponUsed)).length;
+    const couponUsage = allOrders.filter((order) => !['cancelled', 'refunded', 'failed'].includes(String(order.orderStatus || '').toLowerCase()) && Boolean(order.couponUsed)).length;
     const conversionRate = totalOrdersReferred ? Math.round((paidOrders.length / totalOrdersReferred) * 1000) / 10 : 0;
     const averageOrderValue = paidOrders.length ? Math.round(salesGenerated / paidOrders.length) : 0;
     const repeatCustomerCount = [...customerEmailCounts.values()].filter((count) => count > 1).length;
@@ -2471,10 +3330,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     if (String(order.status || '').toLowerCase() === 'cancelled') {
+      const who = order.cancelledBy === 'customer'
+        ? 'Customer'
+        : (order.cancelledBy === 'admin' ? 'Merchant / Admin' : 'Customer or Merchant');
       entries.push({
-        label: 'Cancelled',
-        note: 'Order status was marked cancelled',
-        time: updatedAt,
+        label: 'Order Cancelled',
+        note: `Cancelled by ${who}`,
+        time: order.cancelledAt || updatedAt,
       });
     }
 
@@ -2486,6 +3348,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const billingAddress = parseMerchShippingAddress(order.billingAddress || order.billing_address) || shippingAddress;
     const realCustomerEmail = hasRealEmail(order.customerEmail || order.customer_email) ? String(order.customerEmail || order.customer_email) : '';
     const realGuestEmail = hasRealEmail(order.guestEmail || order.guest_email) ? String(order.guestEmail || order.guest_email) : '';
+    const isCancelled = String(order.status || '').toLowerCase() === 'cancelled';
+    const cancelledBy = order.cancelled_by || order.cancelledBy || (isCancelled ? 'admin' : null);
+    const cancelledAt = order.cancelled_at || order.cancelledAt || (isCancelled ? order.updatedAt || order.updated_at || null : null);
+
     return {
       id: Number(order.id),
       orderNumber: String(order.orderNumber || order.order_number || ''),
@@ -2501,6 +3367,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       displayEmail: realCustomerEmail || 'Email not provided',
       phone: String(order.customerPhone || order.customer_phone || ''),
       status: String(order.status || 'pending'),
+      cancelledBy,
+      cancelledAt,
       subtotal: Number(order.subtotal || 0),
       gstAmount: Number(order.gstAmount || order.gst_amount || 0),
       shippingCharge: Number(order.shippingCharge || order.shipping_charge || 0),
@@ -2554,6 +3422,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         carrierName: order.carrierName || order.carrier_name,
         createdAt: order.createdAt || order.created_at,
         updatedAt: order.updatedAt || order.updated_at,
+        cancelledBy,
+        cancelledAt,
       }),
     };
   }
@@ -2676,7 +3546,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       )
       .all();
 
-    const paidOrders = allOrders.filter((order) => String(order.paymentStatus || '').toLowerCase() === 'paid');
+    const paidOrders = allOrders.filter((order) => !['cancelled', 'refunded', 'failed'].includes(String(order.status || '').toLowerCase()) && String(order.paymentStatus || '').toLowerCase() === 'paid');
     const revenue = paidOrders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
     const refunds = allOrders.filter((order) => String(order.paymentStatus || '').toLowerCase() === 'refunded').reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
     const discounts = allOrders.reduce((sum, order) => sum + Number(order.discountAmount || 0), 0);
@@ -2735,11 +3605,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         couponUsage: 0,
       };
 
+      const orderStatus = String(order.status || '').toLowerCase();
+      const orderPaymentStatus = String(order.paymentStatus || '').toLowerCase();
+      const isActiveOrder = !['cancelled', 'refunded', 'failed'].includes(orderStatus);
+      const isCommissionableOrder = isActiveOrder && ['paid', 'cod_pending'].includes(orderPaymentStatus);
       const orderRevenue = Number(order.totalAmount || 0);
-      existing.orders += 1;
-      existing.revenue += orderRevenue;
-      existing.commission += Math.max(0, Number(order.commissionAmountPaise || 0));
-      if (String(order.couponCode || '').trim()) {
+      if (isActiveOrder) existing.orders += 1;
+      if (isCommissionableOrder) {
+        existing.revenue += orderRevenue;
+        existing.commission += Math.max(0, Number(order.commissionAmountPaise || 0));
+      }
+      if (isActiveOrder && String(order.couponCode || '').trim()) {
         existing.couponUsage += 1;
       }
       monthlyInfluencerMap.set(entryKey, existing);
@@ -3914,42 +4790,36 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
               </td>
             </tr>
             <tr>
-              <td class="mobile-pad" style="padding:28px 30px 26px;background:#f4eee9;border-top:1px solid #ead8cd;">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-                  <tr>
-                    <td class="mobile-stack mobile-center footer-logo-cell" valign="middle" style="width:31%;padding-right:22px;border-right:1px solid #d2a08d;">
-                      <a href="${escapeHtml(links.home)}"><img src="${escapeHtml(links.logo)}" width="132" alt="H2 House of Health logo" style="display:block;border:0;width:132px;max-width:132px;height:auto;"></a>
-                    </td>
-                    <td class="mobile-stack mobile-center footer-copy-cell" valign="middle" style="padding-left:26px;">
-                      <p style="margin:0 0 15px;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:21px;font-weight:700;letter-spacing:1px;">PREVENTIVE TODAY, HEALTHIER TOMORROW.</p>
-                      <p style="margin:0 0 18px;">
-                        <a href="${escapeHtml(links.instagram)}" style="display:inline-block;width:26px;height:26px;margin-right:28px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:24px;line-height:26px;text-align:center;" title="Instagram">&#9678;</a>
-                        <a href="${escapeHtml(links.facebook)}" style="display:inline-block;width:26px;height:26px;margin-right:28px;color:#ad3c22;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:24px;line-height:26px;text-align:center;" title="Facebook">f</a>
-                        <a href="${escapeHtml(links.youtube)}" style="display:inline-block;width:30px;height:24px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:24px;line-height:24px;text-align:center;" title="YouTube">&#9658;</a>
-                      </p>
-                    </td>
-                  </tr>
-                </table>
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:24px;">
-                  <tr>
-                    <td class="mobile-stack mobile-center footer-contact-cell" valign="top" style="width:100%;">
-                      <p style="margin:0 0 8px;color:#14233b;font-size:15px;line-height:22px;">
-                        <span style="color:#ad3c22;font-size:18px;line-height:18px;">&#9993;</span>
-                        <span>&nbsp;&nbsp;</span>
-                        <span class="footer-contact"><a href="${escapeHtml(links.email)}" style="color:#111827;text-decoration:none;">hello@h2houseofhealth.com</a></span>
-                        <span class="footer-separator">&nbsp;&nbsp; | &nbsp;&nbsp;</span>
-                        <span style="color:#ad3c22;font-size:18px;line-height:18px;">&#9742;</span>
-                        <span>&nbsp;&nbsp;</span>
-                        <span class="footer-contact"><a href="${escapeHtml(links.phone)}" style="color:#111827;text-decoration:none;">+91 98765 43210</a></span>
-                      </p>
-                      <p style="margin:0;color:#14233b;font-size:15px;line-height:22px;">
-                        <span style="color:#ad3c22;font-size:18px;line-height:18px;">&#9679;</span>
-                        <span>&nbsp;&nbsp;</span>
-                        H2 House of Health, Hyderabad
-                      </p>
-                    </td>
-                  </tr>
-                </table>
+              <td class="mobile-pad" align="center" style="padding:28px 24px 26px;background:#f4eee9;border-top:1px solid #ead8cd;text-align:center;">
+                <!-- Centered Logo -->
+                <div align="center" style="text-align:center;margin:0 auto 14px;">
+                  <a href="${escapeHtml(links.home)}" style="display:inline-block;text-decoration:none;margin:0 auto;text-align:center;">
+                    <img src="${escapeHtml(links.logo)}" width="140" alt="H2 House of Health logo" style="display:block;border:0;width:140px;max-width:140px;height:auto;margin:0 auto;text-align:center;">
+                  </a>
+                </div>
+
+                <!-- Brand Slogan -->
+                <p style="margin:0 0 12px;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:22px;font-weight:700;letter-spacing:1px;text-align:center;">PREVENTIVE TODAY, HEALTHIER TOMORROW.</p>
+
+                <!-- Social Links -->
+                <div align="center" style="text-align:center;margin:0 auto 16px;">
+                  <a href="${escapeHtml(links.instagram)}" style="display:inline-block;width:28px;height:28px;margin:0 10px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:22px;line-height:28px;text-align:center;" title="Instagram">&#9678;</a>
+                  <a href="${escapeHtml(links.facebook)}" style="display:inline-block;width:28px;height:28px;margin:0 10px;color:#ad3c22;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:22px;line-height:28px;text-align:center;" title="Facebook">f</a>
+                  <a href="${escapeHtml(links.youtube)}" style="display:inline-block;width:32px;height:28px;margin:0 10px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:22px;line-height:28px;text-align:center;" title="YouTube">&#9658;</a>
+                </div>
+
+                <!-- Divider -->
+                <div style="border-top:1px solid #d2a08d;margin:16px auto;width:100%;max-width:520px;"></div>
+
+                <!-- Contact Info Centered -->
+                <div align="center" style="text-align:center;color:#14233b;font-size:14px;line-height:1.7;margin:0 auto;max-width:520px;">
+                  <p style="margin:0 0 6px;text-align:center;">
+                    ✉️ <a href="${escapeHtml(links.email)}" style="color:#14233b;text-decoration:none;font-weight:600;">hello@h2houseofhealth.com</a>
+                    &nbsp;&bull;&nbsp;
+                    📞 <a href="${escapeHtml(links.phone)}" style="color:#14233b;text-decoration:none;font-weight:600;">+91 91000 56979</a>
+                  </p>
+                  <p style="margin:0;text-align:center;">📍 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033</p>
+                </div>
               </td>
             </tr>
           </table>
@@ -3990,8 +4860,15 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
 
   function normalizeMerchWhatsAppPhone(phone) {
-    const digits = String(phone || '').replace(/\D/g, '');
+    const raw = String(phone || '').trim();
+    if (typeof normalizeWhatsAppMobile === 'function') {
+      const normalized = normalizeWhatsAppMobile(raw);
+      if (normalized) return normalized.replace(/^\+/, '');
+    }
+    const digits = raw.replace(/\D/g, '');
     if (!digits) return '';
+    if (/^[6-9]\d{9}$/.test(digits)) return `91${digits}`;
+    if (/^[2-5]\d{9}$/.test(digits)) return `1${digits}`;
     if (digits.length === 10) return `91${digits}`;
     return digits;
   }
@@ -4453,6 +5330,144 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return result;
   }
 
+  function resolveMerchRefundStatus(order, options = {}) {
+    const method = String(order?.payment_method || '').toLowerCase();
+    const paymentStatus = String(order?.payment_status || '').toLowerCase();
+    const prevPaymentStatus = String(options.previousPaymentStatus || '').toLowerCase();
+
+    if (method === 'cod') {
+      return 'No refund required (COD order)';
+    }
+    if (paymentStatus === 'refunded' || paymentStatus === 'paid' || prevPaymentStatus === 'paid') {
+      return 'No refund';
+    }
+    return 'No payment was collected';
+  }
+
+  async function sendMerchCancellationWhatsApp(order, options = {}) {
+    const rawPhone = order?.customer_phone || order?.customerPhone || order?.guest_phone || order?.guestPhone || '';
+    const customerName = String(order?.customer_name || order?.customerName || order?.guest_name || order?.guestName || 'Valued Customer').trim();
+    const orderNumber = String(order?.order_number || order?.orderNumber || (order?.id ? `Order #${order.id}` : 'Order')).trim();
+    const reason = String(options.reason || (options.cancelledBy === 'customer' ? 'Requested by customer' : 'Cancelled by store administration')).trim();
+    const refundStatus = options.refundStatus || resolveMerchRefundStatus(order, options);
+
+    if (!rawPhone) {
+      console.warn(`[WhatsApp] Skipping merch cancellation notification for order ${orderNumber}: no phone number provided.`);
+      return { ok: false, reason: 'missing_phone' };
+    }
+
+    const phone = typeof normalizeWhatsAppMobile === 'function' ? normalizeWhatsAppMobile(rawPhone) : normalizeMerchWhatsAppPhone(rawPhone);
+    if (!phone) {
+      console.warn(`[WhatsApp] Skipping merch cancellation notification for order ${orderNumber}: invalid phone "${rawPhone}".`);
+      return { ok: false, reason: 'invalid_phone' };
+    }
+
+    const parameters = [
+      customerName,
+      orderNumber,
+      reason,
+      refundStatus,
+    ];
+
+    try {
+      if (typeof sendWhatsAppMessage === 'function') {
+        const result = await sendWhatsAppMessage(phone, 'order_cancelled', parameters);
+        console.log(`[WhatsApp] Sent order_cancelled notification for merch order ${orderNumber}:`, result);
+        return result;
+      }
+      const config = getMerchWhatsAppConfig();
+      if (!config.token || !config.phoneNumberId) {
+        console.warn(`[WhatsApp] Skipping cancellation notification for merch order ${orderNumber}: WhatsApp Cloud API not configured.`);
+        return { ok: false, reason: 'unconfigured' };
+      }
+      const payload = {
+        to: phone.replace(/^\+/, ''),
+        type: 'template',
+        template: {
+          name: 'order_cancelled',
+          language: { code: 'en' },
+          components: [
+            {
+              type: 'body',
+              parameters: parameters.map((param) => ({ type: 'text', text: String(param) })),
+            },
+          ],
+        },
+      };
+      const result = await sendWhatsAppGraphMessage(config, payload);
+      console.log(`[WhatsApp] Sent order_cancelled notification for merch order ${orderNumber}:`, result);
+      return { ok: true, result };
+    } catch (err) {
+      console.error(`[WhatsApp] Error sending order_cancelled notification for merch order ${orderNumber}:`, err?.message || err);
+      return { ok: false, error: err?.message || err };
+    }
+  }
+
+  async function sendMerchCancellationEmail(order, options = {}) {
+    const email = String(order?.customer_email || order?.customerEmail || order?.guest_email || order?.guestEmail || '').trim().toLowerCase();
+    const customerName = String(order?.customer_name || order?.customerName || order?.guest_name || order?.guestName || 'Valued Customer').trim();
+    const orderNumber = String(order?.order_number || order?.orderNumber || (order?.id ? `Order #${order.id}` : 'Order')).trim();
+    const reason = String(options.reason || (options.cancelledBy === 'customer' ? 'Requested by customer' : 'Cancelled by store administration')).trim();
+    const refundStatus = options.refundStatus || resolveMerchRefundStatus(order, options);
+
+    if (!email || !isValidMerchEmail(email)) {
+      console.warn(`[Merch] Skipping cancellation email for order ${orderNumber}: no valid email.`);
+      return { status: 'skipped', reason: 'missing_email' };
+    }
+    if (typeof sendMerchEmail !== 'function') {
+      console.warn(`[Merch] Cancellation email skipped for order ${orderNumber}: email service not configured.`);
+      return { status: 'skipped', reason: 'missing_service' };
+    }
+
+    const subject = `Your H2 House of Health order ${orderNumber} has been cancelled`;
+    const text = `Hi ${customerName},\n\nYour H2 House of Health order ${orderNumber} has been cancelled.\n\nCancellation reason: ${reason}\nRefund status: ${refundStatus}\n\nIf you have any questions, please contact our support team at support@h2houseofhealth.com.\n\nBest regards,\nH2 House of Health Team`;
+    const html = `<!doctype html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #faf7f4; padding: 24px; color: #2d2422;">
+  <div style="max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 12px; padding: 32px; border: 1px solid #e8dfd8;">
+    <h2 style="color: #8b3e23; margin-top: 0;">Order Cancellation Confirmation</h2>
+    <p>Hi <strong>${escapeHtml(customerName)}</strong>,</p>
+    <p>Your H2 House of Health order <strong>${escapeHtml(orderNumber)}</strong> has been cancelled.</p>
+    <div style="background: #f8f4f0; border-radius: 8px; padding: 16px; margin: 20px 0;">
+      <p style="margin: 6px 0;"><strong>Cancellation reason:</strong> ${escapeHtml(reason)}</p>
+      <p style="margin: 6px 0;"><strong>Refund status:</strong> ${escapeHtml(refundStatus)}</p>
+    </div>
+    <p style="color: #6d6360; font-size: 14px; margin-top: 24px;">If you have any questions, please contact our support team at <a href="mailto:support@h2houseofhealth.com" style="color: #8b3e23;">support@h2houseofhealth.com</a>.</p>
+    <p style="color: #6d6360; font-size: 14px;">Best regards,<br>H2 House of Health Team</p>
+  </div>
+</body>
+</html>`;
+
+    try {
+      await sendMerchEmail({ to: email, subject, text, html });
+      return { status: 'sent' };
+    } catch (err) {
+      console.error(`[Merch] Failed to send cancellation email for order ${orderNumber}:`, err?.message || err);
+      return { status: 'failed', error: err?.message || err };
+    }
+  }
+
+  async function triggerMerchCancellationNotifications(order, options = {}) {
+    const results = {
+      whatsapp: { status: 'pending' },
+      email: { status: 'pending' },
+    };
+    try {
+      results.whatsapp = await sendMerchCancellationWhatsApp(order, options);
+    } catch (err) {
+      console.error('[Merch] WhatsApp cancellation error:', err?.message || err);
+      results.whatsapp = { ok: false, error: err?.message || err };
+    }
+    try {
+      results.email = await sendMerchCancellationEmail(order, options);
+    } catch (err) {
+      console.error('[Merch] Email cancellation error:', err?.message || err);
+      results.email = { status: 'failed', error: err?.message || err };
+    }
+    return results;
+  }
+
   function handleMerchWhatsAppStatusWebhook(body) {
     const entries = Array.isArray(body?.entry) ? body.entry : [];
     let updated = 0;
@@ -4649,24 +5664,37 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function getMerchCommissionSnapshot(coupon, items = []) {
     if (!coupon?.influencerId) return { total: 0, byProduct: new Map() };
-    const fallback = Math.max(0, Math.round(Number(coupon.commissionPerOrderPaise || 0)));
+    const commissionType = String(coupon.commissionType || coupon.commission_type || 'flat').toLowerCase();
+    const fallback = Math.max(0, Math.round(Number(coupon.commissionPerOrderPaise || coupon.commission_per_order_paise || 0)));
+    const commissionRate = Number(coupon.commissionRate || coupon.commission_rate || 0);
     const lineCommissions = new Map();
-    let total = items.length ? fallback : 0;
-    for (const item of items) {
-      const productCommission = fallback;
-      lineCommissions.set(Number(item.variantId), productCommission);
+    let total = 0;
+    if (commissionType === 'percentage' || commissionType === '%') {
+      const orderSubtotalPaise = items.reduce((sum, item) => sum + Math.max(0, Math.round(Number(item.lineTotal || 0))), 0);
+      total = Math.round(orderSubtotalPaise * (commissionRate / 100));
+      for (const item of items) {
+        const itemLineTotal = Math.max(0, Math.round(Number(item.lineTotal || 0)));
+        lineCommissions.set(Number(item.variantId), Math.round(itemLineTotal * (commissionRate / 100)));
+      }
+    } else {
+      total = items.length ? fallback : 0;
+      for (const item of items) {
+        lineCommissions.set(Number(item.variantId), fallback);
+      }
     }
     return { total, byProduct: lineCommissions };
   }
 
   function getMerchBundleDiscountPaise(bundleCode, items = []) {
     if (String(bundleCode || '').trim().toUpperCase() !== 'H2BUNDLE15') return 0;
-    const bottle = items.find((item) => /bottle/i.test(String(item.productName || '')) && Number(item.quantity || 0) > 0);
-    const mist = items.find((item) => /(mist|spray)/i.test(String(item.productName || '')) && Number(item.quantity || 0) > 0);
+    const bundleItems = (items || []).filter((item) => Boolean(item.isBundle || item.source === 'bundle'));
+    const bottle = bundleItems.find((item) => /bottle/i.test(String(item.productName || '')) && Number(item.quantity || 0) > 0);
+    const mist = bundleItems.find((item) => /(mist|spray)/i.test(String(item.productName || '')) && Number(item.quantity || 0) > 0);
     if (!bottle || !mist) return 0;
-    const bottleUnitPrice = Math.round(Number(bottle.lineTotal || 0) / Math.max(1, Number(bottle.quantity || 1)));
-    const mistUnitPrice = Math.round(Number(mist.lineTotal || 0) / Math.max(1, Number(mist.quantity || 1)));
-    return Math.max(0, Math.round((bottleUnitPrice + mistUnitPrice) * 0.15));
+    const bundleQty = Math.min(Number(bottle.quantity || 1), Number(mist.quantity || 1));
+    const bottleUnitPrice = Number(bottle.unitPrice || Math.round(Number(bottle.lineTotal || 0) / Math.max(1, Number(bottle.quantity || 1))));
+    const mistUnitPrice = Number(mist.unitPrice || Math.round(Number(mist.lineTotal || 0) / Math.max(1, Number(mist.quantity || 1))));
+    return Math.max(0, Math.round((bottleUnitPrice + mistUnitPrice) * 0.15 * bundleQty));
   }
 
   function recordMerchCouponRedemption(payload) {
@@ -4864,6 +5892,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         SELECT id, code, description, discount_type AS discountType, discount_value AS discountValue,
                applies_to AS appliesTo, max_redemptions AS maxRedemptions, per_user_limit AS perUserLimit,
                active, is_active AS isActive, coupon_type AS couponType,
+               commission_type AS commissionType, commission_rate AS commissionRate,
                valid_from AS validFrom, valid_till AS validTill, expires_at AS expiresAt,
                festival_name AS festivalName, influencer_id AS influencerId, created_at AS createdAt
         FROM coupons
@@ -4880,8 +5909,20 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const coupons = rows.filter((row) => {
         const appliesTo = String(row.appliesTo || 'all').trim().toLowerCase();
         if (['all', 'merch'].includes(appliesTo)) return true;
-        const match = appliesTo.match(/^product:([\\d,]+)$/);
-        return Boolean(match && productIds.some((id) => match[1].split(',').includes(String(id))));
+        const match = appliesTo.match(/^product:([\d,]+)$/);
+        if (match && productIds.some((id) => match[1].split(',').includes(String(id)))) return true;
+        const catMatch = appliesTo.match(/^category:([a-z0-9_\-,]+)$/);
+        if (catMatch) {
+          const catSlugs = catMatch[1].split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+          if (productIds.length > 0) {
+            const placeholders = productIds.map(() => '?').join(',');
+            const prodRows = db.prepare(`SELECT DISTINCT LOWER(category) AS category FROM merch_products WHERE id IN (${placeholders})`).all(...productIds);
+            const inCartCats = prodRows.map((r) => String(r.category || '').toLowerCase());
+            return catSlugs.some((cat) => inCartCats.includes(cat));
+          }
+          return true;
+        }
+        return false;
       }).map((row) => {
         const campaignText = `${row.festivalName || ''} ${row.description || ''}`.toLowerCase();
         const couponCategory = Number(row.influencerId || 0) > 0
@@ -4892,21 +5933,23 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
             ? 'seasonal'
             : 'public';
         return {
-        id: Number(row.id),
-        code: row.code,
-        description: row.description || '',
-        discountType: row.discountType || 'flat',
-        discountValue: Number(row.discountValue || 0),
-        appliesTo: row.appliesTo || 'all',
-        couponType: row.couponType || 'public',
-        couponCategory,
-        influencerId: row.influencerId == null ? null : Number(row.influencerId),
-        festivalName: row.festivalName || '',
-        validFrom: row.validFrom || null,
-        validTill: row.validTill || row.expiresAt || null,
-        expiresAt: row.validTill || row.expiresAt || null,
-        maxRedemptions: row.maxRedemptions == null ? null : Number(row.maxRedemptions),
-        perUserLimit: Number(row.perUserLimit || 1),
+          id: Number(row.id),
+          code: row.code,
+          description: row.description || '',
+          discountType: row.discountType || 'flat',
+          discountValue: Number(row.discountValue || 0),
+          commissionType: row.commissionType || 'flat',
+          commissionRate: Number(row.commissionRate || 0),
+          appliesTo: row.appliesTo || 'all',
+          couponType: row.couponType || 'public',
+          couponCategory,
+          influencerId: row.influencerId == null ? null : Number(row.influencerId),
+          festivalName: row.festivalName || '',
+          validFrom: row.validFrom || null,
+          validTill: row.validTill || row.expiresAt || null,
+          expiresAt: row.validTill || row.expiresAt || null,
+          maxRedemptions: row.maxRedemptions == null ? null : Number(row.maxRedemptions),
+          perUserLimit: Number(row.perUserLimit || 1),
         };
       });
       return res.json({ coupons });
@@ -4916,7 +5959,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
   });
 
-  app.post('/api/merch/preview-coupon',(req, res) => {
+  app.post('/api/merch/preview-coupon', (req, res) => {
+    const bundleCode = String(req.body?.bundleCode || '').trim().toUpperCase();
+    if (bundleCode === 'H2BUNDLE15') {
+      return res.status(400).json({ error: 'Coupons cannot be applied to orders with Bundle & Save discounts.' });
+    }
     const authUser = getMerchAuthUser(req);
     const couponCode = normalizeMerchCouponCode(req.body?.couponCode);
     if (!couponCode) {
@@ -4970,6 +6017,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
     return { campaignId, influencerId };
   }
+
+  app.get('/api/merch/currency-config', (_req, res) => {
+    res.json(getCurrencyConfig());
+  });
 
   app.post('/api/merch/checkout', (req, res) => {
     if (!razorpay || !RAZORPAY_KEY_SECRET) {
@@ -5057,16 +6108,26 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     let subtotal = 0;
     const validatedItems = [];
 
+    const variantQuantities = {};
+    for (const item of items) {
+      const vid = Number(item.variantId || 0);
+      const quantity = Math.max(1, Math.floor(Number(item.quantity || 0)));
+      variantQuantities[vid] = (variantQuantities[vid] || 0) + quantity;
+    }
+    for (const [vid, totalQty] of Object.entries(variantQuantities)) {
+      const purchase = getMerchPurchaseVariant(Number(vid));
+      if (!purchase) {
+        return res.status(400).json({ error: `Variant ${vid} not found` });
+      }
+      if (purchase.stock < totalQty) {
+        return res.status(409).json({ error: `Insufficient stock for ${purchase.variant.product_name} (available: ${purchase.stock})` });
+      }
+    }
+
     for (const item of items) {
       const purchase = getMerchPurchaseVariant(item.variantId);
       const variant = purchase?.variant;
       const quantity = Math.max(1, Math.floor(Number(item.quantity || 0)));
-      if (!purchase) {
-        return res.status(400).json({ error: `Variant ${item.variantId} not found` });
-      }
-      if (purchase.stock < quantity) {
-        return res.status(409).json({ error: `Insufficient stock for ${variant.product_name} (available: ${purchase.stock})` });
-      }
       const offer = getVariantActiveOffer(variant.id, variant.product_id);
       let unitPrice = Number(variant.price || 0);
       if (offer) {
@@ -5078,6 +6139,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       }
       const lineTotal = unitPrice * quantity;
       subtotal += lineTotal;
+      const isBundle = Boolean(item.isBundle || item.source === 'bundle');
       validatedItems.push({
         variantId: variant.id,
         productId: Number(variant.product_id),
@@ -5089,10 +6151,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         offerName: offer ? offer.name : null,
         quantity,
         lineTotal,
+        isBundle,
+        source: isBundle ? 'bundle' : 'individual',
       });
     }
 
-    const couponResult = couponCode
+    const bundleDiscountPaise = getMerchBundleDiscountPaise(bundleCode, validatedItems);
+    let couponResult = (couponCode && bundleDiscountPaise === 0)
       ? validateMerchCouponForUser({
           code: couponCode,
           userId: authUser?.id,
@@ -5104,15 +6169,18 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           subtotalAmountPaise: subtotal,
         })
       : { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
-    if (couponResult.error) {
-      return res.status(400).json({ error: couponResult.error });
+    if (couponResult?.error) {
+      console.warn('[Merch] Invalid or expired coupon during checkout, proceeding without discount:', couponResult.error);
+      couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
     }
 
-    // Product prices are GST-inclusive; derive included GST for reporting only.
-    const gstAmount = Math.max(0, subtotal - Math.round(subtotal / 1.18));
-    const shippingCharge = subtotal >= 99900 ? 0 : 9900; // Free above ₹999 or ₹1 test
-    const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
-      + getMerchBundleDiscountPaise(bundleCode, validatedItems);
+    const shippingCharge = 0; // Free shipping by default as of now
+    const discountAmount = bundleDiscountPaise > 0
+      ? bundleDiscountPaise
+      : Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
+    const discountedSubtotal = Math.max(0, subtotal - discountAmount);
+    // Product prices are GST-inclusive; derive included GST on discounted amount.
+    const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
     const { campaignId, influencerId } = resolveOrderCampaignAttribution(req, couponResult);
     const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems);
     const totalAmount = Math.max(100, subtotal + shippingCharge - discountAmount);
@@ -5124,23 +6192,27 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const guestEmail = isGuestCheckout ? resolvedCustomer.email : null;
     const guestPhone = isGuestCheckout ? resolvedCustomer.phone : null;
 
+    const requestedCurrency = normalizeCurrency(req.body?.currency);
+    const convertedPayment = convertInrPaiseToCurrency(totalAmount, requestedCurrency);
+
     // Create Razorpay order
     razorpay.orders.create({
-      amount: totalAmount,
-      currency: 'INR',
+      amount: convertedPayment.razorpayAmount,
+      currency: convertedPayment.currency,
       receipt: orderNumber,
-      notes: { customerEmail: resolvedCustomer.email, orderNumber, couponCode: String(couponResult.couponCode || couponCode || ''), bundleCode },
+      notes: { customerEmail: resolvedCustomer.email, orderNumber, couponCode: bundleDiscountPaise > 0 ? '' : String(couponResult.couponCode || couponCode || ''), bundleCode, currency: convertedPayment.currency },
     }).then(rpOrder => {
       // Save order to DB
       const insertOrder = db.prepare(`
-        INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, campaign_id, commission_amount_paise, commission_snapshot_at, total_amount, payment_method, payment_status, razorpay_order_id, shipping_address, billing_address)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'online', 'pending', ?, ?, ?)
+        INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, campaign_id, commission_amount_paise, commission_snapshot_at, total_amount, payment_method, payment_status, razorpay_order_id, shipping_address, billing_address, currency, exchange_rate, original_inr_amount, charged_amount)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'online', 'pending', ?, ?, ?, ?, ?, ?, ?)
       `);
       const result = insertOrder.run(
         orderNumber, resolvedCustomer.name, dbCustomerEmail, resolvedCustomer.phone,
         guestName, isGuestCheckout ? (realEmailToUse || null) : null, guestPhone, isGuestCheckout ? 1 : 0, authUser?.id || null, merchProfile?.id || null,
         subtotal, gstAmount, shippingCharge, discountAmount, couponResult.coupon?.id || null, couponResult.couponCode || null, influencerId, campaignId, commissionSnapshot.total, totalAmount,
-        rpOrder.id, JSON.stringify(shippingAddressPayload || {}), JSON.stringify(billingAddressPayload || shippingAddressPayload || {})
+        rpOrder.id, JSON.stringify(shippingAddressPayload || {}), JSON.stringify(billingAddressPayload || shippingAddressPayload || {}),
+        convertedPayment.currency, convertedPayment.exchangeRate, convertedPayment.originalInrAmount, convertedPayment.chargedAmount
       );
       const orderId = result.lastInsertRowid;
 
@@ -5158,14 +6230,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         orderNumber,
         razorpayKeyId: RAZORPAY_KEY_ID,
         razorpayOrderId: rpOrder.id,
-        amount: totalAmount,
-        currency: 'INR',
+        amount: convertedPayment.razorpayAmount,
+        currency: convertedPayment.currency,
+        chargedAmount: convertedPayment.chargedAmount,
+        exchangeRate: convertedPayment.exchangeRate,
+        originalInrAmount: convertedPayment.originalInrAmount,
         subtotal,
         gstAmount,
         shippingCharge,
         discountAmount,
         customer: resolvedCustomer,
-        coupon: buildMerchCouponPreview(couponResult),
+        coupon: bundleDiscountPaise > 0 ? null : buildMerchCouponPreview(couponResult),
       });
     }).catch(err => {
       console.error('Merch Razorpay order create failed:', err?.message || err);
@@ -5173,14 +6248,33 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     });
   });
 
-  async function autoFulfillOrderWithShiprocket(orderId) {
+  function getOrderItemsWithProductDetails(orderId) {
+    try {
+      return db.prepare(`
+        SELECT 
+          oi.*,
+          COALESCE(p.weight_grams, 0) AS weight_grams,
+          COALESCE(p.length_cm, 0) AS length_cm,
+          COALESCE(p.breadth_cm, 0) AS breadth_cm,
+          COALESCE(p.height_cm, 0) AS height_cm
+        FROM merch_order_items oi
+        LEFT JOIN merch_variants v ON v.id = oi.variant_id
+        LEFT JOIN merch_products p ON p.id = v.product_id
+        WHERE oi.order_id = ?
+      `).all(orderId);
+    } catch {
+      return db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
+    }
+  }
+
+  async function autoCreateShiprocketOrder(orderId) {
     if (!shiprocket.isConfigured()) return null;
 
     try {
       const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
       if (!order) return null;
 
-      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+      const items = getOrderItemsWithProductDetails(order.id);
       let shipmentId = order.shiprocket_shipment_id;
 
       // 1. Create order in Shiprocket if not yet created
@@ -5197,40 +6291,71 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         `).run(String(createRes.orderId), shipmentId, String(createRes.status || 'NEW'), order.id);
       }
 
-      // 2. Automatically assign courier and generate AWB immediately
-      const awbRes = await shiprocket.assignAwb({ shipmentId });
-      let labelUrl = null;
-      try {
-        const labelRes = await shiprocket.generateLabel({ shipmentId });
-        labelUrl = labelRes.labelUrl;
-      } catch (labelErr) {
-        console.warn('[Shiprocket] Auto label generation deferred:', labelErr.message);
+      // Check if auto-assign AWB is enabled via environment configuration
+      const autoAssignAwb = String(process.env.SHIPROCKET_AUTO_ASSIGN_AWB || '').toLowerCase() === 'true';
+      if (autoAssignAwb && shipmentId && !order.shiprocket_awb_code) {
+        try {
+          const parsedAddr = parseMerchShippingAddress(order.shipping_address) || {};
+          const deliveryPostcode = parsedAddr.postalCode || parsedAddr.postal_code || parsedAddr.pincode || '452001';
+          const isCod = String(order.payment_method || '').toLowerCase() === 'cod';
+
+          const metrics = shiprocket.calculatePackageMetrics(items);
+          const orderWeightKg = metrics.weight;
+
+          const couriers = await shiprocket.checkServiceability({
+            deliveryPostcode,
+            weight: orderWeightKg,
+            cod: isCod,
+          });
+
+          // Couriers are sorted by price ascending: lowest price courier is first
+          const lowestCourier = couriers && couriers.length > 0 ? couriers[0] : null;
+          const courierId = lowestCourier?.courierCompanyId ? Number(lowestCourier.courierCompanyId) : null;
+
+          const awbRes = await shiprocket.assignAwb({ shipmentId, courierId });
+          let labelUrl = null;
+          try {
+            const labelRes = await shiprocket.generateLabel({ shipmentId });
+            labelUrl = labelRes.labelUrl;
+          } catch (labelErr) {
+            console.warn('[Shiprocket] Auto label generation deferred:', labelErr.message);
+          }
+
+          const awbCode = String(awbRes.awbCode || '');
+          const courierName = String(awbRes.courierName || lowestCourier?.courierName || 'Shiprocket');
+
+          db.prepare(`
+            UPDATE merch_orders
+            SET shiprocket_awb_code = ?,
+                shiprocket_courier_name = ?,
+                tracking_number = ?,
+                carrier_name = ?,
+                shiprocket_status = 'AWB ASSIGNED',
+                shiprocket_label_url = COALESCE(?, shiprocket_label_url),
+                updated_at = datetime('now')
+            WHERE id = ?
+          `).run(awbCode, courierName, awbCode, courierName, labelUrl, order.id);
+
+          return {
+            orderId: order.shiprocket_order_id || shipmentId,
+            shipmentId,
+            awbCode,
+            courierName,
+            labelUrl,
+            status: 'AWB ASSIGNED',
+          };
+        } catch (assignErr) {
+          console.warn('[Shiprocket] Auto courier assign notice:', assignErr.message);
+        }
       }
 
-      const awbCode = String(awbRes.awbCode || '');
-      const courierName = String(awbRes.courierName || 'Shiprocket');
-
-      db.prepare(`
-        UPDATE merch_orders
-        SET shiprocket_awb_code = ?,
-            shiprocket_courier_name = ?,
-            tracking_number = ?,
-            carrier_name = ?,
-            status = 'processing',
-            shiprocket_status = 'AWB ASSIGNED',
-            shiprocket_label_url = COALESCE(?, shiprocket_label_url),
-            updated_at = datetime('now')
-        WHERE id = ?
-      `).run(awbCode, courierName, awbCode, courierName, labelUrl, order.id);
-
       return {
+        orderId: order.shiprocket_order_id,
         shipmentId,
-        awbCode,
-        courierName,
-        labelUrl,
+        status: order.shiprocket_status || 'NEW',
       };
     } catch (err) {
-      console.warn('[Shiprocket] Instant auto-fulfillment notice:', err.message);
+      console.warn('[Shiprocket] Auto-order creation notice:', err.message);
       return null;
     }
   }
@@ -5291,12 +6416,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       }
     }
 
-    // Automatically fulfill order with Shiprocket to immediately generate Tracking ID (AWB)
+    // Auto-generate order in Shiprocket for prepaid orders
     let autoFulfill = null;
     try {
-      autoFulfill = await autoFulfillOrderWithShiprocket(order.id);
+      autoFulfill = await autoCreateShiprocketOrder(order.id);
     } catch (fulfillErr) {
-      console.warn('[Shiprocket] Instant auto-fulfillment skipped:', fulfillErr.message);
+      console.warn('[Shiprocket] Auto order generation notice:', fulfillErr.message);
     }
 
     const notifications = await triggerMerchOrderConfirmationNotifications(order.id, req);
@@ -5305,6 +6430,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       success: true,
       message: 'Payment verified, order confirmed',
       orderId: order.id,
+      shiprocketOrderId: autoFulfill?.orderId || null,
+      shiprocketShipmentId: autoFulfill?.shipmentId || null,
       trackingNumber: autoFulfill?.awbCode || null,
       carrierName: autoFulfill?.courierName || null,
       notifications,
@@ -5391,18 +6518,44 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     let subtotal = 0;
     const validatedItems = [];
+
+    const variantQuantities = {};
+    for (const item of items) {
+      const vid = Number(item.variantId || 0);
+      const quantity = Math.max(1, Math.floor(Number(item.quantity || 0)));
+      variantQuantities[vid] = (variantQuantities[vid] || 0) + quantity;
+    }
+    for (const [vid, totalQty] of Object.entries(variantQuantities)) {
+      const purchase = getMerchPurchaseVariant(Number(vid));
+      if (!purchase) return res.status(400).json({ error: `Variant ${vid} not found` });
+      if (purchase.stock < totalQty) {
+        return res.status(409).json({ error: `Insufficient stock for ${purchase.variant.product_name} (available: ${purchase.stock})` });
+      }
+    }
+
     for (const item of items) {
       const purchase = getMerchPurchaseVariant(item.variantId);
       const variant = purchase?.variant;
       const quantity = Math.max(1, Math.floor(Number(item.quantity || 0)));
-      if (!purchase) return res.status(400).json({ error: `Variant ${item.variantId} not found` });
-      if (purchase.stock < quantity) return res.status(409).json({ error: `Insufficient stock for ${variant.product_name}` });
       const lineTotal = variant.price * quantity;
       subtotal += lineTotal;
-      validatedItems.push({ productId: Number(variant.product_id), variantId: variant.id, productName: variant.product_name, variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '), sku: variant.sku, unitPrice: variant.price, quantity, lineTotal });
+      const isBundle = Boolean(item.isBundle || item.source === 'bundle');
+      validatedItems.push({
+        productId: Number(variant.product_id),
+        variantId: variant.id,
+        productName: variant.product_name,
+        variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '),
+        sku: variant.sku,
+        unitPrice: variant.price,
+        quantity,
+        lineTotal,
+        isBundle,
+        source: isBundle ? 'bundle' : 'individual',
+      });
     }
 
-    const couponResult = couponCode
+    const bundleDiscountPaise = getMerchBundleDiscountPaise(bundleCode, validatedItems);
+    let couponResult = (couponCode && bundleDiscountPaise === 0)
       ? validateMerchCouponForUser({
           code: couponCode,
           userId: authUser?.id,
@@ -5414,15 +6567,19 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           subtotalAmountPaise: subtotal,
         })
       : { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
-    if (couponResult.error) {
-      return res.status(400).json({ error: couponResult.error });
+    if (couponResult?.error) {
+      console.warn('[Merch] Invalid or expired coupon during COD checkout, proceeding without discount:', couponResult.error);
+      couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
     }
 
-    const gstAmount = Math.max(0, subtotal - Math.round(subtotal / 1.18));
-    const shippingCharge = subtotal >= 99900 ? 0 : 9900;
+    const shippingCharge = 0; // Free shipping by default as of now
     const codSurcharge = 5000; // ₹50
-    const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
-      + getMerchBundleDiscountPaise(bundleCode, validatedItems);
+    const discountAmount = bundleDiscountPaise > 0
+      ? bundleDiscountPaise
+      : Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
+    const discountedSubtotal = Math.max(0, subtotal - discountAmount);
+    // Product prices are GST-inclusive; derive included GST on discounted amount.
+    const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
     const { campaignId, influencerId } = resolveOrderCampaignAttribution(req, couponResult);
     const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems);
     const totalAmount = Math.max(100, subtotal + shippingCharge + codSurcharge - discountAmount);
@@ -5434,9 +6591,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const guestEmail = isGuestCheckout ? resolvedCustomer.email : null;
     const guestPhone = isGuestCheckout ? resolvedCustomer.phone : null;
 
+    if (String(req.body?.currency || '').trim().toUpperCase() === 'USD') {
+      return res.status(400).json({ error: 'Cash on Delivery is only available in INR' });
+    }
+
     const result = db.prepare(`
-      INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, campaign_id, commission_amount_paise, commission_snapshot_at, total_amount, payment_method, payment_status, shipping_address, billing_address)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'cod', 'cod_pending', ?, ?)
+      INSERT INTO merch_orders (order_number, customer_name, customer_email, customer_phone, guest_name, guest_email, guest_phone, is_guest, customer_user_id, customer_id, status, subtotal, gst_amount, shipping_charge, discount_amount, coupon_id, coupon_code, influencer_id, campaign_id, commission_amount_paise, commission_snapshot_at, total_amount, payment_method, payment_status, shipping_address, billing_address, currency, exchange_rate, original_inr_amount, charged_amount)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'cod', 'cod_pending', ?, ?, 'INR', 1, ?, ?)
     `).run(
       orderNumber,
       resolvedCustomer.name,
@@ -5459,7 +6620,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       commissionSnapshot.total,
       totalAmount,
       JSON.stringify(shippingAddressPayload || {}),
-      JSON.stringify(billingAddressPayload || shippingAddressPayload || {})
+      JSON.stringify(billingAddressPayload || shippingAddressPayload || {}),
+      totalAmount / 100,
+      totalAmount / 100
     );
 
     const orderId = result.lastInsertRowid;
@@ -5469,7 +6632,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       decrementMerchPurchaseVariant(item.variantId, item.quantity);
     }
 
-    if (Number(couponResult.coupon?.id || 0) > 0 && Number(discountAmount || 0) > 0 && Number(authUser?.id || 0) > 0) {
+    if (bundleDiscountPaise === 0 && Number(couponResult.coupon?.id || 0) > 0 && Number(discountAmount || 0) > 0 && Number(authUser?.id || 0) > 0) {
       recordMerchCouponRedemption({
         couponId: Number(couponResult.coupon.id),
         userId: Number(authUser.id),
@@ -5496,9 +6659,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       success: true,
       orderNumber,
       orderId,
+      currency: 'INR',
+      subtotal,
       totalAmount,
       discountAmount,
-      coupon: buildMerchCouponPreview(couponResult),
+      coupon: bundleDiscountPaise > 0 ? null : buildMerchCouponPreview(couponResult),
       notifications,
       message: 'COD order placed',
       customer: resolvedCustomer,
@@ -5560,7 +6725,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     const rows = db.prepare(`
-      SELECT c.id, c.customer_id AS customerId, c.variant_id AS variantId, c.quantity,
+      SELECT c.id, c.customer_id AS customerId, c.variant_id AS variantId, c.quantity, c.is_bundle AS isBundle,
              v.product_id AS productId, v.sku, v.size, v.color, v.price, v.stock, v.image_url AS imageUrl,
              p.name AS productName, p.slug AS productSlug, p.is_active AS productActive, v.is_active AS variantActive
       FROM merch_customer_cart_items c
@@ -5579,6 +6744,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         variantLabel: [row.size, row.color].filter(Boolean).join(' / '),
         price: Number(row.price),
         quantity: Math.min(Number(row.quantity || 1), Number(row.stock || 1)),
+        isBundle: Boolean(row.isBundle),
+        source: row.isBundle ? 'bundle' : 'individual',
         image: row.imageUrl,
         sku: row.sku,
       }));
@@ -5597,16 +6764,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const sync = db.transaction(() => {
       db.prepare('DELETE FROM merch_customer_cart_items WHERE customer_id = ?').run(profile.id);
       const insert = db.prepare(`
-        INSERT INTO merch_customer_cart_items (customer_id, variant_id, quantity, updated_at)
-        VALUES (?, ?, ?, datetime('now'))
+        INSERT INTO merch_customer_cart_items (customer_id, variant_id, quantity, is_bundle, updated_at)
+        VALUES (?, ?, ?, ?, datetime('now'))
       `);
       for (const item of incomingItems) {
         const variantId = Number(item.variantId || item.id || 0);
         const quantity = Math.max(1, Math.min(99, Number(item.quantity || 1)));
+        const isBundle = Boolean(item.isBundle || item.source === 'bundle') ? 1 : 0;
         if (variantId > 0) {
           const variantExists = db.prepare('SELECT id, stock FROM merch_variants WHERE id = ? AND is_active = 1').get(variantId);
           if (variantExists && variantExists.stock > 0) {
-            insert.run(profile.id, variantId, Math.min(quantity, variantExists.stock));
+            insert.run(profile.id, variantId, Math.min(quantity, variantExists.stock), isBundle);
           }
         }
       }
@@ -5735,21 +6903,28 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (fullName && !isValidMerchName(fullName)) {
       return res.status(400).json({ message: 'Name should contain letters and spaces only' });
     }
-    if (mobile && !isValidMerchPhone(mobile)) {
-      return res.status(400).json({ message: 'Enter a valid phone number' });
+    if (hasMobileField && mobile) {
+      if (!isValidMerchPhone(mobile)) {
+        return res.status(400).json({ message: 'Enter a valid phone number' });
+      }
+      const existingMobileOwner = findUserByMobile(mobile, req.user.id);
+      if (existingMobileOwner) {
+        return res.status(409).json({ message: 'Mobile number is already linked to another account' });
+      }
     }
     if (hasEmailField && email) {
       if (!isValidMerchEmail(email)) {
         return res.status(400).json({ message: 'invalid email address' });
       }
       const existingEmailOwner = db
-        .prepare('SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1')
+        .prepare('SELECT id FROM users WHERE lower(email) = ? AND id != ? LIMIT 1')
         .get(email, req.user.id);
       if (existingEmailOwner) {
-        return res.status(409).json({ message: 'Email address already in use' });
+        return res.status(409).json({ message: 'Email address already in use by another account' });
       }
     }
 
+    const normalizedMobile = hasMobileField && mobile ? (normalizeWhatsAppMobile(mobile) || mobile) : null;
     const updates = [];
     const params = [];
     if (fullName) {
@@ -5762,7 +6937,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
     if (hasMobileField) {
       updates.push('mobile = ?');
-      params.push(mobile || null);
+      params.push(normalizedMobile || null);
     }
     if (avatarUrl) {
       updates.push('avatar_url = ?');
@@ -5773,8 +6948,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       updates.push("updated_at = datetime('now')");
       db.prepare(`UPDATE merch_customer_profiles SET ${updates.join(', ')} WHERE id = ?`).run(...params, profile.id);
     }
-    if (hasMobileField && mobile) {
-      db.prepare('UPDATE users SET mobile = ? WHERE id = ?').run(mobile, req.user.id);
+    if (hasMobileField && normalizedMobile) {
+      db.prepare('UPDATE users SET mobile = ? WHERE id = ?').run(normalizedMobile, req.user.id);
     }
     if (hasEmailField && email && hasRealEmail(email)) {
       db.prepare('UPDATE users SET email = ? WHERE id = ?').run(email, req.user.id);
@@ -6080,6 +7255,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const orders = loadMerchOrders({
       customerUserId: Number(req.user.id),
       customerId: Number(profile?.id || 0),
+      includeUnconfirmed: true,
+    }).filter((order) => {
+      const status = String(order.status || '').toLowerCase();
+      const paymentStatus = String(order.paymentStatus || '').toLowerCase();
+      if (status === 'cancelled' && paymentStatus !== 'paid' && paymentStatus !== 'refunded') {
+        return false;
+      }
+      return true;
     });
 
     res.json({ orders });
@@ -6097,6 +7280,20 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!order) return res.status(404).json({ error: 'Order not found' });
 
     const currentStatus = String(order.status || '').toLowerCase();
+    const currentPaymentStatus = String(order.payment_status || '').toLowerCase();
+
+    // If order was pending / unpaid, cancel removes it completely from orders
+    if ((currentStatus === 'pending' || currentPaymentStatus === 'pending') && currentPaymentStatus !== 'paid') {
+      db.prepare('DELETE FROM merch_order_items WHERE order_id = ?').run(order.id);
+      db.prepare('DELETE FROM merch_orders WHERE id = ?').run(order.id);
+      triggerMerchCancellationNotifications(order, {
+        cancelledBy: 'customer',
+        reason: req.body?.reason || req.body?.cancellationReason || 'Requested by customer',
+        refundStatus: 'No payment was collected',
+      }).catch((err) => console.error('[Merch] Customer cancel unpaid order notification error:', err?.message || err));
+      return res.json({ success: true, removed: true, orderId: order.id });
+    }
+
     if (currentStatus === 'cancelled') {
       const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
       return res.json({ success: true, order: buildMerchOrderRecord(order, items) });
@@ -6109,7 +7306,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const result = db.prepare(`
         UPDATE merch_orders
         SET status = 'cancelled',
-            payment_status = CASE WHEN payment_status IN ('paid', 'cod_pending') THEN 'refunded' ELSE payment_status END,
+            cancelled_by = 'customer',
+            cancelled_at = datetime('now'),
+            payment_status = CASE WHEN payment_status = 'cod_pending' THEN 'cancelled' ELSE payment_status END,
             updated_at = datetime('now')
         WHERE id = ? AND status NOT IN ('delivered', 'returned', 'cancelled')
       `).run(order.id);
@@ -6128,7 +7327,30 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     const updated = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(order.id);
     const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+    triggerMerchCancellationNotifications(updated || order, {
+      cancelledBy: 'customer',
+      reason: req.body?.reason || req.body?.cancellationReason || 'Requested by customer',
+      previousPaymentStatus: currentPaymentStatus,
+    }).catch((err) => console.error('[Merch] Customer cancel notification error:', err?.message || err));
     res.json({ success: true, order: buildMerchOrderRecord(updated, items) });
+  });
+
+  app.delete('/api/merch/orders/:id', requireMerchAuth, (req, res) => {
+    const profile = syncMerchGuestOrdersForUser(req.user) || ensureMerchCustomerProfileForUser(req.user);
+    const order = db.prepare(`
+      SELECT * FROM merch_orders
+      WHERE id = ? AND (customer_user_id = ? OR customer_id = ?)
+    `).get(Number(req.params.id), Number(req.user.id), Number(profile?.id || 0));
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    const currentStatus = String(order.status || '').toLowerCase();
+    const currentPaymentStatus = String(order.payment_status || '').toLowerCase();
+
+    if ((currentStatus === 'pending' || currentPaymentStatus === 'pending') && currentPaymentStatus !== 'paid') {
+      db.prepare('DELETE FROM merch_order_items WHERE order_id = ?').run(order.id);
+      db.prepare('DELETE FROM merch_orders WHERE id = ?').run(order.id);
+      return res.json({ success: true, removed: true, orderId: order.id });
+    }
   });
 
   app.get('/api/merch/admin/orders', requireAdmin, (req, res) => {
@@ -6927,15 +8149,30 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       return res.status(400).json({ message: 'Payment confirmation is required before proceeding.' });
     }
 
+    // Verify security question answer if configured
+    const securityRow = db.prepare('SELECT answer FROM merch_admin_security_questions WHERE id = 1').get();
+    if (securityRow && securityRow.answer && String(securityRow.answer).trim()) {
+      const submittedAnswer = String(req.body?.securityAnswer || req.body?.answer || '').trim();
+      const expectedAnswer = String(securityRow.answer || '').trim();
+      if (!submittedAnswer || submittedAnswer.toLowerCase() !== expectedAnswer.toLowerCase()) {
+        return res.status(401).json({ message: 'Wrong answer' });
+      }
+    }
+
     // Calculate current commission stats
     const statsRows = getInfluencerStatsRows([influencerId]);
     const stats = statsRows[0] || {};
     const commissionEarnedPaise = Math.round(Number(stats.totalCommissionEarned || 0));
     const previousPaidPaise = Math.round(Number(influencer.paidCommission ?? influencer.paid_commission ?? 0));
     const newCumulativePaidPaise = previousPaidPaise + amountPaise;
-    if (newCumulativePaidPaise > commissionEarnedPaise) {
-      return res.status(400).json({ message: `Payment cannot exceed the remaining commission balance (${Math.max(0, commissionEarnedPaise - previousPaidPaise) / 100}).` });
+
+    // Strict validation: cumulative paid CANNOT exceed earned commission
+    if (commissionEarnedPaise > 0 && newCumulativePaidPaise > commissionEarnedPaise) {
+      return res.status(400).json({
+        message: `Payment amount (${formatMerchCurrency(amountPaise)}) exceeds remaining commission balance (${formatMerchCurrency(Math.max(0, commissionEarnedPaise - previousPaidPaise))}). Commission paid cannot exceed total earned commission of ${formatMerchCurrency(commissionEarnedPaise)}.`,
+      });
     }
+
     const balanceRemainingPaise = Math.max(0, commissionEarnedPaise - newCumulativePaidPaise);
 
     const now = new Date();
@@ -7024,46 +8261,29 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       formattedDate,
     });
 
-    // 3. Send payment invoice to Influencer Email and h2houseofhealth@gmail.com
-    const emailResults = {
-      influencer: { to: influencerEmail, status: 'pending' },
-      admin: { to: ADMIN_INVOICE_RECIPIENT, status: 'pending' },
+    // 3. Send payment email notification to Influencer and Admin
+    let emailResults = {
+      influencer: { to: influencerEmail, status: 'skipped' },
+      admin: { to: ADMIN_INVOICE_RECIPIENT, status: 'skipped' },
     };
 
-    try {
-      if (typeof sendMerchEmail === 'function') {
-        await sendMerchEmail({
-          to: influencerEmail,
-          subject: `Commission Payment Receipt & Invoice - ${invoiceNumber} - H2 House of Health`,
-          text: invoiceText,
-          html: invoiceHtml,
-        });
-        emailResults.influencer.status = 'sent';
-      } else {
-        emailResults.influencer.status = 'skipped_no_mailer';
-      }
-    } catch (err) {
-      console.error('[Merch] Failed to email commission invoice to influencer:', err.message);
-      emailResults.influencer.status = 'failed';
-      emailResults.influencer.error = err.message;
-    }
+    const shouldSendEmail = req.body?.sendEmail !== false &&
+      req.body?.sendEmail !== 'false' &&
+      req.body?.sendPaymentEmail !== false &&
+      req.body?.sendPaymentEmail !== 'false';
 
-    try {
-      if (typeof sendMerchEmail === 'function') {
-        await sendMerchEmail({
-          to: ADMIN_INVOICE_RECIPIENT,
-          subject: `[Admin Copy] Commission Payment Invoice - ${influencer.name} - ${invoiceNumber}`,
-          text: invoiceText,
-          html: invoiceHtml,
-        });
-        emailResults.admin.status = 'sent';
-      } else {
-        emailResults.admin.status = 'skipped_no_mailer';
-      }
-    } catch (err) {
-      console.error('[Merch] Failed to email commission invoice to admin:', err.message);
-      emailResults.admin.status = 'failed';
-      emailResults.admin.error = err.message;
+    if (shouldSendEmail) {
+      emailResults = await sendInfluencerCommissionNotificationEmails({
+        payment: paymentRecord,
+        influencer: { ...influencer, email: influencerEmail },
+        coupons,
+        commissionEarnedPaise,
+        commissionPaidPaise: amountPaise,
+        cumulativePaidPaise: newCumulativePaidPaise,
+        balanceRemainingPaise,
+        formattedDate,
+        req,
+      });
     }
 
     const updatedInfluencer = loadMerchInfluencers().find((item) => Number(item.id) === influencerId);
@@ -7079,8 +8299,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     });
   });
 
-  // ─── ADMIN: Correct Commission Paid (Secured with Authorization Audit) ───
-  app.post('/api/merch/admin/influencers/:id/commission-correction', requireAdmin, (req, res) => {
+  // ─── ADMIN: Correct Commission Paid (Secured with Authorization Audit & Email Integration) ───
+  app.post('/api/merch/admin/influencers/:id/commission-correction', requireAdmin, async (req, res) => {
     const influencerId = Number(req.params.id);
     if (!Number.isInteger(influencerId) || influencerId <= 0) {
       return res.status(400).json({ message: 'Invalid influencer id' });
@@ -7090,13 +8310,19 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       return res.status(404).json({ message: 'Influencer not found' });
     }
 
-    // Verify security password
-    const password = String(req.body?.password || '').trim();
-    if (!password || !verifyAdminAuthorization(req, password)) {
-      return res.status(401).json({ message: 'Security authorization failed. Invalid admin password.' });
+    // Verify security question answer
+    const securityRow = db.prepare('SELECT answer FROM merch_admin_security_questions WHERE id = 1').get();
+    if (!securityRow || !securityRow.answer || !String(securityRow.answer).trim()) {
+      return res.status(400).json({ message: 'Security question is not configured yet. Please create security first.' });
     }
 
-    const reason = String(req.body?.reason || '').trim();
+    const submittedAnswer = String(req.body?.securityAnswer || req.body?.answer || '').trim();
+    const expectedAnswer = String(securityRow.answer || '').trim();
+    if (!submittedAnswer || submittedAnswer.toLowerCase() !== expectedAnswer.toLowerCase()) {
+      return res.status(401).json({ message: 'Wrong answer' });
+    }
+
+    const reason = String(req.body?.reason || req.body?.correctionReason || req.body?.note || '').trim();
     if (!reason || reason.length < 3) {
       return res.status(400).json({ message: 'A reason for the commission correction is required.' });
     }
@@ -7111,23 +8337,73 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const stats = getInfluencerStatsRows([influencerId])[0] || {};
     const commissionEarnedPaise = Math.max(0, Math.round(Number(stats.totalCommissionEarned || 0)));
     const cumulativePaidPaise = payBalancePaise > 0 ? prevAmountPaise + payBalancePaise : newAmountPaise;
-    if (cumulativePaidPaise > commissionEarnedPaise) {
-      return res.status(400).json({ message: `Commission paid cannot exceed earned commission (${commissionEarnedPaise / 100}).` });
+
+    // Strict validation: Corrected Amount (₹) CANNOT be greater than commission earned by influencer
+    if (newAmountPaise > commissionEarnedPaise) {
+      return res.status(400).json({
+        message: `Corrected Amount (${formatMerchCurrency(newAmountPaise)}) cannot be greater than commission earned by influencer (${formatMerchCurrency(commissionEarnedPaise)}).`,
+      });
     }
+
+    // Strict validation: cumulative paid CANNOT exceed earned commission
+    if (cumulativePaidPaise > commissionEarnedPaise) {
+      return res.status(400).json({
+        message: `Commission paid (${formatMerchCurrency(cumulativePaidPaise)}) cannot exceed earned commission (${formatMerchCurrency(commissionEarnedPaise)}). Remaining balance is ${formatMerchCurrency(Math.max(0, commissionEarnedPaise - prevAmountPaise))}.`,
+      });
+    }
+
     const changedBy = String(req.user?.email || req.user?.name || 'admin');
+    const influencerEmail = String(req.body?.influencerEmail || req.body?.email || influencer.email || '').trim().toLowerCase();
+    const paymentMethod = String(req.body?.paymentMethod || req.body?.payment_method || 'Bank Transfer (NEFT/RTGS/IMPS)').trim();
+    const referenceNumber = String(req.body?.referenceNumber || req.body?.reference_number || `ADJ-${Date.now().toString().slice(-6)}`).trim();
+    const paymentDeltaPaise = Math.max(0, cumulativePaidPaise - prevAmountPaise);
+
+    const now = new Date();
+    const datePart = now.toISOString().slice(0, 10).replace(/-/g, '');
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const invoiceNumber = `H2-INV-COM-${datePart}-${randomSuffix}`;
+    const formattedDate = new Intl.DateTimeFormat('en-IN', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'Asia/Kolkata',
+    }).format(now);
+
+    let paymentId = null;
 
     const update = db.transaction(() => {
+      // 1. Audit log
       db.prepare(`
         INSERT INTO merch_influencer_commission_adjustments
           (influencer_id, previous_amount_paise, new_amount_paise, reason, changed_by, created_at)
         VALUES (?, ?, ?, ?, ?, datetime('now'))
       `).run(influencerId, prevAmountPaise, cumulativePaidPaise, reason, changedBy);
 
+      // 2. Update influencer record
       db.prepare(`
         UPDATE merch_influencers
-        SET paid_commission = ?, updated_at = datetime('now')
+        SET paid_commission = ?,
+            email = COALESCE(NULLIF(?, ''), email),
+            updated_at = datetime('now')
         WHERE id = ?
-      `).run(cumulativePaidPaise, influencerId);
+      `).run(cumulativePaidPaise, influencerEmail, influencerId);
+
+      // 3. Insert payment invoice record
+      const payResult = db.prepare(`
+        INSERT INTO merch_influencer_commission_payments
+          (influencer_id, amount_paise, payment_method, reference_number, status, paid_at, note, invoice_number, influencer_email, admin_email, created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'paid', datetime('now'), ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      `).run(
+        influencerId,
+        paymentDeltaPaise > 0 ? paymentDeltaPaise : cumulativePaidPaise,
+        paymentMethod,
+        referenceNumber,
+        reason,
+        invoiceNumber,
+        influencerEmail || (influencer.email || ''),
+        FIXED_ADMIN_EMAIL,
+        changedBy
+      );
+      paymentId = payResult.lastInsertRowid;
     });
 
     try {
@@ -7137,16 +8413,108 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       return res.status(500).json({ message: 'Database error adjusting commission.' });
     }
 
-    const updatedInfluencer = loadMerchInfluencers().find((item) => Number(item.id) === influencerId);
+    const updatedInfluencer = loadMerchInfluencers().find((item) => Number(item.id) === influencerId) || influencer;
+    const coupons = getInfluencerCouponRows([influencerId]);
+    const balanceRemainingPaise = Math.max(0, commissionEarnedPaise - cumulativePaidPaise);
+
+    const paymentRecord = {
+      id: paymentId,
+      influencerId,
+      amountPaise: paymentDeltaPaise > 0 ? paymentDeltaPaise : cumulativePaidPaise,
+      paymentMethod,
+      referenceNumber,
+      status: 'paid',
+      paidAt: now.toISOString(),
+      note: reason,
+      invoiceNumber,
+      influencerEmail: influencerEmail || updatedInfluencer.email,
+      adminEmail: FIXED_ADMIN_EMAIL,
+      createdBy: changedBy,
+    };
+
+    const invoiceHtml = buildInfluencerCommissionInvoiceHtml({
+      payment: paymentRecord,
+      influencer: { ...updatedInfluencer, email: influencerEmail || updatedInfluencer.email },
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise: paymentRecord.amountPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+    });
+
+    let emailResults = {
+      influencer: { to: influencerEmail || updatedInfluencer.email, status: 'skipped' },
+      admin: { to: FIXED_ADMIN_EMAIL, status: 'skipped' },
+    };
+
+    const shouldSendEmail = req.body?.sendEmail === true ||
+      req.body?.sendEmail === 'true' ||
+      req.body?.sendPaymentEmail === true ||
+      req.body?.sendPaymentEmail === 'true';
+
+    if (shouldSendEmail && (influencerEmail || updatedInfluencer.email)) {
+      try {
+        emailResults = await sendInfluencerCommissionNotificationEmails({
+          payment: paymentRecord,
+          influencer: { ...updatedInfluencer, email: influencerEmail || updatedInfluencer.email },
+          coupons,
+          commissionEarnedPaise,
+          commissionPaidPaise: paymentRecord.amountPaise,
+          cumulativePaidPaise,
+          balanceRemainingPaise,
+          formattedDate,
+          req,
+        });
+      } catch (mailErr) {
+        console.error('[Merch] Failed to dispatch commission email:', mailErr);
+      }
+    }
 
     return res.json({
       success: true,
       message: 'Commission paid adjusted successfully.',
       prevAmountPaise,
       newAmountPaise: cumulativePaidPaise,
+      paymentDeltaPaise,
+      payment: paymentRecord,
+      invoiceNumber,
+      invoiceHtml,
+      emailResults,
       changedBy,
       reason,
       influencer: updatedInfluencer,
+    });
+  });
+
+  // ─── ADMIN: Security Question Configuration ───
+  app.get('/api/merch/admin/security-question', requireAdmin, (req, res) => {
+    const row = db.prepare('SELECT question, answer FROM merch_admin_security_questions WHERE id = 1').get();
+    const isConfigured = Boolean(row && row.answer && String(row.answer).trim().length > 0);
+    res.json({
+      isConfigured,
+      question: row?.question || 'First name of H2 House of Health..??',
+    });
+  });
+
+  app.post('/api/merch/admin/security-question', requireAdmin, (req, res) => {
+    const question = String(req.body?.question || 'First name of H2 House of Health..??').trim();
+    const answer = String(req.body?.answer || '').trim();
+    if (!answer) {
+      return res.status(400).json({ message: 'Answer is required.' });
+    }
+
+    db.prepare(`
+      INSERT INTO merch_admin_security_questions (id, question, answer, updated_at)
+      VALUES (1, ?, ?, datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET question = excluded.question, answer = excluded.answer, updated_at = excluded.updated_at
+    `).run(question, answer);
+
+    res.json({
+      success: true,
+      isConfigured: true,
+      question,
+      message: 'Security answer defined successfully.',
     });
   });
 
@@ -7238,6 +8606,68 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return res.json({ invoiceHtml, invoiceNumber: payment.invoiceNumber, payment });
   });
 
+  // ─── ADMIN: Dispatch Commission Payment Email to Influencer & Admin ───
+  app.post('/api/merch/admin/influencers/:id/payments/:paymentId/send-email', requireAdmin, async (req, res) => {
+    const influencerId = Number(req.params.id);
+    const paymentId = Number(req.params.paymentId);
+    if (!Number.isInteger(influencerId) || !Number.isInteger(paymentId)) {
+      return res.status(400).json({ message: 'Invalid influencer or payment id' });
+    }
+    const influencer = getInfluencerById(influencerId);
+    if (!influencer) {
+      return res.status(404).json({ message: 'Influencer not found' });
+    }
+
+    const payment = db.prepare(`
+      SELECT id, influencer_id AS influencerId, amount_paise AS amountPaise, payment_method AS paymentMethod,
+             reference_number AS referenceNumber, status, paid_at AS paidAt, note, invoice_number AS invoiceNumber,
+             influencer_email AS influencerEmail, admin_email AS adminEmail, created_by AS createdBy, created_at AS createdAt
+      FROM merch_influencer_commission_payments
+      WHERE id = ? AND influencer_id = ?
+    `).get(paymentId, influencerId);
+
+    if (!payment) {
+      return res.status(404).json({ message: 'Payment record not found' });
+    }
+
+    const influencerEmail = String(req.body?.influencerEmail || payment.influencerEmail || influencer.email || '').trim().toLowerCase();
+    if (!influencerEmail || !isValidMerchEmail(influencerEmail)) {
+      return res.status(400).json({ message: 'A valid influencer email address is required to send notification.' });
+    }
+
+    const coupons = getInfluencerCouponRows([influencerId]);
+    const statsRows = getInfluencerStatsRows([influencerId]);
+    const stats = statsRows[0] || {};
+    const commissionEarnedPaise = Math.round(Number(stats.totalCommissionEarned || 0));
+    const cumulativePaidPaise = Math.round(Number(influencer.paidCommission ?? influencer.paid_commission ?? 0));
+    const balanceRemainingPaise = Math.max(0, commissionEarnedPaise - cumulativePaidPaise);
+
+    const paidDate = payment.paidAt ? new Date(payment.paidAt) : new Date(payment.createdAt || Date.now());
+    const formattedDate = new Intl.DateTimeFormat('en-IN', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'Asia/Kolkata',
+    }).format(paidDate);
+
+    const emailResults = await sendInfluencerCommissionNotificationEmails({
+      payment: { ...payment, influencerEmail },
+      influencer: { ...influencer, email: influencerEmail },
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise: payment.amountPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      req,
+    });
+
+    return res.json({
+      success: true,
+      message: `Commission payout notification email dispatched to influencer (${influencerEmail}) and admin (${FIXED_ADMIN_EMAIL}).`,
+      emailResults,
+    });
+  });
+
   // ─── ADMIN: Get order detail ───
   app.get('/api/merch/admin/orders/:id', requireAdmin, (req, res) => {
     const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
@@ -7267,6 +8697,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (String(status).toLowerCase() === 'delivered' && String(existingOrder.status || '').toLowerCase() !== 'delivered') {
       updates.push("delivered_at = datetime('now')");
     }
+    if (String(status).toLowerCase() === 'cancelled' && String(existingOrder.status || '').toLowerCase() !== 'cancelled') {
+      updates.push('cancelled_by = ?');
+      params.push('admin');
+      updates.push("cancelled_at = datetime('now')");
+    }
     if (payment_status) {
       updates.push('payment_status = ?');
       params.push(String(payment_status));
@@ -7293,6 +8728,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
     const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(req.params.id);
+
+    if (String(status).toLowerCase() === 'cancelled' && existingStatus !== 'cancelled') {
+      const reason = req.body?.reason || req.body?.cancellationReason || 'Cancelled by store administration';
+      triggerMerchCancellationNotifications(order || existingOrder, {
+        cancelledBy: 'admin',
+        reason,
+        previousPaymentStatus: String(existingOrder.payment_status || '').toLowerCase(),
+      }).catch((err) => console.error('[Merch] Admin cancel notification error:', err?.message || err));
+    }
+
     res.json({ success: true, order: buildMerchOrderRecord(order, items) });
   });
 
@@ -7340,13 +8785,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const deliveryPostcode = parsedAddr.postalCode || parsedAddr.postal_code || parsedAddr.pincode || '452001';
       const isCod = String(order.payment_method || '').toLowerCase() === 'cod';
 
+      const items = getOrderItemsWithProductDetails(order.id);
+      const metrics = shiprocket.calculatePackageMetrics(items);
+      const orderWeightKg = metrics.weight;
+
       const couriers = await shiprocket.checkServiceability({
         deliveryPostcode,
-        weight: shiprocket.defaultWeightKg,
+        weight: orderWeightKg,
         cod: isCod,
       });
 
-      res.json({ success: true, deliveryPostcode, couriers });
+      res.json({ success: true, deliveryPostcode, weightKg: orderWeightKg, couriers });
     } catch (err) {
       res.status(500).json({ error: err.message, details: err.details || null });
     }
@@ -7358,13 +8807,15 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
       if (!order) return res.status(404).json({ error: 'Order not found' });
 
-      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+      const items = getOrderItemsWithProductDetails(order.id);
       const customPickupLocation = req.body?.pickupLocation || null;
+      const packageDimensions = req.body?.packageDimensions || null;
 
       const result = await shiprocket.createOrder({
         order,
         items,
         customPickupLocation,
+        packageDimensions,
       });
 
       db.prepare(`
@@ -7389,7 +8840,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
       if (!order) return res.status(404).json({ error: 'Order not found' });
 
-      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
+      const items = getOrderItemsWithProductDetails(order.id);
       let shipmentId = order.shiprocket_shipment_id;
 
       // If order not yet created in Shiprocket, create it first

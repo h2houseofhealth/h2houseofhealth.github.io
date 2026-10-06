@@ -587,8 +587,17 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-const db = new Database(dbPath);
+const db = new Database(dbPath, { timeout: 5000 });
 db.pragma('journal_mode = WAL');
+db.pragma('busy_timeout = 5000');
+db.pragma('synchronous = NORMAL');
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Promise Rejection at:', promise, 'reason:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception thrown:', err?.stack || err);
+});
 const razorpayConfigError = getRazorpayConfigError();
 const RAZORPAY_UNAVAILABLE_MESSAGE = razorpayConfigError || 'Razorpay is not configured';
 const razorpay = !razorpayConfigError
@@ -10862,6 +10871,32 @@ app.get(/^\/booking(?:\/.*)?$/, (_req, res) => {
 
 app.use(express.static(WEBSITE_ROOT));
 
+// ─── Support & Legal Page Routes ──────────────────────────────────────────
+app.get(['/shipping', '/shipping/', '/shipping-policy', '/shipping-policy/'], (_req, res) => {
+  res.sendFile(path.join(WEBSITE_ROOT, 'shipping', 'index.html'));
+});
+
+app.get(['/refund', '/refund/', '/refund-policy', '/refund-policy/', '/returns', '/returns/', '/return-policy', '/return-policy/', '/replacement-policy', '/replacement-policy/', '/warranty', '/warranty/', '/warranty-policy', '/warranty-policy/'], (_req, res) => {
+  res.sendFile(path.join(WEBSITE_ROOT, 'refund', 'index.html'));
+});
+
+
+app.get(['/faq', '/faq/'], (_req, res) => {
+  res.sendFile(path.join(WEBSITE_ROOT, 'faq', 'index.html'));
+});
+
+app.get(['/privacy', '/privacy/', '/privacy-policy', '/privacy-policy/'], (_req, res) => {
+  res.sendFile(path.join(WEBSITE_ROOT, 'privacy', 'index.html'));
+});
+
+app.get(['/terms', '/terms/', '/terms-of-service', '/terms-of-service/'], (_req, res) => {
+  res.sendFile(path.join(WEBSITE_ROOT, 'terms', 'index.html'));
+});
+
+app.get(['/contact', '/contact/', '/contact-us', '/contact-us/'], (_req, res) => {
+  res.sendFile(path.join(WEBSITE_ROOT, 'pages', 'contact.html'));
+});
+
 app.get(/.*/, (_req, res) => {
   res.sendFile(path.join(WEBSITE_ROOT, 'index.html'));
 });
@@ -10934,6 +10969,19 @@ app.post('/api/contact', async (req, res) => {
     console.error('Contact form email error:', error?.message || error);
     return res.status(500).json({ message: 'Failed to send your message. Please try again later.' });
   }
+});
+
+// Global Express error handler to prevent process crashes and 502 Bad Gateway
+app.use((err, req, res, _next) => {
+  console.error(`Unhandled Express route error [${req.method} ${req.originalUrl || req.url}]:`, err?.stack || err);
+  if (res.headersSent) {
+    return;
+  }
+  const status = Number(err?.status || err?.statusCode || 500);
+  return res.status(status >= 400 && status < 600 ? status : 500).json({
+    error: 'Internal Server Error',
+    message: IS_PRODUCTION ? 'An unexpected error occurred. Please try again.' : (err?.message || 'Internal Server Error')
+  });
 });
 
 const HOST = normalizeEnvValue(process.env.HOST || (IS_PRODUCTION ? '0.0.0.0' : '127.0.0.1'));
@@ -16433,3 +16481,13 @@ function rateLimit({ windowMs, max }) {
     return next();
   };
 }
+
+// Periodically clean up expired rate-limit buckets to prevent memory leaks under load
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, row] of requestCounters.entries()) {
+    if (now > row.resetAt) {
+      requestCounters.delete(key);
+    }
+  }
+}, 120_000).unref();
