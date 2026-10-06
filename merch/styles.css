@@ -3458,6 +3458,128 @@ body.is-auth-loading .merch-auth-cta {
   color: #b42318;
 }
 
+/* Jiva-style Savings Banner & Applied Coupon Tag */
+.shopify-coupon__savings-card {
+  margin-top: 10px;
+  background: #fdfaf6;
+  border: 1px solid #ebd9c8;
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shopify-coupon__savings-card--cart {
+  margin-top: 12px;
+  margin-bottom: 8px;
+}
+
+.shopify-coupon__savings-headline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #1a1a1a;
+}
+
+.shopify-coupon__savings-coin {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.shopify-coupon__savings-title {
+  font-weight: 500;
+  color: #1a1a1a;
+}
+
+.shopify-coupon__savings-title strong {
+  font-weight: 700;
+  color: #111;
+}
+
+.shopify-coupon__applied-tag {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.shopify-coupon__tag-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.shopify-coupon__tag-icon {
+  width: 16px;
+  height: 16px;
+  color: #6b7280;
+  flex-shrink: 0;
+}
+
+.shopify-coupon__tag-name {
+  font-weight: 700;
+  font-size: 13px;
+  color: #111827;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shopify-coupon__tag-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.shopify-coupon__tag-amt {
+  font-weight: 700;
+  font-size: 13px;
+  color: #166534;
+}
+
+.shopify-coupon__tag-remove {
+  background: transparent;
+  border: none;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 13px;
+  line-height: 1;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.shopify-coupon__tag-remove:hover {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.shopify-total__savings {
+  grid-column: 1 / -1;
+  margin: 4px 0 0;
+  color: #166534;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.shopify-total__fx {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #6e6a67;
+  font-size: 13px;
+}
+
 .checkout-coupon-offers {
   display: grid;
   gap: 8px;

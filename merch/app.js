@@ -477,8 +477,27 @@
     return offer || null;
   }
 
+  function hasActiveInfluencerCampaign() {
+    return Boolean(
+      state.campaignAttribution?.couponCode ||
+      state.campaignAttribution?.slug ||
+      state.merchCouponPreview?.coupon?.influencerId ||
+      state.merchCouponPreview?.influencerId ||
+      (Array.isArray(state.availableCoupons) && state.availableCoupons.find((c) => c.code === state.merchCouponCode)?.influencerId)
+    );
+  }
+
+  function isMerchCouponActive() {
+    return Boolean(
+      (state.merchCouponPreview && Number(state.merchCouponPreview.discountAmountInr || 0) > 0) ||
+      state.merchCouponCode ||
+      state.campaignAttribution?.couponCode
+    );
+  }
+
   function getVariantOfferDetails(variant, product = state.selectedProduct) {
     if (!variant) return null;
+    if (hasActiveInfluencerCampaign()) return null;
     if (variant.offer && variant.offer.offerPrice !== undefined) {
       return variant.offer;
     }
@@ -667,6 +686,9 @@
   }
 
   function getMerchBundleDiscountAmount() {
+    if (isMerchCouponActive()) {
+      return 0;
+    }
     const activeBundle = getActiveBundleInfo();
     if (!activeBundle) {
       if (state.merchBundleCode === 'H2BUNDLE15') {
@@ -680,7 +702,6 @@
   }
 
   function getActiveBundleInfo() {
-    if (state.merchBundleCode !== 'H2BUNDLE15') return null;
     const bundleDef = getMerchBundleDefinition();
     if (!bundleDef || !bundleDef.products || bundleDef.products.length !== 2) return null;
     const bottleProduct = bundleDef.products[0];
@@ -726,18 +747,30 @@
       return;
     }
 
-    bundleItems.forEach(({ product, variant }) => addToCart(variant.id, 1, product, { isBundle: true, openDrawerAfterAdd: false }));
+    bundleItems.forEach(({ product, variant }) => addToCart(variant.id, 1, product, { isBundle: true, openDrawerAfterAdd: false, preserveCoupon: true }));
     state.merchBundleCode = 'H2BUNDLE15';
     try {
       localStorage.setItem(getBundleStorageKey(state.cartOwnerId), state.merchBundleCode);
     } catch {}
-    state.merchBundlePreview = {
-      code: state.merchBundleCode,
-      description: 'Bundle & Save — 15% off Bottle + Mist',
-      discountAmountInr: Math.round(bundleItems.reduce((sum, item) => sum + Number(item.variant.price || 0), 0) * 0.15),
-    };
+
+    const hasCoupon = isMerchCouponActive();
+    if (!hasCoupon) {
+      state.merchBundlePreview = {
+        code: state.merchBundleCode,
+        description: 'Bundle & Save — 15% off Bottle + Mist',
+        discountAmountInr: Math.round(bundleItems.reduce((sum, item) => sum + Number(item.variant.price || 0), 0) * 0.15),
+      };
+    } else {
+      state.merchBundlePreview = null;
+      if (!state.merchCouponCode && state.campaignAttribution?.couponCode) {
+        state.merchCouponCode = state.campaignAttribution.couponCode;
+      }
+      await applyMerchCouponFromCart({ silent: true });
+    }
     renderCart();
-    showCheckoutNotice('Added to Cart', 'H2 Hydrogen Bottle and H2 Hydrogen Mist Spray were added with 15% bundle savings.');
+    showCheckoutNotice('Added to Cart', hasCoupon
+      ? 'H2 Hydrogen Bottle and H2 Hydrogen Mist Spray were added to cart.'
+      : 'H2 Hydrogen Bottle and H2 Hydrogen Mist Spray were added with 15% bundle savings.');
     openCart();
   }
 
@@ -2089,9 +2122,12 @@ function getWishlistProductPrice(item) {
   }
 
   function getCheckoutDiscountAmount() {
+    const couponDiscount = Math.max(0, Number(state.merchCouponPreview?.discountAmountInr || 0));
+    if (couponDiscount > 0 || state.merchCouponCode || state.campaignAttribution?.couponCode) {
+      return couponDiscount;
+    }
     const bundleDiscount = getMerchBundleDiscountAmount();
-    if (bundleDiscount > 0) return bundleDiscount;
-    return Math.max(0, Number(state.merchCouponPreview?.discountAmountInr || 0));
+    return bundleDiscount;
   }
 
   function getMerchCouponPayableAmount() {
@@ -2105,6 +2141,8 @@ function getWishlistProductPrice(item) {
     state.merchCouponError = '';
     if (!preserveCode) state.merchCouponCode = '';
     if (els.cartCouponCode && !preserveCode) els.cartCouponCode.value = '';
+    const checkoutCoupon = document.getElementById('checkoutCouponCode');
+    if (checkoutCoupon && !preserveCode) checkoutCoupon.value = '';
   }
 
   function getCouponDiscountLabel(coupon) {
@@ -2164,7 +2202,7 @@ function getWishlistProductPrice(item) {
     if (!preview) {
       if (state.merchCouponError) {
         els.cartCouponPreview.hidden = false;
-        els.cartCouponPreview.innerHTML = `<span>${escapeHtml(state.merchCouponError)}</span>`;
+        els.cartCouponPreview.innerHTML = `<span class="cart-coupon__error">${escapeHtml(state.merchCouponError)}</span>`;
       } else {
         els.cartCouponPreview.hidden = true;
         els.cartCouponPreview.innerHTML = '';
@@ -2172,28 +2210,40 @@ function getWishlistProductPrice(item) {
       return;
     }
 
+    const savedAmount = Number(preview.discountAmountInr || 0);
     els.cartCouponPreview.hidden = false;
     els.cartCouponPreview.innerHTML = `
-      <strong>${escapeHtml(preview.code || '')}</strong>
-      <span>${escapeHtml(preview.description || 'Coupon applied')}</span>
-      <span>Discount: ${formatPrice(Number(preview.discountAmountInr || 0))}</span>
-      <span>Payable: ${formatPrice(getMerchCouponPayableAmount())}</span>
+      <div class="shopify-coupon__savings-card shopify-coupon__savings-card--cart">
+        <div class="shopify-coupon__savings-headline">
+          <span class="shopify-coupon__savings-coin" aria-hidden="true">🪙</span>
+          <span class="shopify-coupon__savings-title"><strong>${formatPrice(savedAmount)}</strong> Saved with discounts!</span>
+        </div>
+        <div class="shopify-coupon__applied-tag">
+          <div class="shopify-coupon__tag-left">
+            <svg class="shopify-coupon__tag-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m20 12-8 8-9-9V3h8l9 9Z"/><circle cx="7.5" cy="7.5" r="1.2"/></svg>
+            <span class="shopify-coupon__tag-name">${escapeHtml(preview.code || state.merchCouponCode)}</span>
+          </div>
+          <div class="shopify-coupon__tag-right">
+            <span class="shopify-coupon__tag-amt">- ${formatPrice(savedAmount)}</span>
+            <button type="button" class="shopify-coupon__tag-remove" id="cartCouponRemoveBtn" aria-label="Remove coupon" title="Remove coupon">✕</button>
+          </div>
+        </div>
+      </div>
     `;
+
+    const removeBtn = document.getElementById('cartCouponRemoveBtn');
+    if (removeBtn) {
+      removeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        clearMerchCoupon();
+        renderMerchCouponPreview();
+        renderCart();
+      });
+    }
   }
 
   async function applyMerchCouponFromCart(options = {}) {
     const isSilent = Boolean(options?.silent);
-    const bundleDiscount = getMerchBundleDiscountAmount();
-    if (bundleDiscount > 0) {
-      clearMerchCoupon();
-      if (!isSilent) {
-        showCheckoutNotice('Coupon not applicable', 'Coupons cannot be applied to Bundle & Save orders because bundle discount is already applied.', { variant: 'error' });
-      }
-      renderCart();
-      if (state.currentView === 'checkout') renderCheckoutPage();
-      return;
-    }
-
     const checkoutCoupon = document.getElementById('checkoutCouponCode');
     const rawCode = state.currentView === 'checkout'
       ? (checkoutCoupon?.value || state.merchCouponCode || '')
@@ -2397,19 +2447,10 @@ function getWishlistProductPrice(item) {
     }
     if (cartPayable) cartPayable.textContent = formatPrice(payable);
 
-    // Hide coupon section when a bundle discount is active
     const cartCouponSection = document.querySelector('.cart-coupon');
     if (cartCouponSection) {
-      const hasBundleDiscount = bundleDiscount > 0;
-      cartCouponSection.hidden = hasBundleDiscount;
-      // Clear any applied coupon when bundle discount kicks in (they shouldn't stack)
-      if (hasBundleDiscount && state.merchCouponCode) {
-        state.merchCouponCode = '';
-        state.merchCouponPreview = null;
-        state.merchCouponError = '';
-        if (els.cartCouponCode) els.cartCouponCode.value = '';
-        renderMerchCouponPreview();
-      }
+      cartCouponSection.hidden = false;
+      renderMerchCouponPreview();
     }
 
     // Bind bundle remove button
@@ -5935,15 +5976,26 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       localStorage.setItem('merch_bundle_code', state.merchBundleCode);
     } catch {}
 
-    const bundleTotal = bundleItems.reduce((sum, item) => sum + Number(item.variant.price || 0), 0);
-    state.merchBundlePreview = {
-      code: state.merchBundleCode,
-      description: 'Bundle & Save — 15% off Bottle + Mist',
-      discountAmountInr: Math.round(bundleTotal * 0.15),
-    };
+    const hasCoupon = isMerchCouponActive();
+    if (!hasCoupon) {
+      const bundleTotal = bundleItems.reduce((sum, item) => sum + Number(item.variant.price || 0), 0);
+      state.merchBundlePreview = {
+        code: state.merchBundleCode,
+        description: 'Bundle & Save — 15% off Bottle + Mist',
+        discountAmountInr: Math.round(bundleTotal * 0.15),
+      };
+    } else {
+      state.merchBundlePreview = null;
+      if (!state.merchCouponCode && state.campaignAttribution?.couponCode) {
+        state.merchCouponCode = state.campaignAttribution.couponCode;
+      }
+      await applyMerchCouponFromCart({ silent: true });
+    }
 
     saveCart();
-    showCheckoutToast('Bottle + Mist Bundle added to order with 15% savings!');
+    showCheckoutToast(hasCoupon
+      ? 'Bottle + Mist Bundle added to order.'
+      : 'Bottle + Mist Bundle added to order with 15% savings!');
     renderCheckoutPage();
     return true;
   }
@@ -5969,7 +6021,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
     if (!hasBundle && !promoProducts.length) return '';
 
-    const isBundleInOrder = state.merchBundleCode === 'H2BUNDLE15' && getMerchBundleDiscountAmount() > 0;
+    const isBundleInOrder = Boolean(getActiveBundleInfo());
 
     let bundleCardHtml = '';
     if (hasBundle) {
@@ -6324,16 +6376,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
   function renderCheckoutSummary() {
     const totals = getCheckoutTotals();
-    const hasBundleDiscount = totals.bundleDiscount > 0;
-    if (hasBundleDiscount && (state.merchCouponCode || state.merchCouponPreview)) {
-      state.merchCouponCode = '';
-      state.merchCouponPreview = null;
-      state.merchCouponError = '';
-    }
     const hasShippingAddress = Boolean(state.checkoutDraft?.line1 && state.checkoutDraft?.city && state.checkoutDraft?.state && state.checkoutDraft?.postalCode);
     const discount = totals.discount > 0 ? `
       <div class="shopify-price-row shopify-price-row--discount">
-        <span>${hasBundleDiscount ? 'Bundle discount (15% OFF)' : `Discount${state.merchCouponCode ? ` (${escapeHtml(state.merchCouponCode)})` : ''}`}</span>
+        <span>${totals.bundleDiscount > 0 ? 'Bundle discount (15% OFF)' : `Discount${state.merchCouponCode ? ` (${escapeHtml(state.merchCouponCode)})` : ''}`}</span>
         <strong>- ${formatCheckoutMoney(totals.discount)}</strong>
       </div>
     ` : '';
@@ -6422,15 +6468,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           <span>Add more products</span>
         </button>
 
-        ${hasBundleDiscount ? `
-          <div class="shopify-bundle-badge" style="background:#fef7f2;border:1px dashed #ae5431;border-radius:10px;padding:12px 14px;margin-bottom:18px;display:flex;align-items:flex-start;gap:10px;">
-            <span style="font-size:1.2rem;line-height:1;" aria-hidden="true">✨</span>
-            <div>
-              <strong style="display:block;font-size:0.88rem;color:#ae5431;line-height:1.3;">Bundle &amp; Save Applied (15% OFF)</strong>
-              <small style="display:block;font-size:0.78rem;color:#78350f;margin-top:2px;">Special 15% savings are active for your bottle &amp; spray bundle. Coupons cannot be combined with bundle discounts.</small>
-            </div>
-          </div>
-        ` : `
         <div class="shopify-coupon">
           <div class="shopify-coupon__row">
             <label class="shopify-coupon__field">
@@ -6441,12 +6478,40 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             </label>
             <div class="shopify-coupon__actions">
               <button id="checkoutCouponApplyBtn" class="shopify-coupon__apply" type="button" ${state.merchCouponLoading ? 'disabled' : ''}>${state.merchCouponLoading ? 'APPLYING' : 'APPLY'}</button>
-              ${state.merchCouponPreview ? `<button id="checkoutCouponRemoveBtn" class="shopify-coupon__remove" type="button" aria-label="Remove coupon">✕ REMOVE</button>` : ''}
             </div>
           </div>
-          <div class="shopify-coupon__message${state.merchCouponError ? ' is-error' : ''}" ${state.merchCouponPreview || state.merchCouponError ? '' : 'hidden'}>
-            ${state.merchCouponPreview ? `✓ ${escapeHtml(state.merchCouponPreview.code || state.merchCouponCode)} applied — ${escapeHtml(getCouponDiscountLabel(state.availableCoupons.find((coupon) => coupon.code === state.merchCouponPreview.code) || state.merchCouponPreview))}` : escapeHtml(state.merchCouponError || '')}
-          </div>
+          ${state.merchCouponPreview ? `
+            <div class="shopify-coupon__savings-card">
+              <div class="shopify-coupon__savings-headline">
+                <span class="shopify-coupon__savings-coin" aria-hidden="true">🪙</span>
+                <span class="shopify-coupon__savings-title"><strong>${formatCheckoutMoney(state.merchCouponPreview.discountAmountInr)}</strong> Saved with discounts!</span>
+              </div>
+              <div class="shopify-coupon__applied-tag">
+                <div class="shopify-coupon__tag-left">
+                  <svg class="shopify-coupon__tag-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m20 12-8 8-9-9V3h8l9 9Z"/><circle cx="7.5" cy="7.5" r="1.2"/></svg>
+                  <span class="shopify-coupon__tag-name">${escapeHtml(state.merchCouponPreview.code || state.merchCouponCode)}</span>
+                </div>
+                <div class="shopify-coupon__tag-right">
+                  <span class="shopify-coupon__tag-amt">- ${formatCheckoutMoney(state.merchCouponPreview.discountAmountInr)}</span>
+                  <button type="button" id="checkoutCouponRemoveBtn" class="shopify-coupon__tag-remove" aria-label="Remove coupon" title="Remove coupon">✕</button>
+                </div>
+              </div>
+            </div>
+          ` : ''}
+          ${state.merchCouponError ? `
+            <div class="shopify-coupon__message is-error">
+              ${escapeHtml(state.merchCouponError)}
+            </div>
+          ` : ''}
+          ${!state.merchCouponPreview && totals.bundleDiscount > 0 ? `
+            <div class="shopify-bundle-badge" style="background:#fef7f2;border:1px dashed #ae5431;border-radius:10px;padding:12px 14px;margin-top:10px;display:flex;align-items:flex-start;gap:10px;">
+              <span style="font-size:1.2rem;line-height:1;" aria-hidden="true">✨</span>
+              <div>
+                <strong style="display:block;font-size:0.88rem;color:#ae5431;line-height:1.3;">Bundle &amp; Save Applied (15% OFF)</strong>
+                <small style="display:block;font-size:0.78rem;color:#78350f;margin-top:2px;">Special 15% savings are active for your bottle &amp; spray bundle.</small>
+              </div>
+            </div>
+          ` : ''}
           ${state.availableCoupons.length ? `<div class="checkout-coupon-offers" aria-label="Available coupons">
             <p class="checkout-coupon-offers__title">Available coupons</p>
             ${state.availableCoupons.filter(isPublicMerchCoupon).map((coupon) => `
@@ -6457,7 +6522,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             `).join('')}
           </div>` : ''}
         </div>
-        `}
 
         ${renderCheckoutRecommendations()}
 
@@ -6479,7 +6543,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         <div class="shopify-total">
           <span>Total</span>
           <strong><small>${state.currency}</small> ${formatCheckoutMoney(totals.total)}</strong>
-          <p>${state.currency === 'USD' ? `Approx. ${formatCheckoutMoney(totals.total)} USD · Base ₹${Number(totals.total).toLocaleString('en-IN')}` : `Including ${formatCheckoutMoney(totals.gstIncluded)} in taxes`}</p>
+          ${state.currency === 'USD' ? `<p class="shopify-total__fx">Approx. ${formatCheckoutMoney(totals.total)} USD · Base ₹${Number(totals.total).toLocaleString('en-IN')}</p>` : ''}
+          ${totals.discount > 0 ? `<p class="shopify-total__savings">You saved ${formatCheckoutMoney(totals.discount)}!</p>` : ''}
         </div>
 
         <div class="shopify-trust">
@@ -6676,12 +6741,18 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           activeBundle.bottleItem.quantity = Number(activeBundle.bottleItem.quantity || 1) + 1;
           activeBundle.mistItem.quantity = Number(activeBundle.mistItem.quantity || 1) + 1;
           saveCart();
+          if (state.merchCouponCode) {
+            await applyMerchCouponFromCart({ silent: true });
+          }
           renderCheckoutPage();
         } else if (dir === 'down') {
           if (activeBundle.bundleQty > 1) {
             activeBundle.bottleItem.quantity = Number(activeBundle.bottleItem.quantity || 1) - 1;
             activeBundle.mistItem.quantity = Number(activeBundle.mistItem.quantity || 1) - 1;
             saveCart();
+            if (state.merchCouponCode) {
+              await applyMerchCouponFromCart({ silent: true });
+            }
             renderCheckoutPage();
           } else {
             state.cart = state.cart.filter((item) => !item.isBundle);
@@ -6690,8 +6761,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             if (!state.cart.length) {
               showShop();
             } else {
-              if (state.campaignAttribution?.couponCode && !state.merchCouponCode && !state.merchBundleCode) {
+              if (state.campaignAttribution?.couponCode && !state.merchCouponCode) {
                 state.merchCouponCode = state.campaignAttribution.couponCode;
+                await applyMerchCouponFromCart({ silent: true });
+              } else if (state.merchCouponCode) {
                 await applyMerchCouponFromCart({ silent: true });
               }
               renderCheckoutPage();
@@ -6714,8 +6787,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         if (!state.cart.length) {
           showShop();
         } else {
-          if (state.campaignAttribution?.couponCode && !state.merchCouponCode && !state.merchBundleCode) {
+          if (state.campaignAttribution?.couponCode && !state.merchCouponCode) {
             state.merchCouponCode = state.campaignAttribution.couponCode;
+            await applyMerchCouponFromCart({ silent: true });
+          } else if (state.merchCouponCode) {
             await applyMerchCouponFromCart({ silent: true });
           }
           renderCheckoutPage();
@@ -6787,7 +6862,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         if (!state.cart.length) {
           showShop();
         } else {
-          if (state.campaignAttribution?.couponCode && !state.merchCouponCode && !state.merchBundleCode) {
+          if (state.campaignAttribution?.couponCode && !state.merchCouponCode) {
             state.merchCouponCode = state.campaignAttribution.couponCode;
             await applyMerchCouponFromCart({ silent: true });
           } else if (hadCoupon) {
