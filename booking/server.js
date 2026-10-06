@@ -3359,19 +3359,26 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   let code = normalizeCouponCode(req.body?.code);
   const description = String(req.body?.description || '').trim();
   const festivalName = String(req.body?.festivalName || '').trim();
-  const discountType = 'flat';
-  const discountValue = Number(req.body?.discountValue || 0);
+  const discountType = String(req.body?.discountType || 'flat').trim().toLowerCase() === 'percentage' ? 'percentage' : 'flat';
+  const discountValue = Number(req.body?.discountValue ?? req.body?.discount ?? 0);
   const couponCategory = String(req.body?.couponCategory || '').trim().toLowerCase();
+  const commissionType = String(req.body?.commissionType || 'flat').trim().toLowerCase() === 'percentage' ? 'percentage' : 'flat';
+  const commissionRate = commissionType === 'percentage'
+    ? Math.max(0, Math.min(100, Number(req.body?.commissionRate ?? req.body?.commissionValue ?? req.body?.commissionPerOrder ?? 0)))
+    : 0;
   const commissionPerOrderPaise = couponCategory && couponCategory !== 'influencer'
     ? 0
-    : Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
+    : commissionType === 'percentage'
+      ? 0
+      : Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? req.body?.commissionValue ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
   const commissionByProductJson = normalizeCommissionByProduct(req.body?.commissionByProduct);
   const appliesToRaw = String(req.body?.appliesTo || 'all').trim().toLowerCase();
   const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
+  const categoryAppliesTo = appliesToRaw.match(/^category:([a-z0-9_\-,]+)$/);
   const productIds = productAppliesTo
     ? [...new Set(productAppliesTo[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
     : [];
-  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo ? appliesToRaw : 'all';
+  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo || categoryAppliesTo ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || '').trim().toLowerCase();
   const influencerId = Number(req.body?.influencerId || req.body?.influencer_id || 0);
   const sendEmail = req.body?.sendEmail !== false;
@@ -3409,7 +3416,10 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   if (!Number.isFinite(discountValue) || discountValue <= 0) {
     return res.status(400).json({ message: 'discountValue must be greater than 0.' });
   }
-  if (discountValue > 10000000) {
+  if (discountType === 'percentage' && discountValue > 100) {
+    return res.status(400).json({ message: 'Percentage discount cannot exceed 100%.' });
+  }
+  if (discountType === 'flat' && discountValue > 10000000) {
     return res.status(400).json({ message: 'discountValue is too large.' });
   }
   if (recipientEmail && !isValidEmail(recipientEmail)) {
@@ -3469,14 +3479,16 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
 
   db.prepare(
     `INSERT INTO coupons (
-      code, description, discount_type, discount_value, commission_per_order_paise, commission_by_product_json, applies_to, max_redemptions, per_user_limit, expires_at, active,
+      code, description, discount_type, discount_value, commission_type, commission_rate, commission_per_order_paise, commission_by_product_json, applies_to, max_redemptions, per_user_limit, expires_at, active,
       coupon_type, assigned_user_email, used_by, is_active, valid_from, valid_till,
       recipient_email, recipient_name, festival_name, emailed_at, email_status, email_error, portal, influencer_id, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(code) DO UPDATE SET
       description = excluded.description,
       discount_type = excluded.discount_type,
       discount_value = excluded.discount_value,
+      commission_type = excluded.commission_type,
+      commission_rate = excluded.commission_rate,
       commission_per_order_paise = excluded.commission_per_order_paise,
       commission_by_product_json = excluded.commission_by_product_json,
       applies_to = excluded.applies_to,
@@ -3500,6 +3512,8 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     description,
     discountType,
     discountValue,
+    commissionType,
+    commissionRate,
     commissionPerOrderPaise,
     commissionByProductJson,
     appliesTo,
@@ -3590,19 +3604,26 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   let code = normalizeCouponCode(req.body?.code || existing.code);
   const description = String(req.body?.description || existing.description || '').trim();
   const festivalName = String(req.body?.festivalName || existing.festivalName || '').trim();
-  const discountType = String(req.body?.discountType || existing.discountType || 'flat').trim().toLowerCase() || 'flat';
-  const discountValue = Number(req.body?.discountValue ?? existing.discountValue ?? 0);
+  const discountType = String(req.body?.discountType || existing.discountType || 'flat').trim().toLowerCase() === 'percentage' ? 'percentage' : 'flat';
+  const discountValue = Number(req.body?.discountValue ?? req.body?.discount ?? existing.discountValue ?? 0);
   const couponCategory = String(req.body?.couponCategory || '').trim().toLowerCase();
+  const commissionType = String(req.body?.commissionType || existing.commissionType || 'flat').trim().toLowerCase() === 'percentage' ? 'percentage' : 'flat';
+  const commissionRate = commissionType === 'percentage'
+    ? Math.max(0, Math.min(100, Number(req.body?.commissionRate ?? req.body?.commissionValue ?? req.body?.commissionPerOrder ?? existing.commissionRate ?? 0)))
+    : 0;
   const commissionPerOrderPaise = couponCategory && couponCategory !== 'influencer'
     ? 0
-    : Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? existing.commissionPerOrderPaise ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
+    : commissionType === 'percentage'
+      ? 0
+      : Math.max(0, Math.round(Number(req.body?.commissionPerOrderPaise ?? req.body?.commissionPerOrder ?? req.body?.commissionValue ?? existing.commissionPerOrderPaise ?? 0) * (req.body?.commissionPerOrderPaise != null ? 1 : 100)));
   const commissionByProductJson = normalizeCommissionByProduct(req.body?.commissionByProduct, existing.commissionByProduct);
   const appliesToRaw = String(req.body?.appliesTo || existing.appliesTo || 'all').trim().toLowerCase();
   const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
+  const categoryAppliesTo = appliesToRaw.match(/^category:([a-z0-9_\-,]+)$/);
   const productIds = productAppliesTo
     ? [...new Set(productAppliesTo[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
     : [];
-  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo ? appliesToRaw : 'all';
+  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo || categoryAppliesTo ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || existing.recipientEmail || '').trim().toLowerCase();
   const recipientName = String(req.body?.recipientName || existing.recipientName || '').trim();
   const influencerIdRaw = Object.prototype.hasOwnProperty.call(req.body || {}, 'influencerId')
@@ -3657,6 +3678,12 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   if (!Number.isFinite(discountValue) || discountValue <= 0) {
     return res.status(400).json({ message: 'discountValue must be greater than 0.' });
   }
+  if (discountType === 'percentage' && discountValue > 100) {
+    return res.status(400).json({ message: 'Percentage discount cannot exceed 100%.' });
+  }
+  if (discountType === 'flat' && discountValue > 10000000) {
+    return res.status(400).json({ message: 'discountValue is too large.' });
+  }
   if (couponType === 'private' && !recipientEmail) {
     return res.status(400).json({ message: 'recipientEmail is required for private coupons.' });
   }
@@ -3692,6 +3719,8 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
         description = ?,
         discount_type = ?,
         discount_value = ?,
+        commission_type = ?,
+        commission_rate = ?,
         commission_per_order_paise = ?,
         commission_by_product_json = ?,
         applies_to = ?,
@@ -3715,6 +3744,8 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
       description,
       discountType || 'flat',
       discountValue,
+      commissionType || 'flat',
+      commissionRate || 0,
       commissionPerOrderPaise,
       commissionByProductJson,
       appliesTo,
@@ -11172,6 +11203,8 @@ function mapCouponRow(row) {
     description: row.description || '',
     discountType: row.discountType || 'flat',
     discountValue: Number(row.discountValue || 0),
+    commissionType: row.commissionType || 'flat',
+    commissionRate: Number(row.commissionRate || 0),
     commissionPerOrderPaise: Math.max(0, Number(row.commissionPerOrderPaise || 0)),
     commissionByProduct: parseCommissionByProduct(row.commissionByProductJson),
     appliesTo: row.appliesTo || 'all',
@@ -11231,6 +11264,8 @@ function getCouponByCode(code) {
               c.description,
               c.discount_type AS discountType,
               c.discount_value AS discountValue,
+              c.commission_type AS commissionType,
+              c.commission_rate AS commissionRate,
               c.commission_per_order_paise AS commissionPerOrderPaise,
               c.commission_by_product_json AS commissionByProductJson,
               c.applies_to AS appliesTo,
@@ -11275,6 +11310,8 @@ function getCouponById(couponId) {
               c.description,
               c.discount_type AS discountType,
               c.discount_value AS discountValue,
+              c.commission_type AS commissionType,
+              c.commission_rate AS commissionRate,
               c.commission_per_order_paise AS commissionPerOrderPaise,
               c.commission_by_product_json AS commissionByProductJson,
               c.applies_to AS appliesTo,
@@ -11341,11 +11378,12 @@ function calculateCouponDiscountPaise(coupon, subtotalAmountPaise) {
   const subtotal = Math.max(0, Math.round(Number(subtotalAmountPaise || 0)));
   if (!coupon || subtotal <= 0) return 0;
 
+  const discountType = String(coupon.discountType || 'flat').toLowerCase();
   let discountPaise = 0;
-  if (coupon.discountType === 'flat') {
-    discountPaise = Math.round(Number(coupon.discountValue || 0) * 100);
-  } else {
+  if (discountType === 'percentage' || discountType === '%') {
     discountPaise = Math.round(subtotal * (Number(coupon.discountValue || 0) / 100));
+  } else {
+    discountPaise = Math.round(Number(coupon.discountValue || 0) * 100);
   }
 
   if (!Number.isFinite(discountPaise) || discountPaise <= 0) return 0;
@@ -15995,6 +16033,8 @@ function migrate() {
       description TEXT,
       discount_type TEXT NOT NULL,
       discount_value REAL NOT NULL,
+      commission_type TEXT NOT NULL DEFAULT 'flat',
+      commission_rate REAL NOT NULL DEFAULT 0,
       commission_per_order_paise INTEGER NOT NULL DEFAULT 0,
       commission_by_product_json TEXT NOT NULL DEFAULT '{}',
       applies_to TEXT NOT NULL DEFAULT 'all',
@@ -16186,6 +16226,12 @@ function migrate() {
   }
   if (hasTable('coupons') && !hasColumn('coupons', 'commission_per_order_paise')) {
     db.exec('ALTER TABLE coupons ADD COLUMN commission_per_order_paise INTEGER NOT NULL DEFAULT 0');
+  }
+  if (hasTable('coupons') && !hasColumn('coupons', 'commission_type')) {
+    db.exec("ALTER TABLE coupons ADD COLUMN commission_type TEXT NOT NULL DEFAULT 'flat'");
+  }
+  if (hasTable('coupons') && !hasColumn('coupons', 'commission_rate')) {
+    db.exec('ALTER TABLE coupons ADD COLUMN commission_rate REAL NOT NULL DEFAULT 0');
   }
   if (hasTable('coupons') && !hasColumn('coupons', 'commission_by_product_json')) {
     db.exec("ALTER TABLE coupons ADD COLUMN commission_by_product_json TEXT NOT NULL DEFAULT '{}'");
