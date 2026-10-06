@@ -623,9 +623,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       customer_id INTEGER NOT NULL REFERENCES merch_customer_profiles(id) ON DELETE CASCADE,
       variant_id INTEGER NOT NULL,
       quantity INTEGER NOT NULL DEFAULT 1,
+      is_bundle INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      UNIQUE(customer_id, variant_id)
+      UNIQUE(customer_id, variant_id, is_bundle)
     );
 
     CREATE TABLE IF NOT EXISTS merch_customer_wishlist_items (
@@ -638,6 +639,25 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       UNIQUE(customer_id, product_id, variant_id)
     );
   `);
+
+  if (!hasColumn('merch_customer_cart_items', 'is_bundle')) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS merch_customer_cart_items_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL REFERENCES merch_customer_profiles(id) ON DELETE CASCADE,
+        variant_id INTEGER NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 1,
+        is_bundle INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(customer_id, variant_id, is_bundle)
+      );
+      INSERT OR IGNORE INTO merch_customer_cart_items_new (id, customer_id, variant_id, quantity, is_bundle, created_at, updated_at)
+        SELECT id, customer_id, variant_id, quantity, 0, created_at, updated_at FROM merch_customer_cart_items;
+      DROP TABLE merch_customer_cart_items;
+      ALTER TABLE merch_customer_cart_items_new RENAME TO merch_customer_cart_items;
+    `);
+  }
 
   if (!hasColumn('merch_orders', 'customer_user_id')) {
     db.exec('ALTER TABLE merch_orders ADD COLUMN customer_user_id INTEGER');
@@ -1467,12 +1487,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     cumulativePaidPaise = 0,
     balanceRemainingPaise = 0,
     formattedDate = '',
+    req = null,
   }) {
     const couponList = coupons.map((c) => c.code || c).filter(Boolean).join(', ') || 'None';
     const invoiceNum = payment.invoice_number || payment.invoiceNumber || 'H2-INV-COM';
     const refNum = payment.reference_number || payment.referenceNumber || 'N/A';
     const method = payment.payment_method || payment.paymentMethod || 'Direct Transfer';
     const status = (payment.status || 'PAID').toUpperCase();
+    const logoUrl = 'https://h2houseofhealth.com/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=240';
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -1480,36 +1502,278 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Commission Invoice ${escapeHtml(invoiceNum)} - H2 House of Health</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..800;1,9..40,400..800&display=swap" rel="stylesheet">
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f1f5f9; color: #0f172a; margin: 0; padding: 24px 12px; }
-    .invoice-card { max-width: 680px; margin: 0 auto; background: #ffffff; border-radius: 14px; box-shadow: 0 4px 20px rgba(0,0,0,0.07); border: 1px solid #e2e8f0; overflow: hidden; }
-    .header { background: #0b1329; color: #ffffff; padding: 32px 36px 26px; }
-    .header-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 22px; }
-    .brand-title { font-size: 22px; font-weight: 800; letter-spacing: 0.04em; color: #38bdf8; text-transform: uppercase; margin: 0; }
-    .brand-sub { font-size: 13px; color: #94a3b8; margin: 4px 0 0; }
-    .badge-paid { display: inline-block; background: #10b981; color: #ffffff; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; padding: 6px 14px; border-radius: 9999px; text-transform: uppercase; }
-    .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 14px; border-top: 1px solid #1e293b; padding-top: 18px; }
-    .meta-item-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; margin-bottom: 4px; }
-    .meta-item-val { font-size: 13px; font-weight: 600; color: #f8fafc; word-break: break-word; }
-    .body { padding: 30px 36px; }
-    .parties-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 28px; }
-    @media (max-width: 580px) { .parties-grid { grid-template-columns: 1fr; } }
-    .party-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 18px; }
-    .party-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #64748b; margin: 0 0 8px; }
-    .party-name { font-size: 16px; font-weight: 700; color: #0f172a; margin: 0 0 4px; }
-    .party-info { font-size: 13px; color: #475569; margin: 3px 0; line-height: 1.45; word-break: break-word; }
-    .table-wrap { margin-bottom: 26px; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
-    table { width: 100%; border-collapse: collapse; text-align: left; }
-    th { background: #f8fafc; color: #475569; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 12px 18px; border-bottom: 1px solid #e2e8f0; }
-    td { padding: 14px 18px; font-size: 14px; border-top: 1px solid #f1f5f9; color: #1e293b; }
-    .amt { text-align: right; font-weight: 600; }
-    .total-highlight { background: #ecfdf5; font-weight: 700; }
-    .total-highlight td { color: #065f46; font-size: 15px; }
-    .notes-box { background: #f0f9ff; border-left: 4px solid #0284c7; padding: 14px 18px; border-radius: 0 8px 8px 0; margin-bottom: 26px; }
-    .notes-title { font-size: 12px; font-weight: 700; color: #0369a1; text-transform: uppercase; margin: 0 0 4px; }
-    .notes-text { font-size: 13px; color: #0c4a6e; margin: 0; line-height: 1.5; }
-    .footer { background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 22px 36px; text-align: center; color: #64748b; font-size: 12px; line-height: 1.6; }
-    .footer strong { color: #334155; }
+    body {
+      font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background-color: #f8f3ee;
+      color: #14233b;
+      margin: 0;
+      padding: 24px 12px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .invoice-card {
+      max-width: 680px;
+      margin: 0 auto;
+      background: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(174, 84, 49, 0.08);
+      border: 1px solid #e7cabb;
+      overflow: hidden;
+    }
+    .header {
+      background: #fffaf7;
+      border-bottom: 1px solid #e7cabb;
+      padding: 28px 36px 24px;
+      position: relative;
+    }
+    .header::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, #b63b20, #c8652d, #ad3c22);
+    }
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .logo-img {
+      height: 46px;
+      width: auto;
+      display: block;
+    }
+    .badge-paid {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: #ad3c22;
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      box-shadow: 0 2px 8px rgba(173, 60, 34, 0.25);
+    }
+    .header-title-block {
+      margin-top: 4px;
+    }
+    .brand-eyebrow {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: #ad3c22;
+      text-transform: uppercase;
+      margin: 0 0 6px;
+    }
+    .brand-title {
+      font-family: Georgia, 'Times New Roman', serif;
+      font-size: 26px;
+      line-height: 32px;
+      font-weight: 700;
+      color: #14233b;
+      margin: 0;
+    }
+    .brand-sub {
+      font-size: 13px;
+      color: #657384;
+      margin: 4px 0 0;
+    }
+    .meta-banner {
+      background: #b63b20;
+      color: #ffffff;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-top: 20px;
+      box-shadow: 0 6px 16px rgba(182, 59, 32, 0.12);
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 14px;
+    }
+    .meta-item-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: rgba(255, 255, 255, 0.8);
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+    .meta-item-val {
+      font-size: 14px;
+      font-weight: 700;
+      color: #ffffff;
+      word-break: break-word;
+    }
+    .body {
+      padding: 30px 36px;
+      background: #ffffff;
+    }
+    .parties-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-bottom: 26px;
+    }
+    @media (max-width: 580px) {
+      .parties-grid { grid-template-columns: 1fr; }
+      .header { padding: 22px 20px; text-align: center; }
+      .header-top { flex-direction: column; align-items: center; text-align: center; gap: 14px; }
+      .logo-img { margin: 0 auto; }
+      .header-title-block { text-align: center; }
+      .body { padding: 22px 20px; }
+      .footer { padding: 22px 18px 20px !important; text-align: center !important; }
+      .meta-banner { grid-template-columns: 1fr 1fr; text-align: center; }
+    }
+    .party-box {
+      background: #fffaf7;
+      border: 1px solid #e7cabb;
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .party-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #ad3c22;
+      margin: 0 0 8px;
+    }
+    .party-name {
+      font-size: 17px;
+      font-weight: 700;
+      color: #14233b;
+      margin: 0 0 6px;
+    }
+    .party-info {
+      font-size: 13px;
+      color: #52606f;
+      margin: 4px 0;
+      line-height: 1.48;
+      word-break: break-word;
+    }
+    .party-info strong {
+      color: #14233b;
+    }
+    .coupon-badge {
+      display: inline-block;
+      background: rgba(174, 84, 49, 0.12);
+      color: #ad3c22;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .table-wrap {
+      margin-bottom: 26px;
+      border: 1px solid #e7cabb;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+    th {
+      background: #b63b20;
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 13px 18px;
+      border: 0;
+    }
+    td {
+      padding: 14px 18px;
+      font-size: 14px;
+      border-top: 1px solid #f0ded4;
+      color: #14233b;
+    }
+    .amt {
+      text-align: right;
+      font-weight: 600;
+      color: #14233b;
+    }
+    .total-highlight {
+      background: #f5e8e1;
+      font-weight: 700;
+    }
+    .total-highlight td {
+      color: #ad3c22;
+      font-size: 16px;
+      font-weight: 800;
+      border-top: 2px solid #e7cabb;
+      border-bottom: 2px solid #e7cabb;
+    }
+    .notes-box {
+      background: #fffaf7;
+      border: 1px solid #e7cabb;
+      border-left: 4px solid #ad3c22;
+      padding: 14px 18px;
+      border-radius: 0 8px 8px 0;
+      margin-bottom: 26px;
+    }
+    .notes-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #ad3c22;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 0 0 4px;
+    }
+    .notes-text {
+      font-size: 13px;
+      color: #52606f;
+      margin: 0;
+      line-height: 1.5;
+    }
+    .footer {
+      background: #f4eee9;
+      border-top: 1px solid #ead8cd;
+      padding: 24px 36px 20px;
+      text-align: center;
+      color: #52606f;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .footer strong {
+      color: #14233b;
+    }
+    .invoice-company-footer {
+      display: flex;
+      justify-content: space-between;
+      text-align: left;
+      gap: 20px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #14233b;
+      border-bottom: 1px solid #d2a08d;
+      padding-bottom: 16px;
+    }
+    .invoice-company-footer a {
+      color: #ad3c22;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    @media (max-width: 580px) {
+      .invoice-company-footer { flex-direction: column; text-align: center !important; gap: 10px; }
+      .invoice-company-footer div { text-align: center !important; }
+    }
+    @media print {
+      body { background: #ffffff !important; padding: 0 !important; }
+      .invoice-card { box-shadow: none !important; border: 1px solid #e7cabb !important; max-width: 100% !important; border-radius: 0 !important; }
+    }
   </style>
 </head>
 <body>
@@ -1517,14 +1781,18 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     <div class="header">
       <div class="header-top">
         <div>
-          <h1 class="brand-title">H2 House of Health</h1>
-          <p class="brand-sub">Commission Payment Receipt &amp; Invoice</p>
+          <img class="logo-img" src="${escapeHtml(logoUrl)}" alt="H2 House of Health">
         </div>
         <div>
-          <span class="badge-paid">${escapeHtml(status)}</span>
+          <span class="badge-paid">&#10003; ${escapeHtml(status)}</span>
         </div>
       </div>
-      <div class="meta-grid">
+      <div class="header-title-block">
+        <p class="brand-eyebrow">OFFICIAL COMMISSION PAYMENT RECEIPT</p>
+        <h1 class="brand-title">Commission Payment Receipt &amp; Invoice</h1>
+        <p class="brand-sub">Official Commission Settlement Record &bull; H2 House of Health</p>
+      </div>
+      <div class="meta-banner">
         <div>
           <div class="meta-item-label">Invoice Number</div>
           <div class="meta-item-val">${escapeHtml(invoiceNum)}</div>
@@ -1552,16 +1820,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           <p class="party-info"><strong>Email:</strong> ${escapeHtml(payment.influencer_email || payment.influencerEmail || influencer.email || 'N/A')}</p>
           ${influencer.handle ? `<p class="party-info"><strong>Handle:</strong> ${escapeHtml(influencer.handle)}</p>` : ''}
           ${influencer.phone ? `<p class="party-info"><strong>Phone:</strong> ${escapeHtml(influencer.phone)}</p>` : ''}
-          <p class="party-info"><strong>Coupon / Code:</strong> ${escapeHtml(couponList)}</p>
+          <p class="party-info"><strong>Coupon / Code:</strong> <span class="coupon-badge">${escapeHtml(couponList)}</span></p>
         </div>
 
         <div class="party-box">
           <p class="party-title">Issued By (Payer)</p>
           <p class="party-name">H2 House of Health</p>
-          <p class="party-info">Jubilee Hills, Hyderabad, Telangana 500033</p>
+          <p class="party-info">📍 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033</p>
           <p class="party-info"><strong>Admin Recipient:</strong> h2houseofhealth@gmail.com</p>
-          <p class="party-info"><strong>Support:</strong> hello@h2houseofhealth.com</p>
-          <p class="party-info"><strong>Contact:</strong> +91 98765 43210</p>
+          <p class="party-info"><strong>Email:</strong> hello@h2houseofhealth.com</p>
+          <p class="party-info"><strong>Phone:</strong> 91000 56979, 91000 86979</p>
+          <p class="party-info"><strong>Website:</strong> www.h2houseofhealth.com</p>
         </div>
       </div>
 
@@ -1576,10 +1845,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           <tbody>
             <tr>
               <td>
-                <strong>Commission Paid (This Receipt)</strong><br>
-                <small style="color:#64748b;">Method: ${escapeHtml(method)} &bull; Ref: ${escapeHtml(refNum)}</small>
+                <strong style="color:#14233b;">Commission Paid (This Receipt)</strong><br>
+                <small style="color:#657384;">Method: ${escapeHtml(method)} &bull; Ref: ${escapeHtml(refNum)}</small>
               </td>
-              <td class="amt" style="font-size:15px;color:#0f172a;">${formatMerchCurrency(commissionPaidPaise)}</td>
+              <td class="amt" style="font-size:15px;color:#ad3c22;font-weight:700;">${formatMerchCurrency(commissionPaidPaise)}</td>
             </tr>
             <tr>
               <td>Total Commission Earned (Gross Referral Attribution)</td>
@@ -1595,7 +1864,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
             </tr>
             <tr>
               <td>Remaining Balance Due</td>
-              <td class="amt" style="color:${balanceRemainingPaise > 0 ? '#b45309' : '#059669'};">${formatMerchCurrency(balanceRemainingPaise)}</td>
+              <td class="amt" style="color:${balanceRemainingPaise > 0 ? '#ad3c22' : '#059669'};">${formatMerchCurrency(balanceRemainingPaise)}</td>
             </tr>
           </tbody>
         </table>
@@ -1610,8 +1879,19 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     </div>
 
     <div class="footer">
-      <p style="margin:0 0 4px;"><strong>H2 House of Health</strong> &bull; Wellness &amp; Merchandise Ecosystem</p>
-      <p style="margin:0;">This is an officially recorded commission payment receipt. Commission paid records are permanently locked and logged for accounting integrity.</p>
+      <div class="invoice-company-footer">
+        <div>
+          📞 91000 56979, 91000 86979<br>
+          ✉️ <a href="mailto:hello@h2houseofhealth.com">hello@h2houseofhealth.com</a>
+        </div>
+        <div style="text-align:right;">
+          📍 47A, Journalist Colony, Road No:70,<br>
+          Jubilee Hills, Hyderabad - 500033<br>
+          🌐 <a href="https://www.h2houseofhealth.com">www.h2houseofhealth.com</a>
+        </div>
+      </div>
+      <p style="margin:0 0 6px;color:#ad3c22;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;">PREVENTIVE TODAY, HEALTHIER TOMORROW.</p>
+      <p style="margin:0;color:#657384;font-size:11px;">This is an officially recorded commission payment receipt. Commission paid records are permanently locked and logged for accounting integrity.</p>
     </div>
   </div>
 </body>
@@ -1658,17 +1938,438 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       `Remaining Balance Due: ${formatMerchCurrency(balanceRemainingPaise)}`,
       '',
       payment.note ? `Payment Notes: ${payment.note}\n` : '',
-      'ISSUER DETAILS:',
+      'COMPANY DETAILS (FROM INVOICE):',
       'H2 House of Health',
-      'Jubilee Hills, Hyderabad, Telangana 500033',
-      'Support: hello@h2houseofhealth.com',
-      'Fixed Admin Recipient: h2houseofhealth@gmail.com',
-      'Phone: +91 98765 43210',
-      'Website: https://h2houseofhealth.com',
+      '📞 Phone: 91000 56979, 91000 86979',
+      '✉️ Email: hello@h2houseofhealth.com',
+      '📍 Address: 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033',
+      '🌐 Website: www.h2houseofhealth.com',
+      'Admin Recipient: h2houseofhealth@gmail.com',
       '',
       'Thank you for partnering with H2 House of Health.',
       '============================================================',
     ].filter(Boolean).join('\n');
+  }
+
+  // ─── Image-Type Email for Commission Payments (Like Order Placed Email) ───
+  function buildInfluencerCommissionEmailHtml({
+    payment,
+    influencer,
+    coupons = [],
+    commissionEarnedPaise = 0,
+    commissionPaidPaise = 0,
+    cumulativePaidPaise = 0,
+    balanceRemainingPaise = 0,
+    formattedDate = '',
+    recipientRole = 'influencer', // 'influencer' | 'admin'
+    req = null,
+  }) {
+    const couponList = coupons.map((c) => c.code || c).filter(Boolean).join(', ') || 'None';
+    const invoiceNum = payment.invoice_number || payment.invoiceNumber || 'H2-INV-COM';
+    const refNum = payment.reference_number || payment.referenceNumber || 'N/A';
+    const method = payment.payment_method || payment.paymentMethod || 'Direct Transfer';
+    const status = (payment.status || 'PAID').toUpperCase();
+    const influencerEmail = payment.influencer_email || payment.influencerEmail || influencer.email || 'N/A';
+    const influencerName = influencer.name || 'Influencer Partner';
+    const amountInr = (commissionPaidPaise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const origin = getMerchEmailOrigin(req);
+    const logoUrl = getMerchEmailAssetUrl(req, '/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=240');
+    const homeUrl = `${origin}/`;
+
+    const heroTitle = recipientRole === 'admin'
+      ? 'Commission Payout Recorded'
+      : 'Commission Payment Received';
+
+    const heroSubtitle = recipientRole === 'admin'
+      ? `Commission amount paid to influencer: <strong style="color:#ad3c22;">${escapeHtml(influencerName)}</strong>`
+      : `Commission amount sent to influencer: <strong style="color:#ad3c22;">${escapeHtml(influencerName)}</strong>`;
+
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${escapeHtml(heroTitle)} - H2 House of Health</title>
+    <style>
+      body, table, td, p, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+      table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+      img { -ms-interpolation-mode: bicubic; }
+      @media only screen and (max-width: 620px) {
+        .email-shell { width: 100% !important; max-width: 600px !important; }
+        .mobile-pad { padding-left: 20px !important; padding-right: 20px !important; }
+        .mobile-top-pad { padding-top: 22px !important; }
+        .mobile-stack { display: block !important; width: 100% !important; }
+        .mobile-center { text-align: center !important; }
+        .mobile-left { text-align: left !important; }
+        .mobile-logo { width: 142px !important; max-width: 142px !important; margin: 0 auto !important; }
+        .hero-title { font-size: 30px !important; line-height: 38px !important; }
+        .hero-subtitle { font-size: 19px !important; line-height: 26px !important; }
+        .stat-cell { display: block !important; width: 100% !important; padding: 18px 12px !important; border-right: 0 !important; border-bottom: 1px solid rgba(255,255,255,0.45) !important; }
+        .stat-cell-last { border-bottom: 0 !important; }
+        .footer-logo-cell { border-right: 0 !important; border-bottom: 1px solid #d6a28c !important; padding: 0 0 18px !important; }
+        .footer-copy-cell { padding: 18px 0 0 !important; }
+        .footer-contact-right { text-align: left !important; padding-top: 8px !important; }
+      }
+    </style>
+  </head>
+  <body style="margin:0;padding:0;background:#f6f1ec;color:#14233b;font-family:Arial,Helvetica,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f6f1ec;">
+      <tr>
+        <td align="center" style="padding:20px 10px;">
+          <table role="presentation" class="email-shell" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:600px;border-collapse:collapse;background:#fffaf7;border-radius:12px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,0.06);border:1px solid #ebdcd3;">
+            
+            <!-- Top Logo & Help Header -->
+            <tr>
+              <td class="mobile-pad mobile-top-pad" style="padding:32px 32px 18px;background:#fffaf7;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+                  <tr>
+                    <td class="mobile-stack mobile-center" valign="middle" style="width:50%;">
+                      <a href="${escapeHtml(homeUrl)}" style="text-decoration:none;">
+                        <img class="mobile-logo" src="${escapeHtml(logoUrl)}" width="154" alt="H2 House of Health" style="display:block;border:0;width:154px;max-width:154px;height:auto;">
+                      </a>
+                    </td>
+                    <td class="mobile-stack mobile-center" valign="middle" align="right" style="width:50%;font-size:13px;line-height:20px;color:#14233b;">
+                      <p style="margin:0;font-size:14px;font-weight:600;color:#14233b;">Need Assistance?</p>
+                      <a href="mailto:hello@h2houseofhealth.com" style="color:#ad3c22;text-decoration:none;font-size:13px;line-height:18px;">hello@h2houseofhealth.com</a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Hero Title Block -->
+            <tr>
+              <td class="mobile-pad" style="padding:16px 32px 28px;background:#fffaf7;text-align:center;">
+                <h1 class="hero-title" style="margin:0;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:36px;line-height:44px;font-weight:700;">${escapeHtml(heroTitle)}</h1>
+                <p class="hero-subtitle" style="margin:8px 0 0;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:21px;line-height:28px;">${heroSubtitle}</p>
+                <div style="width:54px;height:3px;background:#b63b20;margin:16px auto 0;border-radius:2px;"></div>
+              </td>
+            </tr>
+
+            <!-- Stat Banner -->
+            <tr>
+              <td class="mobile-pad" style="padding:0 28px 28px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;background:#b63b20;border-radius:8px;box-shadow:0 8px 18px rgba(88,36,19,0.12);">
+                  <tr>
+                    <td class="stat-cell" align="center" style="width:33.33%;padding:22px 10px;border-right:1px solid rgba(255,255,255,0.48);color:#ffffff;">
+                      <div style="font-size:26px;line-height:26px;color:#ffffff;">&#8377;</div>
+                      <p style="margin:10px 0 4px;font-size:14px;line-height:18px;font-weight:500;color:#ffffff;">Amount Paid</p>
+                      <p style="margin:0;font-size:20px;line-height:26px;font-weight:700;color:#ffffff;">₹${amountInr}</p>
+                    </td>
+                    <td class="stat-cell" align="center" style="width:33.33%;padding:22px 10px;border-right:1px solid rgba(255,255,255,0.48);color:#ffffff;">
+                      <div style="font-size:26px;line-height:26px;color:#ffffff;">&#128197;</div>
+                      <p style="margin:10px 0 4px;font-size:14px;line-height:18px;font-weight:500;color:#ffffff;">Payment Date</p>
+                      <p style="margin:0;font-size:14px;line-height:20px;font-weight:600;color:#ffffff;">${escapeHtml(formattedDate)}</p>
+                    </td>
+                    <td class="stat-cell stat-cell-last" align="center" style="width:33.33%;padding:22px 10px;color:#ffffff;">
+                      <div style="font-size:26px;line-height:26px;color:#ffffff;">&#10003;</div>
+                      <p style="margin:10px 0 4px;font-size:14px;line-height:18px;font-weight:500;color:#ffffff;">Status</p>
+                      <p style="margin:0;font-size:15px;line-height:20px;font-weight:700;color:#ffffff;text-transform:uppercase;">${escapeHtml(status)}</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Payout & Ledger Details -->
+            <tr>
+              <td class="mobile-pad" style="padding:0 30px 24px;">
+                <h2 style="margin:0 0 14px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:30px;font-weight:700;">Commission Payout Details</h2>
+                
+                <!-- Party & Meta Info Box -->
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;border:1px solid #e7cabb;border-radius:8px;background:#ffffff;margin-bottom:18px;">
+                  <tr>
+                    <td style="padding:16px 20px;">
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:14px;line-height:22px;">
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;width:38%;">Influencer Name:</td>
+                          <td style="padding:5px 0;color:#0f172a;font-weight:700;">${escapeHtml(influencerName)}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Influencer Email:</td>
+                          <td style="padding:5px 0;color:#0f172a;">${escapeHtml(influencerEmail)}</td>
+                        </tr>
+                        ${influencer.handle ? `
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Social Handle:</td>
+                          <td style="padding:5px 0;color:#0f172a;">${escapeHtml(influencer.handle)}</td>
+                        </tr>
+                        ` : ''}
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Associated Coupon(s):</td>
+                          <td style="padding:5px 0;color:#0f172a;font-weight:600;">${escapeHtml(couponList)}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Payment Method:</td>
+                          <td style="padding:5px 0;color:#0f172a;">${escapeHtml(method)}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Reference / UTR ID:</td>
+                          <td style="padding:5px 0;color:#0f172a;font-weight:600;">${escapeHtml(refNum)}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:5px 0;color:#64748b;">Invoice Number:</td>
+                          <td style="padding:5px 0;color:#0f172a;font-weight:600;">${escapeHtml(invoiceNum)}</td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+
+                <!-- Financial Ledger Box -->
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;border:1px solid #e7cabb;border-radius:8px;background:#ffffff;table-layout:fixed;">
+                  <tr>
+                    <td style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;border-bottom:1px solid #f0ded4;">Total Commission Earned (Gross Attribution)</td>
+                    <td align="right" style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;font-weight:600;white-space:nowrap;border-bottom:1px solid #f0ded4;">${formatMerchCurrency(commissionEarnedPaise)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;border-bottom:1px solid #f0ded4;">Cumulative Commission Paid to Date</td>
+                    <td align="right" style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;font-weight:600;white-space:nowrap;border-bottom:1px solid #f0ded4;">${formatMerchCurrency(cumulativePaidPaise)}</td>
+                  </tr>
+                  <tr style="background:#f5e8e1;">
+                    <td style="padding:16px 20px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:17px;line-height:22px;font-weight:700;">Current Commission Settled</td>
+                    <td align="right" style="padding:16px 20px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:22px;line-height:26px;font-weight:700;white-space:nowrap;">${formatMerchCurrency(commissionPaidPaise)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:12px 20px;color:#14233b;font-size:14px;line-height:20px;border-top:1px solid #f0ded4;">Remaining Balance Due</td>
+                    <td align="right" style="padding:12px 20px;font-size:14px;line-height:20px;font-weight:700;white-space:nowrap;border-top:1px solid #f0ded4;color:${balanceRemainingPaise > 0 ? '#b45309' : '#059669'};">${formatMerchCurrency(balanceRemainingPaise)}</td>
+                  </tr>
+                </table>
+
+                ${payment.note ? `
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;background:#fffaf7;border:1px solid #e7cabb;border-left:4px solid #ad3c22;border-radius:0 8px 8px 0;margin-top:16px;">
+                    <tr>
+                      <td style="padding:12px 18px;">
+                        <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:#ad3c22;text-transform:uppercase;">Payment Notes / Remarks</p>
+                        <p style="margin:0;font-size:13px;color:#52606f;line-height:1.5;">${escapeHtml(payment.note)}</p>
+                      </td>
+                    </tr>
+                  </table>
+                ` : ''}
+              </td>
+            </tr>
+
+            <!-- Action Buttons Row -->
+            <tr>
+              <td class="mobile-pad" style="padding:0 30px 30px;">
+                <a class="mobile-button" href="${escapeHtml(homeUrl)}" style="display:block;text-align:center;padding:16px 18px;border-radius:6px;background:#b63b20;color:#ffffff;text-decoration:none;font-family:Georgia,'Times New Roman',serif;font-size:20px;line-height:26px;font-weight:700;">Visit H2 House of Health&nbsp;&nbsp;&#8594;</a>
+              </td>
+            </tr>
+
+            <!-- Footer: Matches Bottom of Invoice -->
+            <tr>
+              <td class="mobile-pad" align="center" style="padding:28px 24px 26px;background:#f4eee9;border-top:1px solid #ead8cd;text-align:center;">
+                <!-- Centered Logo -->
+                <div align="center" style="text-align:center;margin:0 auto 14px;">
+                  <a href="${escapeHtml(homeUrl)}" style="display:inline-block;text-decoration:none;margin:0 auto;text-align:center;">
+                    <img src="${escapeHtml(logoUrl)}" width="140" alt="H2 House of Health" style="display:block;border:0;width:140px;max-width:140px;height:auto;margin:0 auto;text-align:center;">
+                  </a>
+                </div>
+
+                <!-- Brand Slogan -->
+                <p style="margin:0 0 12px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:22px;font-weight:700;letter-spacing:1px;text-transform:uppercase;text-align:center;">PREVENTIVE TODAY, HEALTHIER TOMORROW.</p>
+
+                <!-- Social Links -->
+                <div align="center" style="text-align:center;margin:0 auto 16px;">
+                  <a href="https://www.instagram.com/h2houseofhealth" style="display:inline-block;width:28px;height:28px;margin:0 10px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:22px;line-height:28px;text-align:center;" title="Instagram">&#9678;</a>
+                  <a href="${escapeHtml(homeUrl)}" style="display:inline-block;width:28px;height:28px;margin:0 10px;color:#ad3c22;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:22px;line-height:28px;text-align:center;" title="Facebook">f</a>
+                  <a href="${escapeHtml(homeUrl)}" style="display:inline-block;width:32px;height:28px;margin:0 10px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:22px;line-height:28px;text-align:center;" title="YouTube">&#9658;</a>
+                </div>
+
+                <!-- Divider -->
+                <div style="border-top:1px solid #d2a08d;margin:16px auto;width:100%;max-width:520px;"></div>
+
+                <!-- Company Details: Fully Centered -->
+                <div align="center" style="text-align:center;color:#14233b;font-size:13px;line-height:1.7;margin:0 auto;max-width:520px;">
+                  <p style="margin:0 0 6px;text-align:center;">📞 <strong>91000 56979, 91000 86979</strong> &nbsp;&bull;&nbsp; ✉️ <a href="mailto:hello@h2houseofhealth.com" style="color:#14233b;text-decoration:none;font-weight:600;">hello@h2houseofhealth.com</a></p>
+                  <p style="margin:0 0 6px;text-align:center;">📍 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033</p>
+                  <p style="margin:0 0 10px;text-align:center;">🌐 <a href="https://www.h2houseofhealth.com" style="color:#ad3c22;text-decoration:none;font-weight:700;">www.h2houseofhealth.com</a></p>
+                  <p style="margin:12px 0 0;color:#788696;font-size:11px;line-height:1.5;text-align:center;">Official Influencer Commission Settlement Receipt &bull; H2 House of Health</p>
+                </div>
+              </td>
+            </tr>
+
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+  }
+
+  function buildInfluencerCommissionEmailText({
+    payment,
+    influencer,
+    coupons = [],
+    commissionEarnedPaise = 0,
+    commissionPaidPaise = 0,
+    cumulativePaidPaise = 0,
+    balanceRemainingPaise = 0,
+    formattedDate = '',
+    recipientRole = 'influencer',
+  }) {
+    const couponList = coupons.map((c) => c.code || c).filter(Boolean).join(', ') || 'None';
+    const invoiceNum = payment.invoice_number || payment.invoiceNumber || 'H2-INV-COM';
+    const refNum = payment.reference_number || payment.referenceNumber || 'N/A';
+    const method = payment.payment_method || payment.paymentMethod || 'Direct Transfer';
+    const status = (payment.status || 'PAID').toUpperCase();
+    const influencerName = influencer.name || 'Influencer Partner';
+    const amountInr = (commissionPaidPaise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const header = recipientRole === 'admin'
+      ? `Commission amount paid to influencer: ${influencerName}`
+      : `Commission amount sent to influencer: ${influencerName}`;
+
+    return [
+      '============================================================',
+      'H2 HOUSE OF HEALTH - COMMISSION PAYMENT NOTIFICATION',
+      '============================================================',
+      '',
+      header,
+      `Amount Paid: ₹${amountInr}`,
+      `Payment Date: ${formattedDate}`,
+      `Payment Status: ${status}`,
+      `Invoice Number: ${invoiceNum}`,
+      `Payment Method: ${method}`,
+      `Reference / UTR ID: ${refNum}`,
+      '',
+      'INFLUENCER DETAILS:',
+      `Influencer Name: ${influencerName}`,
+      `Email: ${payment.influencer_email || payment.influencerEmail || influencer.email || 'N/A'}`,
+      `Coupon Code(s): ${couponList}`,
+      '',
+      'FINANCIAL BREAKDOWN:',
+      `Total Commission Earned: ${formatMerchCurrency(commissionEarnedPaise)}`,
+      `Cumulative Commission Paid: ${formatMerchCurrency(cumulativePaidPaise)}`,
+      `Current Commission Paid: ${formatMerchCurrency(commissionPaidPaise)}`,
+      `Remaining Balance Due: ${formatMerchCurrency(balanceRemainingPaise)}`,
+      '',
+      payment.note ? `Payment Notes: ${payment.note}\n` : '',
+      'COMPANY DETAILS (FROM INVOICE):',
+      'H2 House of Health',
+      '📞 Phone: 91000 56979, 91000 86979',
+      '✉️ Email: hello@h2houseofhealth.com',
+      '📍 Address: 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033',
+      '🌐 Website: www.h2houseofhealth.com',
+      'Admin Recipient: h2houseofhealth@gmail.com',
+      '',
+      'Thank you for partnering with H2 House of Health.',
+      '============================================================',
+    ].filter(Boolean).join('\n');
+  }
+
+  // ─── Dispatch Commission Payment Emails to Influencer & Admin ───
+  async function sendInfluencerCommissionNotificationEmails({
+    payment,
+    influencer,
+    coupons = [],
+    commissionEarnedPaise = 0,
+    commissionPaidPaise = 0,
+    cumulativePaidPaise = 0,
+    balanceRemainingPaise = 0,
+    formattedDate = '',
+    req = null,
+  }) {
+    const influencerEmail = String(payment.influencerEmail || payment.influencer_email || influencer.email || '').trim().toLowerCase();
+    const adminEmail = FIXED_ADMIN_EMAIL;
+    const invoiceNumber = payment.invoiceNumber || payment.invoice_number || 'H2-INV-COM';
+    const amountInr = (commissionPaidPaise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const influencerName = influencer.name || 'Influencer Partner';
+
+    const influencerHtml = buildInfluencerCommissionEmailHtml({
+      payment,
+      influencer,
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      recipientRole: 'influencer',
+      req,
+    });
+
+    const influencerText = buildInfluencerCommissionEmailText({
+      payment,
+      influencer,
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      recipientRole: 'influencer',
+    });
+
+    const adminHtml = buildInfluencerCommissionEmailHtml({
+      payment,
+      influencer,
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      recipientRole: 'admin',
+      req,
+    });
+
+    const adminText = buildInfluencerCommissionEmailText({
+      payment,
+      influencer,
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      recipientRole: 'admin',
+    });
+
+    const results = {
+      influencer: { to: influencerEmail, status: 'pending' },
+      admin: { to: adminEmail, status: 'pending' },
+    };
+
+    // 1. Send to Influencer
+    try {
+      if (typeof sendMerchEmail === 'function' && influencerEmail) {
+        await sendMerchEmail({
+          to: influencerEmail,
+          subject: `Commission amount sent to influencer: ${influencerName} - ₹${amountInr} (${invoiceNumber}) | H2 House of Health`,
+          text: influencerText,
+          html: influencerHtml,
+        });
+        results.influencer.status = 'sent';
+      } else {
+        results.influencer.status = 'skipped_no_mailer';
+      }
+    } catch (err) {
+      console.error('[Merch] Failed to email commission payout to influencer:', err.message);
+      results.influencer.status = 'failed';
+      results.influencer.error = err.message;
+    }
+
+    // 2. Send to Admin (Fixed copy: h2houseofhealth@gmail.com)
+    try {
+      if (typeof sendMerchEmail === 'function' && adminEmail) {
+        await sendMerchEmail({
+          to: adminEmail,
+          subject: `Commission amount paid to influencer: ${influencerName} - ₹${amountInr} (${invoiceNumber}) | H2 House of Health`,
+          text: adminText,
+          html: adminHtml,
+        });
+        results.admin.status = 'sent';
+      } else {
+        results.admin.status = 'skipped_no_mailer';
+      }
+    } catch (err) {
+      console.error('[Merch] Failed to email commission payout copy to admin:', err.message);
+      results.admin.status = 'failed';
+      results.admin.error = err.message;
+    }
+
+    return results;
   }
 
   function loadMerchInfluencers() {
@@ -4063,42 +4764,36 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
               </td>
             </tr>
             <tr>
-              <td class="mobile-pad" style="padding:28px 30px 26px;background:#f4eee9;border-top:1px solid #ead8cd;">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-                  <tr>
-                    <td class="mobile-stack mobile-center footer-logo-cell" valign="middle" style="width:31%;padding-right:22px;border-right:1px solid #d2a08d;">
-                      <a href="${escapeHtml(links.home)}"><img src="${escapeHtml(links.logo)}" width="132" alt="H2 House of Health logo" style="display:block;border:0;width:132px;max-width:132px;height:auto;"></a>
-                    </td>
-                    <td class="mobile-stack mobile-center footer-copy-cell" valign="middle" style="padding-left:26px;">
-                      <p style="margin:0 0 15px;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:21px;font-weight:700;letter-spacing:1px;">PREVENTIVE TODAY, HEALTHIER TOMORROW.</p>
-                      <p style="margin:0 0 18px;">
-                        <a href="${escapeHtml(links.instagram)}" style="display:inline-block;width:26px;height:26px;margin-right:28px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:24px;line-height:26px;text-align:center;" title="Instagram">&#9678;</a>
-                        <a href="${escapeHtml(links.facebook)}" style="display:inline-block;width:26px;height:26px;margin-right:28px;color:#ad3c22;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:24px;line-height:26px;text-align:center;" title="Facebook">f</a>
-                        <a href="${escapeHtml(links.youtube)}" style="display:inline-block;width:30px;height:24px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:24px;line-height:24px;text-align:center;" title="YouTube">&#9658;</a>
-                      </p>
-                    </td>
-                  </tr>
-                </table>
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:24px;">
-                  <tr>
-                    <td class="mobile-stack mobile-center footer-contact-cell" valign="top" style="width:100%;">
-                      <p style="margin:0 0 8px;color:#14233b;font-size:15px;line-height:22px;">
-                        <span style="color:#ad3c22;font-size:18px;line-height:18px;">&#9993;</span>
-                        <span>&nbsp;&nbsp;</span>
-                        <span class="footer-contact"><a href="${escapeHtml(links.email)}" style="color:#111827;text-decoration:none;">hello@h2houseofhealth.com</a></span>
-                        <span class="footer-separator">&nbsp;&nbsp; | &nbsp;&nbsp;</span>
-                        <span style="color:#ad3c22;font-size:18px;line-height:18px;">&#9742;</span>
-                        <span>&nbsp;&nbsp;</span>
-                        <span class="footer-contact"><a href="${escapeHtml(links.phone)}" style="color:#111827;text-decoration:none;">+91 98765 43210</a></span>
-                      </p>
-                      <p style="margin:0;color:#14233b;font-size:15px;line-height:22px;">
-                        <span style="color:#ad3c22;font-size:18px;line-height:18px;">&#9679;</span>
-                        <span>&nbsp;&nbsp;</span>
-                        H2 House of Health, Hyderabad
-                      </p>
-                    </td>
-                  </tr>
-                </table>
+              <td class="mobile-pad" align="center" style="padding:28px 24px 26px;background:#f4eee9;border-top:1px solid #ead8cd;text-align:center;">
+                <!-- Centered Logo -->
+                <div align="center" style="text-align:center;margin:0 auto 14px;">
+                  <a href="${escapeHtml(links.home)}" style="display:inline-block;text-decoration:none;margin:0 auto;text-align:center;">
+                    <img src="${escapeHtml(links.logo)}" width="140" alt="H2 House of Health logo" style="display:block;border:0;width:140px;max-width:140px;height:auto;margin:0 auto;text-align:center;">
+                  </a>
+                </div>
+
+                <!-- Brand Slogan -->
+                <p style="margin:0 0 12px;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:22px;font-weight:700;letter-spacing:1px;text-align:center;">PREVENTIVE TODAY, HEALTHIER TOMORROW.</p>
+
+                <!-- Social Links -->
+                <div align="center" style="text-align:center;margin:0 auto 16px;">
+                  <a href="${escapeHtml(links.instagram)}" style="display:inline-block;width:28px;height:28px;margin:0 10px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:22px;line-height:28px;text-align:center;" title="Instagram">&#9678;</a>
+                  <a href="${escapeHtml(links.facebook)}" style="display:inline-block;width:28px;height:28px;margin:0 10px;color:#ad3c22;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:22px;line-height:28px;text-align:center;" title="Facebook">f</a>
+                  <a href="${escapeHtml(links.youtube)}" style="display:inline-block;width:32px;height:28px;margin:0 10px;color:#ad3c22;text-decoration:none;font-weight:700;font-size:22px;line-height:28px;text-align:center;" title="YouTube">&#9658;</a>
+                </div>
+
+                <!-- Divider -->
+                <div style="border-top:1px solid #d2a08d;margin:16px auto;width:100%;max-width:520px;"></div>
+
+                <!-- Contact Info Centered -->
+                <div align="center" style="text-align:center;color:#14233b;font-size:14px;line-height:1.7;margin:0 auto;max-width:520px;">
+                  <p style="margin:0 0 6px;text-align:center;">
+                    ✉️ <a href="${escapeHtml(links.email)}" style="color:#14233b;text-decoration:none;font-weight:600;">hello@h2houseofhealth.com</a>
+                    &nbsp;&bull;&nbsp;
+                    📞 <a href="${escapeHtml(links.phone)}" style="color:#14233b;text-decoration:none;font-weight:600;">+91 91000 56979</a>
+                  </p>
+                  <p style="margin:0;text-align:center;">📍 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033</p>
+                </div>
               </td>
             </tr>
           </table>
@@ -4821,12 +5516,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function getMerchBundleDiscountPaise(bundleCode, items = []) {
     if (String(bundleCode || '').trim().toUpperCase() !== 'H2BUNDLE15') return 0;
-    const bottle = items.find((item) => /bottle/i.test(String(item.productName || '')) && Number(item.quantity || 0) > 0);
-    const mist = items.find((item) => /(mist|spray)/i.test(String(item.productName || '')) && Number(item.quantity || 0) > 0);
+    const bundleItems = (items || []).filter((item) => Boolean(item.isBundle || item.source === 'bundle'));
+    const bottle = bundleItems.find((item) => /bottle/i.test(String(item.productName || '')) && Number(item.quantity || 0) > 0);
+    const mist = bundleItems.find((item) => /(mist|spray)/i.test(String(item.productName || '')) && Number(item.quantity || 0) > 0);
     if (!bottle || !mist) return 0;
-    const bottleUnitPrice = Math.round(Number(bottle.lineTotal || 0) / Math.max(1, Number(bottle.quantity || 1)));
-    const mistUnitPrice = Math.round(Number(mist.lineTotal || 0) / Math.max(1, Number(mist.quantity || 1)));
-    return Math.max(0, Math.round((bottleUnitPrice + mistUnitPrice) * 0.15));
+    const bundleQty = Math.min(Number(bottle.quantity || 1), Number(mist.quantity || 1));
+    const bottleUnitPrice = Number(bottle.unitPrice || Math.round(Number(bottle.lineTotal || 0) / Math.max(1, Number(bottle.quantity || 1))));
+    const mistUnitPrice = Number(mist.unitPrice || Math.round(Number(mist.lineTotal || 0) / Math.max(1, Number(mist.quantity || 1))));
+    return Math.max(0, Math.round((bottleUnitPrice + mistUnitPrice) * 0.15 * bundleQty));
   }
 
   function recordMerchCouponRedemption(payload) {
@@ -5091,7 +5788,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
   });
 
-  app.post('/api/merch/preview-coupon',(req, res) => {
+  app.post('/api/merch/preview-coupon', (req, res) => {
+    const bundleCode = String(req.body?.bundleCode || '').trim().toUpperCase();
+    if (bundleCode === 'H2BUNDLE15') {
+      return res.status(400).json({ error: 'Coupons cannot be applied to orders with Bundle & Save discounts.' });
+    }
     const authUser = getMerchAuthUser(req);
     const couponCode = normalizeMerchCouponCode(req.body?.couponCode);
     if (!couponCode) {
@@ -5232,16 +5933,26 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     let subtotal = 0;
     const validatedItems = [];
 
+    const variantQuantities = {};
+    for (const item of items) {
+      const vid = Number(item.variantId || 0);
+      const quantity = Math.max(1, Math.floor(Number(item.quantity || 0)));
+      variantQuantities[vid] = (variantQuantities[vid] || 0) + quantity;
+    }
+    for (const [vid, totalQty] of Object.entries(variantQuantities)) {
+      const purchase = getMerchPurchaseVariant(Number(vid));
+      if (!purchase) {
+        return res.status(400).json({ error: `Variant ${vid} not found` });
+      }
+      if (purchase.stock < totalQty) {
+        return res.status(409).json({ error: `Insufficient stock for ${purchase.variant.product_name} (available: ${purchase.stock})` });
+      }
+    }
+
     for (const item of items) {
       const purchase = getMerchPurchaseVariant(item.variantId);
       const variant = purchase?.variant;
       const quantity = Math.max(1, Math.floor(Number(item.quantity || 0)));
-      if (!purchase) {
-        return res.status(400).json({ error: `Variant ${item.variantId} not found` });
-      }
-      if (purchase.stock < quantity) {
-        return res.status(409).json({ error: `Insufficient stock for ${variant.product_name} (available: ${purchase.stock})` });
-      }
       const offer = getVariantActiveOffer(variant.id, variant.product_id);
       let unitPrice = Number(variant.price || 0);
       if (offer) {
@@ -5253,6 +5964,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       }
       const lineTotal = unitPrice * quantity;
       subtotal += lineTotal;
+      const isBundle = Boolean(item.isBundle || item.source === 'bundle');
       validatedItems.push({
         variantId: variant.id,
         productId: Number(variant.product_id),
@@ -5264,10 +5976,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         offerName: offer ? offer.name : null,
         quantity,
         lineTotal,
+        isBundle,
+        source: isBundle ? 'bundle' : 'individual',
       });
     }
 
-    let couponResult = couponCode
+    const bundleDiscountPaise = getMerchBundleDiscountPaise(bundleCode, validatedItems);
+    let couponResult = (couponCode && bundleDiscountPaise === 0)
       ? validateMerchCouponForUser({
           code: couponCode,
           userId: authUser?.id,
@@ -5284,11 +5999,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
     }
 
-    // Product prices are GST-inclusive; derive included GST for reporting only.
-    const gstAmount = Math.max(0, subtotal - Math.round(subtotal / 1.18));
-    const shippingCharge = subtotal >= 99900 ? 0 : 9900; // Free above ₹999 or ₹1 test
-    const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
-      + getMerchBundleDiscountPaise(bundleCode, validatedItems);
+    const shippingCharge = 0; // Free shipping by default as of now
+    const discountAmount = bundleDiscountPaise > 0
+      ? bundleDiscountPaise
+      : Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
+    const discountedSubtotal = Math.max(0, subtotal - discountAmount);
+    // Product prices are GST-inclusive; derive included GST on discounted amount.
+    const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
     const { campaignId, influencerId } = resolveOrderCampaignAttribution(req, couponResult);
     const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems);
     const totalAmount = Math.max(100, subtotal + shippingCharge - discountAmount);
@@ -5305,7 +6022,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       amount: totalAmount,
       currency: 'INR',
       receipt: orderNumber,
-      notes: { customerEmail: resolvedCustomer.email, orderNumber, couponCode: String(couponResult.couponCode || couponCode || ''), bundleCode },
+      notes: { customerEmail: resolvedCustomer.email, orderNumber, couponCode: bundleDiscountPaise > 0 ? '' : String(couponResult.couponCode || couponCode || ''), bundleCode, currency: convertedPayment.currency },
     }).then(rpOrder => {
       // Save order to DB
       const insertOrder = db.prepare(`
@@ -5341,7 +6058,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         shippingCharge,
         discountAmount,
         customer: resolvedCustomer,
-        coupon: buildMerchCouponPreview(couponResult),
+        coupon: bundleDiscountPaise > 0 ? null : buildMerchCouponPreview(couponResult),
       });
     }).catch(err => {
       console.error('Merch Razorpay order create failed:', err?.message || err);
@@ -5625,18 +6342,44 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
     let subtotal = 0;
     const validatedItems = [];
+
+    const variantQuantities = {};
+    for (const item of items) {
+      const vid = Number(item.variantId || 0);
+      const quantity = Math.max(1, Math.floor(Number(item.quantity || 0)));
+      variantQuantities[vid] = (variantQuantities[vid] || 0) + quantity;
+    }
+    for (const [vid, totalQty] of Object.entries(variantQuantities)) {
+      const purchase = getMerchPurchaseVariant(Number(vid));
+      if (!purchase) return res.status(400).json({ error: `Variant ${vid} not found` });
+      if (purchase.stock < totalQty) {
+        return res.status(409).json({ error: `Insufficient stock for ${purchase.variant.product_name} (available: ${purchase.stock})` });
+      }
+    }
+
     for (const item of items) {
       const purchase = getMerchPurchaseVariant(item.variantId);
       const variant = purchase?.variant;
       const quantity = Math.max(1, Math.floor(Number(item.quantity || 0)));
-      if (!purchase) return res.status(400).json({ error: `Variant ${item.variantId} not found` });
-      if (purchase.stock < quantity) return res.status(409).json({ error: `Insufficient stock for ${variant.product_name}` });
       const lineTotal = variant.price * quantity;
       subtotal += lineTotal;
-      validatedItems.push({ productId: Number(variant.product_id), variantId: variant.id, productName: variant.product_name, variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '), sku: variant.sku, unitPrice: variant.price, quantity, lineTotal });
+      const isBundle = Boolean(item.isBundle || item.source === 'bundle');
+      validatedItems.push({
+        productId: Number(variant.product_id),
+        variantId: variant.id,
+        productName: variant.product_name,
+        variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '),
+        sku: variant.sku,
+        unitPrice: variant.price,
+        quantity,
+        lineTotal,
+        isBundle,
+        source: isBundle ? 'bundle' : 'individual',
+      });
     }
 
-    let couponResult = couponCode
+    const bundleDiscountPaise = getMerchBundleDiscountPaise(bundleCode, validatedItems);
+    let couponResult = (couponCode && bundleDiscountPaise === 0)
       ? validateMerchCouponForUser({
           code: couponCode,
           userId: authUser?.id,
@@ -5653,11 +6396,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
     }
 
-    const gstAmount = Math.max(0, subtotal - Math.round(subtotal / 1.18));
-    const shippingCharge = subtotal >= 99900 ? 0 : 9900;
+    const shippingCharge = 0; // Free shipping by default as of now
     const codSurcharge = 5000; // ₹50
-    const discountAmount = Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
-      + getMerchBundleDiscountPaise(bundleCode, validatedItems);
+    const discountAmount = bundleDiscountPaise > 0
+      ? bundleDiscountPaise
+      : Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
+    const discountedSubtotal = Math.max(0, subtotal - discountAmount);
+    // Product prices are GST-inclusive; derive included GST on discounted amount.
+    const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
     const { campaignId, influencerId } = resolveOrderCampaignAttribution(req, couponResult);
     const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems);
     const totalAmount = Math.max(100, subtotal + shippingCharge + codSurcharge - discountAmount);
@@ -5704,7 +6450,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       decrementMerchPurchaseVariant(item.variantId, item.quantity);
     }
 
-    if (Number(couponResult.coupon?.id || 0) > 0 && Number(discountAmount || 0) > 0 && Number(authUser?.id || 0) > 0) {
+    if (bundleDiscountPaise === 0 && Number(couponResult.coupon?.id || 0) > 0 && Number(discountAmount || 0) > 0 && Number(authUser?.id || 0) > 0) {
       recordMerchCouponRedemption({
         couponId: Number(couponResult.coupon.id),
         userId: Number(authUser.id),
@@ -5731,9 +6477,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       success: true,
       orderNumber,
       orderId,
+      currency: 'INR',
+      subtotal,
       totalAmount,
       discountAmount,
-      coupon: buildMerchCouponPreview(couponResult),
+      coupon: bundleDiscountPaise > 0 ? null : buildMerchCouponPreview(couponResult),
       notifications,
       message: 'COD order placed',
       customer: resolvedCustomer,
@@ -5795,7 +6543,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     const rows = db.prepare(`
-      SELECT c.id, c.customer_id AS customerId, c.variant_id AS variantId, c.quantity,
+      SELECT c.id, c.customer_id AS customerId, c.variant_id AS variantId, c.quantity, c.is_bundle AS isBundle,
              v.product_id AS productId, v.sku, v.size, v.color, v.price, v.stock, v.image_url AS imageUrl,
              p.name AS productName, p.slug AS productSlug, p.is_active AS productActive, v.is_active AS variantActive
       FROM merch_customer_cart_items c
@@ -5814,6 +6562,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         variantLabel: [row.size, row.color].filter(Boolean).join(' / '),
         price: Number(row.price),
         quantity: Math.min(Number(row.quantity || 1), Number(row.stock || 1)),
+        isBundle: Boolean(row.isBundle),
+        source: row.isBundle ? 'bundle' : 'individual',
         image: row.imageUrl,
         sku: row.sku,
       }));
@@ -5832,16 +6582,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const sync = db.transaction(() => {
       db.prepare('DELETE FROM merch_customer_cart_items WHERE customer_id = ?').run(profile.id);
       const insert = db.prepare(`
-        INSERT INTO merch_customer_cart_items (customer_id, variant_id, quantity, updated_at)
-        VALUES (?, ?, ?, datetime('now'))
+        INSERT INTO merch_customer_cart_items (customer_id, variant_id, quantity, is_bundle, updated_at)
+        VALUES (?, ?, ?, ?, datetime('now'))
       `);
       for (const item of incomingItems) {
         const variantId = Number(item.variantId || item.id || 0);
         const quantity = Math.max(1, Math.min(99, Number(item.quantity || 1)));
+        const isBundle = Boolean(item.isBundle || item.source === 'bundle') ? 1 : 0;
         if (variantId > 0) {
           const variantExists = db.prepare('SELECT id, stock FROM merch_variants WHERE id = ? AND is_active = 1').get(variantId);
           if (variantExists && variantExists.stock > 0) {
-            insert.run(profile.id, variantId, Math.min(quantity, variantExists.stock));
+            insert.run(profile.id, variantId, Math.min(quantity, variantExists.stock), isBundle);
           }
         }
       }
@@ -7206,12 +7957,30 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       return res.status(400).json({ message: 'Payment confirmation is required before proceeding.' });
     }
 
+    // Verify security question answer if configured
+    const securityRow = db.prepare('SELECT answer FROM merch_admin_security_questions WHERE id = 1').get();
+    if (securityRow && securityRow.answer && String(securityRow.answer).trim()) {
+      const submittedAnswer = String(req.body?.securityAnswer || req.body?.answer || '').trim();
+      const expectedAnswer = String(securityRow.answer || '').trim();
+      if (!submittedAnswer || submittedAnswer.toLowerCase() !== expectedAnswer.toLowerCase()) {
+        return res.status(401).json({ message: 'Wrong answer' });
+      }
+    }
+
     // Calculate current commission stats
     const statsRows = getInfluencerStatsRows([influencerId]);
     const stats = statsRows[0] || {};
     const commissionEarnedPaise = Math.round(Number(stats.totalCommissionEarned || 0));
     const previousPaidPaise = Math.round(Number(influencer.paidCommission ?? influencer.paid_commission ?? 0));
     const newCumulativePaidPaise = previousPaidPaise + amountPaise;
+
+    // Strict validation: cumulative paid CANNOT exceed earned commission
+    if (commissionEarnedPaise > 0 && newCumulativePaidPaise > commissionEarnedPaise) {
+      return res.status(400).json({
+        message: `Payment amount (${formatMerchCurrency(amountPaise)}) exceeds remaining commission balance (${formatMerchCurrency(Math.max(0, commissionEarnedPaise - previousPaidPaise))}). Commission paid cannot exceed total earned commission of ${formatMerchCurrency(commissionEarnedPaise)}.`,
+      });
+    }
+
     const balanceRemainingPaise = Math.max(0, commissionEarnedPaise - newCumulativePaidPaise);
 
     const now = new Date();
@@ -7300,46 +8069,29 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       formattedDate,
     });
 
-    // 3. Send payment invoice to Influencer Email and h2houseofhealth@gmail.com
-    const emailResults = {
-      influencer: { to: influencerEmail, status: 'pending' },
-      admin: { to: ADMIN_INVOICE_RECIPIENT, status: 'pending' },
+    // 3. Send payment email notification to Influencer and Admin
+    let emailResults = {
+      influencer: { to: influencerEmail, status: 'skipped' },
+      admin: { to: ADMIN_INVOICE_RECIPIENT, status: 'skipped' },
     };
 
-    try {
-      if (typeof sendMerchEmail === 'function') {
-        await sendMerchEmail({
-          to: influencerEmail,
-          subject: `Commission Payment Receipt & Invoice - ${invoiceNumber} - H2 House of Health`,
-          text: invoiceText,
-          html: invoiceHtml,
-        });
-        emailResults.influencer.status = 'sent';
-      } else {
-        emailResults.influencer.status = 'skipped_no_mailer';
-      }
-    } catch (err) {
-      console.error('[Merch] Failed to email commission invoice to influencer:', err.message);
-      emailResults.influencer.status = 'failed';
-      emailResults.influencer.error = err.message;
-    }
+    const shouldSendEmail = req.body?.sendEmail !== false &&
+      req.body?.sendEmail !== 'false' &&
+      req.body?.sendPaymentEmail !== false &&
+      req.body?.sendPaymentEmail !== 'false';
 
-    try {
-      if (typeof sendMerchEmail === 'function') {
-        await sendMerchEmail({
-          to: ADMIN_INVOICE_RECIPIENT,
-          subject: `[Admin Copy] Commission Payment Invoice - ${influencer.name} - ${invoiceNumber}`,
-          text: invoiceText,
-          html: invoiceHtml,
-        });
-        emailResults.admin.status = 'sent';
-      } else {
-        emailResults.admin.status = 'skipped_no_mailer';
-      }
-    } catch (err) {
-      console.error('[Merch] Failed to email commission invoice to admin:', err.message);
-      emailResults.admin.status = 'failed';
-      emailResults.admin.error = err.message;
+    if (shouldSendEmail) {
+      emailResults = await sendInfluencerCommissionNotificationEmails({
+        payment: paymentRecord,
+        influencer: { ...influencer, email: influencerEmail },
+        coupons,
+        commissionEarnedPaise,
+        commissionPaidPaise: amountPaise,
+        cumulativePaidPaise: newCumulativePaidPaise,
+        balanceRemainingPaise,
+        formattedDate,
+        req,
+      });
     }
 
     const updatedInfluencer = loadMerchInfluencers().find((item) => Number(item.id) === influencerId);
@@ -7355,8 +8107,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     });
   });
 
-  // ─── ADMIN: Correct Commission Paid (Secured with Authorization Audit) ───
-  app.post('/api/merch/admin/influencers/:id/commission-correction', requireAdmin, (req, res) => {
+  // ─── ADMIN: Correct Commission Paid (Secured with Authorization Audit & Email Integration) ───
+  app.post('/api/merch/admin/influencers/:id/commission-correction', requireAdmin, async (req, res) => {
     const influencerId = Number(req.params.id);
     if (!Number.isInteger(influencerId) || influencerId <= 0) {
       return res.status(400).json({ message: 'Invalid influencer id' });
@@ -7378,7 +8130,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       return res.status(401).json({ message: 'Wrong answer' });
     }
 
-    const reason = String(req.body?.reason || '').trim();
+    const reason = String(req.body?.reason || req.body?.correctionReason || req.body?.note || '').trim();
     if (!reason || reason.length < 3) {
       return res.status(400).json({ message: 'A reason for the commission correction is required.' });
     }
@@ -7393,23 +8145,73 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const stats = getInfluencerStatsRows([influencerId])[0] || {};
     const commissionEarnedPaise = Math.max(0, Math.round(Number(stats.totalCommissionEarned || 0)));
     const cumulativePaidPaise = payBalancePaise > 0 ? prevAmountPaise + payBalancePaise : newAmountPaise;
-    if (commissionEarnedPaise > 0 && cumulativePaidPaise > commissionEarnedPaise) {
-      return res.status(400).json({ message: `Commission paid cannot exceed earned commission (${commissionEarnedPaise / 100}).` });
+
+    // Strict validation: Corrected Amount (₹) CANNOT be greater than commission earned by influencer
+    if (newAmountPaise > commissionEarnedPaise) {
+      return res.status(400).json({
+        message: `Corrected Amount (${formatMerchCurrency(newAmountPaise)}) cannot be greater than commission earned by influencer (${formatMerchCurrency(commissionEarnedPaise)}).`,
+      });
     }
+
+    // Strict validation: cumulative paid CANNOT exceed earned commission
+    if (cumulativePaidPaise > commissionEarnedPaise) {
+      return res.status(400).json({
+        message: `Commission paid (${formatMerchCurrency(cumulativePaidPaise)}) cannot exceed earned commission (${formatMerchCurrency(commissionEarnedPaise)}). Remaining balance is ${formatMerchCurrency(Math.max(0, commissionEarnedPaise - prevAmountPaise))}.`,
+      });
+    }
+
     const changedBy = String(req.user?.email || req.user?.name || 'admin');
+    const influencerEmail = String(req.body?.influencerEmail || req.body?.email || influencer.email || '').trim().toLowerCase();
+    const paymentMethod = String(req.body?.paymentMethod || req.body?.payment_method || 'Bank Transfer (NEFT/RTGS/IMPS)').trim();
+    const referenceNumber = String(req.body?.referenceNumber || req.body?.reference_number || `ADJ-${Date.now().toString().slice(-6)}`).trim();
+    const paymentDeltaPaise = Math.max(0, cumulativePaidPaise - prevAmountPaise);
+
+    const now = new Date();
+    const datePart = now.toISOString().slice(0, 10).replace(/-/g, '');
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const invoiceNumber = `H2-INV-COM-${datePart}-${randomSuffix}`;
+    const formattedDate = new Intl.DateTimeFormat('en-IN', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'Asia/Kolkata',
+    }).format(now);
+
+    let paymentId = null;
 
     const update = db.transaction(() => {
+      // 1. Audit log
       db.prepare(`
         INSERT INTO merch_influencer_commission_adjustments
           (influencer_id, previous_amount_paise, new_amount_paise, reason, changed_by, created_at)
         VALUES (?, ?, ?, ?, ?, datetime('now'))
       `).run(influencerId, prevAmountPaise, cumulativePaidPaise, reason, changedBy);
 
+      // 2. Update influencer record
       db.prepare(`
         UPDATE merch_influencers
-        SET paid_commission = ?, updated_at = datetime('now')
+        SET paid_commission = ?,
+            email = COALESCE(NULLIF(?, ''), email),
+            updated_at = datetime('now')
         WHERE id = ?
-      `).run(cumulativePaidPaise, influencerId);
+      `).run(cumulativePaidPaise, influencerEmail, influencerId);
+
+      // 3. Insert payment invoice record
+      const payResult = db.prepare(`
+        INSERT INTO merch_influencer_commission_payments
+          (influencer_id, amount_paise, payment_method, reference_number, status, paid_at, note, invoice_number, influencer_email, admin_email, created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'paid', datetime('now'), ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      `).run(
+        influencerId,
+        paymentDeltaPaise > 0 ? paymentDeltaPaise : cumulativePaidPaise,
+        paymentMethod,
+        referenceNumber,
+        reason,
+        invoiceNumber,
+        influencerEmail || (influencer.email || ''),
+        FIXED_ADMIN_EMAIL,
+        changedBy
+      );
+      paymentId = payResult.lastInsertRowid;
     });
 
     try {
@@ -7419,13 +8221,74 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       return res.status(500).json({ message: 'Database error adjusting commission.' });
     }
 
-    const updatedInfluencer = loadMerchInfluencers().find((item) => Number(item.id) === influencerId);
+    const updatedInfluencer = loadMerchInfluencers().find((item) => Number(item.id) === influencerId) || influencer;
+    const coupons = getInfluencerCouponRows([influencerId]);
+    const balanceRemainingPaise = Math.max(0, commissionEarnedPaise - cumulativePaidPaise);
+
+    const paymentRecord = {
+      id: paymentId,
+      influencerId,
+      amountPaise: paymentDeltaPaise > 0 ? paymentDeltaPaise : cumulativePaidPaise,
+      paymentMethod,
+      referenceNumber,
+      status: 'paid',
+      paidAt: now.toISOString(),
+      note: reason,
+      invoiceNumber,
+      influencerEmail: influencerEmail || updatedInfluencer.email,
+      adminEmail: FIXED_ADMIN_EMAIL,
+      createdBy: changedBy,
+    };
+
+    const invoiceHtml = buildInfluencerCommissionInvoiceHtml({
+      payment: paymentRecord,
+      influencer: { ...updatedInfluencer, email: influencerEmail || updatedInfluencer.email },
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise: paymentRecord.amountPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+    });
+
+    let emailResults = {
+      influencer: { to: influencerEmail || updatedInfluencer.email, status: 'skipped' },
+      admin: { to: FIXED_ADMIN_EMAIL, status: 'skipped' },
+    };
+
+    const shouldSendEmail = req.body?.sendEmail === true ||
+      req.body?.sendEmail === 'true' ||
+      req.body?.sendPaymentEmail === true ||
+      req.body?.sendPaymentEmail === 'true';
+
+    if (shouldSendEmail && (influencerEmail || updatedInfluencer.email)) {
+      try {
+        emailResults = await sendInfluencerCommissionNotificationEmails({
+          payment: paymentRecord,
+          influencer: { ...updatedInfluencer, email: influencerEmail || updatedInfluencer.email },
+          coupons,
+          commissionEarnedPaise,
+          commissionPaidPaise: paymentRecord.amountPaise,
+          cumulativePaidPaise,
+          balanceRemainingPaise,
+          formattedDate,
+          req,
+        });
+      } catch (mailErr) {
+        console.error('[Merch] Failed to dispatch commission email:', mailErr);
+      }
+    }
 
     return res.json({
       success: true,
       message: 'Commission paid adjusted successfully.',
       prevAmountPaise,
       newAmountPaise: cumulativePaidPaise,
+      paymentDeltaPaise,
+      payment: paymentRecord,
+      invoiceNumber,
+      invoiceHtml,
+      emailResults,
       changedBy,
       reason,
       influencer: updatedInfluencer,
@@ -7549,6 +8412,68 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     return res.json({ invoiceHtml, invoiceNumber: payment.invoiceNumber, payment });
+  });
+
+  // ─── ADMIN: Dispatch Commission Payment Email to Influencer & Admin ───
+  app.post('/api/merch/admin/influencers/:id/payments/:paymentId/send-email', requireAdmin, async (req, res) => {
+    const influencerId = Number(req.params.id);
+    const paymentId = Number(req.params.paymentId);
+    if (!Number.isInteger(influencerId) || !Number.isInteger(paymentId)) {
+      return res.status(400).json({ message: 'Invalid influencer or payment id' });
+    }
+    const influencer = getInfluencerById(influencerId);
+    if (!influencer) {
+      return res.status(404).json({ message: 'Influencer not found' });
+    }
+
+    const payment = db.prepare(`
+      SELECT id, influencer_id AS influencerId, amount_paise AS amountPaise, payment_method AS paymentMethod,
+             reference_number AS referenceNumber, status, paid_at AS paidAt, note, invoice_number AS invoiceNumber,
+             influencer_email AS influencerEmail, admin_email AS adminEmail, created_by AS createdBy, created_at AS createdAt
+      FROM merch_influencer_commission_payments
+      WHERE id = ? AND influencer_id = ?
+    `).get(paymentId, influencerId);
+
+    if (!payment) {
+      return res.status(404).json({ message: 'Payment record not found' });
+    }
+
+    const influencerEmail = String(req.body?.influencerEmail || payment.influencerEmail || influencer.email || '').trim().toLowerCase();
+    if (!influencerEmail || !isValidMerchEmail(influencerEmail)) {
+      return res.status(400).json({ message: 'A valid influencer email address is required to send notification.' });
+    }
+
+    const coupons = getInfluencerCouponRows([influencerId]);
+    const statsRows = getInfluencerStatsRows([influencerId]);
+    const stats = statsRows[0] || {};
+    const commissionEarnedPaise = Math.round(Number(stats.totalCommissionEarned || 0));
+    const cumulativePaidPaise = Math.round(Number(influencer.paidCommission ?? influencer.paid_commission ?? 0));
+    const balanceRemainingPaise = Math.max(0, commissionEarnedPaise - cumulativePaidPaise);
+
+    const paidDate = payment.paidAt ? new Date(payment.paidAt) : new Date(payment.createdAt || Date.now());
+    const formattedDate = new Intl.DateTimeFormat('en-IN', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'Asia/Kolkata',
+    }).format(paidDate);
+
+    const emailResults = await sendInfluencerCommissionNotificationEmails({
+      payment: { ...payment, influencerEmail },
+      influencer: { ...influencer, email: influencerEmail },
+      coupons,
+      commissionEarnedPaise,
+      commissionPaidPaise: payment.amountPaise,
+      cumulativePaidPaise,
+      balanceRemainingPaise,
+      formattedDate,
+      req,
+    });
+
+    return res.json({
+      success: true,
+      message: `Commission payout notification email dispatched to influencer (${influencerEmail}) and admin (${FIXED_ADMIN_EMAIL}).`,
+      emailResults,
+    });
   });
 
   // ─── ADMIN: Get order detail ───

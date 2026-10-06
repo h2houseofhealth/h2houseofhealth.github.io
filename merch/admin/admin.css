@@ -393,6 +393,10 @@ a {
   gap: 18px;
 }
 
+.admin-grid > * {
+  min-width: 0;
+}
+
 .admin-grid--stats {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
@@ -734,6 +738,8 @@ a {
   border-radius: var(--admin-radius);
   background: linear-gradient(180deg, #fff 0%, #fbf7f2 100%);
   box-shadow: var(--admin-shadow-soft);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .admin-card__head,
@@ -1040,8 +1046,17 @@ a {
   font-weight: 700;
 }
 
+.customers-table-scroll,
 .admin-table-wrap {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  width: 100%;
+  max-width: 100%;
+}
+
+.admin-customer-table {
+  min-width: 1050px;
 }
 
 .admin-table {
@@ -2832,6 +2847,7 @@ body.merch-admin-page {
     max-width: 100%;
   }
 
+  .customers-table-scroll,
   .admin-table-wrap,
   .admin-influencer-table-wrap {
     max-width: 100%;
