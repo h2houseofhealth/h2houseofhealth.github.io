@@ -11383,19 +11383,44 @@ function validateCouponForUser({ code, userId, appliesTo, productIds = [], produ
   }
   const couponAppliesTo = String(coupon.appliesTo || 'all').trim().toLowerCase();
   const productRestriction = couponAppliesTo.match(/^product:([\d,]+)$/);
+  const categoryRestriction = couponAppliesTo.match(/^category:([a-z0-9_\-,]+)$/);
   const restrictedProductIds = productRestriction
     ? [...new Set(productRestriction[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
     : [];
+
+  if (categoryRestriction) {
+    const rawCategories = categoryRestriction[1].split(',').map((c) => c.trim().toLowerCase()).filter(Boolean);
+    const targetCategories = new Set();
+    for (const c of rawCategories) {
+      targetCategories.add(c);
+      if (c === 'bottle' || c.includes('bottle')) targetCategories.add('bottles');
+      if (c === 'spray' || c.includes('spray') || c.includes('mist')) targetCategories.add('sprays');
+      if (c === 'hoodie' || c.includes('hoodie')) targetCategories.add('hoodies');
+      if (c === 'tshirt' || c.includes('t-shirt') || c.includes('tshirt')) targetCategories.add('t-shirt');
+    }
+    const categoriesList = Array.from(targetCategories);
+    if (categoriesList.length > 0) {
+      try {
+        const placeholders = categoriesList.map(() => '?').join(',');
+        const catRows = db.prepare(`SELECT id FROM merch_products WHERE LOWER(category) IN (${placeholders})`).all(...categoriesList);
+        catRows.forEach((r) => restrictedProductIds.push(Number(r.id)));
+      } catch (err) {
+        console.warn('[Merch] Failed to resolve category products:', err?.message || err);
+      }
+    }
+  }
+
+  const hasRestriction = Boolean(productRestriction || categoryRestriction);
   const productIdSet = new Set((Array.isArray(productIds) ? productIds : [productIds]).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0));
-  const appliesToProduct = productRestriction && restrictedProductIds.some((id) => productIdSet.has(id));
+  const appliesToProduct = hasRestriction && restrictedProductIds.some((id) => productIdSet.has(id));
   if (!['all', appliesTo].includes(couponAppliesTo) && !appliesToProduct) {
     return { error: 'This coupon is not valid for this payment.' };
   }
-  const restrictedProductSubtotalPaise = productRestriction
+  const restrictedProductSubtotalPaise = hasRestriction
     ? Math.max(0, Math.round(restrictedProductIds.reduce((sum, id) => sum + Number(productLineTotals?.[id] || 0), 0) || productSubtotalAmountPaise || 0))
     : 0;
   if (appliesToProduct && restrictedProductSubtotalPaise <= 0) {
-    return { error: 'This coupon is only valid when the selected product is in the cart.' };
+    return { error: categoryRestriction ? 'This coupon is only valid when an item from the selected category is in the cart.' : 'This coupon is only valid when the selected product is in the cart.' };
   }
   const assignedEmail = String(coupon.assignedUserEmail || coupon.recipientEmail || '').trim().toLowerCase();
   if (coupon.couponType === 'private' || assignedEmail) {
