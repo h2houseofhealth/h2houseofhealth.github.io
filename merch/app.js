@@ -2213,33 +2213,10 @@ function getWishlistProductPrice(item) {
     const savedAmount = Number(preview.discountAmountInr || 0);
     els.cartCouponPreview.hidden = false;
     els.cartCouponPreview.innerHTML = `
-      <div class="shopify-coupon__savings-card shopify-coupon__savings-card--cart">
-        <div class="shopify-coupon__savings-headline">
-          <span class="shopify-coupon__savings-coin" aria-hidden="true">🪙</span>
-          <span class="shopify-coupon__savings-title"><strong>${formatPrice(savedAmount)}</strong> Saved with discounts!</span>
-        </div>
-        <div class="shopify-coupon__applied-tag">
-          <div class="shopify-coupon__tag-left">
-            <svg class="shopify-coupon__tag-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m20 12-8 8-9-9V3h8l9 9Z"/><circle cx="7.5" cy="7.5" r="1.2"/></svg>
-            <span class="shopify-coupon__tag-name">${escapeHtml(preview.code || state.merchCouponCode)}</span>
-          </div>
-          <div class="shopify-coupon__tag-right">
-            <span class="shopify-coupon__tag-amt">- ${formatPrice(savedAmount)}</span>
-            <button type="button" class="shopify-coupon__tag-remove" id="cartCouponRemoveBtn" aria-label="Remove coupon" title="Remove coupon">✕</button>
-          </div>
-        </div>
+      <div class="cart-coupon__savings-text">
+        ${formatCheckoutMoney(savedAmount)} Saved with discounts!
       </div>
     `;
-
-    const removeBtn = document.getElementById('cartCouponRemoveBtn');
-    if (removeBtn) {
-      removeBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        clearMerchCoupon();
-        renderMerchCouponPreview();
-        renderCart();
-      });
-    }
   }
 
   async function applyMerchCouponFromCart(options = {}) {
@@ -6478,24 +6455,12 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             </label>
             <div class="shopify-coupon__actions">
               <button id="checkoutCouponApplyBtn" class="shopify-coupon__apply" type="button" ${state.merchCouponLoading ? 'disabled' : ''}>${state.merchCouponLoading ? 'APPLYING' : 'APPLY'}</button>
+              ${state.merchCouponPreview ? `<button id="checkoutCouponRemoveBtn" class="shopify-coupon__remove" type="button" aria-label="Remove coupon">✕ REMOVE</button>` : ''}
             </div>
           </div>
           ${state.merchCouponPreview ? `
-            <div class="shopify-coupon__savings-card">
-              <div class="shopify-coupon__savings-headline">
-                <span class="shopify-coupon__savings-coin" aria-hidden="true">🪙</span>
-                <span class="shopify-coupon__savings-title"><strong>${formatCheckoutMoney(state.merchCouponPreview.discountAmountInr)}</strong> Saved with discounts!</span>
-              </div>
-              <div class="shopify-coupon__applied-tag">
-                <div class="shopify-coupon__tag-left">
-                  <svg class="shopify-coupon__tag-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m20 12-8 8-9-9V3h8l9 9Z"/><circle cx="7.5" cy="7.5" r="1.2"/></svg>
-                  <span class="shopify-coupon__tag-name">${escapeHtml(state.merchCouponPreview.code || state.merchCouponCode)}</span>
-                </div>
-                <div class="shopify-coupon__tag-right">
-                  <span class="shopify-coupon__tag-amt">- ${formatCheckoutMoney(state.merchCouponPreview.discountAmountInr)}</span>
-                  <button type="button" id="checkoutCouponRemoveBtn" class="shopify-coupon__tag-remove" aria-label="Remove coupon" title="Remove coupon">✕</button>
-                </div>
-              </div>
+            <div class="shopify-coupon__savings-text">
+              ${formatCheckoutMoney(state.merchCouponPreview.discountAmountInr)} Saved with discounts!
             </div>
           ` : ''}
           ${state.merchCouponError ? `
