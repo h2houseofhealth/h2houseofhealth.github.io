@@ -11798,11 +11798,20 @@ function validateCouponForUser({ code, userId, appliesTo, productIds = [], produ
     : [];
 
   if (categoryRestriction) {
-    const targetCategories = categoryRestriction[1].split(',').map((c) => c.trim().toLowerCase()).filter(Boolean);
-    if (targetCategories.length > 0) {
+    const rawCategories = categoryRestriction[1].split(',').map((c) => c.trim().toLowerCase()).filter(Boolean);
+    const targetCategories = new Set();
+    for (const c of rawCategories) {
+      targetCategories.add(c);
+      if (c === 'bottle' || c.includes('bottle')) targetCategories.add('bottles');
+      if (c === 'spray' || c.includes('spray') || c.includes('mist')) targetCategories.add('sprays');
+      if (c === 'hoodie' || c.includes('hoodie')) targetCategories.add('hoodies');
+      if (c === 'tshirt' || c.includes('t-shirt') || c.includes('tshirt')) targetCategories.add('t-shirt');
+    }
+    const categoriesList = Array.from(targetCategories);
+    if (categoriesList.length > 0) {
       try {
-        const placeholders = targetCategories.map(() => '?').join(',');
-        const catRows = db.prepare(`SELECT id FROM merch_products WHERE LOWER(category) IN (${placeholders})`).all(...targetCategories);
+        const placeholders = categoriesList.map(() => '?').join(',');
+        const catRows = db.prepare(`SELECT id FROM merch_products WHERE LOWER(category) IN (${placeholders})`).all(...categoriesList);
         catRows.forEach((r) => restrictedProductIds.push(Number(r.id)));
       } catch (err) {
         console.warn('[Merch] Failed to resolve category products:', err?.message || err);
