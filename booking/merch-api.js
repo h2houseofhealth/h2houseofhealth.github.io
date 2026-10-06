@@ -1357,6 +1357,7 @@ module.exports = function mountMerchApi(app, {
       SELECT c.id, c.code, c.description, c.discount_type AS discountType, c.discount_value AS discountValue,
              c.commission_type AS commissionType, c.commission_rate AS commissionRate,
              c.commission_per_order_paise AS commissionPerOrderPaise,
+             c.applies_to AS appliesTo,
              c.active, c.is_active AS isActive, c.influencer_id AS influencerId,
              COUNT(CASE WHEN mo.status NOT IN ('cancelled', 'refunded', 'failed') THEN mo.id END) AS usageCount,
              COALESCE(SUM(CASE WHEN mo.status NOT IN ('cancelled', 'refunded', 'failed') AND mo.payment_status IN ('paid', 'cod_pending') THEN mo.total_amount ELSE 0 END), 0) AS revenue
@@ -1443,6 +1444,7 @@ module.exports = function mountMerchApi(app, {
         description: String(coupon.description || ''),
         discountType: String(coupon.discountType || ''),
         discountValue: Number(coupon.discountValue || 0),
+        appliesTo: String(coupon.appliesTo || 'merch'),
         active: Number(coupon.isActive ?? coupon.active ?? 0) === 1,
         usageCount: Number(coupon.usageCount || 0),
         revenue: Number(coupon.revenue || 0),

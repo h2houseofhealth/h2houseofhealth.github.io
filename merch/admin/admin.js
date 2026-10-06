@@ -506,7 +506,13 @@
       const listedCoupon = Array.isArray(state.coupons)
         ? state.coupons.find((coupon) => String(coupon.code || '').trim().toUpperCase() === code)
         : null;
-      return { ...(detailByCode.get(code) || {}), ...(listedCoupon || {}), code };
+      const apiDetail = detailByCode.get(code) || {};
+      const merged = { ...apiDetail, ...(listedCoupon || {}), code };
+      const rawScope = listedCoupon?.appliesTo || apiDetail?.appliesTo;
+      if (rawScope && !['all', 'merch'].includes(rawScope)) {
+        merged.appliesTo = rawScope;
+      }
+      return merged;
     });
   }
 
@@ -547,22 +553,30 @@
   }
 
   function formatCouponAppliesToLabel(appliesTo) {
-    const raw = String(appliesTo || 'merch').trim().toLowerCase();
-    if (['all', 'merch'].includes(raw)) return 'All Merch Products';
+    const raw = String(appliesTo || '').trim().toLowerCase();
+    if (!raw || ['all', 'merch'].includes(raw)) return 'All Merch Products';
     const catMatch = raw.match(/^category:([a-z0-9_\-,]+)$/);
     if (catMatch) {
       const slugs = catMatch[1].split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
       const names = slugs.map((slug) => {
         const found = (Array.isArray(state.categories) ? state.categories : []).find((c) => String(c.slug || c.id || '').toLowerCase() === slug);
         if (found?.name) return found.name;
-        if (slug === 't-shirt') return 'T-Shirts';
+        if (slug === 'bottles' || slug === 'bottle') return 'Hydrogen Water Bottles';
+        if (slug === 'sprays' || slug === 'mist' || slug === 'spray') return 'Hydrogen Mists / Sprays';
+        if (slug === 'hoodies' || slug === 'hoodie') return 'Hoodies';
+        if (slug === 't-shirt' || slug === 't-shirts') return 'T-Shirts';
         return slug.charAt(0).toUpperCase() + slug.slice(1);
       });
       return names.length ? names.join(', ') : 'Categories';
     }
     const prodMatch = raw.match(/^product:([\d,]+)$/);
     if (prodMatch) {
-      return `Specific Products (${prodMatch[1].split(',').length})`;
+      const pids = prodMatch[1].split(',').map(Number).filter(Boolean);
+      const names = pids.map((id) => {
+        const found = (Array.isArray(state.products) ? state.products : []).find((p) => Number(p.id || p.productId) === id);
+        return found?.name || `Product #${id}`;
+      });
+      return names.length <= 2 ? names.join(', ') : `Specific Products (${names.length})`;
     }
     return raw;
   }
@@ -5863,6 +5877,11 @@
       });
     };
 
+    // Baseline categories guaranteed to exist in H2 Merch
+    addCategory('bottles', 'Hydrogen Water Bottles');
+    addCategory('sprays', 'Hydrogen Mists / Sprays');
+    addCategory('hoodies', 'Hoodies');
+
     // 1. Authoritative: from state.categories
     for (const cat of (Array.isArray(state.categories) ? state.categories : [])) {
       addCategory(cat.slug || cat.id, cat.name);
@@ -5873,18 +5892,33 @@
       addCategory(prod.categorySlug || prod.category, prod.category);
     }
 
+    // 3. Ensure any explicitly selected categories from the coupon are represented
+    if (!isAll && selectedCategorySlugs.size > 0) {
+      for (const slug of selectedCategorySlugs) {
+        if (!categoriesMap.has(slug)) {
+          addCategory(slug, getCategoryDisplayName(slug, ''));
+        }
+      }
+    }
+
     const categories = [];
     for (const [slug, item] of categoriesMap.entries()) {
+      const isSelected = !isAll && (
+        selectedCategorySlugs.has(slug) ||
+        (slug === 'bottles' && (selectedCategorySlugs.has('hydrogen water bottles') || selectedCategorySlugs.has('bottle') || selectedCategorySlugs.has('bottles'))) ||
+        (slug === 'sprays' && (selectedCategorySlugs.has('hydrogen mists / sprays') || selectedCategorySlugs.has('mist') || selectedCategorySlugs.has('spray') || selectedCategorySlugs.has('sprays'))) ||
+        (slug === 'hoodies' && (selectedCategorySlugs.has('hoodie') || selectedCategorySlugs.has('hoodies')))
+      );
       categories.push({
         slug,
         name: item.name,
         label: item.name,
-        selected: !isAll && (selectedCategorySlugs.has(slug) || (slug === 'bottles' && selectedCategorySlugs.has('hydrogen water bottles')) || (slug === 'sprays' && selectedCategorySlugs.has('hydrogen mists / sprays'))),
+        selected: Boolean(isSelected),
       });
     }
 
     return {
-      allSelected: isAll || !categories.some((cat) => cat.selected),
+      allSelected: isAll,
       categories,
     };
   }
@@ -6576,7 +6610,7 @@
       ? 'merch'
       : (() => {
           const categorySlugs = [...new Set(fd.getAll('appliesToCategory').map((s) => String(s || '').trim().toLowerCase()).filter(Boolean))];
-          return categorySlugs.length ? `category:${categorySlugs.join(',')}` : 'merch';
+          return categorySlugs.length ? `category:${categorySlugs.join(',')}` : (existing?.appliesTo || 'merch');
         })();
 
     return {
