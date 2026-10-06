@@ -636,9 +636,10 @@ module.exports = function mountMerchApi(app, {
       customer_id INTEGER NOT NULL REFERENCES merch_customer_profiles(id) ON DELETE CASCADE,
       variant_id INTEGER NOT NULL,
       quantity INTEGER NOT NULL DEFAULT 1,
+      is_bundle INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      UNIQUE(customer_id, variant_id)
+      UNIQUE(customer_id, variant_id, is_bundle)
     );
 
     CREATE TABLE IF NOT EXISTS merch_customer_wishlist_items (
@@ -651,6 +652,25 @@ module.exports = function mountMerchApi(app, {
       UNIQUE(customer_id, product_id, variant_id)
     );
   `);
+
+  if (!hasColumn('merch_customer_cart_items', 'is_bundle')) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS merch_customer_cart_items_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL REFERENCES merch_customer_profiles(id) ON DELETE CASCADE,
+        variant_id INTEGER NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 1,
+        is_bundle INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(customer_id, variant_id, is_bundle)
+      );
+      INSERT OR IGNORE INTO merch_customer_cart_items_new (id, customer_id, variant_id, quantity, is_bundle, created_at, updated_at)
+        SELECT id, customer_id, variant_id, quantity, 0, created_at, updated_at FROM merch_customer_cart_items;
+      DROP TABLE merch_customer_cart_items;
+      ALTER TABLE merch_customer_cart_items_new RENAME TO merch_customer_cart_items;
+    `);
+  }
 
   if (!hasColumn('merch_orders', 'customer_user_id')) {
     db.exec('ALTER TABLE merch_orders ADD COLUMN customer_user_id INTEGER');
@@ -5667,12 +5687,14 @@ module.exports = function mountMerchApi(app, {
 
   function getMerchBundleDiscountPaise(bundleCode, items = []) {
     if (String(bundleCode || '').trim().toUpperCase() !== 'H2BUNDLE15') return 0;
-    const bottle = items.find((item) => /bottle/i.test(String(item.productName || '')) && Number(item.quantity || 0) > 0);
-    const mist = items.find((item) => /(mist|spray)/i.test(String(item.productName || '')) && Number(item.quantity || 0) > 0);
+    const bundleItems = (items || []).filter((item) => Boolean(item.isBundle || item.source === 'bundle'));
+    const bottle = bundleItems.find((item) => /bottle/i.test(String(item.productName || '')) && Number(item.quantity || 0) > 0);
+    const mist = bundleItems.find((item) => /(mist|spray)/i.test(String(item.productName || '')) && Number(item.quantity || 0) > 0);
     if (!bottle || !mist) return 0;
-    const bottleUnitPrice = Math.round(Number(bottle.lineTotal || 0) / Math.max(1, Number(bottle.quantity || 1)));
-    const mistUnitPrice = Math.round(Number(mist.lineTotal || 0) / Math.max(1, Number(mist.quantity || 1)));
-    return Math.max(0, Math.round((bottleUnitPrice + mistUnitPrice) * 0.15));
+    const bundleQty = Math.min(Number(bottle.quantity || 1), Number(mist.quantity || 1));
+    const bottleUnitPrice = Number(bottle.unitPrice || Math.round(Number(bottle.lineTotal || 0) / Math.max(1, Number(bottle.quantity || 1))));
+    const mistUnitPrice = Number(mist.unitPrice || Math.round(Number(mist.lineTotal || 0) / Math.max(1, Number(mist.quantity || 1))));
+    return Math.max(0, Math.round((bottleUnitPrice + mistUnitPrice) * 0.15 * bundleQty));
   }
 
   function recordMerchCouponRedemption(payload) {
@@ -6086,16 +6108,26 @@ module.exports = function mountMerchApi(app, {
     let subtotal = 0;
     const validatedItems = [];
 
+    const variantQuantities = {};
+    for (const item of items) {
+      const vid = Number(item.variantId || 0);
+      const quantity = Math.max(1, Math.floor(Number(item.quantity || 0)));
+      variantQuantities[vid] = (variantQuantities[vid] || 0) + quantity;
+    }
+    for (const [vid, totalQty] of Object.entries(variantQuantities)) {
+      const purchase = getMerchPurchaseVariant(Number(vid));
+      if (!purchase) {
+        return res.status(400).json({ error: `Variant ${vid} not found` });
+      }
+      if (purchase.stock < totalQty) {
+        return res.status(409).json({ error: `Insufficient stock for ${purchase.variant.product_name} (available: ${purchase.stock})` });
+      }
+    }
+
     for (const item of items) {
       const purchase = getMerchPurchaseVariant(item.variantId);
       const variant = purchase?.variant;
       const quantity = Math.max(1, Math.floor(Number(item.quantity || 0)));
-      if (!purchase) {
-        return res.status(400).json({ error: `Variant ${item.variantId} not found` });
-      }
-      if (purchase.stock < quantity) {
-        return res.status(409).json({ error: `Insufficient stock for ${variant.product_name} (available: ${purchase.stock})` });
-      }
       const offer = getVariantActiveOffer(variant.id, variant.product_id);
       let unitPrice = Number(variant.price || 0);
       if (offer) {
@@ -6107,6 +6139,7 @@ module.exports = function mountMerchApi(app, {
       }
       const lineTotal = unitPrice * quantity;
       subtotal += lineTotal;
+      const isBundle = Boolean(item.isBundle || item.source === 'bundle');
       validatedItems.push({
         variantId: variant.id,
         productId: Number(variant.product_id),
@@ -6118,6 +6151,8 @@ module.exports = function mountMerchApi(app, {
         offerName: offer ? offer.name : null,
         quantity,
         lineTotal,
+        isBundle,
+        source: isBundle ? 'bundle' : 'individual',
       });
     }
 
@@ -6483,15 +6518,40 @@ module.exports = function mountMerchApi(app, {
 
     let subtotal = 0;
     const validatedItems = [];
+
+    const variantQuantities = {};
+    for (const item of items) {
+      const vid = Number(item.variantId || 0);
+      const quantity = Math.max(1, Math.floor(Number(item.quantity || 0)));
+      variantQuantities[vid] = (variantQuantities[vid] || 0) + quantity;
+    }
+    for (const [vid, totalQty] of Object.entries(variantQuantities)) {
+      const purchase = getMerchPurchaseVariant(Number(vid));
+      if (!purchase) return res.status(400).json({ error: `Variant ${vid} not found` });
+      if (purchase.stock < totalQty) {
+        return res.status(409).json({ error: `Insufficient stock for ${purchase.variant.product_name} (available: ${purchase.stock})` });
+      }
+    }
+
     for (const item of items) {
       const purchase = getMerchPurchaseVariant(item.variantId);
       const variant = purchase?.variant;
       const quantity = Math.max(1, Math.floor(Number(item.quantity || 0)));
-      if (!purchase) return res.status(400).json({ error: `Variant ${item.variantId} not found` });
-      if (purchase.stock < quantity) return res.status(409).json({ error: `Insufficient stock for ${variant.product_name}` });
       const lineTotal = variant.price * quantity;
       subtotal += lineTotal;
-      validatedItems.push({ productId: Number(variant.product_id), variantId: variant.id, productName: variant.product_name, variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '), sku: variant.sku, unitPrice: variant.price, quantity, lineTotal });
+      const isBundle = Boolean(item.isBundle || item.source === 'bundle');
+      validatedItems.push({
+        productId: Number(variant.product_id),
+        variantId: variant.id,
+        productName: variant.product_name,
+        variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '),
+        sku: variant.sku,
+        unitPrice: variant.price,
+        quantity,
+        lineTotal,
+        isBundle,
+        source: isBundle ? 'bundle' : 'individual',
+      });
     }
 
     const bundleDiscountPaise = getMerchBundleDiscountPaise(bundleCode, validatedItems);
@@ -6600,6 +6660,7 @@ module.exports = function mountMerchApi(app, {
       orderNumber,
       orderId,
       currency: 'INR',
+      subtotal,
       totalAmount,
       discountAmount,
       coupon: bundleDiscountPaise > 0 ? null : buildMerchCouponPreview(couponResult),
@@ -6664,7 +6725,7 @@ module.exports = function mountMerchApi(app, {
     }
 
     const rows = db.prepare(`
-      SELECT c.id, c.customer_id AS customerId, c.variant_id AS variantId, c.quantity,
+      SELECT c.id, c.customer_id AS customerId, c.variant_id AS variantId, c.quantity, c.is_bundle AS isBundle,
              v.product_id AS productId, v.sku, v.size, v.color, v.price, v.stock, v.image_url AS imageUrl,
              p.name AS productName, p.slug AS productSlug, p.is_active AS productActive, v.is_active AS variantActive
       FROM merch_customer_cart_items c
@@ -6683,6 +6744,8 @@ module.exports = function mountMerchApi(app, {
         variantLabel: [row.size, row.color].filter(Boolean).join(' / '),
         price: Number(row.price),
         quantity: Math.min(Number(row.quantity || 1), Number(row.stock || 1)),
+        isBundle: Boolean(row.isBundle),
+        source: row.isBundle ? 'bundle' : 'individual',
         image: row.imageUrl,
         sku: row.sku,
       }));
@@ -6701,16 +6764,17 @@ module.exports = function mountMerchApi(app, {
     const sync = db.transaction(() => {
       db.prepare('DELETE FROM merch_customer_cart_items WHERE customer_id = ?').run(profile.id);
       const insert = db.prepare(`
-        INSERT INTO merch_customer_cart_items (customer_id, variant_id, quantity, updated_at)
-        VALUES (?, ?, ?, datetime('now'))
+        INSERT INTO merch_customer_cart_items (customer_id, variant_id, quantity, is_bundle, updated_at)
+        VALUES (?, ?, ?, ?, datetime('now'))
       `);
       for (const item of incomingItems) {
         const variantId = Number(item.variantId || item.id || 0);
         const quantity = Math.max(1, Math.min(99, Number(item.quantity || 1)));
+        const isBundle = Boolean(item.isBundle || item.source === 'bundle') ? 1 : 0;
         if (variantId > 0) {
           const variantExists = db.prepare('SELECT id, stock FROM merch_variants WHERE id = ? AND is_active = 1').get(variantId);
           if (variantExists && variantExists.stock > 0) {
-            insert.run(profile.id, variantId, Math.min(quantity, variantExists.stock));
+            insert.run(profile.id, variantId, Math.min(quantity, variantExists.stock), isBundle);
           }
         }
       }

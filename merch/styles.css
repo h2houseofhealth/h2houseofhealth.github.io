@@ -2765,6 +2765,157 @@ body.is-auth-loading .merch-auth-cta {
   background-color: rgba(211, 47, 47, 0.08);
 }
 
+/* Quantity Stepper in Order Summary */
+.shopify-summary-product__stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  border-radius: 6px;
+  background: #fff;
+  margin-top: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.shopify-summary-product__step-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: #fbf9f6;
+  color: #333;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.shopify-summary-product__step-btn:hover:not(:disabled) {
+  background: #ebdcd2;
+  color: #b94b24;
+}
+
+.shopify-summary-product__step-btn:active:not(:disabled) {
+  background: #dfcbbf;
+}
+
+.shopify-summary-product__step-qty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #111;
+  background: #fff;
+  border-left: 1px solid rgba(0, 0, 0, 0.08);
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+/* Bundle product row in Order Summary */
+.shopify-summary-product--bundle {
+  background: #fdfaf7;
+  border: 1px solid #eadcd2;
+  border-radius: 12px;
+  padding: 12px;
+  grid-template-columns: 104px minmax(0, 1fr) auto;
+}
+
+.shopify-summary-bundle__images {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 104px;
+  height: 72px;
+  padding: 4px;
+  background: #f4ede6;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.shopify-summary-bundle__img {
+  width: 44px;
+  height: 60px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #eee8e1;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
+}
+
+.shopify-summary-bundle__img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.shopify-summary-bundle__plus {
+  font-size: 12px;
+  font-weight: 900;
+  color: #b94b24;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.shopify-summary-bundle__count {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #b94b24;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  z-index: 2;
+}
+
+.shopify-summary-bundle__badge {
+  display: inline-block;
+  background: #ae5431;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 4px;
+  margin-bottom: 5px;
+}
+
+.shopify-summary-bundle__title {
+  display: block;
+  margin: 0 0 4px;
+  color: #111;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.shopify-summary-bundle__includes {
+  display: block;
+  font-size: 12px;
+  color: #78350f;
+  line-height: 1.35;
+  margin-bottom: 4px;
+}
+
 /* Checkout: "+ Add more products" Button */
 .checkout-add-more-btn {
   display: inline-flex;
@@ -7879,6 +8030,23 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
     height: 76px;
   }
 
+  .shopify-summary-product--bundle {
+    grid-template-columns: 88px minmax(0, 1fr);
+    padding: 10px;
+  }
+
+  .shopify-summary-bundle__images {
+    width: 88px;
+    height: 64px;
+    gap: 3px;
+    padding: 3px;
+  }
+
+  .shopify-summary-bundle__img {
+    width: 38px;
+    height: 54px;
+  }
+
   .shopify-summary-product__right {
     grid-column: 2;
     width: 100%;
@@ -8010,6 +8178,31 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
   .shopify-summary-product__image img {
     width: 62px;
     height: 62px;
+  }
+
+  .shopify-summary-product--bundle {
+    grid-template-columns: 80px minmax(0, 1fr);
+    padding: 8px;
+  }
+
+  .shopify-summary-bundle__images {
+    width: 80px;
+    height: 58px;
+    gap: 2px;
+    padding: 2px;
+  }
+
+  .shopify-summary-bundle__img {
+    width: 34px;
+    height: 48px;
+  }
+
+  .shopify-summary-bundle__title {
+    font-size: 13px;
+  }
+
+  .shopify-summary-bundle__includes {
+    font-size: 11px;
   }
 
   .shopify-summary-product__copy strong {
