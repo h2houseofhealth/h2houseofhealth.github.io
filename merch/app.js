@@ -567,15 +567,26 @@
     }
   }
 
+  function isProductInStock(product) {
+    if (!product) return false;
+    const variants = Array.isArray(product.variants) ? product.variants : [];
+    if (variants.length > 0) {
+      return variants.some((v) => Number(v.stock || 0) > 0 && !v.deletedAt && Number(v.isActive ?? 1) === 1);
+    }
+    return Number(product.stock || 0) > 0;
+  }
+
   function getSmartSidebarData() {
-    const trending = Array.isArray(state.trendingProducts) && state.trendingProducts.length > 0
-      ? state.trendingProducts.map((product) => ({ product, hypeLabel: product.hypeLabel || 'Trending Now' }))
+    const inStockTrending = (Array.isArray(state.trendingProducts) ? state.trendingProducts : [])
+      .filter((product) => isProductInStock(product));
+    const trending = inStockTrending.length > 0
+      ? inStockTrending.map((product) => ({ product, hypeLabel: product.hypeLabel || 'Trending Now' }))
       : MERCH_SIDEBAR_DEMO_DATA.trending
           .map((entry, index) => ({ ...entry, product: findSidebarProduct(entry.key, index), hypeLabel: 'Trending Now' }))
-          .filter((entry) => entry.product);
+          .filter((entry) => entry.product && isProductInStock(entry.product));
     const recommended = MERCH_SIDEBAR_DEMO_DATA.recommended
       .map((entry, index) => ({ ...entry, product: findSidebarProduct(entry.key, index) }))
-      .filter((entry) => entry.product);
+      .filter((entry) => entry.product && isProductInStock(entry.product));
     const bundles = MERCH_SIDEBAR_DEMO_DATA.bundles.map((bundle) => {
       const products = bundle.keys.map((key, index) => findSidebarProduct(key, index)).filter(Boolean);
       const basePrice = products.reduce((total, product) => total + Number(getDefaultPurchasableVariant(product)?.price || product.basePrice || 0), 0);

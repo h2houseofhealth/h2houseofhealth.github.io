@@ -5823,25 +5823,37 @@ module.exports = function mountMerchApi(app, {
 
   // Public promotional catalog. HYPE is deliberately separate from sales and
   // order statistics: admins control this merchandising section directly.
+  // Sold-out products must never be featured in trending recommendations.
   app.get('/api/merch/trending-products', (req, res) => {
     const catalog = loadMerchProductCatalog({ includeInactive: false });
     const catalogById = new Map(
       catalog.map((product) => [Number(product.id), product])
     );
+    const isAvailable = (product) => {
+      if (!product || !product.id) return false;
+      const variants = Array.isArray(product.variants) ? product.variants : [];
+      if (variants.length > 0) {
+        return variants.some((v) => Number(v.stock || 0) > 0 && !v.deletedAt && Number(v.isActive ?? 1) === 1);
+      }
+      return Number(product.stock || 0) > 0;
+    };
     const hypeRows = getMerchHypeRows();
     if (hypeRows.length > 0) {
       const products = hypeRows.map((row) => ({
         ...(catalogById.get(Number(row.productId)) || {}),
         hypeLabel: getMerchHypeLabel(row),
-      })).filter((product) => product.id);
+      })).filter(isAvailable);
       if (products.length > 0) {
         return res.json(products);
       }
     }
-    const defaultTrending = catalog.slice(0, 4).map((product) => ({
-      ...product,
-      hypeLabel: 'Trending Now',
-    }));
+    const defaultTrending = catalog
+      .filter(isAvailable)
+      .slice(0, 4)
+      .map((product) => ({
+        ...product,
+        hypeLabel: 'Trending Now',
+      }));
     res.json(defaultTrending);
   });
 
