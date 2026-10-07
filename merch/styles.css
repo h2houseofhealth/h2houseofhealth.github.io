@@ -2745,6 +2745,16 @@ body.is-auth-loading .merch-auth-cta {
   white-space: nowrap;
 }
 
+.shopify-summary-product__orig-price {
+  align-self: center;
+  color: #8b8784;
+  font-size: 13px;
+  line-height: 1.2;
+  font-weight: 500;
+  text-decoration: line-through;
+  white-space: nowrap;
+}
+
 .shopify-summary-product__remove {
   background: transparent;
   border: none;
@@ -3456,6 +3466,31 @@ body.is-auth-loading .merch-auth-cta {
 
 .shopify-coupon__message.is-error {
   color: #b42318;
+}
+
+.shopify-coupon__savings-text,
+.cart-coupon__savings-text {
+  margin: 0;
+  color: #166534;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.shopify-total__savings {
+  grid-column: 1 / -1;
+  margin: 4px 0 0;
+  color: #166534;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.shopify-total__fx {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #6e6a67;
+  font-size: 13px;
 }
 
 .checkout-coupon-offers {
