@@ -5691,7 +5691,6 @@ module.exports = function mountMerchApi(app, {
   }
 
   function getMerchBundleDiscountPaise(bundleCode, items = []) {
-    if (String(bundleCode || '').trim().toUpperCase() !== 'H2BUNDLE15') return 0;
     const bundleItems = (items || []).filter((item) => Boolean(item.isBundle || item.source === 'bundle'));
     const bottle = bundleItems.find((item) => /bottle/i.test(String(item.productName || '')) && Number(item.quantity || 0) > 0);
     const mist = bundleItems.find((item) => /(mist|spray)/i.test(String(item.productName || '')) && Number(item.quantity || 0) > 0);
@@ -5699,7 +5698,10 @@ module.exports = function mountMerchApi(app, {
     const bundleQty = Math.min(Number(bottle.quantity || 1), Number(mist.quantity || 1));
     const bottleUnitPrice = Number(bottle.unitPrice || Math.round(Number(bottle.lineTotal || 0) / Math.max(1, Number(bottle.quantity || 1))));
     const mistUnitPrice = Number(mist.unitPrice || Math.round(Number(mist.lineTotal || 0) / Math.max(1, Number(mist.quantity || 1))));
-    return Math.max(0, Math.round((bottleUnitPrice + mistUnitPrice) * 0.15 * bundleQty));
+    const bundleUnitPriceInr = Math.round((bottleUnitPrice + mistUnitPrice) / 100);
+    const bundleOfferPriceInr = Math.round(bundleUnitPriceInr * 0.85);
+    const bundleDiscountInr = Math.max(0, bundleUnitPriceInr - bundleOfferPriceInr) * bundleQty;
+    return bundleDiscountInr * 100;
   }
 
   function recordMerchCouponRedemption(payload) {
@@ -6200,11 +6202,24 @@ module.exports = function mountMerchApi(app, {
     }
 
     const hasActiveCoupon = Boolean(couponResult?.coupon && Number(couponResult.discountAmountPaise || 0) > 0);
-    const bundleDiscountPaise = hasActiveCoupon ? 0 : getMerchBundleDiscountPaise(bundleCode, validatedItems);
+    const isCouponInfluencer = Boolean(
+      couponResult?.coupon &&
+      (
+        Number(couponResult.coupon.influencer_id || couponResult.coupon.influencerId || 0) > 0 ||
+        couponResult.coupon.influencer_name ||
+        couponResult.coupon.influencer ||
+        isInfluencerCampaignActive
+      )
+    );
+    const hasActiveInfluencerCoupon = Boolean(
+      isCouponInfluencer &&
+      Number(couponResult?.discountAmountPaise || 0) > 0
+    );
+    const bundleDiscountPaise = hasActiveInfluencerCoupon ? 0 : getMerchBundleDiscountPaise(bundleCode, validatedItems);
     const shippingCharge = 0; // Free shipping by default as of now
-    const discountAmount = hasActiveCoupon
+    const discountAmount = hasActiveInfluencerCoupon
       ? Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
-      : bundleDiscountPaise;
+      : (bundleDiscountPaise > 0 ? bundleDiscountPaise : Math.max(0, Math.round(Number(couponResult?.discountAmountPaise || 0))));
     const discountedSubtotal = Math.max(0, subtotal - discountAmount);
     // Product prices are GST-inclusive; derive included GST on discounted amount.
     const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
@@ -6616,13 +6631,27 @@ module.exports = function mountMerchApi(app, {
     }
 
     const hasActiveCoupon = Boolean(couponResult?.coupon && Number(couponResult.discountAmountPaise || 0) > 0);
-    const bundleDiscountPaise = hasActiveCoupon ? 0 : getMerchBundleDiscountPaise(bundleCode, validatedItems);
+    const isCouponInfluencer = Boolean(
+      couponResult?.coupon &&
+      (
+        Number(couponResult.coupon.influencer_id || couponResult.coupon.influencerId || 0) > 0 ||
+        couponResult.coupon.influencer_name ||
+        couponResult.coupon.influencer ||
+        isInfluencerCampaignActive
+      )
+    );
+    const hasActiveInfluencerCoupon = Boolean(
+      isCouponInfluencer &&
+      Number(couponResult?.discountAmountPaise || 0) > 0
+    );
+
+    const bundleDiscountPaise = hasActiveInfluencerCoupon ? 0 : getMerchBundleDiscountPaise(bundleCode, validatedItems);
 
     const shippingCharge = 0; // Free shipping by default as of now
     const codSurcharge = 5000; // ₹50
-    const discountAmount = hasActiveCoupon
+    const discountAmount = hasActiveInfluencerCoupon
       ? Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
-      : bundleDiscountPaise;
+      : (bundleDiscountPaise > 0 ? bundleDiscountPaise : Math.max(0, Math.round(Number(couponResult?.discountAmountPaise || 0))));
     const discountedSubtotal = Math.max(0, subtotal - discountAmount);
     // Product prices are GST-inclusive; derive included GST on discounted amount.
     const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
