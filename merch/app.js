@@ -477,6 +477,52 @@
     return offer || null;
   }
 
+  function isRyanAttribution() {
+    if (state.merchCouponPreview) {
+      const code = String(state.merchCouponPreview.code || '').trim().toUpperCase();
+      if (code.startsWith('RYAN')) return true;
+      if (Number(state.merchCouponPreview.influencerId || 0) === 10) return true;
+      if (String(state.merchCouponPreview.influencerName || '').toLowerCase() === 'ryan') return true;
+    }
+    if (state.merchCouponCode && normalizeCouponCode(state.merchCouponCode).startsWith('RYAN')) {
+      return true;
+    }
+    const slug = String(state.campaignAttribution?.slug || '').toLowerCase();
+    if (slug.startsWith('ryan')) return true;
+    if (Number(state.campaignAttribution?.influencerId || 0) === 10) return true;
+    return false;
+  }
+
+  function countCartBottles(cart = state.cart) {
+    return (cart || []).reduce((count, item) => {
+      const isBottle = Number(item.productId) === 11 ||
+        String(item.category || '').toLowerCase() === 'bottles' ||
+        /bottle/i.test(String(item.name || item.productName || ''));
+      return isBottle ? count + Math.max(0, Number(item.quantity || 0)) : count;
+    }, 0);
+  }
+
+  function countCartMists(cart = state.cart) {
+    return (cart || []).reduce((count, item) => {
+      const isMist = Number(item.productId) === 12 ||
+        String(item.category || '').toLowerCase() === 'sprays' ||
+        /(mist|spray)/i.test(String(item.name || item.productName || ''));
+      return isMist ? count + Math.max(0, Number(item.quantity || 0)) : count;
+    }, 0);
+  }
+
+  function getCartBundleCount(cart = state.cart) {
+    const bottles = countCartBottles(cart);
+    const mists = countCartMists(cart);
+    return Math.min(bottles, mists);
+  }
+
+  function getCartIndividualBottleCount(cart = state.cart) {
+    const bottles = countCartBottles(cart);
+    const bundleCount = getCartBundleCount(cart);
+    return Math.max(0, bottles - bundleCount);
+  }
+
   function isInfluencerCoupon(coupon) {
     if (!coupon) return false;
     const infId = Number(coupon.influencerId || coupon.influencer_id || coupon.coupon?.influencerId || coupon.coupon?.influencer_id || 0);
@@ -488,6 +534,7 @@
   }
 
   function hasActiveInfluencerCoupon() {
+    if (isRyanAttribution()) return true;
     if (state.merchCouponPreview && Number(state.merchCouponPreview.discountAmountInr || 0) > 0) {
       if (isInfluencerCoupon(state.merchCouponPreview)) return true;
       const matching = (state.availableCoupons || []).find((c) => normalizeCouponCode(c.code) === normalizeCouponCode(state.merchCouponPreview.code));
@@ -695,12 +742,18 @@
   }
 
   function getMerchBundleDiscountAmount() {
-    if (hasActiveInfluencerCoupon()) {
+    const isRyan = isRyanAttribution();
+    if (hasActiveInfluencerCoupon() && !isRyan) {
       return 0;
+    }
+    const bundleQty = getCartBundleCount();
+    if (bundleQty > 0) {
+      // 15% off ₹34,890 bundle = ₹5,233.50 per bundle
+      return bundleQty * 5233.5;
     }
     const activeBundle = getActiveBundleInfo();
     if (!activeBundle) {
-      if (state.merchBundleCode === 'H2BUNDLE15') {
+      if (state.merchBundleCode === 'H2BUNDLE15' && !isRyan) {
         clearMerchBundleDiscount();
       }
       return 0;
@@ -766,7 +819,8 @@
     } catch {}
 
     const hasInfluencer = hasActiveInfluencerCoupon();
-    if (!hasInfluencer) {
+    const isRyan = isRyanAttribution();
+    if (!hasInfluencer || isRyan) {
       const bundleTotal = bundleItems.reduce((sum, item) => sum + Number(item.variant.price || 0), 0);
       const bundleOffer = Math.round(bundleTotal * 0.85);
       state.merchBundlePreview = {
@@ -776,9 +830,11 @@
       };
     } else {
       state.merchBundlePreview = null;
-      if (!state.merchCouponCode && state.campaignAttribution?.couponCode) {
-        state.merchCouponCode = state.campaignAttribution.couponCode;
-      }
+    }
+    if (!state.merchCouponCode && state.campaignAttribution?.couponCode) {
+      state.merchCouponCode = state.campaignAttribution.couponCode;
+    }
+    if (state.merchCouponCode || state.campaignAttribution?.slug) {
       await applyMerchCouponFromCart({ silent: true });
     }
     renderCart();
@@ -2191,7 +2247,11 @@ function getWishlistProductPrice(item) {
     const rawSubtotal = getRawCartTotal();
     const bundleDiscount = getMerchBundleDiscountAmount();
     const subtotal = Math.max(0, rawSubtotal - bundleDiscount);
-    const couponDiscount = Math.max(0, Number(state.merchCouponPreview?.discountAmountInr || 0));
+    let couponDiscount = Math.max(0, Number(state.merchCouponPreview?.discountAmountInr || 0));
+    if (isRyanAttribution()) {
+      const indBottles = getCartIndividualBottleCount();
+      couponDiscount = indBottles * 1150;
+    }
     const shipping = getMerchShippingCharge(Math.max(0, subtotal - couponDiscount));
     const total = Math.max(1, subtotal + shipping - couponDiscount);
     const totalSavings = bundleDiscount + couponDiscount;
@@ -2231,12 +2291,21 @@ function getWishlistProductPrice(item) {
     }
 
     const savedAmount = Number(preview.discountAmountInr || 0);
+    const isRyan = isRyanAttribution();
     els.cartCouponPreview.hidden = false;
-    els.cartCouponPreview.innerHTML = `
-      <div class="cart-coupon__savings-text">
-        ${formatCheckoutMoney(savedAmount)} Saved with discounts!
-      </div>
-    `;
+    if (isRyan && savedAmount === 0 && getCartBundleCount() > 0) {
+      els.cartCouponPreview.innerHTML = `
+        <div class="cart-coupon__savings-text" style="color:#0f766e;">
+          ✓ ${escapeHtml(preview.code)} applied · Bundle savings active
+        </div>
+      `;
+    } else {
+      els.cartCouponPreview.innerHTML = `
+        <div class="cart-coupon__savings-text">
+          ${formatCheckoutMoney(savedAmount)} Saved with discounts!
+        </div>
+      `;
+    }
   }
 
   async function applyMerchCouponFromCart(options = {}) {
@@ -2278,6 +2347,13 @@ function getWishlistProductPrice(item) {
             if (variantId) totals[variantId] = Number(totals[variantId] || 0) + Math.round(item.price * item.quantity * 100);
             return totals;
           }, {}),
+          items: state.cart.map((item) => ({
+            productId: item.productId,
+            variantId: item.variantId,
+            quantity: item.quantity,
+            price: item.price,
+            productName: item.productName || item.name || '',
+          })),
           campaignSlug: state.campaignAttribution?.slug || null,
           campaignId: state.campaignAttribution?.campaignId || null,
         }),
@@ -5979,7 +6055,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     } catch {}
 
     const hasInfluencer = hasActiveInfluencerCoupon();
-    if (!hasInfluencer) {
+    const isRyan = isRyanAttribution();
+    if (!hasInfluencer || isRyan) {
       const bundleTotal = bundleItems.reduce((sum, item) => sum + Number(item.variant.price || 0), 0);
       const bundleOffer = Math.round(bundleTotal * 0.85);
       state.merchBundlePreview = {
@@ -5989,9 +6066,11 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       };
     } else {
       state.merchBundlePreview = null;
-      if (!state.merchCouponCode && state.campaignAttribution?.couponCode) {
-        state.merchCouponCode = state.campaignAttribution.couponCode;
-      }
+    }
+    if (!state.merchCouponCode && state.campaignAttribution?.couponCode) {
+      state.merchCouponCode = state.campaignAttribution.couponCode;
+    }
+    if (state.merchCouponCode || state.campaignAttribution?.slug) {
       await applyMerchCouponFromCart({ silent: true });
     }
 
@@ -6491,7 +6570,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           </div>
           ${state.merchCouponPreview ? `
             <div class="shopify-coupon__savings-text">
-              ${formatCheckoutMoney(state.merchCouponPreview.discountAmountInr)} Saved with discounts!
+              ${isRyanAttribution() && Number(state.merchCouponPreview.discountAmountInr || 0) === 0 && totals.bundleDiscount > 0
+                ? `✓ ${escapeHtml(state.merchCouponPreview.code)} applied · Bundle savings active`
+                : `${formatCheckoutMoney(state.merchCouponPreview.discountAmountInr)} Saved with discounts!`
+              }
             </div>
           ` : ''}
           ${state.merchCouponError ? `
@@ -6499,7 +6581,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
               ${escapeHtml(state.merchCouponError)}
             </div>
           ` : ''}
-          ${!state.merchCouponPreview && totals.bundleDiscount > 0 ? `
+          ${totals.bundleDiscount > 0 ? `
             <div class="shopify-bundle-badge" style="background:#fef7f2;border:1px dashed #ae5431;border-radius:10px;padding:12px 14px;margin-top:10px;display:flex;align-items:flex-start;gap:10px;">
               <span style="font-size:1.2rem;line-height:1;" aria-hidden="true">✨</span>
               <div>
@@ -7300,7 +7382,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       source: item.isBundle ? 'bundle' : 'individual',
     }));
     const hasInfluencer = hasActiveInfluencerCoupon();
-    const bundleCode = hasInfluencer ? '' : (state.merchBundleCode || 'H2BUNDLE15');
+    const isRyan = isRyanAttribution();
+    const bundleCode = (hasInfluencer && !isRyan) ? '' : (state.merchBundleCode || 'H2BUNDLE15');
     const couponCode = state.merchCouponPreview?.code ? normalizeCouponCode(state.merchCouponPreview.code) : '';
 
     try {
