@@ -577,13 +577,13 @@
   }
 
   function getSmartSidebarData() {
+    // Top Trending Products strictly reflects admin-curated hypes.
     const inStockTrending = (Array.isArray(state.trendingProducts) ? state.trendingProducts : [])
       .filter((product) => isProductInStock(product));
-    const trending = inStockTrending.length > 0
-      ? inStockTrending.map((product) => ({ product, hypeLabel: product.hypeLabel || 'Trending Now' }))
-      : MERCH_SIDEBAR_DEMO_DATA.trending
-          .map((entry, index) => ({ ...entry, product: findSidebarProduct(entry.key, index), hypeLabel: 'Trending Now' }))
-          .filter((entry) => entry.product && isProductInStock(entry.product));
+    const trending = inStockTrending.map((product) => ({
+      product,
+      hypeLabel: product.hypeLabel || 'Trending Now',
+    }));
     const recommended = MERCH_SIDEBAR_DEMO_DATA.recommended
       .map((entry, index) => ({ ...entry, product: findSidebarProduct(entry.key, index) }))
       .filter((entry) => entry.product && isProductInStock(entry.product));

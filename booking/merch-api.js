@@ -5843,18 +5843,11 @@ module.exports = function mountMerchApi(app, {
         ...(catalogById.get(Number(row.productId)) || {}),
         hypeLabel: getMerchHypeLabel(row),
       })).filter(isAvailable);
-      if (products.length > 0) {
-        return res.json(products);
-      }
+      return res.json(products);
     }
-    const defaultTrending = catalog
-      .filter(isAvailable)
-      .slice(0, 4)
-      .map((product) => ({
-        ...product,
-        hypeLabel: 'Trending Now',
-      }));
-    res.json(defaultTrending);
+    // Only admin-curated products are displayed in Top Trending Products.
+    // If no products are currently hyped by admin, return empty array.
+    res.json([]);
   });
 
   function getMerchPurchaseVariant(variantId) {

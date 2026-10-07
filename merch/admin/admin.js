@@ -2891,20 +2891,29 @@
                 <button class="admin-btn admin-btn--soft" type="button" data-action="open-hype-modal">HYPE</button>
               </div>
               <div class="admin-card__body admin-list">
-                ${state.hypes.length ? state.hypes.map((hype) => {
-                  const product = state.products.find((item) => Number(item.productId || item.parentProductId || item.id) === Number(hype.productId));
-                  return product ? `
-                  <div class="admin-list__item">
-                    <div class="admin-list__item-head">
-                      <div>
-                        <p class="admin-list__item-title">${escapeHtml(product.name)}</p>
-                        <p class="admin-list__item-sub">${escapeHtml(hype.effectiveLabel || hype.label || 'Hyped product')}</p>
+                ${(() => {
+                  if (!state.hypes || !state.hypes.length) {
+                    return '<p class="admin-table__muted" style="margin:0;">No products hyped yet. Click HYPE to curate this section.</p>';
+                  }
+                  const renderedItems = state.hypes.map((hype) => {
+                    const product = (state.products || []).find((item) => Number(item.productId || item.parentProductId || item.id) === Number(hype.productId));
+                    const name = product?.name || hype.productName || `Product #${hype.productId}`;
+                    const label = hype.effectiveLabel || hype.label || 'Hyped product';
+                    const priceStr = product ? (product.priceLabel || catalogPrice(product.price)) : '';
+                    return `
+                    <div class="admin-list__item">
+                      <div class="admin-list__item-head">
+                        <div>
+                          <p class="admin-list__item-title">${escapeHtml(name)}</p>
+                          <p class="admin-list__item-sub">${escapeHtml(label)}</p>
+                        </div>
+                        ${priceStr ? `<strong>${escapeHtml(priceStr)}</strong>` : ''}
                       </div>
-                      <strong>${escapeHtml(product.priceLabel || catalogPrice(product.price))}</strong>
                     </div>
-                  </div>
-                ` : '';
-                }).join('') : '<p class="admin-table__muted" style="margin:0;">No products hyped yet. Click HYPE to curate this section.</p>'}
+                  `;
+                  }).filter(Boolean).join('');
+                  return renderedItems || '<p class="admin-table__muted" style="margin:0;">No products hyped yet. Click HYPE to curate this section.</p>';
+                })()}
               </div>
             </article>
         </div>
@@ -2940,19 +2949,26 @@
               const productId = Number(product.productId || product.parentProductId || product.id);
               const existing = hypesByProductId.get(productId);
               const selectedLabel = existing?.label || options[0];
+              const isSoldOut = Number(product.stock || 0) <= 0;
               return `
-                <div class="admin-hype-row">
+                <div class="admin-hype-row${isSoldOut ? ' admin-hype-row--sold-out' : ''}">
                   <label class="admin-hype-row__product">
-                    <input type="checkbox" name="hypedProductId" value="${productId}" ${existing ? 'checked' : ''} />
-                    <span><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(product.category || '')}</small></span>
+                    <input type="checkbox" name="hypedProductId" value="${productId}" ${existing ? 'checked' : ''} ${isSoldOut ? 'disabled' : ''} />
+                    <span>
+                      <strong>${escapeHtml(product.name)}</strong>
+                      <small>
+                        ${escapeHtml(product.category || '')}
+                        ${isSoldOut ? ' · <span style="color:var(--admin-danger,#ef4444);font-weight:600;">Sold Out</span>' : ` · ${product.stock} in stock`}
+                      </small>
+                    </span>
                   </label>
                   <label class="admin-hype-row__label">Label
-                    <select name="hypeLabel-${productId}" class="admin-select" data-hype-label-select>
+                    <select name="hypeLabel-${productId}" class="admin-select" data-hype-label-select ${isSoldOut ? 'disabled' : ''}>
                       ${options.map((option) => `<option value="${escapeHtml(option)}" ${option === selectedLabel ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}
                     </select>
                   </label>
-                  <label class="admin-hype-row__custom" data-hype-custom-wrap ${selectedLabel === 'Custom Label' ? '' : 'hidden'}>Custom text
-                    <input class="admin-input" name="hypeCustomLabel-${productId}" maxlength="60" value="${escapeHtml(existing?.customLabel || '')}" placeholder="Short label" />
+                  <label class="admin-hype-row__custom" data-hype-custom-wrap ${selectedLabel === 'Custom Label' && !isSoldOut ? '' : 'hidden'}>Custom text
+                    <input class="admin-input" name="hypeCustomLabel-${productId}" maxlength="60" value="${escapeHtml(existing?.customLabel || '')}" placeholder="Short label" ${isSoldOut ? 'disabled' : ''} />
                   </label>
                 </div>
               `;
