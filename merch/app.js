@@ -620,7 +620,7 @@
       ${data.trending.length ? `<section class="smart-merch-sidebar__section smart-merch-sidebar__section--trending" aria-labelledby="smartTrendingTitle">
         <div class="smart-merch-sidebar__heading">
           <h3 id="smartTrendingTitle">🔥 Trending Products</h3>
-          <button type="button" class="smart-merch-sidebar__view-all" data-sidebar-action="view-all">View All <span aria-hidden="true">→</span></button>
+          <a href="#shopSection" class="smart-merch-sidebar__view-all" data-sidebar-action="view-all" aria-label="View all products">View All <span aria-hidden="true">→</span></a>
         </div>
         <div class="smart-merch-product-list">${data.trending.map(renderSidebarProduct).join('')}</div>
       </section>` : ''}
@@ -659,7 +659,7 @@
       <section class="smart-merch-sidebar__section smart-merch-sidebar__section--recommended" aria-labelledby="smartRecommendedTitle">
         <div class="smart-merch-sidebar__heading">
           <h3 id="smartRecommendedTitle">Recommended For You</h3>
-          <button type="button" class="smart-merch-sidebar__view-all" data-sidebar-action="view-all">View All <span aria-hidden="true">→</span></button>
+          <a href="#shopSection" class="smart-merch-sidebar__view-all" data-sidebar-action="view-all" aria-label="View all products">View All <span aria-hidden="true">→</span></a>
         </div>
         <div class="smart-merch-product-list">${data.recommended.map(renderSidebarProduct).join('')}</div>
       </section>
@@ -669,11 +669,35 @@
       button.addEventListener('click', () => showProductDetail(Number(button.dataset.sidebarProductId)));
     });
     els.smartMerchSidebar.querySelectorAll('[data-sidebar-action="view-all"]').forEach((button) => {
-      button.addEventListener('click', () => els.shopSection?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      button.addEventListener('click', navigateToAllProducts);
     });
     els.smartMerchSidebar.querySelectorAll('[data-sidebar-action="shop-bundle"]').forEach((button) => {
       button.addEventListener('click', () => addMerchBundleToCart());
     });
+  }
+
+  function navigateToAllProducts(event) {
+    if (event && typeof event.preventDefault === 'function') {
+      event.preventDefault();
+    }
+    showShop();
+    state.selectedCategory = 'all';
+    if (els.categoryFilter) {
+      els.categoryFilter.value = 'all';
+    }
+    state.searchQuery = '';
+    if (els.searchInput) {
+      els.searchInput.value = '';
+    }
+    renderProductGrid();
+    if (window.location.hash !== '#shopSection') {
+      window.location.hash = 'shopSection';
+    } else {
+      const target = els.shopSection || document.getElementById('shopSection');
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
   }
 
   function getDefaultPurchasableVariant(product) {
@@ -3088,6 +3112,23 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     }
     if (window.location.hash === '#checkout') {
       showCheckoutPage();
+      return true;
+    }
+    if (window.location.hash === '#shopSection' || window.location.hash === '#shop') {
+      showShop();
+      state.selectedCategory = 'all';
+      if (els.categoryFilter) {
+        els.categoryFilter.value = 'all';
+      }
+      state.searchQuery = '';
+      if (els.searchInput) {
+        els.searchInput.value = '';
+      }
+      renderProductGrid();
+      const target = els.shopSection || document.getElementById('shopSection');
+      if (target) {
+        setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+      }
       return true;
     }
     return false;
@@ -7258,6 +7299,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         event.preventDefault();
         showShop();
         window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+      const viewAllBtn = event.target.closest('[data-sidebar-action="view-all"]');
+      if (viewAllBtn) {
+        navigateToAllProducts(event);
       }
     });
 
