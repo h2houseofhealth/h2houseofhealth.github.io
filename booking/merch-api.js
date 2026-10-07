@@ -5454,7 +5454,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       `).get(Number(result.coupon.id), String(result.coupon.code || ''));
     }
 
-    if (campaign && campaign.targetVariantId) {
+    const couponAppliesTo = String(result?.coupon?.appliesTo || '').trim().toLowerCase();
+    const hasCategoryOrProductScope = couponAppliesTo.startsWith('category:') || couponAppliesTo.startsWith('product:');
+
+    if (campaign && campaign.targetVariantId && !hasCategoryOrProductScope) {
       const targetVariantId = Number(campaign.targetVariantId);
       const cartVariantIds = (Array.isArray(args.variantIds) ? args.variantIds : []).map((id) => Number(id));
       const hasTargetVariant = cartVariantIds.includes(targetVariantId);
@@ -5517,7 +5520,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
 
   function getMerchBundleDiscountPaise(bundleCode, items = []) {
-    if (String(bundleCode || '').trim().toUpperCase() !== 'H2BUNDLE15') return 0;
     const bundleItems = (items || []).filter((item) => Boolean(item.isBundle || item.source === 'bundle'));
     const bottle = bundleItems.find((item) => /bottle/i.test(String(item.productName || '')) && Number(item.quantity || 0) > 0);
     const mist = bundleItems.find((item) => /(mist|spray)/i.test(String(item.productName || '')) && Number(item.quantity || 0) > 0);
@@ -5525,7 +5527,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const bundleQty = Math.min(Number(bottle.quantity || 1), Number(mist.quantity || 1));
     const bottleUnitPrice = Number(bottle.unitPrice || Math.round(Number(bottle.lineTotal || 0) / Math.max(1, Number(bottle.quantity || 1))));
     const mistUnitPrice = Number(mist.unitPrice || Math.round(Number(mist.lineTotal || 0) / Math.max(1, Number(mist.quantity || 1))));
-    return Math.max(0, Math.round((bottleUnitPrice + mistUnitPrice) * 0.15 * bundleQty));
+    const bundleUnitPriceInr = Math.round((bottleUnitPrice + mistUnitPrice) / 100);
+    const bundleOfferPriceInr = Math.round(bundleUnitPriceInr * 0.85);
+    const bundleDiscountInr = Math.max(0, bundleUnitPriceInr - bundleOfferPriceInr) * bundleQty;
+    return bundleDiscountInr * 100;
   }
 
   function recordMerchCouponRedemption(payload) {
@@ -5791,10 +5796,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   });
 
   app.post('/api/merch/preview-coupon', (req, res) => {
-    const bundleCode = String(req.body?.bundleCode || '').trim().toUpperCase();
-    if (bundleCode === 'H2BUNDLE15') {
-      return res.status(400).json({ error: 'Coupons cannot be applied to orders with Bundle & Save discounts.' });
-    }
     const authUser = getMerchAuthUser(req);
     const couponCode = normalizeMerchCouponCode(req.body?.couponCode);
     if (!couponCode) {
@@ -5951,11 +5952,34 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       }
     }
 
+    let campaignAttributionCookie = null;
+    try {
+      const rawCookie = req.cookies?.h2_campaign_attribution;
+      if (rawCookie) {
+        campaignAttributionCookie = typeof rawCookie === 'object' ? rawCookie : JSON.parse(decodeURIComponent(rawCookie));
+      }
+    } catch {}
+
+    const campaignSlug = String(req.body?.campaignSlug || campaignAttributionCookie?.slug || '').trim();
+    let effectiveCouponCode = normalizeMerchCouponCode(req.body?.couponCode || campaignAttributionCookie?.couponCode);
+    if (!effectiveCouponCode && campaignSlug) {
+      const campRow = db.prepare('SELECT coupon_code FROM merch_campaigns WHERE LOWER(slug) = LOWER(?) AND is_active = 1 LIMIT 1').get(campaignSlug);
+      if (campRow?.coupon_code) effectiveCouponCode = normalizeMerchCouponCode(campRow.coupon_code);
+    }
+
+    let isInfluencerCampaignActive = Boolean(campaignSlug || campaignAttributionCookie?.influencerId);
+    if (!isInfluencerCampaignActive && effectiveCouponCode) {
+      const cRow = db.prepare('SELECT influencer_id FROM coupons WHERE LOWER(code) = LOWER(?) LIMIT 1').get(effectiveCouponCode);
+      if (cRow && Number(cRow.influencer_id) > 0) {
+        isInfluencerCampaignActive = true;
+      }
+    }
+
     for (const item of items) {
       const purchase = getMerchPurchaseVariant(item.variantId);
       const variant = purchase?.variant;
       const quantity = Math.max(1, Math.floor(Number(item.quantity || 0)));
-      const offer = getVariantActiveOffer(variant.id, variant.product_id);
+      const offer = isInfluencerCampaignActive ? null : getVariantActiveOffer(variant.id, variant.product_id);
       let unitPrice = Number(variant.price || 0);
       if (offer) {
         const isPercentage = String(offer.discountType || '').toLowerCase() === 'percentage';
@@ -5983,28 +6007,44 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       });
     }
 
-    const bundleDiscountPaise = getMerchBundleDiscountPaise(bundleCode, validatedItems);
-    let couponResult = (couponCode && bundleDiscountPaise === 0)
+    // Coupon takes priority over bundle and other discounts
+    let couponResult = effectiveCouponCode
       ? validateMerchCouponForUser({
-          code: couponCode,
+          code: effectiveCouponCode,
           userId: authUser?.id,
           productIds: validatedItems.map((item) => item.productId),
           productLineTotals: validatedItems.reduce((totals, item) => ({ ...totals, [item.productId]: Number(totals[item.productId] || 0) + item.lineTotal }), {}),
           variantIds: validatedItems.map((item) => Number(item.variantId)),
           variantLineTotals: validatedItems.reduce((totals, item) => ({ ...totals, [item.variantId]: Number(totals[item.variantId] || 0) + item.lineTotal }), {}),
-          campaignSlug: req.body?.campaignSlug || null,
+          campaignSlug: campaignSlug || null,
+          campaignId: req.body?.campaignId || campaignAttributionCookie?.campaignId || null,
           subtotalAmountPaise: subtotal,
         })
       : { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
     if (couponResult?.error) {
-      console.warn('[Merch] Invalid or expired coupon during checkout, proceeding without discount:', couponResult.error);
+      console.warn('[Merch] Invalid or expired coupon during checkout, proceeding without coupon:', couponResult.error);
       couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
     }
 
+    const hasActiveCoupon = Boolean(couponResult?.coupon && Number(couponResult.discountAmountPaise || 0) > 0);
+    const isCouponInfluencer = Boolean(
+      couponResult?.coupon &&
+      (
+        Number(couponResult.coupon.influencer_id || couponResult.coupon.influencerId || 0) > 0 ||
+        couponResult.coupon.influencer_name ||
+        couponResult.coupon.influencer ||
+        isInfluencerCampaignActive
+      )
+    );
+    const hasActiveInfluencerCoupon = Boolean(
+      isCouponInfluencer &&
+      Number(couponResult?.discountAmountPaise || 0) > 0
+    );
+    const bundleDiscountPaise = hasActiveInfluencerCoupon ? 0 : getMerchBundleDiscountPaise(bundleCode, validatedItems);
     const shippingCharge = 0; // Free shipping by default as of now
-    const discountAmount = bundleDiscountPaise > 0
-      ? bundleDiscountPaise
-      : Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
+    const discountAmount = hasActiveInfluencerCoupon
+      ? Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
+      : (bundleDiscountPaise > 0 ? bundleDiscountPaise : Math.max(0, Math.round(Number(couponResult?.discountAmountPaise || 0))));
     const discountedSubtotal = Math.max(0, subtotal - discountAmount);
     // Product prices are GST-inclusive; derive included GST on discounted amount.
     const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
@@ -6024,7 +6064,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       amount: totalAmount,
       currency: 'INR',
       receipt: orderNumber,
-      notes: { customerEmail: resolvedCustomer.email, orderNumber, couponCode: bundleDiscountPaise > 0 ? '' : String(couponResult.couponCode || couponCode || ''), bundleCode, currency: convertedPayment.currency },
+      notes: { customerEmail: resolvedCustomer.email, orderNumber, couponCode: hasActiveCoupon ? String(couponResult.couponCode || effectiveCouponCode || '') : '', bundleCode: hasActiveCoupon ? '' : bundleCode, currency: convertedPayment.currency },
     }).then(rpOrder => {
       // Save order to DB
       const insertOrder = db.prepare(`
@@ -6060,7 +6100,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         shippingCharge,
         discountAmount,
         customer: resolvedCustomer,
-        coupon: bundleDiscountPaise > 0 ? null : buildMerchCouponPreview(couponResult),
+        coupon: hasActiveCoupon ? buildMerchCouponPreview(couponResult) : null,
       });
     }).catch(err => {
       console.error('Merch Razorpay order create failed:', err?.message || err);
@@ -6380,29 +6420,62 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       });
     }
 
-    const bundleDiscountPaise = getMerchBundleDiscountPaise(bundleCode, validatedItems);
-    let couponResult = (couponCode && bundleDiscountPaise === 0)
+    let campaignAttributionCookie = null;
+    try {
+      const rawCookie = req.cookies?.h2_campaign_attribution;
+      if (rawCookie) {
+        campaignAttributionCookie = typeof rawCookie === 'object' ? rawCookie : JSON.parse(decodeURIComponent(rawCookie));
+      }
+    } catch {}
+
+    const campaignSlug = String(req.body?.campaignSlug || campaignAttributionCookie?.slug || '').trim();
+    let effectiveCouponCode = normalizeMerchCouponCode(req.body?.couponCode || campaignAttributionCookie?.couponCode);
+    if (!effectiveCouponCode && campaignSlug) {
+      const campRow = db.prepare('SELECT coupon_code FROM merch_campaigns WHERE LOWER(slug) = LOWER(?) AND is_active = 1 LIMIT 1').get(campaignSlug);
+      if (campRow?.coupon_code) effectiveCouponCode = normalizeMerchCouponCode(campRow.coupon_code);
+    }
+
+    // Coupon takes priority over bundle and other discounts
+    let couponResult = effectiveCouponCode
       ? validateMerchCouponForUser({
-          code: couponCode,
+          code: effectiveCouponCode,
           userId: authUser?.id,
           productIds: validatedItems.map((item) => item.productId),
           productLineTotals: validatedItems.reduce((totals, item) => ({ ...totals, [item.productId]: Number(totals[item.productId] || 0) + item.lineTotal }), {}),
           variantIds: validatedItems.map((item) => Number(item.variantId)),
           variantLineTotals: validatedItems.reduce((totals, item) => ({ ...totals, [item.variantId]: Number(totals[item.variantId] || 0) + item.lineTotal }), {}),
-          campaignSlug: req.body?.campaignSlug || null,
+          campaignSlug: campaignSlug || null,
+          campaignId: req.body?.campaignId || campaignAttributionCookie?.campaignId || null,
           subtotalAmountPaise: subtotal,
         })
       : { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
     if (couponResult?.error) {
-      console.warn('[Merch] Invalid or expired coupon during COD checkout, proceeding without discount:', couponResult.error);
+      console.warn('[Merch] Invalid or expired coupon during COD checkout, proceeding without coupon:', couponResult.error);
       couponResult = { coupon: null, couponCode: '', discountAmountPaise: 0, finalAmountPaise: subtotal };
     }
 
+    const hasActiveCoupon = Boolean(couponResult?.coupon && Number(couponResult.discountAmountPaise || 0) > 0);
+    const isCouponInfluencer = Boolean(
+      couponResult?.coupon &&
+      (
+        Number(couponResult.coupon.influencer_id || couponResult.coupon.influencerId || 0) > 0 ||
+        couponResult.coupon.influencer_name ||
+        couponResult.coupon.influencer ||
+        isInfluencerCampaignActive
+      )
+    );
+    const hasActiveInfluencerCoupon = Boolean(
+      isCouponInfluencer &&
+      Number(couponResult?.discountAmountPaise || 0) > 0
+    );
+
+    const bundleDiscountPaise = hasActiveInfluencerCoupon ? 0 : getMerchBundleDiscountPaise(bundleCode, validatedItems);
+
     const shippingCharge = 0; // Free shipping by default as of now
     const codSurcharge = 5000; // ₹50
-    const discountAmount = bundleDiscountPaise > 0
-      ? bundleDiscountPaise
-      : Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)));
+    const discountAmount = hasActiveInfluencerCoupon
+      ? Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
+      : (bundleDiscountPaise > 0 ? bundleDiscountPaise : Math.max(0, Math.round(Number(couponResult?.discountAmountPaise || 0))));
     const discountedSubtotal = Math.max(0, subtotal - discountAmount);
     // Product prices are GST-inclusive; derive included GST on discounted amount.
     const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
