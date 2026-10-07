@@ -2290,21 +2290,42 @@ function getWishlistProductPrice(item) {
       return;
     }
 
-    const savedAmount = Number(preview.discountAmountInr || 0);
+    if (state.merchCouponError) {
+      els.cartCouponPreview.hidden = false;
+      els.cartCouponPreview.innerHTML = `<span class="cart-coupon__error">${escapeHtml(state.merchCouponError)}</span>`;
+      return;
+    }
+
+    const totals = getCheckoutTotals();
     const isRyan = isRyanAttribution();
-    els.cartCouponPreview.hidden = false;
-    if (isRyan && savedAmount === 0 && getCartBundleCount() > 0) {
-      els.cartCouponPreview.innerHTML = `
-        <div class="cart-coupon__savings-text" style="color:#0f766e;">
-          ✓ ${escapeHtml(preview.code)} applied · Bundle savings active
-        </div>
-      `;
+    const indBottles = getCartIndividualBottleCount();
+
+    if (isRyan) {
+      if (totals.couponDiscount > 0) {
+        els.cartCouponPreview.hidden = false;
+        els.cartCouponPreview.innerHTML = `
+          <div class="cart-coupon__savings-text" style="color:#0f766e;">
+            <strong style="display:block;margin-bottom:2px;">Ryan Discount Applied</strong>
+            <div>${formatCheckoutMoney(totals.couponDiscount)} ${totals.bundleDiscount > 0 ? `discount applied to ${indBottles} standalone bottle${indBottles === 1 ? '' : 's'}` : `Ryan discount applied to ${indBottles} bottle${indBottles === 1 ? '' : 's'}`}.</div>
+          </div>
+        `;
+      } else {
+        // When Ryan customer discount is 0: do not show Ryan discount/coupon applied
+        els.cartCouponPreview.hidden = true;
+        els.cartCouponPreview.innerHTML = '';
+      }
     } else {
-      els.cartCouponPreview.innerHTML = `
-        <div class="cart-coupon__savings-text">
-          ${formatCheckoutMoney(savedAmount)} Saved with discounts!
-        </div>
-      `;
+      if (totals.couponDiscount > 0) {
+        els.cartCouponPreview.hidden = false;
+        els.cartCouponPreview.innerHTML = `
+          <div class="cart-coupon__savings-text">
+            ${formatCheckoutMoney(totals.couponDiscount)} Saved with discounts!
+          </div>
+        `;
+      } else {
+        els.cartCouponPreview.hidden = true;
+        els.cartCouponPreview.innerHTML = '';
+      }
     }
   }
 
@@ -2512,18 +2533,29 @@ function getWishlistProductPrice(item) {
 
     els.cartItems.innerHTML = bundleCartHtml + individualItemsHtml;
 
-    const subtotal = getCartTotal();
-    const bundleDiscount = getMerchBundleDiscountAmount();
-    const shipping = getMerchShippingCharge(Math.max(0, subtotal - bundleDiscount));
-    const payable = getCheckoutTotals().total;
-    els.cartSubtotal.textContent = formatPrice(subtotal);
+    const totals = getCheckoutTotals();
+    const bundleDiscount = totals.bundleDiscount;
+    els.cartSubtotal.textContent = formatPrice(totals.rawSubtotal);
     const bundleDiscountRow = document.getElementById('cartBundleDiscountRow');
+    const couponDiscountRow = document.getElementById('cartCouponDiscountRow');
     const cartPayable = document.getElementById('cartPayable');
     if (bundleDiscountRow) {
       bundleDiscountRow.hidden = bundleDiscount <= 0;
       bundleDiscountRow.querySelector('span:last-child').textContent = `- ${formatPrice(bundleDiscount)}`;
     }
-    if (cartPayable) cartPayable.textContent = formatPrice(payable);
+    if (couponDiscountRow) {
+      if (totals.couponDiscount > 0) {
+        couponDiscountRow.hidden = false;
+        const indBottles = getCartIndividualBottleCount();
+        const labelEl = document.getElementById('cartCouponDiscountLabel');
+        const valEl = document.getElementById('cartCouponDiscountVal');
+        if (labelEl) labelEl.textContent = isRyanAttribution() ? `Ryan discount (${indBottles} ${totals.bundleDiscount > 0 ? 'standalone ' : ''}bottle${indBottles === 1 ? '' : 's'})` : 'Coupon discount';
+        if (valEl) valEl.textContent = `- ${formatPrice(totals.couponDiscount)}`;
+      } else {
+        couponDiscountRow.hidden = true;
+      }
+    }
+    if (cartPayable) cartPayable.textContent = formatPrice(totals.total);
 
     const cartCouponSection = document.querySelector('.cart-coupon');
     if (cartCouponSection) {
@@ -6459,12 +6491,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   function renderCheckoutSummary() {
     const totals = getCheckoutTotals();
     const hasShippingAddress = Boolean(state.checkoutDraft?.line1 && state.checkoutDraft?.city && state.checkoutDraft?.state && state.checkoutDraft?.postalCode);
-    const discount = totals.couponDiscount > 0 ? `
-      <div class="shopify-price-row shopify-price-row--discount">
-        <span>Discount${state.merchCouponCode ? ` (${escapeHtml(state.merchCouponCode)})` : ''}</span>
-        <strong>- ${formatCheckoutMoney(totals.couponDiscount)}</strong>
-      </div>
-    ` : '';
+    const isRyan = isRyanAttribution();
+    const indBottles = getCartIndividualBottleCount();
 
     const activeBundle = getActiveBundleInfo();
     let bundleHtml = '';
@@ -6568,14 +6596,29 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
               ${state.merchCouponPreview ? `<button id="checkoutCouponRemoveBtn" class="shopify-coupon__remove" type="button" aria-label="Remove coupon">✕ REMOVE</button>` : ''}
             </div>
           </div>
-          ${state.merchCouponPreview ? `
-            <div class="shopify-coupon__savings-text">
-              ${isRyanAttribution() && Number(state.merchCouponPreview.discountAmountInr || 0) === 0 && totals.bundleDiscount > 0
-                ? `✓ ${escapeHtml(state.merchCouponPreview.code)} applied · Bundle savings active`
-                : `${formatCheckoutMoney(state.merchCouponPreview.discountAmountInr)} Saved with discounts!`
+          ${(() => {
+            if (state.merchCouponError) return '';
+            if (isRyan) {
+              if (totals.couponDiscount > 0) {
+                return `
+                  <div class="shopify-coupon__savings-text" style="color:#0f766e;font-size:13px;line-height:1.4;margin-top:6px;">
+                    <strong style="display:block;color:#0f766e;margin-bottom:2px;">Ryan Discount Applied</strong>
+                    <span>${formatCheckoutMoney(totals.couponDiscount)} ${totals.bundleDiscount > 0 ? `discount applied to ${indBottles} standalone bottle${indBottles === 1 ? '' : 's'}` : `Ryan discount applied to ${indBottles} bottle${indBottles === 1 ? '' : 's'}`}.</span>
+                  </div>
+                `;
               }
-            </div>
-          ` : ''}
+              // When Ryan customer discount is 0: do not show Ryan discount/coupon applied
+              return '';
+            }
+            if (totals.couponDiscount > 0 && state.merchCouponPreview) {
+              return `
+                <div class="shopify-coupon__savings-text" style="margin-top:6px;">
+                  ${formatCheckoutMoney(totals.couponDiscount)} Saved with discounts!
+                </div>
+              `;
+            }
+            return '';
+          })()}
           ${state.merchCouponError ? `
             <div class="shopify-coupon__message is-error">
               ${escapeHtml(state.merchCouponError)}
@@ -6586,7 +6629,12 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
               <span style="font-size:1.2rem;line-height:1;" aria-hidden="true">✨</span>
               <div>
                 <strong style="display:block;font-size:0.88rem;color:#ae5431;line-height:1.3;">Bundle &amp; Save Applied (15% OFF)</strong>
-                <small style="display:block;font-size:0.78rem;color:#78350f;margin-top:2px;">Special 15% savings are active for your bottle &amp; spray bundle.</small>
+                <small style="display:block;font-size:0.78rem;color:#78350f;margin-top:2px;">
+                  ${totals.couponDiscount > 0
+                    ? `${formatCheckoutMoney(totals.bundleDiscount)} saved on Bottle + Mist bundle`
+                    : '15% bundle savings are active for your Bottle + Mist bundle.'
+                  }
+                </small>
               </div>
             </div>
           ` : ''}
@@ -6612,17 +6660,76 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         </div>
 
         <div class="shopify-pricing">
-          <div class="shopify-price-row"><span>Subtotal</span><strong>${formatCheckoutMoney(totals.subtotal)}</strong></div>
-          ${discount}
+          <div class="shopify-price-row"><span>Subtotal</span><strong>${formatCheckoutMoney(totals.rawSubtotal)}</strong></div>
+          ${totals.bundleDiscount > 0 ? `
+            <div class="shopify-price-row shopify-price-row--discount">
+              <span>Bundle &amp; Save (15% OFF)</span>
+              <strong>- ${formatCheckoutMoney(totals.bundleDiscount)}</strong>
+            </div>
+          ` : ''}
+          ${totals.couponDiscount > 0 ? `
+            <div class="shopify-price-row shopify-price-row--discount">
+              <span>${isRyan ? `Ryan Discount (${indBottles} ${totals.bundleDiscount > 0 ? 'standalone ' : ''}bottle${indBottles === 1 ? '' : 's'})` : `Coupon (${escapeHtml(state.merchCouponCode || '')})`}</span>
+              <strong>- ${formatCheckoutMoney(totals.couponDiscount)}</strong>
+            </div>
+          ` : ''}
           <div class="shopify-price-row"><span>Shipping <em aria-label="Shipping help">?</em></span><strong>${hasShippingAddress ? (totals.shipping ? formatCheckoutMoney(totals.shipping) : 'Free') : 'Enter shipping address'}</strong></div>
           <div class="shopify-price-row"><span>GST (Included)</span><strong>${formatCheckoutMoney(totals.gstIncluded)}</strong></div>
         </div>
+
+        ${(() => {
+          if (totals.totalSavings <= 0) return '';
+          let bundleLine = '';
+          if (totals.bundleDiscount > 0) {
+            bundleLine = `
+              <div class="shopify-savings-breakdown__row">
+                <div>
+                  <strong>Bundle &amp; Save</strong>
+                  <small>15% OFF</small>
+                </div>
+                <strong class="shopify-savings-breakdown__amt">${formatCheckoutMoney(totals.bundleDiscount)}</strong>
+              </div>
+            `;
+          }
+          let couponLine = '';
+          if (isRyan && totals.couponDiscount > 0) {
+            couponLine = `
+              <div class="shopify-savings-breakdown__row">
+                <div>
+                  <strong>Ryan Discount</strong>
+                  <small>Applied to ${indBottles} eligible ${totals.bundleDiscount > 0 ? 'standalone ' : ''}bottle${indBottles === 1 ? '' : 's'}</small>
+                </div>
+                <strong class="shopify-savings-breakdown__amt">${formatCheckoutMoney(totals.couponDiscount)}</strong>
+              </div>
+            `;
+          } else if (!isRyan && totals.couponDiscount > 0) {
+            couponLine = `
+              <div class="shopify-savings-breakdown__row">
+                <div>
+                  <strong>Coupon Discount</strong>
+                  <small>${escapeHtml(state.merchCouponCode || '')}</small>
+                </div>
+                <strong class="shopify-savings-breakdown__amt">${formatCheckoutMoney(totals.couponDiscount)}</strong>
+              </div>
+            `;
+          }
+          return `
+            <div class="shopify-savings-breakdown">
+              <span class="shopify-savings-breakdown__title">Discounts &amp; Savings</span>
+              ${bundleLine}
+              ${couponLine}
+              <div class="shopify-savings-breakdown__total">
+                <span>Total Savings</span>
+                <strong>${formatCheckoutMoney(totals.totalSavings)}</strong>
+              </div>
+            </div>
+          `;
+        })()}
 
         <div class="shopify-total">
           <span>Total</span>
           <strong><small>${state.currency}</small> ${formatCheckoutMoney(totals.total)}</strong>
           ${state.currency === 'USD' ? `<p class="shopify-total__fx">Approx. ${formatCheckoutMoney(totals.total)} USD · Base ₹${Number(totals.total).toLocaleString('en-IN')}</p>` : ''}
-          ${totals.totalSavings > 0 ? `<p class="shopify-total__savings">You saved ${formatCheckoutMoney(totals.totalSavings)}!</p>` : ''}
         </div>
 
         <div class="shopify-trust">

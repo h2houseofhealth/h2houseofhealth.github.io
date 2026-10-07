@@ -3486,6 +3486,73 @@ body.is-auth-loading .merch-auth-cta {
   text-align: right;
 }
 
+.shopify-savings-breakdown {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin: 16px 0 6px;
+}
+
+.shopify-savings-breakdown__title {
+  display: block;
+  font-size: 0.82rem;
+  color: #166534;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.shopify-savings-breakdown__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.shopify-savings-breakdown__row strong {
+  display: block;
+  font-size: 0.9rem;
+  color: #15803d;
+  font-weight: 600;
+}
+
+.shopify-savings-breakdown__row small {
+  color: #166534;
+  font-size: 0.8rem;
+}
+
+.shopify-savings-breakdown__amt {
+  font-size: 0.95rem;
+  color: #15803d;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.shopify-savings-breakdown__total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 1px dashed #86efac;
+  margin-top: 6px;
+}
+
+.shopify-savings-breakdown__total span {
+  font-size: 0.95rem;
+  color: #166534;
+  font-weight: 700;
+}
+
+.shopify-savings-breakdown__total strong {
+  font-size: 1.05rem;
+  color: #15803d;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .shopify-total__fx {
   grid-column: 1 / -1;
   margin: 0;

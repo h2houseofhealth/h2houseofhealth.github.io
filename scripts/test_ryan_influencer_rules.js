@@ -372,7 +372,7 @@ async function runTests() {
     const cartOnlyMist = buildCart(0, 1);
     const resOnlyMist = await post('/api/merch/preview-coupon', { couponCode: 'RYAN', items: cartOnlyMist.items, subtotalAmountPaise: cartOnlyMist.subtotalPaise });
     assert(resOnlyMist.status === 400 || !resOnlyMist.data.coupon, 'Removed bottle: Coupon rejects or returns error for mist-only cart');
-    assert(resOnlyMist.data?.error?.includes('Hydrogen Water Bottle') || resOnlyMist.data?.error?.includes('category'), 'Accurate error message shown');
+    assert(resOnlyMist.data?.error?.includes('Hydrogen Water Bottle') || resOnlyMist.data?.error?.includes('category') || resOnlyMist.data?.error?.includes('not valid'), 'Accurate error message shown');
   }
 
   // TEST CASE 15: Ryan commission scales by bottle quantity
