@@ -3498,10 +3498,11 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   const appliesToRaw = String(req.body?.appliesTo || 'all').trim().toLowerCase();
   const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
   const categoryAppliesTo = appliesToRaw.match(/^category:([a-z0-9_\-,]+)$/);
+  const variantAppliesTo = appliesToRaw.match(/^variant:([\d,]+)$/);
   const productIds = productAppliesTo
     ? [...new Set(productAppliesTo[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
     : [];
-  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo || categoryAppliesTo ? appliesToRaw : 'all';
+  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo || categoryAppliesTo || variantAppliesTo ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || '').trim().toLowerCase();
   const influencerId = Number(req.body?.influencerId || req.body?.influencer_id || 0);
   const sendEmail = req.body?.sendEmail !== false;
@@ -3743,10 +3744,11 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   const appliesToRaw = String(req.body?.appliesTo || existing.appliesTo || 'all').trim().toLowerCase();
   const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
   const categoryAppliesTo = appliesToRaw.match(/^category:([a-z0-9_\-,]+)$/);
+  const variantAppliesTo = appliesToRaw.match(/^variant:([\d,]+)$/);
   const productIds = productAppliesTo
     ? [...new Set(productAppliesTo[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
     : [];
-  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo || categoryAppliesTo ? appliesToRaw : 'all';
+  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo || categoryAppliesTo || variantAppliesTo ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || existing.recipientEmail || '').trim().toLowerCase();
   const recipientName = String(req.body?.recipientName || existing.recipientName || '').trim();
   const influencerIdRaw = Object.prototype.hasOwnProperty.call(req.body || {}, 'influencerId')
@@ -11761,7 +11763,7 @@ function calculateCouponDiscountPaise(coupon, subtotalAmountPaise) {
   return Math.min(discountPaise, Math.max(0, subtotal - 100));
 }
 
-function validateCouponForUser({ code, userId, appliesTo, productIds = [], productLineTotals = {}, productSubtotalAmountPaise, subtotalAmountPaise, singleBookingAmountPaise, portal }) {
+function validateCouponForUser({ code, userId, appliesTo, productIds = [], productLineTotals = {}, variantIds = [], variantLineTotals = {}, productSubtotalAmountPaise, subtotalAmountPaise, singleBookingAmountPaise, portal }) {
   const normalizedCode = normalizeCouponCode(code);
   if (!normalizedCode) {
     return {
@@ -11793,8 +11795,12 @@ function validateCouponForUser({ code, userId, appliesTo, productIds = [], produ
   const couponAppliesTo = String(coupon.appliesTo || 'all').trim().toLowerCase();
   const productRestriction = couponAppliesTo.match(/^product:([\d,]+)$/);
   const categoryRestriction = couponAppliesTo.match(/^category:([a-z0-9_\-,]+)$/);
+  const variantRestriction = couponAppliesTo.match(/^variant:([\d,]+)$/);
   const restrictedProductIds = productRestriction
     ? [...new Set(productRestriction[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
+    : [];
+  const restrictedVariantIds = variantRestriction
+    ? [...new Set(variantRestriction[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
     : [];
 
   if (categoryRestriction) {
@@ -11819,13 +11825,21 @@ function validateCouponForUser({ code, userId, appliesTo, productIds = [], produ
     }
   }
 
-  const hasRestriction = Boolean(productRestriction || categoryRestriction);
+  const hasRestriction = Boolean(productRestriction || categoryRestriction || variantRestriction);
   const productIdSet = new Set((Array.isArray(productIds) ? productIds : [productIds]).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0));
-  const appliesToProduct = hasRestriction && restrictedProductIds.some((id) => productIdSet.has(id));
-  if (!['all', appliesTo].includes(couponAppliesTo) && !appliesToProduct) {
+  const variantIdSet = new Set((Array.isArray(variantIds) ? variantIds : [variantIds]).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0));
+  const appliesToProduct = Boolean(productRestriction || categoryRestriction) && restrictedProductIds.some((id) => productIdSet.has(id));
+  const appliesToVariant = Boolean(variantRestriction) && restrictedVariantIds.some((id) => variantIdSet.has(id));
+  if (!['all', appliesTo].includes(couponAppliesTo) && !appliesToProduct && !appliesToVariant) {
     return { error: 'This coupon is not valid for this payment.' };
   }
-  const restrictedProductSubtotalPaise = hasRestriction
+  const restrictedVariantSubtotalPaise = variantRestriction
+    ? Math.max(0, Math.round(restrictedVariantIds.reduce((sum, id) => sum + Number(variantLineTotals?.[id] || 0), 0) || 0))
+    : 0;
+  if (appliesToVariant && restrictedVariantSubtotalPaise <= 0) {
+    return { error: 'This coupon is only valid when the selected product variant is in the cart.' };
+  }
+  const restrictedProductSubtotalPaise = Boolean(productRestriction || categoryRestriction)
     ? Math.max(0, Math.round(restrictedProductIds.reduce((sum, id) => sum + Number(productLineTotals?.[id] || 0), 0) || productSubtotalAmountPaise || 0))
     : 0;
   if (appliesToProduct && restrictedProductSubtotalPaise <= 0) {
@@ -11869,9 +11883,11 @@ function validateCouponForUser({ code, userId, appliesTo, productIds = [], produ
     0,
     Math.round(Number(isAssignedSingleBookingServiceCoupon
       ? singleBookingAmountPaise
-      : appliesToProduct
-        ? restrictedProductSubtotalPaise
-        : subtotalPaise || 0))
+      : appliesToVariant
+        ? restrictedVariantSubtotalPaise
+        : appliesToProduct
+          ? restrictedProductSubtotalPaise
+          : subtotalPaise || 0))
   );
   const discountAmountPaise = calculateCouponDiscountPaise(coupon, discountBasePaise);
   if (discountAmountPaise <= 0) {
