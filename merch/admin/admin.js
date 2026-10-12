@@ -578,6 +578,18 @@
       });
       return names.length <= 2 ? names.join(', ') : `Specific Products (${names.length})`;
     }
+    const varMatch = raw.match(/^variant:([\d,]+)$/);
+    if (varMatch) {
+      const vids = varMatch[1].split(',').map(Number).filter(Boolean);
+      const names = vids.map((id) => {
+        for (const p of (Array.isArray(state.products) ? state.products : [])) {
+          const found = (p.variants || []).find((v) => Number(v.id) === id);
+          if (found) return `${p.name} (${found.color || found.size || found.sku})`;
+        }
+        return `Variant #${id}`;
+      });
+      return names.length <= 2 ? names.join(', ') : `Specific Variants (${names.length})`;
+    }
     return raw;
   }
 
