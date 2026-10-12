@@ -3413,6 +3413,33 @@ app.get('/api/coupons/general', requireAuth, (req, res) => {
   }
 });
 
+const APP_TIME_ZONE = 'Asia/Kolkata';
+
+function getAppTodayDateString(timeZone = APP_TIME_ZONE) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+function normalizeDateOnlyString(value, timeZone = APP_TIME_ZONE) {
+  if (!value) return '';
+  const str = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return str;
+  }
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
+
 app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   const requestId = String(req.headers['x-request-id'] || '').trim() || crypto.randomUUID();
   let code = normalizeCouponCode(req.body?.code);
@@ -3434,10 +3461,11 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   const appliesToRaw = String(req.body?.appliesTo || 'all').trim().toLowerCase();
   const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
   const categoryAppliesTo = appliesToRaw.match(/^category:([a-z0-9_\-,]+)$/);
+  const variantAppliesTo = appliesToRaw.match(/^variant:([\d,]+)$/);
   const productIds = productAppliesTo
     ? [...new Set(productAppliesTo[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
     : [];
-  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo || categoryAppliesTo ? appliesToRaw : 'all';
+  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo || categoryAppliesTo || variantAppliesTo ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || '').trim().toLowerCase();
   const influencerId = Number(req.body?.influencerId || req.body?.influencer_id || 0);
   const sendEmail = req.body?.sendEmail !== false;
@@ -3455,12 +3483,18 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   if (!['public', 'private'].includes(couponType)) {
     couponType = recipientEmail ? 'private' : 'public';
   }
-  const singleUse = Boolean(req.body?.singleUse) || couponType === 'private';
+  const singleUse = Boolean(req.body?.singleUse);
   const maxRedemptionsRaw = req.body?.maxRedemptions;
   let maxRedemptions =
     maxRedemptionsRaw === '' || maxRedemptionsRaw == null ? null : Number(maxRedemptionsRaw);
+  if (singleUse && maxRedemptions == null) {
+    maxRedemptions = 1;
+  }
   const perUserLimitRaw = req.body?.perUserLimit ?? req.body?.sessionLimit;
-  const perUserLimit = perUserLimitRaw === '' || perUserLimitRaw == null ? 1 : Number(perUserLimitRaw);
+  let perUserLimit = perUserLimitRaw === '' || perUserLimitRaw == null ? 1 : Number(perUserLimitRaw);
+  if (couponType === 'private' && Number.isFinite(maxRedemptions) && maxRedemptions > 0) {
+    perUserLimit = Math.max(perUserLimit, maxRedemptions);
+  }
   const active = req.body?.active == null ? 1 : Number(req.body?.active) === 1 ? 1 : 0;
   const validFrom = String(req.body?.validFrom || '').trim();
   const validTill = String(req.body?.validTill || req.body?.expiresAt || '').trim();
@@ -3493,9 +3527,6 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   if (sendEmail && !recipientEmail) {
     return res.status(400).json({ message: 'recipientEmail is required to send the coupon.' });
   }
-  if (singleUse || couponType === 'private') {
-    maxRedemptions = 1;
-  }
   if (maxRedemptions != null && (!Number.isInteger(maxRedemptions) || maxRedemptions <= 0)) {
     return res.status(400).json({ message: 'maxRedemptions must be a positive integer.' });
   }
@@ -3509,15 +3540,13 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     }
   }
   if (validTill) {
+    const todayDateStr = getAppTodayDateString();
+    const expiryDateStr = normalizeDateOnlyString(validTill);
     const parsedExpiry = new Date(validTill);
-    if (Number.isNaN(parsedExpiry.getTime())) {
+    if (!expiryDateStr || Number.isNaN(parsedExpiry.getTime())) {
       return res.status(400).json({ message: 'validTill must be a valid date.' });
     }
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const expiryDateOnly = new Date(parsedExpiry);
-    expiryDateOnly.setHours(0, 0, 0, 0);
-    if (expiryDateOnly < today) {
+    if (expiryDateStr < todayDateStr) {
       return res.status(400).json({ message: 'validTill cannot be in the past.' });
     }
   }
@@ -3640,9 +3669,11 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     }
   }
 
+  const savedCoupon = getCouponByCode(code);
   res.status(201).json({
     message: 'Coupon saved.',
     code,
+    coupon: savedCoupon ? getCouponById(savedCoupon.id) : null,
     emailStatus,
     emailMessage,
     requestId,
@@ -3679,10 +3710,11 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   const appliesToRaw = String(req.body?.appliesTo || existing.appliesTo || 'all').trim().toLowerCase();
   const productAppliesTo = appliesToRaw.match(/^product:([\d,]+)$/);
   const categoryAppliesTo = appliesToRaw.match(/^category:([a-z0-9_\-,]+)$/);
+  const variantAppliesTo = appliesToRaw.match(/^variant:([\d,]+)$/);
   const productIds = productAppliesTo
     ? [...new Set(productAppliesTo[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
     : [];
-  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo || categoryAppliesTo ? appliesToRaw : 'all';
+  const appliesTo = ['all', 'services', 'membership', 'merch'].includes(appliesToRaw) || productAppliesTo || categoryAppliesTo || variantAppliesTo ? appliesToRaw : 'all';
   const recipientEmail = String(req.body?.recipientEmail || existing.recipientEmail || '').trim().toLowerCase();
   const recipientName = String(req.body?.recipientName || existing.recipientName || '').trim();
   const influencerIdRaw = Object.prototype.hasOwnProperty.call(req.body || {}, 'influencerId')
@@ -3706,9 +3738,8 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   if (!['public', 'private'].includes(couponType)) {
     couponType = recipientEmail ? 'private' : 'public';
   }
-  const singleUse = Boolean(req.body?.singleUse) || couponType === 'private';
-  const supportsInfluencerUnlimited = portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0;
-  const hasMaxRedemptions = supportsInfluencerUnlimited && Object.prototype.hasOwnProperty.call(req.body || {}, 'maxRedemptions');
+  const singleUse = Boolean(req.body?.singleUse);
+  const hasMaxRedemptions = Object.prototype.hasOwnProperty.call(req.body || {}, 'maxRedemptions');
   const maxRedemptionsRaw = req.body?.maxRedemptions;
   let maxRedemptions =
     !hasMaxRedemptions
@@ -3716,16 +3747,21 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
       : maxRedemptionsRaw === '' || maxRedemptionsRaw == null
       ? null
       : Number(maxRedemptionsRaw);
+  if (singleUse && maxRedemptions == null) {
+    maxRedemptions = 1;
+  }
   const perUserLimitRaw = req.body?.perUserLimit ?? req.body?.sessionLimit;
-  const perUserLimit =
+  let perUserLimit =
     perUserLimitRaw === '' || perUserLimitRaw == null
       ? Number(existing.perUserLimit || 1)
       : Number(perUserLimitRaw);
+  if (couponType === 'private' && Number.isFinite(maxRedemptions) && maxRedemptions > 0) {
+    perUserLimit = Math.max(perUserLimit, maxRedemptions);
+  }
   const validFrom = String(req.body?.validFrom || existing.validFrom || '').trim();
-  const hasValidTill = supportsInfluencerUnlimited && (
+  const hasValidTill =
     Object.prototype.hasOwnProperty.call(req.body || {}, 'validTill') ||
-    Object.prototype.hasOwnProperty.call(req.body || {}, 'expiresAt')
-  );
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'expiresAt');
   const validTill = hasValidTill
     ? String(req.body?.validTill ?? req.body?.expiresAt ?? '').trim()
     : String(existing.validTill || existing.expiresAt || '').trim();
@@ -3746,9 +3782,6 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   if (couponType === 'private' && !recipientEmail) {
     return res.status(400).json({ message: 'recipientEmail is required for private coupons.' });
   }
-  if (singleUse || couponType === 'private') {
-    maxRedemptions = 1;
-  }
   if (maxRedemptions != null && (!Number.isInteger(maxRedemptions) || maxRedemptions <= 0)) {
     return res.status(400).json({ message: 'maxRedemptions must be a positive integer.' });
   }
@@ -3760,9 +3793,20 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   }
   if (validTill) {
     const parsedExpiry = new Date(validTill);
-    if (Number.isNaN(parsedExpiry.getTime())) {
+    const incomingExpiryStr = normalizeDateOnlyString(validTill);
+    if (!incomingExpiryStr || Number.isNaN(parsedExpiry.getTime())) {
       return res.status(400).json({ message: 'validTill must be a valid date.' });
     }
+    const todayDateStr = getAppTodayDateString();
+    const existingExpiryStr = normalizeDateOnlyString(existing.validTill || existing.expiresAt);
+    const isExpiryChanged = hasValidTill && incomingExpiryStr !== existingExpiryStr;
+
+    if (isExpiryChanged && incomingExpiryStr < todayDateStr) {
+      return res.status(400).json({ message: 'validTill cannot be in the past.' });
+    }
+  }
+  if (validFrom && validTill && new Date(validFrom).getTime() >= new Date(validTill).getTime()) {
+    return res.status(400).json({ message: 'validTill must be after validFrom.' });
   }
   if (portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0) {
     const influencer = db.prepare('SELECT id FROM merch_influencers WHERE id = ?').get(influencerId);
@@ -11405,7 +11449,27 @@ function getCouponById(couponId) {
     )
     .get(id);
   if (!row) return null;
-  return mapCouponRow(row);
+  const stats = getCouponRedemptionStats(row.id, -1);
+  const merchDiscountStats = row.portal === 'merch'
+    ? db.prepare(`
+        SELECT COUNT(*) AS orderRedemptions,
+               COALESCE(SUM(discount_amount), 0) AS totalDiscountAmount
+        FROM merch_orders
+        WHERE coupon_id = ?
+          AND discount_amount > 0
+          AND (
+            payment_status IN ('paid', 'cod_pending', 'refunded')
+            OR status IN ('processing', 'shipped', 'delivered', 'cancelled', 'returned')
+          )
+      `).get(row.id)
+    : null;
+  const coupon = mapCouponRow(row);
+  return {
+    ...coupon,
+    totalRedemptions: Number(stats.total || 0),
+    orderRedemptions: Number(merchDiscountStats?.orderRedemptions || 0),
+    totalDiscountAmount: Number(merchDiscountStats?.totalDiscountAmount || 0),
+  };
 }
 
 function generateUniqueCouponCode(prefix = 'H2') {
@@ -11452,7 +11516,7 @@ function calculateCouponDiscountPaise(coupon, subtotalAmountPaise) {
   return Math.min(discountPaise, Math.max(0, subtotal - 100));
 }
 
-function validateCouponForUser({ code, userId, appliesTo, productIds = [], productLineTotals = {}, productSubtotalAmountPaise, subtotalAmountPaise, singleBookingAmountPaise, portal }) {
+function validateCouponForUser({ code, userId, appliesTo, productIds = [], productLineTotals = {}, variantIds = [], variantLineTotals = {}, productSubtotalAmountPaise, subtotalAmountPaise, singleBookingAmountPaise, portal }) {
   const normalizedCode = normalizeCouponCode(code);
   if (!normalizedCode) {
     return {
@@ -11484,8 +11548,12 @@ function validateCouponForUser({ code, userId, appliesTo, productIds = [], produ
   const couponAppliesTo = String(coupon.appliesTo || 'all').trim().toLowerCase();
   const productRestriction = couponAppliesTo.match(/^product:([\d,]+)$/);
   const categoryRestriction = couponAppliesTo.match(/^category:([a-z0-9_\-,]+)$/);
+  const variantRestriction = couponAppliesTo.match(/^variant:([\d,]+)$/);
   const restrictedProductIds = productRestriction
     ? [...new Set(productRestriction[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
+    : [];
+  const restrictedVariantIds = variantRestriction
+    ? [...new Set(variantRestriction[1].split(',').map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))]
     : [];
 
   if (categoryRestriction) {
@@ -11510,13 +11578,21 @@ function validateCouponForUser({ code, userId, appliesTo, productIds = [], produ
     }
   }
 
-  const hasRestriction = Boolean(productRestriction || categoryRestriction);
+  const hasRestriction = Boolean(productRestriction || categoryRestriction || variantRestriction);
   const productIdSet = new Set((Array.isArray(productIds) ? productIds : [productIds]).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0));
-  const appliesToProduct = hasRestriction && restrictedProductIds.some((id) => productIdSet.has(id));
-  if (!['all', appliesTo].includes(couponAppliesTo) && !appliesToProduct) {
+  const variantIdSet = new Set((Array.isArray(variantIds) ? variantIds : [variantIds]).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0));
+  const appliesToProduct = Boolean(productRestriction || categoryRestriction) && restrictedProductIds.some((id) => productIdSet.has(id));
+  const appliesToVariant = Boolean(variantRestriction) && restrictedVariantIds.some((id) => variantIdSet.has(id));
+  if (!['all', appliesTo].includes(couponAppliesTo) && !appliesToProduct && !appliesToVariant) {
     return { error: 'This coupon is not valid for this payment.' };
   }
-  const restrictedProductSubtotalPaise = hasRestriction
+  const restrictedVariantSubtotalPaise = variantRestriction
+    ? Math.max(0, Math.round(restrictedVariantIds.reduce((sum, id) => sum + Number(variantLineTotals?.[id] || 0), 0) || 0))
+    : 0;
+  if (appliesToVariant && restrictedVariantSubtotalPaise <= 0) {
+    return { error: 'This coupon is only valid when the selected product variant is in the cart.' };
+  }
+  const restrictedProductSubtotalPaise = Boolean(productRestriction || categoryRestriction)
     ? Math.max(0, Math.round(restrictedProductIds.reduce((sum, id) => sum + Number(productLineTotals?.[id] || 0), 0) || productSubtotalAmountPaise || 0))
     : 0;
   if (appliesToProduct && restrictedProductSubtotalPaise <= 0) {
@@ -11533,20 +11609,22 @@ function validateCouponForUser({ code, userId, appliesTo, productIds = [], produ
 
   const user = getUserById(userId);
   const userEmail = String(user?.email || '').trim().toLowerCase();
-  if (userEmail && Array.isArray(coupon.usedBy) && coupon.usedBy.includes(userEmail)) {
-    return { error: 'You have already used this coupon.' };
-  }
 
   const stats = getCouponRedemptionStats(coupon.id, userId);
   if (
-    coupon.couponType === 'private' &&
     Number.isFinite(coupon.maxRedemptions) &&
     coupon.maxRedemptions > 0 &&
     stats.total >= coupon.maxRedemptions
   ) {
     return { error: 'This coupon has reached its maximum usage limit.' };
   }
-  if (Number(coupon.perUserLimit || 1) > 0 && stats.userTotal >= Number(coupon.perUserLimit || 1)) {
+  const effectivePerUserLimit = coupon.couponType === 'private' && Number.isFinite(coupon.maxRedemptions) && coupon.maxRedemptions > 0
+    ? Math.max(Number(coupon.perUserLimit || 1), coupon.maxRedemptions)
+    : Number(coupon.perUserLimit || 1);
+  if (effectivePerUserLimit > 0 && stats.userTotal >= effectivePerUserLimit) {
+    return { error: 'You have already used this coupon.' };
+  }
+  if (effectivePerUserLimit === 1 && userEmail && Array.isArray(coupon.usedBy) && coupon.usedBy.includes(userEmail)) {
     return { error: 'You have already used this coupon.' };
   }
 
@@ -11560,9 +11638,11 @@ function validateCouponForUser({ code, userId, appliesTo, productIds = [], produ
     0,
     Math.round(Number(isAssignedSingleBookingServiceCoupon
       ? singleBookingAmountPaise
-      : appliesToProduct
-        ? restrictedProductSubtotalPaise
-        : subtotalPaise || 0))
+      : appliesToVariant
+        ? restrictedVariantSubtotalPaise
+        : appliesToProduct
+          ? restrictedProductSubtotalPaise
+          : subtotalPaise || 0))
   );
   const discountAmountPaise = calculateCouponDiscountPaise(coupon, discountBasePaise);
   if (discountAmountPaise <= 0) {
@@ -11618,6 +11698,14 @@ function recordCouponRedemption({ couponId, userId, contextType, contextRef, dis
     .get(Number(couponId), Number(userId), String(contextType || '').trim(), normalizedContextRef);
   if (exists) return;
 
+  const coupon = getCouponById(couponId);
+  if (coupon && Number.isFinite(coupon.maxRedemptions) && coupon.maxRedemptions > 0) {
+    const stats = getCouponRedemptionStats(couponId, userId);
+    if (stats.total >= coupon.maxRedemptions) {
+      return;
+    }
+  }
+
   db.prepare(
     `INSERT INTO coupon_redemptions (
       coupon_id, user_id, context_type, context_ref, discount_amount_paise, created_at
@@ -11630,7 +11718,6 @@ function recordCouponRedemption({ couponId, userId, contextType, contextRef, dis
     Math.max(0, Math.round(Number(discountAmountPaise || 0)))
   );
 
-  const coupon = getCouponById(couponId);
   const user = getUserById(userId);
   const userEmail = String(user?.email || '').trim().toLowerCase();
   if (coupon && userEmail) {
@@ -11655,19 +11742,21 @@ function validateCouponRedemptionLimit(couponId, userId) {
       return 'This coupon is assigned to another user.';
     }
   }
-  if (userEmail && Array.isArray(coupon.usedBy) && coupon.usedBy.includes(userEmail)) {
-    return 'You have already used this coupon.';
-  }
   const stats = getCouponRedemptionStats(coupon.id, userId);
   if (
-    coupon.couponType === 'private' &&
     Number.isFinite(coupon.maxRedemptions) &&
     coupon.maxRedemptions > 0 &&
     stats.total >= coupon.maxRedemptions
   ) {
-    return 'This coupon has already been used.';
+    return 'This coupon has reached its maximum usage limit.';
   }
-  if (Number(coupon.perUserLimit || 1) > 0 && stats.userTotal >= Number(coupon.perUserLimit || 1)) {
+  const effectivePerUserLimit = coupon.couponType === 'private' && Number.isFinite(coupon.maxRedemptions) && coupon.maxRedemptions > 0
+    ? Math.max(Number(coupon.perUserLimit || 1), coupon.maxRedemptions)
+    : Number(coupon.perUserLimit || 1);
+  if (effectivePerUserLimit > 0 && stats.userTotal >= effectivePerUserLimit) {
+    return 'You have already used this coupon.';
+  }
+  if (effectivePerUserLimit === 1 && userEmail && Array.isArray(coupon.usedBy) && coupon.usedBy.includes(userEmail)) {
     return 'You have already used this coupon.';
   }
   return '';

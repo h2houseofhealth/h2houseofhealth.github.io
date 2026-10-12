@@ -32,6 +32,15 @@
     return new Date(`${parts.year}-${parts.month}-${parts.day}T12:00:00`);
   }
 
+  function getAppTodayDateString() {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: APP_TIME_ZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+  }
+
   function getViewFromLocation() {
     const hash = String(window.location.hash || '').replace(/^#\/?/, '').trim().toLowerCase();
     if (hash && SECTION_TITLES[hash]) {
@@ -578,11 +587,36 @@
       });
       return names.length <= 2 ? names.join(', ') : `Specific Products (${names.length})`;
     }
+    const varMatch = raw.match(/^variant:([\d,]+)$/);
+    if (varMatch) {
+      const vids = varMatch[1].split(',').map(Number).filter(Boolean);
+      const names = vids.map((id) => {
+        for (const p of (Array.isArray(state.products) ? state.products : [])) {
+          const found = (p.variants || []).find((v) => Number(v.id) === id);
+          if (found) return `${p.name} (${found.color || found.size || found.sku})`;
+        }
+        return `Variant #${id}`;
+      });
+      return names.length <= 2 ? names.join(', ') : `Specific Variants (${names.length})`;
+    }
     return raw;
   }
 
   function getCouponRedemptionCount(coupon) {
-    return Number(coupon?.totalRedemptions || coupon?.orderRedemptions || coupon?.redemptions || coupon?.usageCount || 0);
+    if (coupon == null) return 0;
+    if (typeof coupon.totalRedemptions === 'number' || (coupon.totalRedemptions != null && coupon.totalRedemptions !== '')) {
+      return Math.max(0, Number(coupon.totalRedemptions) || 0);
+    }
+    if (typeof coupon.orderRedemptions === 'number' || (coupon.orderRedemptions != null && coupon.orderRedemptions !== '')) {
+      return Math.max(0, Number(coupon.orderRedemptions) || 0);
+    }
+    if (typeof coupon.redemptions === 'number' || (coupon.redemptions != null && coupon.redemptions !== '')) {
+      return Math.max(0, Number(coupon.redemptions) || 0);
+    }
+    if (coupon.usageCount != null && coupon.usageCount !== '' && coupon.maxRedemptions === undefined) {
+      return Math.max(0, Number(coupon.usageCount) || 0);
+    }
+    return 0;
   }
 
   function getCouponActualDiscountAmount(coupon) {
@@ -1478,7 +1512,7 @@
 
     if (section === 'coupons') {
       const rows = Array.isArray(state.coupons) ? state.coupons : [];
-      return { summary, periodLabel, title: 'Coupons report', section, columns: ['Coupon', 'Type', 'Usage', 'Status', 'Owner'], rows: rows.map((row) => [row.code || '', getCouponTypeLabel(row), row.totalRedemptions || row.usageCount || 0, Number(row.active ?? row.isActive ?? 0) === 1 ? 'Active' : 'Inactive', row.influencerName || row.owner || row.recipientEmail || 'Store']), metrics: [['Active Coupons', summary.activeCouponCount || 0], ['Coupon Records', rows.length], ['Discounts', moneyValue(summary.discounts)], ['Orders', summary.orderCount || 0]] };
+      return { summary, periodLabel, title: 'Coupons report', section, columns: ['Coupon', 'Type', 'Usage', 'Status', 'Owner'], rows: rows.map((row) => [row.code || '', getCouponTypeLabel(row), getCouponRedemptionCount(row), Number(row.active ?? row.isActive ?? 0) === 1 ? 'Active' : 'Inactive', row.influencerName || row.owner || row.recipientEmail || 'Store']), metrics: [['Active Coupons', summary.activeCouponCount || 0], ['Coupon Records', rows.length], ['Discounts', moneyValue(summary.discounts)], ['Orders', summary.orderCount || 0]] };
     }
 
     if (section === 'influencer') {
@@ -1886,7 +1920,7 @@
     const header = ['Code', 'Type', 'Discount', 'Usage', 'Expiry', 'Status', 'Owner'];
     const lines = [header, ...rows.map((coupon) => [
       coupon.code, getCouponTypeLabel(coupon), coupon.discount || coupon.discountValue || '',
-      coupon.totalRedemptions || coupon.usageCount || 0, coupon.validTill || coupon.expiresAt || coupon.expiry || 'No expiry',
+      getCouponRedemptionCount(coupon), coupon.validTill || coupon.expiresAt || coupon.expiry || 'No expiry',
       Number(coupon.active ?? coupon.isActive ?? 0) === 1 ? 'Active' : 'Inactive', coupon.owner || coupon.influencerName || coupon.recipientEmail || 'General',
     ])].map((row) => row.map(csvValue).join(','));
     downloadMerchReportFile(`merch-coupons-${toISODate(today)}.csv`, lines.join('\n'), 'text/csv;charset=utf-8');
@@ -2126,6 +2160,7 @@
     settingsView: document.getElementById('settingsView'),
     offersView: document.getElementById('offersView'),
     notificationBadgeCount: document.getElementById('notificationBadgeCount'),
+    notificationBellBtn: document.getElementById('notificationBellBtn'),
     adminModal: document.getElementById('adminModal'),
     adminModalDialog: document.getElementById('adminModalDialog'),
     toastRegion: document.getElementById('toastRegion'),
@@ -2133,6 +2168,7 @@
     profileTrigger: document.querySelector('[data-action="open-profile"]'),
     profileDropdown: document.getElementById('adminProfileDropdown'),
     adminContent: document.getElementById('adminContent'),
+    adminMain: document.querySelector('.admin-main'),
   };
 
   function getCategoryName(categoryId) {
@@ -2777,7 +2813,7 @@
     if (els.notificationBadgeCount) els.notificationBadgeCount.textContent = String(unreadNotificationCount);
 
     els.dashboardView.innerHTML = `
-      <section class="admin-section">
+      <section class="admin-section" id="liveActivitySection">
         <div class="admin-section__head">
           <div>
             <h2 class="admin-section__title">Live Activity</h2>
@@ -3978,7 +4014,7 @@
                             : getCouponInfluencerLabel(coupon) || (typeValue === 'influencer' ? 'Influencer' : 'General');
                         const expiryValue = coupon.validTill || coupon.expiresAt || coupon.expiry || '';
                         const statusValue = Number(coupon.active ?? coupon.isActive ?? 0) === 1 ? 'active' : 'inactive';
-                        const usageCount = Number(coupon.totalRedemptions || coupon.usageCount || 0);
+                        const usageCount = getCouponRedemptionCount(coupon);
                         return `
                           <tr data-action="select-coupon" data-id="${coupon.id}" style="cursor:pointer;">
                             <td><strong>${escapeHtml(coupon.code || '-')}</strong></td>
@@ -4026,8 +4062,8 @@
                     <div class="admin-list__item">
                       <p class="admin-list__item-title">Usage Statistics</p>
                       <p class="admin-list__item-sub">
-                        Times used: ${escapeHtml(String(selectedCoupon.totalRedemptions || selectedCoupon.usageCount || 0))}<br>
-                        Remaining usage: ${escapeHtml(selectedCoupon.maxRedemptions == null ? 'Unlimited' : String(Math.max(0, Number(selectedCoupon.maxRedemptions || 0) - Number(selectedCoupon.totalRedemptions || 0))))}
+                        Times used: ${escapeHtml(String(getCouponRedemptionCount(selectedCoupon)))}<br>
+                        Remaining usage: ${escapeHtml(selectedCoupon.maxRedemptions == null ? 'Unlimited' : String(Math.max(0, Number(selectedCoupon.maxRedemptions || 0) - getCouponRedemptionCount(selectedCoupon))))}
                       </p>
                     </div>
                     <div class="admin-list__item">
@@ -4043,7 +4079,7 @@
                     <div class="admin-list__item">
                       <p class="admin-list__item-title">Owner</p>
                       <p class="admin-list__item-sub">
-                        ${escapeHtml(getCouponInfluencerLabel(selectedCoupon) || 'General')}
+                        ${escapeHtml(getCouponTypeValue(selectedCoupon) === 'private' ? (selectedCoupon.recipientEmail ? `${selectedCoupon.recipientEmail}${selectedCoupon.recipientName ? ` (${selectedCoupon.recipientName})` : ''}` : 'Private') : (getCouponInfluencerLabel(selectedCoupon) || (getCouponTypeValue(selectedCoupon) === 'influencer' ? 'Influencer' : 'General')))}
                       </p>
                     </div>
                   </div>
@@ -5346,7 +5382,7 @@
       ? state.reports.productSales
       : (Array.isArray(state.reports?.topProducts) ? state.reports.topProducts : []);
     const couponReportRows = [...(Array.isArray(state.coupons) ? state.coupons : [])]
-      .sort((left, right) => Number(right.totalRedemptions || right.usageCount || 0) - Number(left.totalRedemptions || left.usageCount || 0))
+      .sort((left, right) => getCouponRedemptionCount(right) - getCouponRedemptionCount(left))
       .slice(0, 5);
 
     els.reportsView.innerHTML = `
@@ -5475,7 +5511,7 @@
                       <tr>
                         <td><strong>${escapeHtml(coupon.code || '')}</strong></td>
                         <td>${escapeHtml(getCouponTypeLabel(coupon))}</td>
-                        <td>${formatCount(coupon.totalRedemptions || coupon.usageCount || 0)}</td>
+                        <td>${formatCount(getCouponRedemptionCount(coupon))}</td>
                         <td><span class="admin-badge ${Number(coupon.active ?? coupon.isActive ?? 0) === 1 ? 'admin-badge--active' : 'admin-badge--inactive'}">${Number(coupon.active ?? coupon.isActive ?? 0) === 1 ? 'Active' : 'Inactive'}</span></td>
                         <td>${escapeHtml(coupon.influencerName || coupon.owner || 'Store')}</td>
                       </tr>
@@ -6108,8 +6144,8 @@
               <option value="unlimited" ${getCouponUsageTypeValue(entity) === 'unlimited' ? 'selected' : ''}>Unlimited</option>
             </select>
           </label>
-          <label class="admin-field" data-coupon-usage-limit-field><span>Usage Limit</span><input class="admin-input" name="usageCount" type="number" min="1" value="${escapeHtml(entity?.maxRedemptions || entity?.usageCount || '')}" /></label>
-          <label class="admin-field" data-coupon-expiry-field><span>Expiry Date</span><input class="admin-input" name="expiry" type="date" value="${escapeHtml(normalizeCouponDateValue(entity?.validTill || entity?.expiresAt || entity?.expiry))}" /></label>
+          <label class="admin-field" data-coupon-usage-limit-field><span>Usage Limit</span><input class="admin-input" name="usageCount" type="number" min="1" value="${escapeHtml(entity?.maxRedemptions ?? entity?.usageCount ?? '')}" /></label>
+          <label class="admin-field" data-coupon-expiry-field><span>Expiry Date</span><input class="admin-input" name="expiry" type="date" min="${escapeHtml(getAppTodayDateString())}" value="${escapeHtml(normalizeCouponDateValue(entity?.validTill || entity?.expiresAt || entity?.expiry))}" /></label>
           <label class="admin-field" data-coupon-influencer-field><span>Assigned Influencer</span>
             <select class="admin-select" name="influencerId">
               <option value="">Unassigned</option>
@@ -6141,7 +6177,12 @@
               </div>
             `;
           })()}
-          <label class="admin-check"><input type="checkbox" name="status" ${String(entity?.status || 'active') === 'active' ? 'checked' : ''} /><span>Active</span></label>
+          ${(() => {
+            const isEntityActive = entity == null
+              ? true
+              : (entity.status != null ? entity.status === 'active' : Number(entity.active ?? entity.isActive ?? 0) === 1);
+            return `<label class="admin-check"><input type="checkbox" name="status" ${isEntityActive ? 'checked' : ''} /><span>Active</span></label>`;
+          })()}
         `,
       },
       influencer: {
@@ -6198,7 +6239,7 @@
       title: selected.title,
       subtitle: selected.subtitle,
       body: `
-        <form class="admin-form" data-entity-form="${escapeHtml(type)}" data-entity-id="${escapeHtml(entity?.id || '')}">
+        <form class="admin-form" data-entity-form="${escapeHtml(type)}" data-entity-id="${escapeHtml(entity?.id || '')}" novalidate>
           <div class="admin-form__grid">
             ${selected.fields}
           </div>
@@ -6369,6 +6410,11 @@
           input.value = value;
         }
       });
+
+      const expiryInput = form.querySelector('[name="expiry"]');
+      if (expiryInput) {
+        expiryInput.min = getAppTodayDateString();
+      }
 
       if (isInfluencer && usageTypeSelect && (overwriteDefaults || !usageTypeSelect.value)) {
         usageTypeSelect.value = 'limited';
@@ -7641,6 +7687,43 @@
       case 'shiprocket-get-label':
         if (order) await handleShiprocketGetLabel(order);
         return;
+      case 'view-live-activity': {
+        const scrollToLiveActivity = () => {
+          const section = document.getElementById('liveActivitySection');
+          if (section) {
+            const rect = section.getBoundingClientRect();
+            const currentScrollY = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
+            const targetY = rect.top + currentScrollY - 96;
+
+            window.scrollTo({
+              top: Math.max(0, targetY),
+              behavior: 'smooth'
+            });
+
+            try {
+              section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } catch (_) {}
+
+            section.classList.remove('admin-section--highlight');
+            void section.offsetWidth;
+            section.classList.add('admin-section--highlight');
+            setTimeout(() => {
+              section.classList.remove('admin-section--highlight');
+            }, 1800);
+          } else {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            if (els.adminMain) els.adminMain.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        };
+
+        if (state.view === 'dashboard') {
+          scrollToLiveActivity();
+        } else {
+          handleNav('dashboard', true);
+          setTimeout(scrollToLiveActivity, 80);
+        }
+        return;
+      }
       case 'toggle-notifications':
         state.notificationsExpanded = !state.notificationsExpanded;
         renderDashboard();
@@ -8752,6 +8835,7 @@
     setSidebarOpen(false);
     renderAll();
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (els.adminMain) els.adminMain.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
  function preserveInputFocus(target, renderFn) {
@@ -9039,7 +9123,8 @@
     }
 
     if (type === 'coupon') {
-      const entity = updateCouponFromForm(form, existingId ? state.coupons.find((item) => Number(item.id) === existingId) : null);
+      const existingCoupon = existingId ? state.coupons.find((item) => Number(item.id) === existingId) : null;
+      const entity = updateCouponFromForm(form, existingCoupon);
       if (!entity.code || !entity.discountValue) {
         toast('Missing details', 'Coupon code and discount are required.', 'warning');
         return;
@@ -9060,6 +9145,22 @@
         toast('Missing owner email', 'Enter a valid owner email for this private coupon.', 'warning');
         return;
       }
+
+      const todayStr = getAppTodayDateString();
+      const expiryStr = normalizeCouponDateValue(entity.expiry);
+      const existingExpiryStr = normalizeCouponDateValue(existingCoupon?.validTill || existingCoupon?.expiresAt || existingCoupon?.expiry);
+      if (expiryStr && expiryStr < todayStr) {
+        const isExpiryChanged = !existingCoupon || expiryStr !== existingExpiryStr;
+        if (isExpiryChanged) {
+          toast('Invalid expiry date', 'Expiry date cannot be in the past. Choose today or a future date.', 'warning');
+          const expiryField = form.querySelector('[name="expiry"]');
+          if (expiryField) {
+            expiryField.focus();
+          }
+          return;
+        }
+      }
+
       const payload = {
         code: entity.code,
         description: entity.description,
@@ -9076,25 +9177,34 @@
         recipientEmail: entity.recipientEmail,
         influencerId: entity.influencerId || null,
         validTill: entity.expiry || null,
-        singleUse: entity.couponType === 'private',
+        singleUse: Boolean(Number(entity.usageCount) === 1),
         sendEmail: false,
         maxRedemptions: entity.usageCount,
-        perUserLimit: 1,
+        perUserLimit: entity.couponType === 'private' && Number.isFinite(entity.usageCount) && entity.usageCount > 0 ? entity.usageCount : 1,
         active: entity.status === 'active' ? 1 : 0,
         portal: 'merch'
       };
       const method = existingId ? 'PUT' : 'POST';
       const path = existingId ? `/api/admin/coupons/${encodeURIComponent(existingId)}` : '/api/admin/coupons';
-      await apiRequest(path, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      toast('Coupon saved', `${entity.code} ${existingId ? 'updated' : 'created'} successfully.`, 'success');
-      closeModal();
-      await loadCouponData();
-      await loadInfluencerData();
-      await loadReportData();
+      try {
+        const result = await apiRequest(path, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        toast('Coupon saved', `${entity.code} ${existingId ? 'updated' : 'created'} successfully.`, 'success');
+        closeModal();
+        if (existingId) {
+          state.selectedCouponId = existingId;
+        } else if (result?.coupon?.id) {
+          state.selectedCouponId = result.coupon.id;
+        }
+        await loadCouponData();
+        await loadInfluencerData();
+        await loadReportData();
+      } catch (error) {
+        toast('Coupon not saved', error.message || 'Unable to save the coupon.', 'danger');
+      }
       return;
     }
 
