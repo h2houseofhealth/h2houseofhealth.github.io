@@ -26,6 +26,7 @@
 
 html {
   scroll-behavior: smooth;
+  height: 100%;
 }
 
 body.merch-admin-page {
@@ -34,7 +35,14 @@ body.merch-admin-page {
   background:
     radial-gradient(circle at top left, rgba(200, 101, 45, 0.08), transparent 30%),
     linear-gradient(180deg, #f8f3ee 0%, #f6efe8 100%);
+  height: 100%;
   min-height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
+  width: 100%;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body.merch-admin-page::before,
@@ -64,15 +72,19 @@ a {
 }
 
 .admin-shell {
+  height: 100vh;
+  height: 100dvh;
   min-height: 100vh;
   display: grid;
   grid-template-columns: var(--admin-sidebar-width) minmax(0, 1fr);
+  overflow: hidden;
 }
 
 .admin-sidebar {
   position: sticky;
   top: 0;
-  height: 100vh;
+  height: 100%;
+  max-height: 100dvh;
   padding: 18px 16px;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -184,6 +196,11 @@ a {
 
 .admin-main {
   min-width: 0;
+  height: 100%;
+  max-height: 100dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
 }
@@ -258,6 +275,9 @@ a {
 }
 
 .admin-pill {
+  -webkit-appearance: none;
+  appearance: none;
+  font: inherit;
   border: 1px solid rgba(200, 101, 45, 0.16);
   background: rgba(200, 101, 45, 0.08);
   color: var(--admin-accent-dark);
@@ -268,6 +288,44 @@ a {
   gap: 8px;
   font-weight: 700;
   box-shadow: var(--admin-shadow-soft);
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.admin-pill:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--admin-shadow);
+}
+
+.admin-pill:active {
+  transform: translateY(0);
+}
+
+.admin-pill:focus-visible {
+  outline: 2px solid var(--admin-accent);
+  outline-offset: 2px;
+}
+
+#liveActivitySection {
+  scroll-margin-top: 100px;
+  transition: box-shadow 0.3s ease;
+}
+
+.admin-section--highlight {
+  animation: adminSectionPulse 1.6s ease;
+}
+
+@keyframes adminSectionPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(200, 101, 45, 0);
+  }
+  30% {
+    box-shadow: 0 0 0 4px rgba(200, 101, 45, 0.4), var(--admin-shadow);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(200, 101, 45, 0);
+  }
 }
 
 .admin-pill__dot {
