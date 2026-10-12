@@ -5592,10 +5592,19 @@ module.exports = function mountMerchApi(app, {
 
   function isRyanAttribution({ coupon, influencerId, campaignId, campaignSlug } = {}) {
     const infId = Number(influencerId || coupon?.influencerId || coupon?.influencer_id || 0);
-    if (infId === 10) return true;
     const code = String(coupon?.code || coupon?.couponCode || '').trim().toUpperCase();
-    if (code.startsWith('RYAN')) return true;
     const infName = String(coupon?.influencerName || coupon?.influencer_name || coupon?.recipientName || coupon?.recipient_name || '').trim().toLowerCase();
+
+    // If a coupon is provided, check if the coupon itself is Ryan's coupon
+    if (coupon) {
+      if (infId === 10) return true;
+      if (code.startsWith('RYAN')) return true;
+      if (infName === 'ryan') return true;
+      return false;
+    }
+
+    if (infId === 10) return true;
+    if (code.startsWith('RYAN')) return true;
     if (infName === 'ryan') return true;
     const slug = String(campaignSlug || '').trim().toLowerCase();
     if (slug.startsWith('ryan')) return true;
@@ -5713,43 +5722,51 @@ module.exports = function mountMerchApi(app, {
 
     // Check if this coupon is linked to a campaign with a specific target variant
     let campaign = null;
-    if (args.campaignId) {
-      campaign = db.prepare(`
-        SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
-               v.color AS variantColor, v.size AS variantSize, p.name AS productName
-        FROM merch_campaigns c
-        LEFT JOIN merch_variants v ON v.id = c.target_variant_id
-        LEFT JOIN merch_products p ON p.id = c.target_product_id
-        WHERE c.id = ? AND c.is_active = 1
-      `).get(Number(args.campaignId));
-    }
-    if (!campaign && args.campaignSlug) {
-      campaign = db.prepare(`
-        SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
-               v.color AS variantColor, v.size AS variantSize, p.name AS productName
-        FROM merch_campaigns c
-        LEFT JOIN merch_variants v ON v.id = c.target_variant_id
-        LEFT JOIN merch_products p ON p.id = c.target_product_id
-        WHERE LOWER(c.slug) = LOWER(?) AND c.is_active = 1
-      `).get(String(args.campaignSlug).trim());
-    }
-    if (!campaign) {
-      campaign = db.prepare(`
-        SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
-               v.color AS variantColor, v.size AS variantSize, p.name AS productName
-        FROM merch_campaigns c
-        LEFT JOIN merch_variants v ON v.id = c.target_variant_id
-        LEFT JOIN merch_products p ON p.id = c.target_product_id
-        WHERE (c.coupon_id = ? OR LOWER(c.coupon_code) = LOWER(?)) AND c.is_active = 1
-        ORDER BY c.id DESC
-        LIMIT 1
-      `).get(Number(result.coupon.id), String(result.coupon.code || ''));
+    const isInfluencerCoupon = Boolean(Number(result.coupon?.influencerId || 0) > 0 || String(result.coupon?.couponType || '').toLowerCase() === 'influencer');
+    const couponCode = normalizeMerchCouponCode(result.coupon?.code);
+    const couponId = Number(result.coupon?.id || 0);
+
+    // Only match campaigns that belong specifically to the coupon being validated
+    if (couponId > 0 || couponCode) {
+      if (args.campaignId) {
+        campaign = db.prepare(`
+          SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
+                 v.color AS variantColor, v.size AS variantSize, p.name AS productName
+          FROM merch_campaigns c
+          LEFT JOIN merch_variants v ON v.id = c.target_variant_id
+          LEFT JOIN merch_products p ON p.id = c.target_product_id
+          WHERE c.id = ? AND c.is_active = 1 AND (c.coupon_id = ? OR LOWER(TRIM(c.coupon_code)) = LOWER(TRIM(?)))
+        `).get(Number(args.campaignId), couponId, couponCode);
+      }
+      if (!campaign && args.campaignSlug) {
+        campaign = db.prepare(`
+          SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
+                 v.color AS variantColor, v.size AS variantSize, p.name AS productName
+          FROM merch_campaigns c
+          LEFT JOIN merch_variants v ON v.id = c.target_variant_id
+          LEFT JOIN merch_products p ON p.id = c.target_product_id
+          WHERE LOWER(c.slug) = LOWER(?) AND c.is_active = 1 AND (c.coupon_id = ? OR LOWER(TRIM(c.coupon_code)) = LOWER(TRIM(?)))
+        `).get(String(args.campaignSlug).trim(), couponId, couponCode);
+      }
+      if (!campaign && isInfluencerCoupon) {
+        campaign = db.prepare(`
+          SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
+                 v.color AS variantColor, v.size AS variantSize, p.name AS productName
+          FROM merch_campaigns c
+          LEFT JOIN merch_variants v ON v.id = c.target_variant_id
+          LEFT JOIN merch_products p ON p.id = c.target_product_id
+          WHERE (c.coupon_id = ? OR LOWER(TRIM(c.coupon_code)) = LOWER(TRIM(?))) AND c.is_active = 1
+          ORDER BY c.id DESC
+          LIMIT 1
+        `).get(couponId, couponCode);
+      }
     }
 
     const couponAppliesTo = String(result?.coupon?.appliesTo || '').trim().toLowerCase();
-    const hasCategoryOrProductScope = couponAppliesTo.startsWith('category:') || couponAppliesTo.startsWith('product:');
+    const isGeneralMerchCoupon = !isInfluencerCoupon && ['all', 'merch'].includes(couponAppliesTo);
+    const hasCategoryOrProductScope = couponAppliesTo.startsWith('category:') || couponAppliesTo.startsWith('product:') || couponAppliesTo.startsWith('variant:');
 
-    if (campaign && campaign.targetVariantId && !hasCategoryOrProductScope) {
+    if (!isGeneralMerchCoupon && campaign && campaign.targetVariantId && !hasCategoryOrProductScope) {
       const targetVariantId = Number(campaign.targetVariantId);
       const cartVariantIds = (Array.isArray(args.variantIds) ? args.variantIds : []).map((id) => Number(id));
       const hasTargetVariant = cartVariantIds.includes(targetVariantId);
@@ -6079,6 +6096,15 @@ module.exports = function mountMerchApi(app, {
             const prodRows = db.prepare(`SELECT DISTINCT LOWER(category) AS category FROM merch_products WHERE id IN (${placeholders})`).all(...productIds);
             const inCartCats = prodRows.map((r) => String(r.category || '').toLowerCase());
             return catSlugs.some((cat) => inCartCats.includes(cat));
+          }
+          return true;
+        }
+        const varMatch = appliesTo.match(/^variant:([\d,]+)$/);
+        if (varMatch) {
+          const varIds = varMatch[1].split(',').map(Number).filter(Boolean);
+          const rawVariantIds = String(req.query?.variantIds || '').split(',').map(Number).filter(Boolean);
+          if (rawVariantIds.length > 0) {
+            return varIds.some((id) => rawVariantIds.includes(id));
           }
           return true;
         }
