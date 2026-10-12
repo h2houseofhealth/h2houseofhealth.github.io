@@ -479,9 +479,11 @@
       if (code.startsWith('RYAN')) return true;
       if (Number(state.merchCouponPreview.influencerId || 0) === 10) return true;
       if (String(state.merchCouponPreview.influencerName || '').toLowerCase() === 'ryan') return true;
+      return false;
     }
-    if (state.merchCouponCode && normalizeCouponCode(state.merchCouponCode).startsWith('RYAN')) {
-      return true;
+    if (state.merchCouponCode) {
+      if (normalizeCouponCode(state.merchCouponCode).startsWith('RYAN')) return true;
+      return false;
     }
     const slug = String(state.campaignAttribution?.slug || '').toLowerCase();
     if (slug.startsWith('ryan')) return true;
@@ -535,7 +537,9 @@
       if (isInfluencerCoupon(state.merchCouponPreview)) return true;
       const matching = (state.availableCoupons || []).find((c) => normalizeCouponCode(c.code) === normalizeCouponCode(state.merchCouponPreview.code));
       if (matching && isInfluencerCoupon(matching)) return true;
-      if (state.campaignAttribution?.slug || state.campaignAttribution?.influencerId) return true;
+      if (state.campaignAttribution?.couponCode && normalizeCouponCode(state.merchCouponPreview.code) === normalizeCouponCode(state.campaignAttribution.couponCode)) {
+        return true;
+      }
     }
     return false;
   }
