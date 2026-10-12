@@ -2126,6 +2126,7 @@
     settingsView: document.getElementById('settingsView'),
     offersView: document.getElementById('offersView'),
     notificationBadgeCount: document.getElementById('notificationBadgeCount'),
+    notificationBellBtn: document.getElementById('notificationBellBtn'),
     adminModal: document.getElementById('adminModal'),
     adminModalDialog: document.getElementById('adminModalDialog'),
     toastRegion: document.getElementById('toastRegion'),
@@ -2777,7 +2778,7 @@
     if (els.notificationBadgeCount) els.notificationBadgeCount.textContent = String(unreadNotificationCount);
 
     els.dashboardView.innerHTML = `
-      <section class="admin-section">
+      <section class="admin-section" id="liveActivitySection">
         <div class="admin-section__head">
           <div>
             <h2 class="admin-section__title">Live Activity</h2>
@@ -7641,6 +7642,26 @@
       case 'shiprocket-get-label':
         if (order) await handleShiprocketGetLabel(order);
         return;
+      case 'view-live-activity': {
+        const scrollToLiveActivity = () => {
+          const section = document.getElementById('liveActivitySection');
+          if (section) {
+            section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          } else {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        };
+
+        if (state.view === 'dashboard') {
+          scrollToLiveActivity();
+        } else {
+          handleNav('dashboard', true);
+          requestAnimationFrame(() => {
+            scrollToLiveActivity();
+          });
+        }
+        return;
+      }
       case 'toggle-notifications':
         state.notificationsExpanded = !state.notificationsExpanded;
         renderDashboard();
