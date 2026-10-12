@@ -32,6 +32,15 @@
     return new Date(`${parts.year}-${parts.month}-${parts.day}T12:00:00`);
   }
 
+  function getAppTodayDateString() {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: APP_TIME_ZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+  }
+
   function getViewFromLocation() {
     const hash = String(window.location.hash || '').replace(/^#\/?/, '').trim().toLowerCase();
     if (hash && SECTION_TITLES[hash]) {
@@ -6123,7 +6132,7 @@
             </select>
           </label>
           <label class="admin-field" data-coupon-usage-limit-field><span>Usage Limit</span><input class="admin-input" name="usageCount" type="number" min="1" value="${escapeHtml(entity?.maxRedemptions || entity?.usageCount || '')}" /></label>
-          <label class="admin-field" data-coupon-expiry-field><span>Expiry Date</span><input class="admin-input" name="expiry" type="date" value="${escapeHtml(normalizeCouponDateValue(entity?.validTill || entity?.expiresAt || entity?.expiry))}" /></label>
+          <label class="admin-field" data-coupon-expiry-field><span>Expiry Date</span><input class="admin-input" name="expiry" type="date" min="${escapeHtml(getAppTodayDateString())}" value="${escapeHtml(normalizeCouponDateValue(entity?.validTill || entity?.expiresAt || entity?.expiry))}" /></label>
           <label class="admin-field" data-coupon-influencer-field><span>Assigned Influencer</span>
             <select class="admin-select" name="influencerId">
               <option value="">Unassigned</option>
@@ -6212,7 +6221,7 @@
       title: selected.title,
       subtitle: selected.subtitle,
       body: `
-        <form class="admin-form" data-entity-form="${escapeHtml(type)}" data-entity-id="${escapeHtml(entity?.id || '')}">
+        <form class="admin-form" data-entity-form="${escapeHtml(type)}" data-entity-id="${escapeHtml(entity?.id || '')}" novalidate>
           <div class="admin-form__grid">
             ${selected.fields}
           </div>
@@ -6383,6 +6392,11 @@
           input.value = value;
         }
       });
+
+      const expiryInput = form.querySelector('[name="expiry"]');
+      if (expiryInput) {
+        expiryInput.min = getAppTodayDateString();
+      }
 
       if (isInfluencer && usageTypeSelect && (overwriteDefaults || !usageTypeSelect.value)) {
         usageTypeSelect.value = 'limited';
@@ -9097,7 +9111,8 @@
     }
 
     if (type === 'coupon') {
-      const entity = updateCouponFromForm(form, existingId ? state.coupons.find((item) => Number(item.id) === existingId) : null);
+      const existingCoupon = existingId ? state.coupons.find((item) => Number(item.id) === existingId) : null;
+      const entity = updateCouponFromForm(form, existingCoupon);
       if (!entity.code || !entity.discountValue) {
         toast('Missing details', 'Coupon code and discount are required.', 'warning');
         return;
@@ -9118,6 +9133,22 @@
         toast('Missing owner email', 'Enter a valid owner email for this private coupon.', 'warning');
         return;
       }
+
+      const todayStr = getAppTodayDateString();
+      const expiryStr = normalizeCouponDateValue(entity.expiry);
+      const existingExpiryStr = normalizeCouponDateValue(existingCoupon?.validTill || existingCoupon?.expiresAt || existingCoupon?.expiry);
+      if (expiryStr && expiryStr < todayStr) {
+        const isExpiryChanged = !existingCoupon || expiryStr !== existingExpiryStr;
+        if (isExpiryChanged) {
+          toast('Invalid expiry date', 'Expiry date cannot be in the past. Choose today or a future date.', 'warning');
+          const expiryField = form.querySelector('[name="expiry"]');
+          if (expiryField) {
+            expiryField.focus();
+          }
+          return;
+        }
+      }
+
       const payload = {
         code: entity.code,
         description: entity.description,
@@ -9143,16 +9174,20 @@
       };
       const method = existingId ? 'PUT' : 'POST';
       const path = existingId ? `/api/admin/coupons/${encodeURIComponent(existingId)}` : '/api/admin/coupons';
-      await apiRequest(path, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      toast('Coupon saved', `${entity.code} ${existingId ? 'updated' : 'created'} successfully.`, 'success');
-      closeModal();
-      await loadCouponData();
-      await loadInfluencerData();
-      await loadReportData();
+      try {
+        await apiRequest(path, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        toast('Coupon saved', `${entity.code} ${existingId ? 'updated' : 'created'} successfully.`, 'success');
+        closeModal();
+        await loadCouponData();
+        await loadInfluencerData();
+        await loadReportData();
+      } catch (error) {
+        toast('Coupon not saved', error.message || 'Unable to save the coupon.', 'danger');
+      }
       return;
     }
 
