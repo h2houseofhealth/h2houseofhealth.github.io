@@ -2134,6 +2134,7 @@
     profileTrigger: document.querySelector('[data-action="open-profile"]'),
     profileDropdown: document.getElementById('adminProfileDropdown'),
     adminContent: document.getElementById('adminContent'),
+    adminMain: document.querySelector('.admin-main'),
   };
 
   function getCategoryName(categoryId) {
@@ -7667,6 +7668,7 @@
             }, 1800);
           } else {
             window.scrollTo({ top: 0, behavior: 'smooth' });
+            if (els.adminMain) els.adminMain.scrollTo({ top: 0, behavior: 'smooth' });
           }
         };
 
@@ -8795,6 +8797,7 @@
     setSidebarOpen(false);
     renderAll();
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (els.adminMain) els.adminMain.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
  function preserveInputFocus(target, renderFn) {
