@@ -3477,6 +3477,33 @@ app.get('/api/coupons/general', requireAuth, (req, res) => {
   }
 });
 
+const APP_TIME_ZONE = 'Asia/Kolkata';
+
+function getAppTodayDateString(timeZone = APP_TIME_ZONE) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+function normalizeDateOnlyString(value, timeZone = APP_TIME_ZONE) {
+  if (!value) return '';
+  const str = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return str;
+  }
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
+
 app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   const requestId = String(req.headers['x-request-id'] || '').trim() || crypto.randomUUID();
   let code = normalizeCouponCode(req.body?.code);
@@ -3573,15 +3600,13 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     }
   }
   if (validTill) {
+    const todayDateStr = getAppTodayDateString();
+    const expiryDateStr = normalizeDateOnlyString(validTill);
     const parsedExpiry = new Date(validTill);
-    if (Number.isNaN(parsedExpiry.getTime())) {
+    if (!expiryDateStr || Number.isNaN(parsedExpiry.getTime())) {
       return res.status(400).json({ message: 'validTill must be a valid date.' });
     }
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const expiryDateOnly = new Date(parsedExpiry);
-    expiryDateOnly.setHours(0, 0, 0, 0);
-    if (expiryDateOnly < today) {
+    if (expiryDateStr < todayDateStr) {
       return res.status(400).json({ message: 'validTill cannot be in the past.' });
     }
   }
@@ -3771,8 +3796,7 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
     couponType = recipientEmail ? 'private' : 'public';
   }
   const singleUse = Boolean(req.body?.singleUse) || couponType === 'private';
-  const supportsInfluencerUnlimited = portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0;
-  const hasMaxRedemptions = supportsInfluencerUnlimited && Object.prototype.hasOwnProperty.call(req.body || {}, 'maxRedemptions');
+  const hasMaxRedemptions = Object.prototype.hasOwnProperty.call(req.body || {}, 'maxRedemptions');
   const maxRedemptionsRaw = req.body?.maxRedemptions;
   let maxRedemptions =
     !hasMaxRedemptions
@@ -3786,10 +3810,9 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
       ? Number(existing.perUserLimit || 1)
       : Number(perUserLimitRaw);
   const validFrom = String(req.body?.validFrom || existing.validFrom || '').trim();
-  const hasValidTill = supportsInfluencerUnlimited && (
+  const hasValidTill =
     Object.prototype.hasOwnProperty.call(req.body || {}, 'validTill') ||
-    Object.prototype.hasOwnProperty.call(req.body || {}, 'expiresAt')
-  );
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'expiresAt');
   const validTill = hasValidTill
     ? String(req.body?.validTill ?? req.body?.expiresAt ?? '').trim()
     : String(existing.validTill || existing.expiresAt || '').trim();
@@ -3824,9 +3847,20 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   }
   if (validTill) {
     const parsedExpiry = new Date(validTill);
-    if (Number.isNaN(parsedExpiry.getTime())) {
+    const incomingExpiryStr = normalizeDateOnlyString(validTill);
+    if (!incomingExpiryStr || Number.isNaN(parsedExpiry.getTime())) {
       return res.status(400).json({ message: 'validTill must be a valid date.' });
     }
+    const todayDateStr = getAppTodayDateString();
+    const existingExpiryStr = normalizeDateOnlyString(existing.validTill || existing.expiresAt);
+    const isExpiryChanged = hasValidTill && incomingExpiryStr !== existingExpiryStr;
+
+    if (isExpiryChanged && incomingExpiryStr < todayDateStr) {
+      return res.status(400).json({ message: 'validTill cannot be in the past.' });
+    }
+  }
+  if (validFrom && validTill && new Date(validFrom).getTime() >= new Date(validTill).getTime()) {
+    return res.status(400).json({ message: 'validTill must be after validFrom.' });
   }
   if (portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0) {
     const influencer = db.prepare('SELECT id FROM merch_influencers WHERE id = ?').get(influencerId);
