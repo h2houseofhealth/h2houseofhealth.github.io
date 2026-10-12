@@ -7646,7 +7646,25 @@
         const scrollToLiveActivity = () => {
           const section = document.getElementById('liveActivitySection');
           if (section) {
-            section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            const rect = section.getBoundingClientRect();
+            const currentScrollY = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
+            const targetY = rect.top + currentScrollY - 96;
+
+            window.scrollTo({
+              top: Math.max(0, targetY),
+              behavior: 'smooth'
+            });
+
+            try {
+              section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } catch (_) {}
+
+            section.classList.remove('admin-section--highlight');
+            void section.offsetWidth;
+            section.classList.add('admin-section--highlight');
+            setTimeout(() => {
+              section.classList.remove('admin-section--highlight');
+            }, 1800);
           } else {
             window.scrollTo({ top: 0, behavior: 'smooth' });
           }
@@ -7656,9 +7674,7 @@
           scrollToLiveActivity();
         } else {
           handleNav('dashboard', true);
-          requestAnimationFrame(() => {
-            scrollToLiveActivity();
-          });
+          setTimeout(scrollToLiveActivity, 80);
         }
         return;
       }
