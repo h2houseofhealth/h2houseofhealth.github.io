@@ -6271,6 +6271,14 @@ app.post('/api/bookings/:id/send-whatsapp', requireAuth, async (req, res) => {
     return res.status(403).json({ message: 'forbidden' });
   }
 
+  const paymentStatus = String(booking.paymentStatus || '').trim().toLowerCase();
+  if (paymentStatus !== 'paid') {
+    return res.status(400).json({
+      success: false,
+      message: `Cannot send WhatsApp confirmation: booking payment status is '${paymentStatus || 'unpaid'}'. WhatsApp confirmation requires verified payment.`,
+    });
+  }
+
   const result = await sendWhatsAppBookingConfirmation(booking);
   if (!result.ok) {
     return res.status(result.statusCode || 500).json({
@@ -7926,6 +7934,11 @@ app.post('/api/public/payments/create-order', async (req, res) => {
                AND status <> 'cancelled'
                AND payment_status <> 'paid'`
           ).run(booking.bookingGroupId);
+          payableBookings.forEach((b) => {
+            void sendWhatsAppBookingConfirmation(b.id).catch((err) => {
+              console.error('[WhatsApp] Group booking confirmation error:', err?.message || err);
+            });
+          });
         } else {
           db.prepare(
             `UPDATE bookings
@@ -7935,6 +7948,9 @@ app.post('/api/public/payments/create-order', async (req, res) => {
                  status = CASE WHEN status = 'pending' THEN 'booked' ELSE status END
              WHERE id = ?`
           ).run(booking.id);
+          void sendWhatsAppBookingConfirmation(booking.id).catch((err) => {
+            console.error('[WhatsApp] Booking confirmation error:', err?.message || err);
+          });
         }
         return res.json({
           paid: true,
@@ -7944,16 +7960,6 @@ app.post('/api/public/payments/create-order', async (req, res) => {
         });
       }
 
-      db.prepare(
-        `UPDATE bookings
-         SET payment_status = 'paid',
-             paid_at = CASE WHEN paid_at IS NULL THEN datetime('now') ELSE paid_at END,
-             paid_amount_paise = 0,
-             status = CASE WHEN status = 'pending' THEN 'booked' ELSE status END
-         WHERE id = ?
-           AND status <> 'cancelled'
-           AND payment_status <> 'paid'`
-      );
       for (const booking of paymentContext.payableBookings) {
         db.prepare(
           `UPDATE bookings
@@ -7965,6 +7971,9 @@ app.post('/api/public/payments/create-order', async (req, res) => {
              AND status <> 'cancelled'
              AND payment_status <> 'paid'`
         ).run(booking.id);
+        void sendWhatsAppBookingConfirmation(booking.id).catch((err) => {
+          console.error('[WhatsApp] Guest booking confirmation error:', err?.message || err);
+        });
       }
       return res.json({
         paid: true,
@@ -12415,13 +12424,15 @@ function createSingleBookingResponse(req, res, { targetUser, defaultNotes = '', 
     )
     .get(result.lastInsertRowid);
 
-  void sendWhatsAppBookingConfirmation(booking).then((whatsappResult) => {
-    if (!whatsappResult.ok) {
-      console.error('Booking WhatsApp confirmation was not sent:', whatsappResult.message);
-    }
-  }).catch((error) => {
-    console.error('Booking WhatsApp confirmation failed:', String(error?.message || error));
-  });
+  if (computedPaymentStatus === 'paid') {
+    void sendWhatsAppBookingConfirmation(booking).then((whatsappResult) => {
+      if (!whatsappResult.ok) {
+        console.error('Booking WhatsApp confirmation was not sent:', whatsappResult.message);
+      }
+    }).catch((error) => {
+      console.error('Booking WhatsApp confirmation failed:', String(error?.message || error));
+    });
+  }
 
   if (!includeAdminMeta) {
     return res.status(201).json({ booking });
@@ -15290,13 +15301,35 @@ function getBookingForWhatsApp(bookingId) {
 
 async function sendWhatsAppBookingConfirmation(bookingOrId) {
   let booking = bookingOrId;
+  const bookingId = typeof bookingOrId === 'object' ? bookingOrId?.id : bookingOrId;
   if (!booking || typeof booking !== 'object' || !booking.serviceName) {
-    const id = typeof bookingOrId === 'object' ? bookingOrId?.id : bookingOrId;
-    booking = getBookingForWhatsApp(id);
+    booking = getBookingForWhatsApp(bookingId);
   }
   if (!booking) {
     return { ok: false, message: 'Booking not found for WhatsApp confirmation.' };
   }
+
+  // Ensure WhatsApp confirmation is sent only after backend-verified successful payment
+  let paymentStatus = String(booking.paymentStatus || booking.payment_status || '').trim().toLowerCase();
+  if (paymentStatus !== 'paid' && bookingId) {
+    const dbBooking = getBookingForWhatsApp(bookingId);
+    if (dbBooking) {
+      paymentStatus = String(dbBooking.paymentStatus || '').trim().toLowerCase();
+      booking = { ...dbBooking, ...booking, paymentStatus };
+    }
+  }
+  if (paymentStatus !== 'paid') {
+    return {
+      ok: false,
+      message: `Booking confirmation not sent: payment status is '${paymentStatus || 'unpaid'}'. WhatsApp confirmation requires verified payment.`,
+    };
+  }
+
+  const bookingStatus = String(booking.status || '').trim().toLowerCase();
+  if (bookingStatus === 'cancelled') {
+    return { ok: false, message: 'Booking is cancelled. WhatsApp confirmation not sent.' };
+  }
+
   const recipient = booking.clientPhone || booking.clientMobile;
   if (!recipient) {
     return { ok: false, message: 'No recipient mobile number found for booking.' };
@@ -15306,7 +15339,7 @@ async function sendWhatsAppBookingConfirmation(bookingOrId) {
   const dateFormatted = formatWhatsAppBookingDate(booking.bookingDate);
   const timeFormatted = formatWhatsAppBookingTime(booking.bookingTime);
   const serviceName = String(booking.serviceName || 'Consultation').trim();
-  const bookingId = booking.id ? `BK${booking.id}` : 'BK-REF';
+  const formattedBookingId = booking.id ? `BK${booking.id}` : 'BK-REF';
 
   const templateName = WHATSAPP_APPOINTMENT_TEMPLATE || 'appointment_confirmation';
   console.log('[WhatsApp] Sending booking confirmation:', {
@@ -15316,7 +15349,7 @@ async function sendWhatsAppBookingConfirmation(bookingOrId) {
     dateFormatted,
     timeFormatted,
     serviceName,
-    bookingId,
+    bookingId: formattedBookingId,
   });
 
   return sendWhatsAppMessage(recipient, templateName, [
@@ -15324,7 +15357,7 @@ async function sendWhatsAppBookingConfirmation(bookingOrId) {
     dateFormatted,
     timeFormatted,
     serviceName,
-    bookingId,
+    formattedBookingId,
   ]);
 }
 function getTransporter() {
