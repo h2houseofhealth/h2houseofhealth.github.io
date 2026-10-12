@@ -3547,12 +3547,18 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   if (!['public', 'private'].includes(couponType)) {
     couponType = recipientEmail ? 'private' : 'public';
   }
-  const singleUse = Boolean(req.body?.singleUse) || couponType === 'private';
+  const singleUse = Boolean(req.body?.singleUse);
   const maxRedemptionsRaw = req.body?.maxRedemptions;
   let maxRedemptions =
     maxRedemptionsRaw === '' || maxRedemptionsRaw == null ? null : Number(maxRedemptionsRaw);
+  if (singleUse && maxRedemptions == null) {
+    maxRedemptions = 1;
+  }
   const perUserLimitRaw = req.body?.perUserLimit ?? req.body?.sessionLimit;
-  const perUserLimit = perUserLimitRaw === '' || perUserLimitRaw == null ? 1 : Number(perUserLimitRaw);
+  let perUserLimit = perUserLimitRaw === '' || perUserLimitRaw == null ? 1 : Number(perUserLimitRaw);
+  if (couponType === 'private' && Number.isFinite(maxRedemptions) && maxRedemptions > 0) {
+    perUserLimit = Math.max(perUserLimit, maxRedemptions);
+  }
   const active = req.body?.active == null ? 1 : Number(req.body?.active) === 1 ? 1 : 0;
   const validFrom = String(req.body?.validFrom || '').trim();
   const validTill = String(req.body?.validTill || req.body?.expiresAt || '').trim();
@@ -3584,9 +3590,6 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   }
   if (sendEmail && !recipientEmail) {
     return res.status(400).json({ message: 'recipientEmail is required to send the coupon.' });
-  }
-  if (singleUse || couponType === 'private') {
-    maxRedemptions = 1;
   }
   if (maxRedemptions != null && (!Number.isInteger(maxRedemptions) || maxRedemptions <= 0)) {
     return res.status(400).json({ message: 'maxRedemptions must be a positive integer.' });
@@ -3730,9 +3733,11 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     }
   }
 
+  const savedCoupon = getCouponByCode(code);
   res.status(201).json({
     message: 'Coupon saved.',
     code,
+    coupon: savedCoupon ? getCouponById(savedCoupon.id) : null,
     emailStatus,
     emailMessage,
     requestId,
@@ -3797,7 +3802,7 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   if (!['public', 'private'].includes(couponType)) {
     couponType = recipientEmail ? 'private' : 'public';
   }
-  const singleUse = Boolean(req.body?.singleUse) || couponType === 'private';
+  const singleUse = Boolean(req.body?.singleUse);
   const hasMaxRedemptions = Object.prototype.hasOwnProperty.call(req.body || {}, 'maxRedemptions');
   const maxRedemptionsRaw = req.body?.maxRedemptions;
   let maxRedemptions =
@@ -3806,11 +3811,17 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
       : maxRedemptionsRaw === '' || maxRedemptionsRaw == null
       ? null
       : Number(maxRedemptionsRaw);
+  if (singleUse && maxRedemptions == null) {
+    maxRedemptions = 1;
+  }
   const perUserLimitRaw = req.body?.perUserLimit ?? req.body?.sessionLimit;
-  const perUserLimit =
+  let perUserLimit =
     perUserLimitRaw === '' || perUserLimitRaw == null
       ? Number(existing.perUserLimit || 1)
       : Number(perUserLimitRaw);
+  if (couponType === 'private' && Number.isFinite(maxRedemptions) && maxRedemptions > 0) {
+    perUserLimit = Math.max(perUserLimit, maxRedemptions);
+  }
   const validFrom = String(req.body?.validFrom || existing.validFrom || '').trim();
   const hasValidTill =
     Object.prototype.hasOwnProperty.call(req.body || {}, 'validTill') ||
@@ -3834,9 +3845,6 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   }
   if (couponType === 'private' && !recipientEmail) {
     return res.status(400).json({ message: 'recipientEmail is required for private coupons.' });
-  }
-  if (singleUse || couponType === 'private') {
-    maxRedemptions = 1;
   }
   if (maxRedemptions != null && (!Number.isInteger(maxRedemptions) || maxRedemptions <= 0)) {
     return res.status(400).json({ message: 'maxRedemptions must be a positive integer.' });
@@ -11750,7 +11758,27 @@ function getCouponById(couponId) {
     )
     .get(id);
   if (!row) return null;
-  return mapCouponRow(row);
+  const stats = getCouponRedemptionStats(row.id, -1);
+  const merchDiscountStats = row.portal === 'merch'
+    ? db.prepare(`
+        SELECT COUNT(*) AS orderRedemptions,
+               COALESCE(SUM(discount_amount), 0) AS totalDiscountAmount
+        FROM merch_orders
+        WHERE coupon_id = ?
+          AND discount_amount > 0
+          AND (
+            payment_status IN ('paid', 'cod_pending', 'refunded')
+            OR status IN ('processing', 'shipped', 'delivered', 'cancelled', 'returned')
+          )
+      `).get(row.id)
+    : null;
+  const coupon = mapCouponRow(row);
+  return {
+    ...coupon,
+    totalRedemptions: Number(stats.total || 0),
+    orderRedemptions: Number(merchDiscountStats?.orderRedemptions || 0),
+    totalDiscountAmount: Number(merchDiscountStats?.totalDiscountAmount || 0),
+  };
 }
 
 function generateUniqueCouponCode(prefix = 'H2') {
@@ -11890,20 +11918,22 @@ function validateCouponForUser({ code, userId, appliesTo, productIds = [], produ
 
   const user = getUserById(userId);
   const userEmail = String(user?.email || '').trim().toLowerCase();
-  if (userEmail && Array.isArray(coupon.usedBy) && coupon.usedBy.includes(userEmail)) {
-    return { error: 'You have already used this coupon.' };
-  }
 
   const stats = getCouponRedemptionStats(coupon.id, userId);
   if (
-    coupon.couponType === 'private' &&
     Number.isFinite(coupon.maxRedemptions) &&
     coupon.maxRedemptions > 0 &&
     stats.total >= coupon.maxRedemptions
   ) {
     return { error: 'This coupon has reached its maximum usage limit.' };
   }
-  if (Number(coupon.perUserLimit || 1) > 0 && stats.userTotal >= Number(coupon.perUserLimit || 1)) {
+  const effectivePerUserLimit = coupon.couponType === 'private' && Number.isFinite(coupon.maxRedemptions) && coupon.maxRedemptions > 0
+    ? Math.max(Number(coupon.perUserLimit || 1), coupon.maxRedemptions)
+    : Number(coupon.perUserLimit || 1);
+  if (effectivePerUserLimit > 0 && stats.userTotal >= effectivePerUserLimit) {
+    return { error: 'You have already used this coupon.' };
+  }
+  if (effectivePerUserLimit === 1 && userEmail && Array.isArray(coupon.usedBy) && coupon.usedBy.includes(userEmail)) {
     return { error: 'You have already used this coupon.' };
   }
 
@@ -11977,6 +12007,14 @@ function recordCouponRedemption({ couponId, userId, contextType, contextRef, dis
     .get(Number(couponId), Number(userId), String(contextType || '').trim(), normalizedContextRef);
   if (exists) return;
 
+  const coupon = getCouponById(couponId);
+  if (coupon && Number.isFinite(coupon.maxRedemptions) && coupon.maxRedemptions > 0) {
+    const stats = getCouponRedemptionStats(couponId, userId);
+    if (stats.total >= coupon.maxRedemptions) {
+      return;
+    }
+  }
+
   db.prepare(
     `INSERT INTO coupon_redemptions (
       coupon_id, user_id, context_type, context_ref, discount_amount_paise, created_at
@@ -11989,7 +12027,6 @@ function recordCouponRedemption({ couponId, userId, contextType, contextRef, dis
     Math.max(0, Math.round(Number(discountAmountPaise || 0)))
   );
 
-  const coupon = getCouponById(couponId);
   const user = getUserById(userId);
   const userEmail = String(user?.email || '').trim().toLowerCase();
   if (coupon && userEmail) {
@@ -12014,19 +12051,21 @@ function validateCouponRedemptionLimit(couponId, userId) {
       return 'This coupon is assigned to another user.';
     }
   }
-  if (userEmail && Array.isArray(coupon.usedBy) && coupon.usedBy.includes(userEmail)) {
-    return 'You have already used this coupon.';
-  }
   const stats = getCouponRedemptionStats(coupon.id, userId);
   if (
-    coupon.couponType === 'private' &&
     Number.isFinite(coupon.maxRedemptions) &&
     coupon.maxRedemptions > 0 &&
     stats.total >= coupon.maxRedemptions
   ) {
-    return 'This coupon has already been used.';
+    return 'This coupon has reached its maximum usage limit.';
   }
-  if (Number(coupon.perUserLimit || 1) > 0 && stats.userTotal >= Number(coupon.perUserLimit || 1)) {
+  const effectivePerUserLimit = coupon.couponType === 'private' && Number.isFinite(coupon.maxRedemptions) && coupon.maxRedemptions > 0
+    ? Math.max(Number(coupon.perUserLimit || 1), coupon.maxRedemptions)
+    : Number(coupon.perUserLimit || 1);
+  if (effectivePerUserLimit > 0 && stats.userTotal >= effectivePerUserLimit) {
+    return 'You have already used this coupon.';
+  }
+  if (effectivePerUserLimit === 1 && userEmail && Array.isArray(coupon.usedBy) && coupon.usedBy.includes(userEmail)) {
     return 'You have already used this coupon.';
   }
   return '';
