@@ -10118,7 +10118,7 @@ module.exports = function mountMerchApi(app, {
           };
         }
 
-        // Check if a non-stale sending request is currently in progress (< 5 minutes old)
+        // Check if an active non-stale sending request is currently in progress (< 5 minutes old)
         const now = Date.now();
         const activeSending = activeShortages.find((s) => {
           if (s.customer_communication_status !== 'sending') return false;
@@ -10131,6 +10131,25 @@ module.exports = function mountMerchApi(app, {
           return {
             error: 'A communication request is currently in progress for this order. Please wait.',
             status: 409,
+          };
+        }
+
+        // Uncertain-outcome / Stale 'sending' check:
+        // If a request was left in 'sending' for >= 5 minutes (e.g. previous server crash after provider handover),
+        // we cannot guarantee whether the provider delivered it or dropped it without external verification.
+        // Therefore, to prevent accidental duplicate delivery, retrying requires explicit confirmation and reason.
+        const isStaleSending = activeShortages.some((s) => {
+          if (s.customer_communication_status !== 'sending') return false;
+          const updatedTime = parseSqliteUtcDate(s.updated_at || s.created_at);
+          return (now - updatedTime) >= 300000;
+        });
+
+        if (isStaleSending && (!confirmResend || resendReason.length < 5)) {
+          return {
+            error: "A previous email dispatch attempt was interrupted or timed out. To prevent accidental duplicates if the provider previously accepted the email, retrying requires explicit confirmation ('confirmResend: true') and an administrative reason ('resendReason' >= 5 chars).",
+            status: 409,
+            staleRecovery: true,
+            requiresReason: true,
           };
         }
 
@@ -10162,7 +10181,7 @@ module.exports = function mountMerchApi(app, {
         }
 
         // Atomically claim the active shortage records by setting to 'sending'.
-        // Stale 'sending' rows (>5m old) can be safely claimed.
+        // Stale 'sending' rows (>5m old) can be safely claimed with authorized confirmation.
         // Already 'sent' rows can only be claimed if isAuthorizedResend === true.
         const claimLock = db.prepare(`
           UPDATE merch_order_stock_shortages
@@ -10174,10 +10193,10 @@ module.exports = function mountMerchApi(app, {
             AND review_status = 'ready_for_communication'
             AND (
               customer_communication_status IN ('pending', 'failed')
-              OR (customer_communication_status = 'sending' AND updated_at < datetime('now', '-5 minutes'))
+              OR (customer_communication_status = 'sending' AND updated_at < datetime('now', '-5 minutes') AND (? = 1 OR ? = 1))
               OR (? = 1 AND customer_communication_status = 'sent')
             )
-        `).run(orderId, isAuthorizedResend ? 1 : 0);
+        `).run(orderId, isAuthorizedResend ? 1 : 0, isStaleSending ? 1 : 0, isAuthorizedResend ? 1 : 0);
 
         if (!claimLock.changes) {
           return {
