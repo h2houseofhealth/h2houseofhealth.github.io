@@ -4406,11 +4406,15 @@ body.is-auth-loading .merch-auth-cta {
   font-weight: 700;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+  line-height: 1.35;
 }
 
-.product-card__stock.in-stock,
-.product-card__stock.low-stock {
+.product-card__stock.in-stock {
   color: #2e7d32;
+}
+
+.product-card__stock.low-stock {
+  color: var(--primary-dark, #9f3e1f);
 }
 
 .product-card__stock.out-of-stock {
