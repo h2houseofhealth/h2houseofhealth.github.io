@@ -852,6 +852,14 @@
     return [variant?.size, variant?.color].filter(Boolean).join(' / ') || 'Default variant';
   }
 
+  function formatVariantDropdownLabel(variant) {
+    if (!variant) return 'Default';
+    const color = (variant.color || '').trim();
+    const size = (variant.size || '').trim();
+    if (color && size) return `${color} ${size}`;
+    return color || size || variant.name || `Variant #${variant.id}`;
+  }
+
   function isHoodieProduct(product) {
     const category = String(product?.category || '').toLowerCase();
     const name = String(product?.name || '').toLowerCase();
@@ -6693,7 +6701,26 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
     const nonBundleItems = state.cart.filter((item) => !item.isBundle);
 
-    const individualItemsHtml = nonBundleItems.map((item) => `
+    const individualItemsHtml = nonBundleItems.map((item) => {
+      const product = (state.products || []).find((p) => Number(p.id) === Number(item.productId))
+        || (state.products || []).find((p) => (p.variants || []).some((v) => Number(v.id) === Number(item.variantId)));
+      const variants = (product?.variants || []).filter((v) => Number(v.isActive ?? v.is_active ?? 1) === 1 && !v.deletedAt);
+      const hasMultipleVariants = variants.length > 1;
+
+      let variantSelectorHtml = '';
+      if (hasMultipleVariants) {
+        variantSelectorHtml = `
+          <select class="shopify-summary-product__variant-select" data-checkout-change-variant="${item.variantId}" aria-label="Select variant for ${escapeHtml(item.productName)}">
+            ${variants.map((v) => {
+              const label = formatVariantDropdownLabel(v);
+              const isSelected = Number(v.id) === Number(item.variantId);
+              return `<option value="${v.id}" ${isSelected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+            }).join('')}
+          </select>
+        `;
+      }
+
+      return `
       <div class="shopify-summary-product">
         <div class="shopify-summary-product__image">
           <img src="${escapeHtml(item.image || FALLBACK_PRODUCT_IMAGE)}" alt="${escapeHtml(item.productName)}" />
@@ -6703,10 +6730,13 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           <strong>${escapeHtml(item.productName)}</strong>
           <small>${escapeHtml(item.variantLabel || 'Default')}</small>
           <small class="shopify-summary-product__qty-label">${escapeHtml(`${item.quantity} Piece${item.quantity === 1 ? '' : 's'}`)}</small>
-          <div class="shopify-summary-product__stepper" role="group" aria-label="Quantity for ${escapeHtml(item.productName)}">
-            <button type="button" class="shopify-summary-product__step-btn" data-checkout-step-variant="${item.variantId}" data-checkout-step-dir="down" aria-label="Decrease quantity" ${item.quantity <= 1 ? 'title="Remove item"' : ''}>−</button>
-            <span class="shopify-summary-product__step-qty">${item.quantity}</span>
-            <button type="button" class="shopify-summary-product__step-btn" data-checkout-step-variant="${item.variantId}" data-checkout-step-dir="up" aria-label="Increase quantity">+</button>
+          <div class="shopify-summary-product__controls">
+            <div class="shopify-summary-product__stepper" role="group" aria-label="Quantity for ${escapeHtml(item.productName)}">
+              <button type="button" class="shopify-summary-product__step-btn" data-checkout-step-variant="${item.variantId}" data-checkout-step-dir="down" aria-label="Decrease quantity" ${item.quantity <= 1 ? 'title="Remove item"' : ''}>−</button>
+              <span class="shopify-summary-product__step-qty">${item.quantity}</span>
+              <button type="button" class="shopify-summary-product__step-btn" data-checkout-step-variant="${item.variantId}" data-checkout-step-dir="up" aria-label="Increase quantity">+</button>
+            </div>
+            ${variantSelectorHtml}
           </div>
         </div>
         <div class="shopify-summary-product__right">
@@ -6714,7 +6744,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           <button type="button" class="shopify-summary-product__remove" data-checkout-remove-variant="${item.variantId}" title="Remove item" aria-label="Remove ${escapeHtml(item.productName)}">✕</button>
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
 
     return `
       <aside class="shopify-summary" aria-label="Order summary">
@@ -7214,6 +7245,85 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           }
           renderCheckoutPage();
         }
+      });
+    });
+
+    els.checkoutPage?.querySelectorAll('[data-checkout-change-variant]').forEach((select) => {
+      select.addEventListener('change', async () => {
+        const form = els.checkoutPage?.querySelector('#shopifyCheckoutForm');
+        if (form) state.checkoutDraft = getCheckoutDraftFromForm(form);
+        const currentVariantId = Number(select.dataset.checkoutChangeVariant);
+        const newVariantId = Number(select.value);
+        if (!newVariantId || currentVariantId === newVariantId) return;
+
+        const item = state.cart.find((it) => Number(it.variantId) === currentVariantId && !it.isBundle);
+        if (!item) return;
+
+        const product = (state.products || []).find((p) => Number(p.id) === Number(item.productId))
+          || (state.products || []).find((p) => (p.variants || []).some((v) => Number(v.id) === currentVariantId));
+        const newVariant = (product?.variants || []).find((v) => Number(v.id) === newVariantId);
+        if (!product || !newVariant) {
+          showCheckoutNotice('Variant unavailable', 'The selected variant is no longer available.', { variant: 'error' });
+          renderCheckoutPage();
+          return;
+        }
+
+        const maxStock = Number(newVariant.stock ?? 99);
+        const newVariantLabel = formatVariantDropdownLabel(newVariant);
+
+        if (maxStock <= 0) {
+          showCheckoutNotice('Out of stock', `${newVariantLabel} is currently out of stock.`, { variant: 'error' });
+          renderCheckoutPage();
+          return;
+        }
+
+        let targetQty = Number(item.quantity || 1);
+        if (targetQty > maxStock) {
+          showCheckoutNotice('Stock limit reached', `Only ${maxStock} unit${maxStock === 1 ? '' : 's'} available for ${newVariantLabel}. Quantity adjusted to ${maxStock}.`, { variant: 'warning' });
+          targetQty = maxStock;
+        }
+
+        const existingItem = state.cart.find((it) => it !== item && Number(it.variantId) === newVariantId && !it.isBundle);
+        if (existingItem) {
+          const combinedQty = Number(existingItem.quantity || 1) + targetQty;
+          if (combinedQty > maxStock) {
+            showCheckoutNotice('Stock limit reached', `Total quantity for ${newVariantLabel} capped at available stock (${maxStock}).`, { variant: 'warning' });
+            existingItem.quantity = maxStock;
+          } else {
+            existingItem.quantity = combinedQty;
+          }
+          state.cart = state.cart.filter((it) => it !== item);
+        } else {
+          const offerInfo = getVariantOfferDetails(newVariant, product);
+          const effectivePrice = offerInfo ? offerInfo.offerPrice : newVariant.price;
+
+          item.variantId = Number(newVariant.id);
+          item.id = Number(newVariant.id);
+          item.variantLabel = [newVariant.size, newVariant.color].filter(Boolean).join(' / ') || getVariantLabel(newVariant);
+          item.sku = newVariant.sku;
+          item.image = getVariantImageUrl(newVariant, product);
+          item.price = effectivePrice;
+          item.originalPrice = offerInfo ? offerInfo.originalPrice : null;
+          item.discountLabel = offerInfo ? offerInfo.discountLabel : null;
+          item.offerName = offerInfo ? offerInfo.name : null;
+          item.quantity = targetQty;
+        }
+
+        saveCart();
+
+        const hadCoupon = Boolean(state.merchCouponCode || state.campaignAttribution?.couponCode);
+        if (state.campaignAttribution?.couponCode && !state.merchCouponCode) {
+          state.merchCouponCode = state.campaignAttribution.couponCode;
+        }
+        if (state.merchCouponCode) {
+          await applyMerchCouponFromCart({ silent: true });
+        }
+
+        if (hadCoupon && !state.merchCouponCode && state.merchCouponError) {
+          showCheckoutNotice('Coupon removed', state.merchCouponError, { variant: 'warning' });
+        }
+
+        renderCheckoutPage();
       });
     });
     els.checkoutPage?.querySelectorAll('[data-checkout-add-bundle]').forEach((button) => {
