@@ -5161,7 +5161,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       || normalizedName.includes('mist') || normalizedName.includes('spray');
     const isLowStock = stock <= LOW_STOCK_THRESHOLD;
 
-    if (isMist && isLowStock) {
+    if (isMist) {
       return {
         label: 'Selling fast · Grab yours now',
         className: 'low-stock',
