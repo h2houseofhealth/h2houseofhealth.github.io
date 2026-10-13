@@ -2496,56 +2496,6 @@
       pillHtml = `<span class="admin-activity-card__pill admin-activity-card__pill--warning">${escapeHtml(stockCount != null ? `${stockCount} units remaining` : 'Low stock')}</span>`;
       actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-product-activity" data-product-id="${escapeHtml(data.productId || item.productId || '')}" data-product-name="${escapeHtml(data.productName || item.productName || '')}">View product &rarr;</button>`;
     } else if (isNewOrder) {
-
-    const meta = NOTIFICATION_META[item.type] || {
-      label: String(item.title || item.type || 'NOTIFICATION').toUpperCase(),
-      dotClass: 'admin-activity__dot--info',
-    };
-
-    let typeLabel = meta.label || String(item.type || item.title || 'NOTIFICATION').toUpperCase();
-    let dotClass = meta.dotClass || 'admin-activity__dot--info';
-
-    let headlineHtml = '';
-    let subHtml = '';
-    let pillHtml = '';
-    let actionBtnHtml = '';
-
-    if (isPayment) {
-      typeLabel = 'PAYMENT RECEIVED';
-      dotClass = 'admin-activity__dot--payment';
-      const formattedAmount = data.amount != null ? money(data.amount) : '';
-      headlineHtml = formattedAmount
-        ? `<div class="admin-activity-card__headline"><strong class="admin-activity-card__amount">${escapeHtml(formattedAmount)}</strong> received${data.customerName ? ` from <span class="admin-activity-card__customer">${escapeHtml(data.customerName)}</span>` : ''}</div>`
-        : `<div class="admin-activity-card__headline">Payment received${data.customerName ? ` from <span class="admin-activity-card__customer">${escapeHtml(data.customerName)}</span>` : ''}</div>`;
-      if (data.orderNumber) {
-        subHtml = `<div class="admin-activity-card__sub">Order ${escapeHtml(data.orderNumber)}</div>`;
-      }
-      pillHtml = `<span class="admin-activity-card__pill admin-activity-card__pill--success">Payment successful</span>`;
-      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-order-activity" data-order-id="${escapeHtml(data.orderId || '')}" data-order-number="${escapeHtml(data.orderNumber || '')}">View order &rarr;</button>`;
-    } else if (isCustomer) {
-      typeLabel = 'NEW CUSTOMER';
-      dotClass = 'admin-activity__dot--customer';
-      headlineHtml = `<div class="admin-activity-card__headline"><span class="admin-activity-card__customer">${escapeHtml(data.customerName || 'Customer')}</span> created a new merch account.</div>`;
-      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-customer-activity" data-customer-id="${escapeHtml(data.customerId || '')}" data-customer-name="${escapeHtml(data.customerName || '')}">View customer &rarr;</button>`;
-    } else if (isSoldOut) {
-      typeLabel = 'SOLD OUT';
-      dotClass = 'admin-activity__dot--danger';
-      headlineHtml = `<div class="admin-activity-card__headline"><strong class="admin-activity-card__product-name">${escapeHtml(data.productName || 'Hoodie')}</strong></div>`;
-      if (data.variantLabel) {
-        subHtml = `<div class="admin-activity-card__sub">${escapeHtml(data.variantLabel)}</div>`;
-      }
-      pillHtml = `<span class="admin-activity-card__pill admin-activity-card__pill--danger">Sold out</span>`;
-      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-product-activity" data-product-id="${escapeHtml(data.productId || '')}" data-product-name="${escapeHtml(data.productName || '')}">View product &rarr;</button>`;
-    } else if (isLowStock) {
-      typeLabel = 'LOW STOCK';
-      dotClass = 'admin-activity__dot--warning';
-      headlineHtml = `<div class="admin-activity-card__headline"><strong class="admin-activity-card__product-name">${escapeHtml(data.productName || 'Product')}</strong></div>`;
-      if (data.variantLabel) {
-        subHtml = `<div class="admin-activity-card__sub">${escapeHtml(data.variantLabel)}</div>`;
-      }
-      pillHtml = `<span class="admin-activity-card__pill admin-activity-card__pill--warning">${escapeHtml(data.stock != null ? `${data.stock} units remaining` : 'Low stock')}</span>`;
-      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-product-activity" data-product-id="${escapeHtml(data.productId || '')}" data-product-name="${escapeHtml(data.productName || '')}">View product &rarr;</button>`;
-    } else if (isNewOrder) {
       typeLabel = 'NEW ORDER';
       dotClass = 'admin-activity__dot--order';
       const formattedAmount = data.amount != null ? money(data.amount) : '';
