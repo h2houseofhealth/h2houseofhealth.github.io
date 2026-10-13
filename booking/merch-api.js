@@ -138,6 +138,11 @@ module.exports = function mountMerchApi(app, {
       reviewed_by TEXT,
       reviewed_at TEXT,
       customer_communication_status TEXT NOT NULL DEFAULT 'pending',
+      compensation_coupon_id INTEGER REFERENCES coupons(id),
+      compensation_coupon_code TEXT,
+      compensation_coupon_benefit TEXT,
+      communication_authorized_by TEXT,
+      resend_reason TEXT,
       is_resolved INTEGER NOT NULL DEFAULT 0,
       resolved_at TEXT,
       resolved_by TEXT,
@@ -178,6 +183,21 @@ module.exports = function mountMerchApi(app, {
   }
   if (!hasColumn('merch_order_stock_shortages', 'customer_communication_attempts')) {
     db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN customer_communication_attempts INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'compensation_coupon_id')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN compensation_coupon_id INTEGER REFERENCES coupons(id)');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'compensation_coupon_code')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN compensation_coupon_code TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'compensation_coupon_benefit')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN compensation_coupon_benefit TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'communication_authorized_by')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN communication_authorized_by TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'resend_reason')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN resend_reason TEXT');
   }
 
   // Product specifications are optional so existing databases continue to work.
@@ -1245,6 +1265,11 @@ module.exports = function mountMerchApi(app, {
         s.customer_communication_sent_to,
         s.customer_communication_error,
         s.customer_communication_attempts,
+        s.compensation_coupon_id,
+        s.compensation_coupon_code,
+        s.compensation_coupon_benefit,
+        s.communication_authorized_by,
+        s.resend_reason,
         s.created_at AS shortage_created_at,
         o.order_number,
         o.customer_name,
@@ -3684,6 +3709,11 @@ module.exports = function mountMerchApi(app, {
         customerCommunicationSentTo: s.customer_communication_sent_to || null,
         customerCommunicationError: s.customer_communication_error || null,
         customerCommunicationAttempts: Number(s.customer_communication_attempts || 0),
+        compensationCouponId: s.compensation_coupon_id || null,
+        compensationCouponCode: s.compensation_coupon_code || null,
+        compensationCouponBenefit: s.compensation_coupon_benefit || null,
+        communicationAuthorizedBy: s.communication_authorized_by || null,
+        resendReason: s.resend_reason || null,
         createdAt: s.created_at,
       })),
       stockShortageReviewStatus: (() => {
@@ -9868,7 +9898,156 @@ module.exports = function mountMerchApi(app, {
     return new Date(str.replace(' ', 'T') + 'Z').getTime();
   }
 
-  function buildCustomerStockDelayEmail({ order, shortages = [], items = [] }) {
+  function parseCouponUsedBy(value) {
+    if (!value) return [];
+    try {
+      const parsed = JSON.parse(String(value));
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .map((entry) => String(entry || '').trim().toLowerCase())
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  function evaluateCompensationCouponEligibility(couponRow, order, items = []) {
+    if (!couponRow) {
+      return { eligible: false, reason: 'Coupon not found.' };
+    }
+
+    // 1. Must be a Private Coupon (or assigned exclusively to a recipient)
+    const couponType = String(couponRow.coupon_type || couponRow.couponType || '').trim().toLowerCase();
+    const isPrivate = couponType === 'private' || Boolean(couponRow.assigned_user_email || couponRow.recipient_email);
+    if (!isPrivate) {
+      return { eligible: false, reason: 'Only private courtesy coupons can be selected as compensation.' };
+    }
+
+    // 2. Portal must be merch (or all/null)
+    const portal = String(couponRow.portal || 'merch').trim().toLowerCase();
+    if (portal !== 'merch' && portal !== 'all') {
+      return { eligible: false, reason: 'Coupon is not valid for merch purchases.' };
+    }
+
+    // 3. Active status
+    const isActive = Number(couponRow.active) === 1 && (couponRow.is_active == null || Number(couponRow.is_active) === 1);
+    if (!isActive) {
+      return { eligible: false, reason: 'Coupon is currently inactive or disabled.' };
+    }
+
+    // 4. Date validity: valid_from
+    const now = Date.now();
+    if (couponRow.valid_from) {
+      const validFromTime = new Date(couponRow.valid_from).getTime();
+      if (!isNaN(validFromTime) && validFromTime > now) {
+        return { eligible: false, reason: `Coupon is not active yet (valid from ${String(couponRow.valid_from).split('T')[0]}).` };
+      }
+    }
+
+    // 5. Date validity: valid_till / expires_at
+    const expiryRaw = couponRow.valid_till || couponRow.expires_at;
+    let expiryLabel = 'No expiration date';
+    if (expiryRaw) {
+      const expiryTime = new Date(expiryRaw).getTime();
+      if (!isNaN(expiryTime)) {
+        if (expiryTime <= now) {
+          return { eligible: false, reason: `Coupon expired on ${String(expiryRaw).split('T')[0]}.` };
+        }
+        expiryLabel = String(expiryRaw).split('T')[0];
+      }
+    }
+
+    // 6. Usage caps: max_redemptions
+    const maxRedemptions = couponRow.max_redemptions != null ? Number(couponRow.max_redemptions) : null;
+    const redemptionCount = db.prepare('SELECT COUNT(*) AS c FROM coupon_redemptions WHERE coupon_id = ?').get(couponRow.id)?.c || 0;
+    const orderRedemptionCount = db.prepare(`
+      SELECT COUNT(*) AS c FROM merch_orders
+      WHERE coupon_id = ? AND discount_amount > 0
+        AND (payment_status IN ('paid', 'cod_pending', 'refunded') OR status IN ('processing', 'shipped', 'delivered', 'cancelled', 'returned'))
+    `).get(couponRow.id)?.c || 0;
+    const totalUsage = Math.max(redemptionCount, orderRedemptionCount);
+    if (maxRedemptions !== null && maxRedemptions > 0 && totalUsage >= maxRedemptions) {
+      return { eligible: false, reason: `Coupon has reached its maximum usage limit (${maxRedemptions}/${maxRedemptions} used).` };
+    }
+    const remainingUsages = maxRedemptions !== null && maxRedemptions > 0 ? Math.max(0, maxRedemptions - totalUsage) : null;
+
+    // 7. Assigned user email check
+    const customerEmail = String(order?.customer_email || order?.customerEmail || order?.guest_email || order?.guestEmail || '').trim().toLowerCase();
+    const assignedEmail = String(couponRow.assigned_user_email || couponRow.recipient_email || '').trim().toLowerCase();
+    if (assignedEmail && customerEmail && assignedEmail !== customerEmail) {
+      return { eligible: false, reason: `Coupon is assigned exclusively to another recipient (${assignedEmail}).` };
+    }
+
+    // 8. Customer already used check (used_by array)
+    const usedBy = parseCouponUsedBy(couponRow.used_by);
+    if (customerEmail && usedBy.includes(customerEmail)) {
+      return { eligible: false, reason: 'Customer has already redeemed this coupon.' };
+    }
+
+    // 9. Applies to / product / variant / category restrictions
+    const appliesTo = String(couponRow.applies_to || 'merch').trim().toLowerCase();
+    let scopeLabel = 'All Merch';
+
+    if (appliesTo.startsWith('product:')) {
+      scopeLabel = 'Specific Products';
+      const rawIds = appliesTo.replace('product:', '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0);
+      const orderProductIds = (items || []).map((it) => Number(it.product_id || it.productId)).filter(Boolean);
+      const matches = rawIds.some((id) => orderProductIds.includes(id));
+      if (!matches) {
+        return { eligible: false, reason: 'Coupon only applies to specific products not included in this order.' };
+      }
+    } else if (appliesTo.startsWith('variant:')) {
+      scopeLabel = 'Specific Variants';
+      const rawIds = appliesTo.replace('variant:', '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0);
+      const orderVariantIds = (items || []).map((it) => Number(it.variant_id || it.variantId)).filter(Boolean);
+      const matches = rawIds.some((id) => orderVariantIds.includes(id));
+      if (!matches) {
+        return { eligible: false, reason: 'Coupon only applies to specific variants not included in this order.' };
+      }
+    } else if (appliesTo.startsWith('category:')) {
+      scopeLabel = `Category (${appliesTo.replace('category:', '')})`;
+      const rawCategories = appliesTo.replace('category:', '').split(',').map((c) => c.trim().toLowerCase());
+      const targetCategories = new Set();
+      for (const c of rawCategories) {
+        targetCategories.add(c);
+        if (c === 'bottle' || c.includes('bottle')) targetCategories.add('bottles');
+        if (c === 'spray' || c.includes('spray') || c.includes('mist')) targetCategories.add('sprays');
+        if (c === 'hoodie' || c.includes('hoodie')) targetCategories.add('hoodies');
+        if (c === 'tshirt' || c.includes('t-shirt') || c.includes('tshirt')) targetCategories.add('t-shirt');
+      }
+      const orderProductIds = (items || []).map((it) => Number(it.product_id || it.productId)).filter(Boolean);
+      if (!orderProductIds.length) {
+        return { eligible: false, reason: 'Coupon only applies to specific categories not included in this order.' };
+      }
+      const placeholders = orderProductIds.map(() => '?').join(',');
+      const productRows = db.prepare(`SELECT LOWER(category) AS cat FROM merch_products WHERE id IN (${placeholders})`).all(...orderProductIds);
+      const matches = productRows.some((r) => targetCategories.has(r.cat));
+      if (!matches) {
+        return { eligible: false, reason: 'Coupon only applies to specific categories not included in this order.' };
+      }
+    } else if (['booking', 'services'].includes(appliesTo)) {
+      return { eligible: false, reason: 'Coupon is restricted to bookings, not merchandise.' };
+    }
+
+    // 10. Format benefit text
+    const discountType = String(couponRow.discount_type || 'flat').toLowerCase();
+    const discountVal = Number(couponRow.discount_value || 0);
+    const benefit = (discountType === 'percentage' || discountType === '%')
+      ? `${discountVal}% OFF`
+      : `₹${discountVal} OFF`;
+
+    return {
+      eligible: true,
+      benefit,
+      expiryLabel,
+      scopeLabel,
+      remainingUsages,
+      maxRedemptions,
+      totalUsage,
+    };
+  }
+
+  function buildCustomerStockDelayEmail({ order, shortages = [], items = [], coupon = null }) {
     const customerName = String(order.customerName || order.customer_name || 'Valued Customer').trim();
     const orderNumber = String(order.orderNumber || order.order_number || `Order #${order.id}`).trim();
 
@@ -9924,6 +10103,50 @@ module.exports = function mountMerchApi(app, {
          </div>`
       : '';
 
+    // Courtesy Compensation block (Phase 4): strictly rendered only when approved coupon is provided
+    let compensationText = '';
+    let compensationHtml = '';
+    let couponSummary = null;
+
+    if (coupon && coupon.code) {
+      const code = String(coupon.code).trim().toUpperCase();
+      const benefit = String(coupon.benefit || '').trim();
+      const expiry = String(coupon.expiryLabel || (coupon.validTill ? String(coupon.validTill).split('T')[0] : 'No expiration date')).trim();
+      couponSummary = { code, benefit, expiry };
+
+      compensationText = [
+        '',
+        'As a gesture of our appreciation for your patience, we have prepared a private compensation discount for your next order:',
+        `• Coupon Code: ${code}`,
+        `• Courtesy Benefit: ${benefit}`,
+        `• Valid Until: ${expiry}`,
+        `• How to redeem: Enter coupon code ${code} at checkout on the H2 House of Health merch store.`,
+        '',
+      ].join('\n');
+
+      compensationHtml = `
+        <div style="background: #f6ffed; border: 1px solid #b7eb8f; border-radius: 8px; padding: 20px 24px; margin: 20px 0; text-align: center;">
+          <p style="margin: 0 0 6px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #389e0d;">
+            🎁 Courtesy Compensation
+          </p>
+          <p style="margin: 0 0 14px; font-size: 14px; color: #237804; line-height: 1.5;">
+            To thank you for your patience, please accept this exclusive discount code for your next purchase:
+          </p>
+          <div style="display: inline-block; background: #ffffff; border: 2px dashed #52c41a; border-radius: 6px; padding: 10px 24px; margin-bottom: 12px;">
+            <span style="font-family: monospace; font-size: 22px; font-weight: 700; color: #237804; letter-spacing: 2px;">${escapeHtml(code)}</span>
+          </div>
+          <p style="margin: 0 0 6px; font-size: 15px; font-weight: 700; color: #135200;">
+            Courtesy Benefit: ${escapeHtml(benefit)}
+          </p>
+          <p style="margin: 0 0 12px; font-size: 13px; color: #52c41a;">
+            Valid Until: <strong>${escapeHtml(expiry)}</strong>
+          </p>
+          <p style="margin: 0; font-size: 12px; color: #595959; line-height: 1.4;">
+            To redeem, enter coupon code <strong style="color: #237804;">${escapeHtml(code)}</strong> at checkout on the H2 House of Health merch store.
+          </p>
+        </div>`;
+    }
+
     const subject = `An update about your H2 House of Health order ${orderNumber}`;
 
     const text = [
@@ -9935,7 +10158,7 @@ module.exports = function mountMerchApi(app, {
       '',
       itemsTextList ? itemsTextList.trim() + '\n' : '',
       deliveryUpdateText,
-      '',
+      compensationText,
       `We will keep you informed as soon as we have a confirmed update.`,
       '',
       `If the revised delivery timeline does not work for you, please contact our support team at support@h2houseofhealth.com to discuss the available options under our order policy.`,
@@ -9944,7 +10167,7 @@ module.exports = function mountMerchApi(app, {
       '',
       `Warm regards,`,
       `H2 House of Health Team`,
-    ].filter(Boolean).join('\n');
+    ].filter((line) => line !== null && line !== undefined).join('\n');
 
     const html = `<!DOCTYPE html>
 <html>
@@ -9975,6 +10198,7 @@ module.exports = function mountMerchApi(app, {
               </p>
               ${itemsHtmlList}
               ${deliveryUpdateHtml}
+              ${compensationHtml}
               <p style="margin: 0 0 16px; font-size: 14px; line-height: 1.6; color: #555555;">
                 We will keep you informed as soon as we have a confirmed update.
               </p>
@@ -10010,8 +10234,83 @@ module.exports = function mountMerchApi(app, {
       hasEstimate,
       revisedDeliveryEstimate: rawEstimate || null,
       affectedItems: affectedItemsList,
+      compensationCoupon: couponSummary,
     };
   }
+
+  // ─── ADMIN: Compensation Coupons for Order (Phase 4) ───
+  app.get('/api/merch/admin/orders/:id/compensation-coupons', requireAdmin, (req, res) => {
+    try {
+      const orderId = Number(req.params.id);
+      if (!Number.isInteger(orderId) || orderId <= 0) {
+        return res.status(400).json({ error: 'Invalid order ID.' });
+      }
+
+      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+
+      const activeShortages = db.prepare('SELECT * FROM merch_order_stock_shortages WHERE order_id = ? AND is_resolved = 0').all(orderId);
+      if (!activeShortages.length) {
+        return res.status(400).json({ error: 'No active stock shortages found for this order.' });
+      }
+
+      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
+      const customerEmail = String(order.customer_email || order.guest_email || '').trim().toLowerCase();
+
+      // Query candidate Private Coupons (or coupons assigned to users) for merch
+      const couponRows = db.prepare(`
+        SELECT *
+        FROM coupons
+        WHERE (LOWER(COALESCE(coupon_type, '')) = 'private' OR assigned_user_email IS NOT NULL OR recipient_email IS NOT NULL)
+          AND (portal IS NULL OR LOWER(portal) IN ('merch', 'all'))
+        ORDER BY active DESC, datetime(created_at) DESC, id DESC
+      `).all();
+
+      const eligibleCoupons = [];
+      const ineligibleCoupons = [];
+
+      for (const c of couponRows) {
+        const evalResult = evaluateCompensationCouponEligibility(c, order, items);
+        const couponSummary = {
+          id: c.id,
+          code: c.code,
+          description: c.description || '',
+          discountType: c.discount_type || 'flat',
+          discountValue: Number(c.discount_value || 0),
+          benefit: evalResult.benefit,
+          validTill: c.valid_till || c.expires_at || null,
+          expiryLabel: evalResult.expiryLabel,
+          maxRedemptions: c.max_redemptions != null ? Number(c.max_redemptions) : null,
+          remainingUsages: evalResult.remainingUsages,
+          remainingUsagesLabel: evalResult.remainingUsages !== null ? `${evalResult.remainingUsages} remaining` : 'Unlimited',
+          appliesTo: c.applies_to || 'merch',
+          scopeLabel: evalResult.scopeLabel,
+          assignedUserEmail: c.assigned_user_email || c.recipient_email || null,
+        };
+
+        if (evalResult.eligible) {
+          eligibleCoupons.push(couponSummary);
+        } else {
+          ineligibleCoupons.push({
+            ...couponSummary,
+            reason: evalResult.reason,
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        orderId: order.id,
+        orderNumber: order.order_number,
+        customerEmail,
+        eligibleCoupons,
+        ineligibleCoupons,
+      });
+    } catch (err) {
+      console.error('[Merch Compensation Coupons] Error:', err);
+      res.status(500).json({ error: sanitizeErrorMessage(err.message) });
+    }
+  });
 
   app.get('/api/merch/admin/orders/:id/stock-shortage/email-preview', requireAdmin, (req, res) => {
     try {
@@ -10041,7 +10340,44 @@ module.exports = function mountMerchApi(app, {
       }
 
       const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
-      const emailContent = buildCustomerStockDelayEmail({ order, shortages: activeShortages, items });
+
+      // Handle optional coupon selection (Phase 4)
+      let selectedCoupon = null;
+      const rawCouponId = req.query.couponId ? Number(req.query.couponId) : null;
+      if (rawCouponId && Number.isInteger(rawCouponId) && rawCouponId > 0) {
+        const couponRow = db.prepare('SELECT * FROM coupons WHERE id = ?').get(rawCouponId);
+        if (!couponRow) {
+          return res.status(400).json({ error: 'Selected coupon not found.' });
+        }
+        const evalResult = evaluateCompensationCouponEligibility(couponRow, order, items);
+        if (!evalResult.eligible) {
+          return res.status(400).json({
+            error: `Selected coupon is ineligible: ${evalResult.reason}`,
+            reason: evalResult.reason,
+          });
+        }
+        selectedCoupon = {
+          id: couponRow.id,
+          code: couponRow.code,
+          description: couponRow.description || '',
+          discountType: couponRow.discount_type || 'flat',
+          discountValue: Number(couponRow.discount_value || 0),
+          benefit: evalResult.benefit,
+          validTill: couponRow.valid_till || couponRow.expires_at || null,
+          expiryLabel: evalResult.expiryLabel,
+          maxRedemptions: couponRow.max_redemptions != null ? Number(couponRow.max_redemptions) : null,
+          remainingUsages: evalResult.remainingUsages,
+          appliesTo: couponRow.applies_to || 'merch',
+          scopeLabel: evalResult.scopeLabel,
+        };
+      }
+
+      const emailContent = buildCustomerStockDelayEmail({
+        order,
+        shortages: activeShortages,
+        items,
+        coupon: selectedCoupon,
+      });
 
       res.json({
         success: true,
@@ -10055,13 +10391,18 @@ module.exports = function mountMerchApi(app, {
         hasEstimate: emailContent.hasEstimate,
         revisedDeliveryEstimate: emailContent.revisedDeliveryEstimate,
         affectedItems: emailContent.affectedItems,
+        selectedCoupon,
         communicationStatus: activeShortages[0].customer_communication_status || 'pending',
         communicatedAt: activeShortages[0].customer_communicated_at || null,
         communicationSentTo: activeShortages[0].customer_communication_sent_to || null,
         communicationError: activeShortages[0].customer_communication_error || null,
+        compensationCouponId: activeShortages[0].compensation_coupon_id || null,
+        compensationCouponCode: activeShortages[0].compensation_coupon_code || null,
+        compensationCouponBenefit: activeShortages[0].compensation_coupon_benefit || null,
+        communicationAuthorizedBy: activeShortages[0].communication_authorized_by || null,
       });
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: sanitizeErrorMessage(err.message) });
     }
   });
 
@@ -10080,8 +10421,11 @@ module.exports = function mountMerchApi(app, {
       // 3. resendReason: non-empty string (>= 5 chars) documenting the administrative rationale
       const confirmResend = Boolean(req.body?.confirmResend || req.body?.forceRetry);
       const resendReason = String(req.body?.resendReason || '').trim();
+      const rawCouponId = req.body?.couponId ? Number(req.body.couponId) : null;
+      const adminUser = getMerchAuthUser(req);
+      const authorizedBy = adminUser?.email || 'admin';
 
-      // Execute atomic pre-check and claim transaction
+      // Execute atomic pre-check, coupon re-validation, and claim transaction
       const claimResult = db.transaction(() => {
         const order = db.prepare(`
           SELECT id, order_number, customer_name, customer_email, guest_email, payment_status, status
@@ -10115,6 +10459,32 @@ module.exports = function mountMerchApi(app, {
             error: "Order shortage must be reviewed and marked 'ready_for_communication' before sending a customer email.",
             reviewStatus: activeShortages[0].review_status,
             status: 400,
+          };
+        }
+
+        const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
+
+        // Immediate coupon re-validation immediately before dispatch (Phase 4)
+        let validatedCoupon = null;
+        if (rawCouponId && Number.isInteger(rawCouponId) && rawCouponId > 0) {
+          const couponRow = db.prepare('SELECT * FROM coupons WHERE id = ?').get(rawCouponId);
+          if (!couponRow) {
+            return { error: 'Selected coupon not found.', status: 400 };
+          }
+          const evalResult = evaluateCompensationCouponEligibility(couponRow, order, items);
+          if (!evalResult.eligible) {
+            return {
+              error: `Selected coupon is ineligible: ${evalResult.reason}`,
+              status: 400,
+            };
+          }
+          validatedCoupon = {
+            id: couponRow.id,
+            code: couponRow.code,
+            benefit: evalResult.benefit,
+            validTill: couponRow.valid_till || couponRow.expires_at || null,
+            expiryLabel: evalResult.expiryLabel,
+            scopeLabel: evalResult.scopeLabel,
           };
         }
 
@@ -10180,6 +10550,9 @@ module.exports = function mountMerchApi(app, {
           isAuthorizedResend = true;
         }
 
+        // Documented rationale check for both already-sent resends and stale sending recovery
+        const documentedReason = (isAuthorizedResend || isStaleSending) && confirmResend && resendReason.length >= 5 ? resendReason : null;
+
         // Atomically claim the active shortage records by setting to 'sending'.
         // Stale 'sending' rows (>5m old) can be safely claimed with authorized confirmation.
         // Already 'sent' rows can only be claimed if isAuthorizedResend === true.
@@ -10187,6 +10560,11 @@ module.exports = function mountMerchApi(app, {
           UPDATE merch_order_stock_shortages
           SET customer_communication_status = 'sending',
               customer_communication_attempts = customer_communication_attempts + 1,
+              compensation_coupon_id = ?,
+              compensation_coupon_code = ?,
+              compensation_coupon_benefit = ?,
+              communication_authorized_by = ?,
+              resend_reason = CASE WHEN ? = 1 THEN ? ELSE resend_reason END,
               updated_at = datetime('now')
           WHERE order_id = ?
             AND is_resolved = 0
@@ -10196,7 +10574,18 @@ module.exports = function mountMerchApi(app, {
               OR (customer_communication_status = 'sending' AND updated_at < datetime('now', '-5 minutes') AND (? = 1 OR ? = 1))
               OR (? = 1 AND customer_communication_status = 'sent')
             )
-        `).run(orderId, isAuthorizedResend ? 1 : 0, isStaleSending ? 1 : 0, isAuthorizedResend ? 1 : 0);
+        `).run(
+          validatedCoupon ? validatedCoupon.id : null,
+          validatedCoupon ? validatedCoupon.code : null,
+          validatedCoupon ? validatedCoupon.benefit : null,
+          authorizedBy,
+          documentedReason ? 1 : 0,
+          documentedReason,
+          orderId,
+          isAuthorizedResend ? 1 : 0,
+          isStaleSending ? 1 : 0,
+          isAuthorizedResend ? 1 : 0
+        );
 
         if (!claimLock.changes) {
           return {
@@ -10209,8 +10598,10 @@ module.exports = function mountMerchApi(app, {
           claimed: true,
           order,
           shortages: activeShortages,
+          items,
+          validatedCoupon,
           isAuthorizedResend,
-          resendReason: isAuthorizedResend ? resendReason : null,
+          resendReason: documentedReason,
         };
       })();
 
@@ -10220,11 +10611,12 @@ module.exports = function mountMerchApi(app, {
           ...(claimResult.communicatedAt ? { communicatedAt: claimResult.communicatedAt } : {}),
           ...(claimResult.sentTo ? { sentTo: claimResult.sentTo } : {}),
           ...(claimResult.requiresReason ? { requiresReason: true } : {}),
+          ...(claimResult.staleRecovery ? { staleRecovery: true } : {}),
           ...(claimResult.reviewStatus ? { reviewStatus: claimResult.reviewStatus } : {}),
         });
       }
 
-      const { order, shortages } = claimResult;
+      const { order, shortages, items, validatedCoupon } = claimResult;
 
       const recipientEmail = hasRealEmail(order.customer_email)
         ? order.customer_email
@@ -10242,8 +10634,12 @@ module.exports = function mountMerchApi(app, {
         return res.status(400).json({ error: 'Customer has no valid contact email address on file.' });
       }
 
-      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
-      const emailContent = buildCustomerStockDelayEmail({ order, shortages, items });
+      const emailContent = buildCustomerStockDelayEmail({
+        order,
+        shortages,
+        items,
+        coupon: validatedCoupon,
+      });
 
       let sendSuccess = false;
       let sendError = null;
@@ -10278,16 +10674,37 @@ module.exports = function mountMerchApi(app, {
               customer_communicated_at = datetime('now'),
               customer_communication_sent_to = ?,
               customer_communication_error = NULL,
+              compensation_coupon_id = ?,
+              compensation_coupon_code = ?,
+              compensation_coupon_benefit = ?,
+              communication_authorized_by = ?,
+              resend_reason = COALESCE(?, resend_reason),
               updated_at = datetime('now')
           WHERE order_id = ? AND is_resolved = 0
-        `).run(recipientEmail, orderId);
+        `).run(
+          recipientEmail,
+          validatedCoupon ? validatedCoupon.id : null,
+          validatedCoupon ? validatedCoupon.code : null,
+          validatedCoupon ? validatedCoupon.benefit : null,
+          authorizedBy,
+          claimResult.resendReason,
+          orderId
+        );
 
         const updated = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
         return res.json({
           success: true,
-          message: `Delay notification email sent successfully to ${recipientEmail}.`,
+          message: validatedCoupon
+            ? `Delay notification email with courtesy coupon ${validatedCoupon.code} sent successfully to ${recipientEmail}.`
+            : `Delay notification email sent successfully to ${recipientEmail}.`,
           sentTo: recipientEmail,
           deliveryConfirmedByProvider: true,
+          compensationCoupon: validatedCoupon ? {
+            id: validatedCoupon.id,
+            code: validatedCoupon.code,
+            benefit: validatedCoupon.benefit,
+          } : null,
+          authorizedBy,
           order: buildMerchOrderRecord(updated, items),
         });
       } else {
@@ -10296,9 +10713,22 @@ module.exports = function mountMerchApi(app, {
           UPDATE merch_order_stock_shortages
           SET customer_communication_status = 'failed',
               customer_communication_error = ?,
+              compensation_coupon_id = ?,
+              compensation_coupon_code = ?,
+              compensation_coupon_benefit = ?,
+              communication_authorized_by = ?,
+              resend_reason = COALESCE(?, resend_reason),
               updated_at = datetime('now')
           WHERE order_id = ? AND is_resolved = 0
-        `).run(sanitizedErr, orderId);
+        `).run(
+          sanitizedErr,
+          validatedCoupon ? validatedCoupon.id : null,
+          validatedCoupon ? validatedCoupon.code : null,
+          validatedCoupon ? validatedCoupon.benefit : null,
+          authorizedBy,
+          claimResult.resendReason,
+          orderId
+        );
 
         return res.status(502).json({
           error: `Failed to deliver delay notification email: ${sanitizedErr}`,
