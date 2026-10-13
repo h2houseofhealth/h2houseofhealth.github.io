@@ -68,6 +68,7 @@
     delivered: '#b9674b',
     cancelled: '#8f392b',
     returned: '#a9472f',
+    stock_shortage: '#b83220',
   };
   const REVENUE_PERIOD_OPTIONS = [
     { value: 'year', label: '12 Months (Jan-Dec)' },
@@ -215,6 +216,7 @@
     delivered: { label: 'Delivered', color: ORDER_STATUS_COLORS.delivered },
     cancelled: { label: 'Cancelled', color: ORDER_STATUS_COLORS.cancelled },
     returned: { label: 'Returned', color: ORDER_STATUS_COLORS.returned },
+    stock_shortage: { label: 'Stock Shortage', color: ORDER_STATUS_COLORS.stock_shortage },
   };
 
   function normalizeOrderStatus(status) {
@@ -2025,6 +2027,7 @@
     'Influencer Referral': { label: 'INFLUENCER REFERRAL', dotClass: 'admin-activity__dot--info', icon: '&#128994;', className: 'admin-notification__icon--info' },
     'Order Cancelled': { label: 'ORDER CANCELLED', dotClass: 'admin-activity__dot--danger', icon: '&#128308;', className: 'admin-notification__icon--danger' },
     'Order Refunded': { label: 'ORDER REFUNDED', dotClass: 'admin-activity__dot--warning', icon: '&#128992;', className: 'admin-notification__icon--warning' },
+    'Stock Shortage': { label: 'STOCK SHORTAGE', dotClass: 'admin-activity__dot--danger', icon: '&#128308;', className: 'admin-notification__icon--danger' },
   };
 
   // Notifications are supplied by the merch API from current orders, customers, payments, and inventory.
@@ -2209,6 +2212,7 @@
       paid: 'Paid',
       failed: 'Failed',
       refunded: 'Refunded',
+      stock_shortage: 'STOCK SHORTAGE — FULFILMENT PENDING',
     };
     return map[String(status || '').toLowerCase()] || String(status || 'Unknown');
   }
@@ -2300,8 +2304,8 @@
     let stock = item.stock != null ? item.stock : null;
 
     const itemIdStr = String(item.id || '');
-    if (!orderId && (itemIdStr.startsWith('order-') || itemIdStr.startsWith('payment-') || itemIdStr.startsWith('order-status-') || itemIdStr.startsWith('payment-failed-') || itemIdStr.startsWith('referral-'))) {
-      const parsedId = itemIdStr.replace(/^(order-status-|payment-failed-|payment-|order-|referral-)/, '');
+    if (!orderId && (itemIdStr.startsWith('order-') || itemIdStr.startsWith('payment-') || itemIdStr.startsWith('order-status-') || itemIdStr.startsWith('payment-failed-') || itemIdStr.startsWith('referral-') || itemIdStr.startsWith('stock-shortage-order-'))) {
+      const parsedId = itemIdStr.replace(/^(order-status-|payment-failed-|payment-|order-|referral-|stock-shortage-order-)/, '').split('-')[0];
       if (parsedId) orderId = parsedId;
     }
     if (!orderNumber && item.message) {
@@ -2337,8 +2341,8 @@
       }
     }
 
-    if (!productId && itemIdStr.startsWith('stock-')) {
-      productId = itemIdStr.replace('stock-', '');
+    if (!productId && (itemIdStr.startsWith('stock-variant-') || itemIdStr.startsWith('stock-'))) {
+      productId = item.productId || itemIdStr.replace(/^stock-(variant-)?/, '');
     }
     if (!productName && (item.type === 'Sold Out' || item.type === 'Out of Stock' || item.type === 'Low Stock' || item.title === 'SOLD OUT') && item.message) {
       productName = item.message.replace(/ (is sold out|is out of stock|has only.*)\.?/i, '').trim();
@@ -2380,7 +2384,7 @@
       const title = String(item.title || '').toLowerCase();
       const msg = String(item.message || '').toLowerCase();
       if (filter === 'orders') {
-        return type.includes('order') || title.includes('order') || type.includes('referral') || msg.includes('placed by');
+        return type.includes('order') || title.includes('order') || type.includes('referral') || msg.includes('placed by') || type.includes('shortage') || title.includes('shortage');
       }
       if (filter === 'payments') {
         return type.includes('payment') || title.includes('payment') || type.includes('refund') || msg.includes('payment received');
@@ -2389,7 +2393,7 @@
         return type.includes('customer') || title.includes('customer') || msg.includes('merch account');
       }
       if (filter === 'inventory') {
-        return type.includes('stock') || type.includes('sold out') || title.includes('sold out') || title.includes('stock') || msg.includes('stock') || msg.includes('sold out');
+        return type.includes('stock') || type.includes('sold out') || title.includes('sold out') || title.includes('stock') || msg.includes('stock') || msg.includes('sold out') || type.includes('shortage');
       }
       return true;
     });
@@ -2408,11 +2412,74 @@
   function renderNotificationItem(item) {
     const data = resolveNotificationItemData(item);
     const rawType = String(item.type || item.title || '').trim();
-    const isPayment = rawType === 'Payment Received' || (item.id && String(item.id).startsWith('payment-')) || /payment received/i.test(item.message || '');
-    const isCustomer = rawType === 'New Customer' || (item.id && String(item.id).startsWith('customer-')) || /created a new merch account/i.test(item.message || '');
-    const isSoldOut = rawType === 'Sold Out' || rawType === 'Out of Stock' || (item.title && /sold out|out of stock/i.test(item.title)) || (item.message && /is sold out|is out of stock/i.test(item.message));
-    const isLowStock = !isSoldOut && (rawType === 'Low Stock' || (item.title && /low stock/i.test(item.title)) || (item.message && /units remaining/i.test(item.message)));
-    const isNewOrder = !isPayment && !isSoldOut && (rawType === 'New Order' || (item.id && String(item.id).startsWith('order-')));
+    const isStockShortage = rawType === 'Stock Shortage' || (item.id && String(item.id).startsWith('stock-shortage-order-')) || /stock shortage/i.test(item.title || '') || /stock shortage/i.test(rawType);
+    const isPayment = !isStockShortage && (rawType === 'Payment Received' || (item.id && String(item.id).startsWith('payment-')) || /payment received/i.test(item.message || ''));
+    const isCustomer = !isStockShortage && (rawType === 'New Customer' || (item.id && String(item.id).startsWith('customer-')) || /created a new merch account/i.test(item.message || ''));
+    const isSoldOut = !isStockShortage && (rawType === 'Sold Out' || rawType === 'Out of Stock' || (item.title && /sold out|out of stock/i.test(item.title)) || (item.message && /is sold out|is out of stock/i.test(item.message)));
+    const isLowStock = !isStockShortage && !isSoldOut && (rawType === 'Low Stock' || (item.title && /low stock/i.test(item.title)) || (item.message && /units remaining/i.test(item.message)));
+    const isNewOrder = !isStockShortage && !isPayment && !isSoldOut && (rawType === 'New Order' || (item.id && String(item.id).startsWith('order-')));
+
+    const meta = NOTIFICATION_META[item.type] || {
+      label: String(item.title || item.type || 'NOTIFICATION').toUpperCase(),
+      dotClass: 'admin-activity__dot--info',
+    };
+
+    let typeLabel = meta.label || String(item.type || item.title || 'NOTIFICATION').toUpperCase();
+    let dotClass = meta.dotClass || 'admin-activity__dot--info';
+
+    let headlineHtml = '';
+    let subHtml = '';
+    let pillHtml = '';
+    let actionBtnHtml = '';
+
+    if (isStockShortage) {
+      typeLabel = 'STOCK SHORTAGE';
+      dotClass = 'admin-activity__dot--danger';
+      const orderRef = data.orderNumber || item.orderNumber || (data.orderId ? `Order #${data.orderId}` : '');
+      const custRef = data.customerName || item.customerName || '';
+      headlineHtml = `<div class="admin-activity-card__headline"><strong class="admin-activity-card__amount" style="color:var(--admin-danger);">STOCK SHORTAGE</strong>${orderRef ? ` &middot; ${escapeHtml(orderRef)}` : ''}${custRef ? ` (${escapeHtml(custRef)})` : ''}</div>`;
+      subHtml = `<div class="admin-activity-card__sub">${escapeHtml(item.message || 'Fulfillment is blocked because required stock is unavailable.')}</div>`;
+      pillHtml = `<span class="admin-activity-card__pill admin-activity-card__pill--danger">Fulfilment pending</span>`;
+      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-order-activity" data-order-id="${escapeHtml(data.orderId || item.orderId || '')}" data-order-number="${escapeHtml(data.orderNumber || item.orderNumber || '')}">View order &rarr;</button>`;
+    } else if (isPayment) {
+      typeLabel = 'PAYMENT RECEIVED';
+      dotClass = 'admin-activity__dot--payment';
+      const formattedAmount = data.amount != null ? money(data.amount) : '';
+      headlineHtml = formattedAmount
+        ? `<div class="admin-activity-card__headline"><strong class="admin-activity-card__amount">${escapeHtml(formattedAmount)}</strong> received${data.customerName ? ` from <span class="admin-activity-card__customer">${escapeHtml(data.customerName)}</span>` : ''}</div>`
+        : `<div class="admin-activity-card__headline">Payment received${data.customerName ? ` from <span class="admin-activity-card__customer">${escapeHtml(data.customerName)}</span>` : ''}</div>`;
+      if (data.orderNumber) {
+        subHtml = `<div class="admin-activity-card__sub">Order ${escapeHtml(data.orderNumber)}</div>`;
+      }
+      pillHtml = `<span class="admin-activity-card__pill admin-activity-card__pill--success">Payment successful</span>`;
+      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-order-activity" data-order-id="${escapeHtml(data.orderId || '')}" data-order-number="${escapeHtml(data.orderNumber || '')}">View order &rarr;</button>`;
+    } else if (isCustomer) {
+      typeLabel = 'NEW CUSTOMER';
+      dotClass = 'admin-activity__dot--customer';
+      headlineHtml = `<div class="admin-activity-card__headline"><span class="admin-activity-card__customer">${escapeHtml(data.customerName || 'Customer')}</span> created a new merch account.</div>`;
+      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-customer-activity" data-customer-id="${escapeHtml(data.customerId || '')}" data-customer-name="${escapeHtml(data.customerName || '')}">View customer &rarr;</button>`;
+    } else if (isSoldOut) {
+      typeLabel = 'SOLD OUT';
+      dotClass = 'admin-activity__dot--danger';
+      headlineHtml = `<div class="admin-activity-card__headline"><strong class="admin-activity-card__product-name">${escapeHtml(data.productName || item.productName || 'Product')}</strong></div>`;
+      const variantInfo = [data.variantLabel || item.variantLabel, item.sku ? `SKU: ${item.sku}` : ''].filter(Boolean).join(' · ');
+      if (variantInfo) {
+        subHtml = `<div class="admin-activity-card__sub">${escapeHtml(variantInfo)}</div>`;
+      }
+      pillHtml = `<span class="admin-activity-card__pill admin-activity-card__pill--danger">Sold out</span>`;
+      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-product-activity" data-product-id="${escapeHtml(data.productId || item.productId || '')}" data-product-name="${escapeHtml(data.productName || item.productName || '')}">View product &rarr;</button>`;
+    } else if (isLowStock) {
+      typeLabel = 'LOW STOCK';
+      dotClass = 'admin-activity__dot--warning';
+      headlineHtml = `<div class="admin-activity-card__headline"><strong class="admin-activity-card__product-name">${escapeHtml(data.productName || item.productName || 'Product')}</strong></div>`;
+      const variantInfo = [data.variantLabel || item.variantLabel, item.sku ? `SKU: ${item.sku}` : ''].filter(Boolean).join(' · ');
+      if (variantInfo) {
+        subHtml = `<div class="admin-activity-card__sub">${escapeHtml(variantInfo)}</div>`;
+      }
+      const stockCount = item.stock != null ? item.stock : data.stock;
+      pillHtml = `<span class="admin-activity-card__pill admin-activity-card__pill--warning">${escapeHtml(stockCount != null ? `${stockCount} units remaining` : 'Low stock')}</span>`;
+      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-product-activity" data-product-id="${escapeHtml(data.productId || item.productId || '')}" data-product-name="${escapeHtml(data.productName || item.productName || '')}">View product &rarr;</button>`;
+    } else if (isNewOrder) {
 
     const meta = NOTIFICATION_META[item.type] || {
       label: String(item.title || item.type || 'NOTIFICATION').toUpperCase(),
@@ -3353,7 +3420,11 @@
     if (rangeEnd) rangeEnd.setDate(rangeEnd.getDate() + 1);
 
     return [...state.orders].filter((order) => {
-      const matchesStatus = state.ordersStatus === 'all' || order.status === state.ordersStatus;
+      const matchesStatus = state.ordersStatus === 'all'
+        ? true
+        : state.ordersStatus === 'stock_shortage'
+          ? (order.status === 'stock_shortage' || Boolean(order.hasStockShortage))
+          : order.status === state.ordersStatus;
       const matchesQuery =
         !query ||
         [order.orderNumber, order.customerName, hasRealEmail(order.email) ? order.email : '', order.phone]
@@ -3371,6 +3442,8 @@
     if (!order) {
       return `<p class="admin-table__muted">Select an order to inspect details.</p>`;
     }
+    const isShortage = Boolean(order.hasStockShortage || order.status === 'stock_shortage');
+    const displayStatus = isShortage ? 'stock_shortage' : order.status;
     return `
       <div class="admin-list">
         <div class="admin-list__item">
@@ -3379,9 +3452,44 @@
               <p class="admin-list__item-title">${escapeHtml(order.orderNumber)}</p>
               <p class="admin-list__item-sub">${escapeHtml(order.customerName)}${hasRealEmail(order.email) ? ` - ${escapeHtml(order.email)}` : ''}</p>
             </div>
-            <span class="admin-badge ${statusClass(order.status)}">${escapeHtml(getStatusLabel(order.status))}</span>
+            <span class="admin-badge ${statusClass(displayStatus)}">${escapeHtml(getStatusLabel(displayStatus))}</span>
           </div>
         </div>
+        ${isShortage ? `
+          <div class="admin-list__item admin-stock-shortage-card" style="background:#fff1f0;border:1px solid #ffa39e;border-radius:10px;padding:12px 14px;margin:8px 0;">
+            <div class="admin-list__item-head" style="margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;">
+              <p class="admin-list__item-title" style="margin:0;font-size:12px;font-weight:700;color:#cf1322;display:flex;align-items:center;gap:6px;">
+                <span>⚠️ STOCK SHORTAGE — FULFILMENT PENDING</span>
+              </p>
+              <span class="admin-badge admin-badge--stock-shortage">STOCK SHORTAGE</span>
+            </div>
+            <p class="admin-list__item-sub" style="font-size:11px;color:#595959;margin-bottom:8px;">
+              This verified paid order is currently blocked from fulfilment due to insufficient stock.
+            </p>
+            <div style="background:#fff;border:1px solid #ffd8d6;border-radius:6px;padding:8px 10px;font-size:11px;margin-bottom:8px;">
+              ${Array.isArray(order.stockShortages) && order.stockShortages.length ? order.stockShortages.map((s) => `
+                <div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px dashed #f0f0f0;">
+                  <strong>${escapeHtml(s.productName)}</strong> (${escapeHtml(s.variantLabel || 'Default')})<br>
+                  <span class="admin-table__muted">SKU:</span> <code>${escapeHtml(s.sku || 'N/A')}</code> &middot;
+                  <span class="admin-table__muted">Ordered:</span> ${s.orderedQuantity} &middot;
+                  <span class="admin-table__muted">Available:</span> ${s.currentStock != null ? s.currentStock : s.availableStock}<br>
+                  <span style="color:#cf1322;"><strong>Reason:</strong> ${escapeHtml(s.reason)}</span>
+                </div>
+              `).join('') : `
+                <span style="color:#cf1322;"><strong>Reason:</strong> Required stock is unavailable for fulfillment</span>
+              `}
+            </div>
+            <div class="admin-actions">
+              <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="resolve-stock-shortage" data-order-id="${order.id}">✓ Resolve Stock Shortage</button>
+            </div>
+          </div>
+        ` : `
+          ${order.paymentStatus === 'paid' && !['shipped', 'delivered', 'cancelled', 'returned'].includes(order.status) ? `
+            <div style="margin: 6px 0;">
+              <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-action="flag-stock-shortage" data-order-id="${order.id}">⚠️ Flag Stock Shortage</button>
+            </div>
+          ` : ''}
+        `}
         <div class="admin-list__item">
           <p class="admin-list__item-title">Customer Information</p>
           <p class="admin-list__item-sub">${escapeHtml(order.customerName)}<br>${escapeHtml(displayEmail(order.email))}<br>${escapeHtml(order.phone)}</p>
@@ -3398,11 +3506,14 @@
           <p class="admin-list__item-title">Ordered Products</p>
           <div class="admin-list">
             ${order.items.map((item) => `
-              <div class="admin-list__item" style="padding:10px 12px;">
+              <div class="admin-list__item" style="padding:10px 12px;${item.hasShortage ? 'border-left:3px solid #cf1322;background:rgba(207,19,34,0.03);' : ''}">
                 <div class="admin-list__item-head">
                   <div>
-                    <p class="admin-list__item-title">${escapeHtml(item.name)}</p>
-                    <p class="admin-list__item-sub">Qty ${escapeHtml(item.qty)}</p>
+                    <p class="admin-list__item-title">${escapeHtml(item.name)} ${item.variantLabel ? `(${escapeHtml(item.variantLabel)})` : ''}</p>
+                    <p class="admin-list__item-sub">
+                      SKU: <code>${escapeHtml(item.sku || 'N/A')}</code> &middot; Qty ${escapeHtml(item.qty)}
+                      ${item.hasShortage ? `<br><strong style="color:#cf1322;">⚠️ Shortage: ${escapeHtml(item.shortageReason || 'Stock unavailable')}</strong>` : ''}
+                    </p>
                   </div>
                   <strong>${escapeHtml(money(item.price))}</strong>
                 </div>
@@ -3548,6 +3659,7 @@
     }
 
     const filtered = filteredOrders();
+    const stockShortageCount = state.orders.filter((o) => o.status === 'stock_shortage' || Boolean(o.hasStockShortage)).length;
     const pageSize = 5;
     const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
     if (state.ordersPage > totalPages) state.ordersPage = totalPages;
@@ -3585,6 +3697,7 @@
                 <button class="admin-btn ${state.ordersTodayOnly ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-action="toggle-orders-today">Today</button>
                 <button class="admin-btn ${state.ordersStatus === 'pending' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="pending">Pending</button>
                 <button class="admin-btn ${state.ordersStatus === 'processing' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="processing">Processing</button>
+                <button class="admin-btn ${state.ordersStatus === 'stock_shortage' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="stock_shortage">Stock Shortage${stockShortageCount ? ` (${stockShortageCount})` : ''}</button>
                 <button class="admin-btn ${state.ordersStatus === 'shipped' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="shipped">Shipped</button>
                 <button class="admin-btn ${state.ordersStatus === 'delivered' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="delivered">Delivered</button>
                 <button class="admin-btn ${state.ordersStatus === 'cancelled' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="cancelled">Cancelled</button>
@@ -3613,7 +3726,10 @@
                     </tr>
                   </thead>
                   <tbody>
-                    ${pageItems.map((order) => `
+                    ${pageItems.map((order) => {
+                      const orderIsShortage = Boolean(order.hasStockShortage || order.status === 'stock_shortage');
+                      const orderDisplayStatus = orderIsShortage ? 'stock_shortage' : order.status;
+                      return `
                       <tr class="${Number(state.selectedOrderId) === Number(order.id) ? 'is-selected' : ''}" data-action="select-order" data-id="${order.id}" style="cursor:pointer;">
                         <td><input type="checkbox" data-action="toggle-order-selection" data-id="${order.id}" ${state.selectedOrderIds.includes(Number(order.id)) ? 'checked' : ''} aria-label="Select ${escapeHtml(order.orderNumber)}" /> <strong>${escapeHtml(order.orderNumber)}</strong><br><span class="admin-table__muted">${escapeHtml(dateLabel(order.createdAt))}</span></td>
                         <td>${escapeHtml(order.customerName)}<br><span class="admin-table__muted">${escapeHtml(displayEmail(order.email))}</span></td>
@@ -3621,7 +3737,7 @@
                         <td>${escapeHtml(order.paymentMethod.toUpperCase())}<br><span class="admin-table__muted">${escapeHtml(getStatusLabel(order.paymentStatus))}</span></td>
                         <td><strong>${escapeHtml(money(order.totalAmount))}</strong></td>
                         <td>
-                          <span class="admin-badge ${statusClass(order.status)}">${escapeHtml(getStatusLabel(order.status))}</span>
+                          <span class="admin-badge ${statusClass(orderDisplayStatus)}">${escapeHtml(getStatusLabel(orderDisplayStatus))}</span>
                         </td>
                         <td>
                           <div style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;">
@@ -3632,7 +3748,8 @@
                           </div>
                         </td>
                       </tr>
-                    `).join('')}
+                    `;
+                    }).join('')}
                   </tbody>
                 </table>
               </div>
@@ -5818,6 +5935,7 @@
                   <label class="admin-field"><span>Support Email</span><input class="admin-input" name="supportEmail" value="${escapeHtml(s.supportEmail)}" /></label>
                   <label class="admin-field"><span>Support Phone</span><input class="admin-input" name="supportPhone" value="${escapeHtml(s.supportPhone)}" /></label>
                   <label class="admin-field"><span>Shipping Charges</span><input class="admin-input" name="shippingCharges" value="${escapeHtml(s.shippingCharges)}" /></label>
+                  <label class="admin-field"><span>Low Stock Threshold</span><input type="number" min="0" class="admin-input" name="lowStockThreshold" value="${escapeHtml(s.lowStockThreshold || '15')}" /></label>
                   <label class="admin-field admin-field--wide"><span>Return Policy</span><textarea class="admin-textarea" name="returnPolicy">${escapeHtml(s.returnPolicy)}</textarea></label>
                   <label class="admin-field admin-field--wide"><span>Tax Settings</span><textarea class="admin-textarea" name="taxSettings">${escapeHtml(s.taxSettings)}</textarea></label>
                 </div>
@@ -6909,6 +7027,7 @@
       supportEmail: String(fd.get('supportEmail') || '').trim(),
       supportPhone: String(fd.get('supportPhone') || '').trim(),
       shippingCharges: String(fd.get('shippingCharges') || '').trim(),
+      lowStockThreshold: String(fd.get('lowStockThreshold') || '15').trim(),
       returnPolicy: String(fd.get('returnPolicy') || '').trim(),
       taxSettings: String(fd.get('taxSettings') || '').trim(),
       paymentGateway: String(fd.get('paymentGateway') || '').trim(),
@@ -7899,6 +8018,47 @@
       case 'cancel-edit-campaign': {
         state.editingCampaignId = null;
         renderInfluencers();
+        return;
+      }
+      case 'flag-stock-shortage': {
+        const orderId = Number(target?.dataset?.orderId || id);
+        if (!orderId) return;
+        const currentOrder = state.orders.find((o) => Number(o.id) === orderId) || order;
+        const reason = window.prompt(`Enter stock shortage reason for order ${currentOrder?.orderNumber || orderId}:`, 'Required stock is unavailable for fulfillment');
+        if (reason === null) return;
+        try {
+          const res = await apiRequest(`/api/merch/admin/orders/${orderId}/stock-shortage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: reason.trim() || 'Required stock is unavailable for fulfillment' }),
+          });
+          toast('Stock Shortage Flagged', `Order ${res.order?.orderNumber || orderId} is now flagged for stock shortage.`, 'warning');
+          await loadOrderData();
+          await loadDashboardStats({ silent: true });
+          renderOrders();
+        } catch (err) {
+          toast('Failed to flag shortage', err.message || 'Unable to flag stock shortage.', 'danger');
+        }
+        return;
+      }
+      case 'resolve-stock-shortage': {
+        const orderId = Number(target?.dataset?.orderId || id);
+        if (!orderId) return;
+        const currentOrder = state.orders.find((o) => Number(o.id) === orderId) || order;
+        if (!window.confirm(`Resolve stock shortage for order ${currentOrder?.orderNumber || orderId}? This will return the order to normal processing.`)) return;
+        try {
+          const res = await apiRequest(`/api/merch/admin/orders/${orderId}/resolve-stock-shortage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+          });
+          toast('Stock Shortage Resolved', `Order ${res.order?.orderNumber || orderId} stock shortage has been resolved.`, 'success');
+          await loadOrderData();
+          await loadDashboardStats({ silent: true });
+          renderOrders();
+        } catch (err) {
+          toast('Failed to resolve shortage', err.message || 'Unable to resolve stock shortage.', 'danger');
+        }
         return;
       }
       case 'shiprocket-fulfill':
