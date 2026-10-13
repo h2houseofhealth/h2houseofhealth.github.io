@@ -2217,6 +2217,22 @@
     return map[String(status || '').toLowerCase()] || String(status || 'Unknown');
   }
 
+  function getShortageReviewStatusLabel(status) {
+    const map = {
+      awaiting_review: 'Awaiting Review',
+      reviewed: 'Reviewed',
+      ready_for_communication: 'Ready for Customer Communication',
+    };
+    return map[String(status || '').toLowerCase()] || 'Awaiting Review';
+  }
+
+  function shortageReviewBadgeClass(status) {
+    const s = String(status || '').toLowerCase();
+    if (s === 'ready_for_communication') return 'admin-badge--ready-comm';
+    if (s === 'reviewed') return 'admin-badge--reviewed';
+    return 'admin-badge--awaiting-review';
+  }
+
   function toast(title, message, tone = 'default') {
     const node = document.createElement('div');
     node.className = `admin-toast${tone ? ` admin-toast--${tone}` : ''}`;
@@ -3457,30 +3473,47 @@
         </div>
         ${isShortage ? `
           <div class="admin-list__item admin-stock-shortage-card" style="background:#fff1f0;border:1px solid #ffa39e;border-radius:10px;padding:12px 14px;margin:8px 0;">
-            <div class="admin-list__item-head" style="margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;">
+            <div class="admin-list__item-head" style="margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
               <p class="admin-list__item-title" style="margin:0;font-size:12px;font-weight:700;color:#cf1322;display:flex;align-items:center;gap:6px;">
                 <span>⚠️ STOCK SHORTAGE — FULFILMENT PENDING</span>
               </p>
-              <span class="admin-badge admin-badge--stock-shortage">STOCK SHORTAGE</span>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <span class="admin-badge admin-badge--stock-shortage">STOCK SHORTAGE</span>
+                ${order.stockShortageReviewStatus ? `
+                  <span class="admin-badge ${shortageReviewBadgeClass(order.stockShortageReviewStatus)}">${escapeHtml(getShortageReviewStatusLabel(order.stockShortageReviewStatus))}</span>
+                ` : ''}
+              </div>
             </div>
             <p class="admin-list__item-sub" style="font-size:11px;color:#595959;margin-bottom:8px;">
               This verified paid order is currently blocked from fulfilment due to insufficient stock.
             </p>
             <div style="background:#fff;border:1px solid #ffd8d6;border-radius:6px;padding:8px 10px;font-size:11px;margin-bottom:8px;">
               ${Array.isArray(order.stockShortages) && order.stockShortages.length ? order.stockShortages.map((s) => `
-                <div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px dashed #f0f0f0;">
-                  <strong>${escapeHtml(s.productName)}</strong> (${escapeHtml(s.variantLabel || 'Default')})<br>
-                  <span class="admin-table__muted">SKU:</span> <code>${escapeHtml(s.sku || 'N/A')}</code> &middot;
-                  <span class="admin-table__muted">Ordered:</span> ${s.orderedQuantity} &middot;
-                  <span class="admin-table__muted">Available:</span> ${s.currentStock != null ? s.currentStock : s.availableStock}<br>
-                  <span style="color:#cf1322;"><strong>Reason:</strong> ${escapeHtml(s.reason)}</span>
+                <div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px dashed #f0f0f0;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+                    <strong>${escapeHtml(s.productName)}</strong>
+                    <span class="admin-badge ${shortageReviewBadgeClass(s.reviewStatus)}" style="font-size:10px;">${escapeHtml(getShortageReviewStatusLabel(s.reviewStatus))}</span>
+                  </div>
+                  <div>(${escapeHtml(s.variantLabel || 'Default')})</div>
+                  <div style="margin-top:2px;">
+                    <span class="admin-table__muted">SKU:</span> <code>${escapeHtml(s.sku || 'N/A')}</code> &middot;
+                    <span class="admin-table__muted">Ordered:</span> <strong>${s.orderedQuantity}</strong> &middot;
+                    <span class="admin-table__muted">Available:</span> ${s.currentStock != null ? s.currentStock : s.availableStock}
+                  </div>
+                  <div style="color:#cf1322;margin-top:2px;"><strong>Shortage Reason:</strong> ${escapeHtml(s.reason)}</div>
+                  <div style="margin-top:4px;padding:4px 8px;background:#fafafa;border:1px solid #eee;border-radius:4px;">
+                    <div><strong>Estimated Delivery:</strong> ${s.revisedDeliveryEstimate ? `<strong>${escapeHtml(s.revisedDeliveryEstimate)}</strong>` : '<span class="admin-table__muted"><em>Not yet determined</em></span>'}</div>
+                    ${s.internalDelayNote ? `<div style="margin-top:2px;color:#434343;"><strong>Delay Note:</strong> ${escapeHtml(s.internalDelayNote)}</div>` : ''}
+                    ${s.reviewedBy ? `<div class="admin-table__muted" style="margin-top:2px;font-size:10px;">Reviewed by ${escapeHtml(s.reviewedBy)}${s.reviewedAt ? ` on ${escapeHtml(dateLabel(s.reviewedAt))}` : ''}</div>` : ''}
+                  </div>
                 </div>
               `).join('') : `
                 <span style="color:#cf1322;"><strong>Reason:</strong> Required stock is unavailable for fulfillment</span>
               `}
             </div>
-            <div class="admin-actions">
-              <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="resolve-stock-shortage" data-order-id="${order.id}">✓ Resolve Stock Shortage</button>
+            <div class="admin-actions" style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button class="admin-btn admin-btn--soft admin-btn--sm" type="button" data-action="open-stock-shortage-review" data-order-id="${order.id}">📝 Review Delay & Delivery Estimate</button>
+              <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-action="resolve-stock-shortage" data-order-id="${order.id}">✓ Resolve Stock Shortage</button>
             </div>
           </div>
         ` : `
@@ -3738,10 +3771,16 @@
                         <td><strong>${escapeHtml(money(order.totalAmount))}</strong></td>
                         <td>
                           <span class="admin-badge ${statusClass(orderDisplayStatus)}">${escapeHtml(getStatusLabel(orderDisplayStatus))}</span>
+                          ${orderIsShortage ? `
+                            <br><span class="admin-badge ${shortageReviewBadgeClass(order.stockShortageReviewStatus || order.stockShortages?.[0]?.reviewStatus)}" style="margin-top:3px;font-size:10px;">${escapeHtml(getShortageReviewStatusLabel(order.stockShortageReviewStatus || order.stockShortages?.[0]?.reviewStatus))}</span>
+                          ` : ''}
                         </td>
                         <td>
                           <div style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;">
-                            ${!order.shiprocketAwbCode && !['cancelled', 'delivered', 'returned'].includes(normalizeOrderStatus(order.status)) ? `
+                            ${orderIsShortage ? `
+                              <button class="admin-btn admin-btn--soft admin-btn--sm" type="button" data-action="open-stock-shortage-review" data-id="${order.id}" style="padding:3px 8px;font-size:11px;font-weight:600;white-space:nowrap;">Review</button>
+                            ` : ''}
+                            ${!order.shiprocketAwbCode && !orderIsShortage && !['cancelled', 'delivered', 'returned'].includes(normalizeOrderStatus(order.status)) ? `
                               <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="shiprocket-fulfill" data-id="${order.id}" style="padding:3px 8px;font-size:11px;font-weight:600;white-space:nowrap;">🚀 Ship</button>
                             ` : ''}
                             <button class="admin-action-link" type="button" data-action="track-admin-order" data-id="${order.id}" style="white-space:nowrap;">Track</button>
@@ -7688,6 +7727,87 @@
     }
   }
 
+  function openStockShortageReviewModal(order) {
+    if (!order) return;
+    const shortages = Array.isArray(order.stockShortages) ? order.stockShortages : [];
+    const firstShortage = shortages[0] || {};
+    const currentReviewStatus = firstShortage.reviewStatus || 'awaiting_review';
+    const currentEstimate = firstShortage.revisedDeliveryEstimate || '';
+    const currentNote = firstShortage.internalDelayNote || '';
+
+    const bodyHtml = `
+      <form class="admin-form" data-form="stock-shortage-review" data-order-id="${order.id}">
+        <div style="background:#fff1f0;border:1px solid #ffa39e;border-radius:8px;padding:10px 14px;margin-bottom:14px;">
+          <div style="font-weight:700;font-size:12px;color:#cf1322;margin-bottom:4px;">
+            ⚠️ Stock Shortage Case — Delay Review & Preparation
+          </div>
+          <div style="font-size:11px;color:#595959;">
+            Customer: <strong>${escapeHtml(order.customerName)}</strong> (${escapeHtml(displayEmail(order.email))}, ${escapeHtml(order.phone || 'No phone')})<br>
+            Order: <strong>${escapeHtml(order.orderNumber)}</strong> &middot; Payment: <strong>${escapeHtml(order.paymentStatus || 'paid').toUpperCase()}</strong>
+          </div>
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <label class="admin-field">
+            <span>Affected Item(s) in this Shortage</span>
+          </label>
+          <div style="background:#fafafa;border:1px solid #e8e8e8;border-radius:6px;padding:8px 10px;font-size:11px;max-height:140px;overflow-y:auto;">
+            ${shortages.length ? shortages.map((s) => `
+              <div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px dashed #f0f0f0;">
+                <strong>${escapeHtml(s.productName)}</strong> (${escapeHtml(s.variantLabel || 'Default')})<br>
+                <span class="admin-table__muted">SKU:</span> <code>${escapeHtml(s.sku || 'N/A')}</code> &middot;
+                <span class="admin-table__muted">Ordered Qty:</span> <strong>${s.orderedQuantity}</strong> &middot;
+                <span class="admin-table__muted">Warehouse Stock:</span> ${s.currentStock != null ? s.currentStock : s.availableStock}<br>
+                <span style="color:#cf1322;"><strong>Shortage Reason:</strong> ${escapeHtml(s.reason)}</span>
+              </div>
+            `).join('') : `
+              <div>No specific item shortages listed.</div>
+            `}
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <label class="admin-field">
+            <span>Review Status</span>
+            <select class="admin-select" name="reviewStatus">
+              <option value="awaiting_review" ${currentReviewStatus === 'awaiting_review' ? 'selected' : ''}>⏳ Awaiting Review</option>
+              <option value="reviewed" ${currentReviewStatus === 'reviewed' ? 'selected' : ''}>🔍 Reviewed (Internal assessment complete)</option>
+              <option value="ready_for_communication" ${currentReviewStatus === 'ready_for_communication' ? 'selected' : ''}>📢 Ready for Customer Communication</option>
+            </select>
+          </label>
+
+          <label class="admin-field">
+            <span>Revised Delivery Estimate (Optional / When Known)</span>
+            <input class="admin-input" type="text" name="revisedDeliveryEstimate" value="${escapeHtml(currentEstimate)}" placeholder="e.g. 2026-10-25 or Late October (leave blank if unknown)" />
+            <small class="admin-table__muted" style="font-size:10px;margin-top:2px;">Leave blank if supplier timeline is pending or unknown.</small>
+          </label>
+
+          <label class="admin-field admin-field--wide">
+            <span>Internal Delay Note (Warehouse / Supplier Explanation)</span>
+            <textarea class="admin-textarea" name="internalDelayNote" rows="3" placeholder="Add internal notes on why fulfillment is delayed and next restock steps...">${escapeHtml(currentNote)}</textarea>
+          </label>
+
+          <div style="background:#e6f7ff;border:1px solid #91d5ff;border-radius:6px;padding:8px 10px;font-size:11px;color:#0050b3;">
+            ℹ️ <strong>Phase 2 Guardrail:</strong> This is an internal review record. No customer emails, refunds, or compensation coupons are dispatched until Phase 3.
+          </div>
+        </div>
+      </form>
+    `;
+
+    const footerHtml = `
+      <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button>
+      <button class="admin-btn admin-btn--primary" type="button" data-action="save-stock-shortage-review" data-order-id="${order.id}">Save Review</button>
+    `;
+
+    openModal({
+      title: `Review Stock Shortage: ${order.orderNumber}`,
+      subtitle: 'Fulfilment Delay Management',
+      body: bodyHtml,
+      footer: footerHtml,
+      size: 'md',
+    });
+  }
+
   async function openShiprocketFulfillModal(order) {
     if (!order) return;
     openModal({
@@ -8058,6 +8178,41 @@
           renderOrders();
         } catch (err) {
           toast('Failed to resolve shortage', err.message || 'Unable to resolve stock shortage.', 'danger');
+        }
+        return;
+      }
+      case 'open-stock-shortage-review': {
+        const orderId = Number(target?.dataset?.orderId || id);
+        if (!orderId) return;
+        const currentOrder = state.orders.find((o) => Number(o.id) === orderId) || order;
+        openStockShortageReviewModal(currentOrder);
+        return;
+      }
+      case 'save-stock-shortage-review': {
+        const orderId = Number(target?.dataset?.orderId || id);
+        if (!orderId) return;
+        const form = els.adminModalDialog.querySelector('[data-form="stock-shortage-review"]');
+        if (!form) return;
+        const fd = new FormData(form);
+        const reviewStatus = String(fd.get('reviewStatus') || 'reviewed').trim();
+        const revisedDeliveryEstimate = String(fd.get('revisedDeliveryEstimate') || '').trim();
+        const internalDelayNote = String(fd.get('internalDelayNote') || '').trim();
+
+        target.disabled = true;
+        try {
+          const res = await apiRequest(`/api/merch/admin/orders/${orderId}/stock-shortage/review`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reviewStatus, revisedDeliveryEstimate, internalDelayNote }),
+          });
+          toast('Delay Review Saved', `Order ${res.order?.orderNumber || orderId} shortage review updated.`, 'success');
+          closeModal();
+          await loadOrderData();
+          await loadDashboardStats({ silent: true });
+          renderOrders();
+        } catch (err) {
+          toast('Failed to save review', err.message || 'Unable to update shortage review.', 'danger');
+          target.disabled = false;
         }
         return;
       }
