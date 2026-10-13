@@ -923,6 +923,16 @@ module.exports = function mountMerchApi(app, {
         VALUES ('RYANH2', 'Ryan influencer discount (₹1,150 off per eligible bottle)', 'merch', 'flat', 1150, 'category:bottles', 1, 1, 'public', ?, datetime('now'))
       `).run(ryanId);
     }
+    // Ensure RyanH2 campaign persists all 4 bottle variant IDs [569, 570, 571, 572]
+    try {
+      const ryanH2Campaign = db.prepare("SELECT id, target_variant_ids FROM merch_campaigns WHERE LOWER(slug) = 'ryanh2'").get();
+      if (ryanH2Campaign && !ryanH2Campaign.target_variant_ids) {
+        db.prepare("UPDATE merch_campaigns SET target_variant_ids = ? WHERE id = ?").run(
+          JSON.stringify([569, 570, 571, 572]),
+          ryanH2Campaign.id
+        );
+      }
+    } catch (_) {}
   } catch (seedErr) {
     console.warn('[Seed Ryan Influencer Error]:', seedErr?.message || seedErr);
   }
@@ -5619,6 +5629,41 @@ module.exports = function mountMerchApi(app, {
     return fallbackId > 0 ? [fallbackId] : [];
   }
 
+  function formatVariantScopeMessage(targetVariants = [], allProductVariantsCount = 0, productName = 'bottle') {
+    if (!targetVariants || targetVariants.length === 0) return '';
+    const isAll = allProductVariantsCount > 1 && targetVariants.length >= allProductVariantsCount;
+    const colors = targetVariants.map((v) => v.color).filter(Boolean);
+    const size = targetVariants[0]?.size || '';
+    const itemNoun = /bottle/i.test(productName) ? 'bottle' : 'item';
+
+    const joinList = (arr) => {
+      if (!arr || !arr.length) return '';
+      if (arr.length === 1) return arr[0];
+      if (arr.length === 2) return `${arr[0]} and ${arr[1]}`;
+      return `${arr.slice(0, -1).join(', ')}, and ${arr[arr.length - 1]}`;
+    };
+
+    if (isAll) {
+      if (colors.length > 1) {
+        return `Valid on ${joinList(colors)}${size ? ` ${size}` : ''} ${itemNoun}s.`;
+      }
+      return `Valid on all colours of this ${itemNoun}.`;
+    }
+
+    if (targetVariants.length === 1) {
+      const v = targetVariants[0];
+      const desc = [v.color, v.size].filter(Boolean).join(' ');
+      return `Valid on ${desc ? `${desc} ` : ''}${itemNoun}.`;
+    }
+
+    if (colors.length === targetVariants.length) {
+      return `Valid on ${joinList(colors)}${size ? ` ${size}` : ''} ${itemNoun}s.`;
+    }
+
+    const titles = targetVariants.map((v) => [v.color, v.size].filter(Boolean).join(' ')).filter(Boolean);
+    return `Valid on ${joinList(titles)} ${itemNoun}s.`;
+  }
+
   function isRyanAttribution({ coupon, influencerId, campaignId, campaignSlug } = {}) {
     const infId = Number(influencerId || coupon?.influencerId || coupon?.influencer_id || 0);
     const code = String(coupon?.code || coupon?.couponCode || '').trim().toUpperCase();
@@ -5703,7 +5748,20 @@ module.exports = function mountMerchApi(app, {
       items.forEach(it => {
         const pid = Number(it.productId || it.product_id);
         if (pid) {
-          productLineTotals[pid] = (productLineTotals[pid] || 0) + Number(it.lineTotal || (Number(it.unitPrice || 0) * Number(it.quantity || 1)) || 0);
+          const itemPricePaise = Number(it.lineTotal || (Number(it.unitPrice || it.price || 0) * (Number(it.unitPrice || it.price || 0) < 100000 ? 100 : 1) * Number(it.quantity || 1)) || 0);
+          productLineTotals[pid] = (productLineTotals[pid] || 0) + itemPricePaise;
+        }
+      });
+    }
+    const variantLineTotals = args.variantLineTotals && Object.keys(args.variantLineTotals).length > 0
+      ? { ...args.variantLineTotals }
+      : {};
+    if (Object.keys(variantLineTotals).length === 0 && items.length > 0) {
+      items.forEach(it => {
+        const vid = Number(it.variantId || it.variant_id);
+        if (vid) {
+          const itemPricePaise = Number(it.lineTotal || (Number(it.unitPrice || it.price || 0) * (Number(it.unitPrice || it.price || 0) < 100000 ? 100 : 1) * Number(it.quantity || 1)) || 0);
+          variantLineTotals[vid] = (variantLineTotals[vid] || 0) + itemPricePaise;
         }
       });
     }
@@ -5711,16 +5769,83 @@ module.exports = function mountMerchApi(app, {
       ...args,
       productIds,
       productLineTotals,
+      variantLineTotals,
     };
     const result = validateCouponForUser({ ...enrichedArgs, appliesTo: 'merch', portal: 'merch' });
     if (result?.error || !result?.coupon) return result;
 
     if (result.coupon.influencerId) {
-      const influencer = db.prepare('SELECT active FROM merch_influencers WHERE id = ?').get(Number(result.coupon.influencerId));
+      const influencer = db.prepare('SELECT active, name FROM merch_influencers WHERE id = ?').get(Number(result.coupon.influencerId));
       if (!influencer || Number(influencer.active) !== 1) {
         return { error: 'This influencer coupon is no longer active.' };
       }
+      if (influencer.name && !result.coupon.influencerName) {
+        result.coupon.influencerName = influencer.name;
+      }
     }
+
+    // Resolve campaign linked to this coupon or provided in args
+    let campaign = null;
+    const isInfluencerCoupon = Boolean(Number(result.coupon?.influencerId || 0) > 0 || String(result.coupon?.couponType || '').toLowerCase() === 'influencer');
+    const couponCode = normalizeMerchCouponCode(result.coupon?.code);
+    const couponId = Number(result.coupon?.id || 0);
+
+    // Only match campaigns that belong specifically to the coupon being validated
+    if (couponId > 0 || couponCode) {
+      if (args.campaignId) {
+        campaign = db.prepare(`
+          SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
+                 c.target_variant_ids AS targetVariantIds,
+                 v.color AS variantColor, v.size AS variantSize, p.name AS productName,
+                 i.name AS influencerName
+          FROM merch_campaigns c
+          LEFT JOIN merch_influencers i ON i.id = c.influencer_id
+          LEFT JOIN merch_variants v ON v.id = c.target_variant_id
+          LEFT JOIN merch_products p ON p.id = c.target_product_id
+          WHERE c.id = ? AND c.is_active = 1 AND (c.coupon_id = ? OR LOWER(TRIM(c.coupon_code)) = LOWER(TRIM(?)))
+        `).get(Number(args.campaignId), couponId, couponCode);
+      }
+      if (!campaign && args.campaignSlug) {
+        campaign = db.prepare(`
+          SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
+                 c.target_variant_ids AS targetVariantIds,
+                 v.color AS variantColor, v.size AS variantSize, p.name AS productName,
+                 i.name AS influencerName
+          FROM merch_campaigns c
+          LEFT JOIN merch_influencers i ON i.id = c.influencer_id
+          LEFT JOIN merch_variants v ON v.id = c.target_variant_id
+          LEFT JOIN merch_products p ON p.id = c.target_product_id
+          WHERE LOWER(c.slug) = LOWER(?) AND c.is_active = 1
+        `).get(String(args.campaignSlug).trim());
+      }
+      if (!campaign && isInfluencerCoupon) {
+        campaign = db.prepare(`
+          SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
+                 c.target_variant_ids AS targetVariantIds,
+                 v.color AS variantColor, v.size AS variantSize, p.name AS productName,
+                 i.name AS influencerName
+          FROM merch_campaigns c
+          LEFT JOIN merch_influencers i ON i.id = c.influencer_id
+          LEFT JOIN merch_variants v ON v.id = c.target_variant_id
+          LEFT JOIN merch_products p ON p.id = c.target_product_id
+          WHERE (c.coupon_id = ? OR LOWER(TRIM(c.coupon_code)) = LOWER(TRIM(?)) OR c.influencer_id = ?) AND c.is_active = 1
+          ORDER BY c.id DESC
+          LIMIT 1
+        `).get(couponId, couponCode, Number(result.coupon?.influencerId || 0));
+      }
+    }
+
+    const campaignVariantIds = campaign ? parseCampaignVariantIds(campaign) : [];
+    let targetVariants = [];
+    let allProductVariants = [];
+    if (campaign && campaign.targetProductId) {
+      allProductVariants = db.prepare('SELECT id, sku, color, size, price FROM merch_variants WHERE product_id = ? AND is_active = 1').all(campaign.targetProductId);
+      const varMap = new Map(allProductVariants.map((v) => [v.id, v]));
+      targetVariants = campaignVariantIds.map((id) => varMap.get(id)).filter(Boolean);
+    }
+    const variantScopeMessage = campaign
+      ? formatVariantScopeMessage(targetVariants, allProductVariants.length, campaign.productName || 'bottle')
+      : '';
 
     const isRyan = isRyanAttribution({
       coupon: result.coupon,
@@ -5730,10 +5855,32 @@ module.exports = function mountMerchApi(app, {
     });
 
     if (isRyan) {
-      const { totalBottles, totalMists } = countMerchBottlesAndMists(args.items, args);
-      if (totalBottles === 0) {
-        return { error: 'This coupon is only valid for the Hydrogen Water Bottle.' };
+      let totalBottles = 0;
+      let totalMists = 0;
+      for (const item of items) {
+        const vid = Number(item.variantId || item.id);
+        const pid = Number(item.productId || item.product_id);
+        const qty = Math.max(0, Number(item.quantity || 0));
+        const isEligibleBottle = campaignVariantIds.length > 0
+          ? campaignVariantIds.includes(vid)
+          : (pid === 11 || /bottle/i.test(String(item.productName || item.name || '')));
+        if (isEligibleBottle) totalBottles += qty;
+        const isMist = pid === 12 || /(mist|spray)/i.test(String(item.productName || item.name || ''));
+        if (isMist) totalMists += qty;
       }
+
+      if (totalBottles === 0) {
+        let variantLabel = [campaign?.variantColor, campaign?.variantSize].filter(Boolean).join(' ');
+        if (targetVariants.length > 1) {
+          variantLabel = targetVariants.map((v) => [v.color, v.size].filter(Boolean).join(' ')).join(' / ');
+        }
+        return {
+          error: variantLabel
+            ? `This coupon is only valid for the ${variantLabel} variant(s) of Hydrogen Water Bottle.`
+            : 'This coupon is only valid for the Hydrogen Water Bottle.',
+        };
+      }
+
       const bundleCount = Math.min(totalBottles, totalMists);
       const individualBottleCount = Math.max(0, totalBottles - bundleCount);
       const ryanDiscountPaise = individualBottleCount * 115000; // ₹1,150 per individual bottle
@@ -5746,58 +5893,22 @@ module.exports = function mountMerchApi(app, {
       result.totalBottles = totalBottles;
       result.bundleCount = bundleCount;
       result.individualBottleCount = individualBottleCount;
+
+      if (result.coupon) {
+        result.coupon.influencerName = campaign?.influencerName || result.coupon.influencerName || 'Ryan';
+        result.coupon.campaignSlug = campaign?.slug || args.campaignSlug || '';
+        result.coupon.targetVariantIds = campaignVariantIds;
+        result.coupon.targetVariants = targetVariants;
+        result.coupon.allProductVariantsCount = allProductVariants.length;
+        result.coupon.variantScopeMessage = variantScopeMessage;
+        result.coupon.targetProductName = campaign?.productName || 'H2 Water Bottle';
+      }
       return result;
-    }
-
-    // Check if this coupon is linked to a campaign with a specific target variant
-    let campaign = null;
-    const isInfluencerCoupon = Boolean(Number(result.coupon?.influencerId || 0) > 0 || String(result.coupon?.couponType || '').toLowerCase() === 'influencer');
-    const couponCode = normalizeMerchCouponCode(result.coupon?.code);
-    const couponId = Number(result.coupon?.id || 0);
-
-    // Only match campaigns that belong specifically to the coupon being validated
-    if (couponId > 0 || couponCode) {
-      if (args.campaignId) {
-        campaign = db.prepare(`
-          SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
-                 c.target_variant_ids AS targetVariantIds,
-                 v.color AS variantColor, v.size AS variantSize, p.name AS productName
-          FROM merch_campaigns c
-          LEFT JOIN merch_variants v ON v.id = c.target_variant_id
-          LEFT JOIN merch_products p ON p.id = c.target_product_id
-          WHERE c.id = ? AND c.is_active = 1 AND (c.coupon_id = ? OR LOWER(TRIM(c.coupon_code)) = LOWER(TRIM(?)))
-        `).get(Number(args.campaignId), couponId, couponCode);
-      }
-      if (!campaign && args.campaignSlug) {
-        campaign = db.prepare(`
-          SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
-                 c.target_variant_ids AS targetVariantIds,
-                 v.color AS variantColor, v.size AS variantSize, p.name AS productName
-          FROM merch_campaigns c
-          LEFT JOIN merch_variants v ON v.id = c.target_variant_id
-          LEFT JOIN merch_products p ON p.id = c.target_product_id
-          WHERE LOWER(c.slug) = LOWER(?) AND c.is_active = 1 AND (c.coupon_id = ? OR LOWER(TRIM(c.coupon_code)) = LOWER(TRIM(?)))
-        `).get(String(args.campaignSlug).trim(), couponId, couponCode);
-      }
-      if (!campaign && isInfluencerCoupon) {
-        campaign = db.prepare(`
-          SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
-                 c.target_variant_ids AS targetVariantIds,
-                 v.color AS variantColor, v.size AS variantSize, p.name AS productName
-          FROM merch_campaigns c
-          LEFT JOIN merch_variants v ON v.id = c.target_variant_id
-          LEFT JOIN merch_products p ON p.id = c.target_product_id
-          WHERE (c.coupon_id = ? OR LOWER(TRIM(c.coupon_code)) = LOWER(TRIM(?))) AND c.is_active = 1
-          ORDER BY c.id DESC
-          LIMIT 1
-        `).get(couponId, couponCode);
-      }
     }
 
     const couponAppliesTo = String(result?.coupon?.appliesTo || '').trim().toLowerCase();
     const isGeneralMerchCoupon = !isInfluencerCoupon && ['all', 'merch'].includes(couponAppliesTo);
     const hasCategoryOrProductScope = couponAppliesTo.startsWith('category:') || couponAppliesTo.startsWith('product:') || couponAppliesTo.startsWith('variant:');
-    const campaignVariantIds = campaign ? parseCampaignVariantIds(campaign) : [];
 
     if (!isGeneralMerchCoupon && campaign && campaignVariantIds.length > 0 && !hasCategoryOrProductScope) {
       const cartVariantIds = (Array.isArray(args.variantIds) ? args.variantIds : []).map((id) => Number(id));
@@ -5805,12 +5916,8 @@ module.exports = function mountMerchApi(app, {
 
       if (matchingVariantIds.length === 0) {
         let variantLabel = [campaign.variantColor, campaign.variantSize].filter(Boolean).join(' ');
-        if (campaignVariantIds.length > 1) {
-          try {
-            const vRows = db.prepare(`SELECT color, size FROM merch_variants WHERE id IN (${campaignVariantIds.map(() => '?').join(',')})`).all(...campaignVariantIds);
-            const labels = vRows.map((v) => [v.color, v.size].filter(Boolean).join(' ')).filter(Boolean);
-            if (labels.length) variantLabel = labels.join(' / ');
-          } catch (_) {}
+        if (targetVariants.length > 1) {
+          variantLabel = targetVariants.map((v) => [v.color, v.size].filter(Boolean).join(' ')).join(' / ');
         }
         return {
           error: `This coupon is only valid for the ${variantLabel || 'selected'} variant(s) of ${campaign.productName || 'the product'}.`,
@@ -5836,8 +5943,13 @@ module.exports = function mountMerchApi(app, {
         result.finalAmountPaise = Math.max(0, Number(args.subtotalAmountPaise || 0) - recalculatedDiscountPaise);
         if (result.coupon) {
           result.coupon.targetVariantIds = campaignVariantIds;
+          result.coupon.targetVariants = targetVariants;
+          result.coupon.allProductVariantsCount = allProductVariants.length;
           result.coupon.targetVariantId = matchingVariantIds[0] || campaignVariantIds[0];
           result.coupon.targetVariantName = campaign.variantColor || 'selected';
+          result.coupon.influencerName = campaign.influencerName || result.coupon.influencerName || '';
+          result.coupon.variantScopeMessage = variantScopeMessage;
+          result.coupon.targetProductName = campaign.productName || '';
         }
       }
     }
@@ -5933,6 +6045,11 @@ module.exports = function mountMerchApi(app, {
       influencerId: result?.coupon?.influencerId || null,
       influencerName: result?.coupon?.influencerName || '',
       influencerHandle: result?.coupon?.influencerHandle || '',
+      targetVariantIds: result?.coupon?.targetVariantIds || [],
+      targetVariants: result?.coupon?.targetVariants || [],
+      allProductVariantsCount: result?.coupon?.allProductVariantsCount || null,
+      variantScopeMessage: result?.coupon?.variantScopeMessage || '',
+      targetProductName: result?.coupon?.targetProductName || '',
       bundleDiscountInr: Math.round(Number(result?.bundleDiscountPaise || 0) / 100),
       commissionAmountInr: Math.round(Number(result?.ryanCommissionPaise || 0) / 100),
       totalBottles: result?.totalBottles ?? null,
@@ -5986,6 +6103,7 @@ module.exports = function mountMerchApi(app, {
       campaignId: campaign.id,
       slug: campaign.slug,
       influencerId: campaign.influencerId,
+      influencerName: campaign.influencerName || '',
       couponCode: campaign.couponCode,
       targetProductId: campaign.targetProductId || 11,
       targetVariantId: campaign.targetVariantId || parsedVariantIds[0] || 569,
@@ -6020,7 +6138,18 @@ module.exports = function mountMerchApi(app, {
     if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found or inactive' });
     }
-    campaign.targetVariantIds = parseCampaignVariantIds(campaign);
+    const parsedVariantIds = parseCampaignVariantIds(campaign);
+    const allProductVariants = db.prepare('SELECT id, sku, color, size, price FROM merch_variants WHERE product_id = ? AND is_active = 1').all(campaign.targetProductId || 11);
+    const varMap = new Map(allProductVariants.map((v) => [v.id, v]));
+    const targetVariants = parsedVariantIds.map((id) => varMap.get(id)).filter(Boolean);
+    const prodRow = db.prepare('SELECT name FROM merch_products WHERE id = ?').get(campaign.targetProductId || 11);
+
+    campaign.targetVariantIds = parsedVariantIds;
+    campaign.targetVariants = targetVariants;
+    campaign.allProductVariantsCount = allProductVariants.length;
+    campaign.targetProductName = prodRow?.name || 'H2 Water Bottle';
+    campaign.variantScopeMessage = formatVariantScopeMessage(targetVariants, allProductVariants.length, prodRow?.name || 'bottle');
+
     res.json({ campaign });
   });
 
@@ -8187,7 +8316,7 @@ module.exports = function mountMerchApi(app, {
         ORDER BY datetime(c.created_at) DESC, c.id DESC
       `).all();
 
-      const allVariants = db.prepare('SELECT id, product_id, sku, color, size, price FROM merch_variants').all();
+      const allVariants = db.prepare('SELECT id, product_id, sku, color, size, price, is_active FROM merch_variants').all();
       const variantMap = new Map(allVariants.map((v) => [v.id, v]));
 
       const campaigns = rows.map((row) => {
@@ -8203,6 +8332,8 @@ module.exports = function mountMerchApi(app, {
           size: v.size,
           price: Number(v.price || 0),
         }));
+        const productVariants = allVariants.filter((v) => Number(v.product_id) === Number(row.targetProductId) && Number(v.is_active ?? 1) === 1);
+        const allProductVariantsCount = productVariants.length || 4;
 
         return {
           id: row.id,
@@ -8218,6 +8349,7 @@ module.exports = function mountMerchApi(app, {
           targetVariantId: row.targetVariantId,
           targetVariantIds: parsedVariantIds,
           targetVariants,
+          allProductVariantsCount,
           targetVariantSku: row.targetVariantSku || '',
           targetVariantColor: row.targetVariantColor || '',
           targetVariantSize: row.targetVariantSize || '',
@@ -8239,7 +8371,7 @@ module.exports = function mountMerchApi(app, {
     }
   });
 
-  app.post('/api/merch/admin/campaigns', requireAdmin, (req, res) => {
+  function handleSaveCampaign(req, res, overrideCampaignId = null) {
     try {
       const influencerId = Number(req.body?.influencerId);
       const rawCouponCode = String(req.body?.couponCode || '').trim();
@@ -8247,6 +8379,7 @@ module.exports = function mountMerchApi(app, {
       const campaignName = String(req.body?.name || '').trim() || `${rawSlug} Campaign`;
       let targetProductId = Number(req.body?.targetProductId) || 11;
       let targetVariantId = Number(req.body?.targetVariantId) || 569;
+      const updateCampaignId = overrideCampaignId || Number(req.body?.campaignId);
 
       if (!influencerId || influencerId <= 0) {
         return res.status(400).json({ error: 'Influencer is required' });
@@ -8281,9 +8414,69 @@ module.exports = function mountMerchApi(app, {
       if (!rawSlug || !/^[A-Za-z0-9_-]{2,50}$/.test(rawSlug)) {
         return res.status(400).json({ error: 'Slug must be 2-50 alphanumeric characters (letters, numbers, hyphens, underscores)' });
       }
+
+      // Check for update mode vs create mode
+      if (updateCampaignId && updateCampaignId > 0) {
+        const existingCampaign = db.prepare('SELECT id FROM merch_campaigns WHERE id = ?').get(updateCampaignId);
+        if (!existingCampaign) {
+          return res.status(404).json({ error: 'Campaign to update was not found' });
+        }
+        const conflict = db.prepare('SELECT id FROM merch_campaigns WHERE LOWER(slug) = LOWER(?) AND id != ?').get(rawSlug, updateCampaignId);
+        if (conflict) {
+          return res.status(409).json({ error: `Campaign slug '${rawSlug}' is already in use by another campaign.` });
+        }
+
+        // Parse target variants
+        let incomingVariantIds = req.body?.targetVariantIds;
+        if (!Array.isArray(incomingVariantIds) && req.body?.targetVariantId) incomingVariantIds = [req.body.targetVariantId];
+        if (typeof incomingVariantIds === 'string') {
+          try { incomingVariantIds = JSON.parse(incomingVariantIds); } catch (_) { incomingVariantIds = incomingVariantIds.split(',').map((s) => s.trim()); }
+        }
+        let validVariantIds = [];
+        let validVariants = [];
+        if (Array.isArray(incomingVariantIds) && incomingVariantIds.length > 0) {
+          const cleanedIds = incomingVariantIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0);
+          if (cleanedIds.length > 0) {
+            validVariants = db.prepare(`SELECT id, product_id, sku, color, size, price FROM merch_variants WHERE id IN (${cleanedIds.map(() => '?').join(',')}) AND is_active = 1`).all(...cleanedIds);
+            validVariantIds = validVariants.map((v) => v.id);
+          }
+        }
+        if (validVariants.length === 0) {
+          validVariants = db.prepare('SELECT id, product_id, sku, color, size, price FROM merch_variants WHERE product_id = ? AND is_active = 1').all(targetProductId);
+          validVariantIds = validVariants.map((v) => v.id);
+        }
+        targetVariantId = validVariantIds[0] || 569;
+        targetProductId = validVariants[0]?.product_id || targetProductId;
+        const targetVariantIdsJson = JSON.stringify(validVariantIds);
+
+        db.prepare(`
+          UPDATE merch_campaigns
+          SET slug = ?, name = ?, influencer_id = ?, coupon_id = ?, coupon_code = ?,
+              target_product_id = ?, target_variant_id = ?, target_variant_ids = ?, updated_at = datetime('now')
+          WHERE id = ?
+        `).run(rawSlug, campaignName, influencerId, coupon.id, coupon.code, targetProductId, targetVariantId, targetVariantIdsJson, updateCampaignId);
+
+        return res.json({
+          campaign: {
+            id: updateCampaignId,
+            slug: rawSlug,
+            name: campaignName,
+            influencerId,
+            influencerName: influencer.name,
+            couponId: coupon.id,
+            couponCode: coupon.code,
+            targetProductId,
+            targetVariantId,
+            targetVariantIds: validVariantIds,
+            isActive: true,
+            url: `/c/${rawSlug}`,
+          }
+        });
+      }
+
       const existingSlug = db.prepare('SELECT id, slug FROM merch_campaigns WHERE LOWER(slug) = LOWER(?) LIMIT 1').get(rawSlug);
       if (existingSlug) {
-        return res.status(409).json({ error: `Campaign slug '${rawSlug}' already exists. Please choose a different slug.` });
+        return res.status(409).json({ error: `Campaign slug '${rawSlug}' already exists. Please choose a different slug or edit the existing campaign.` });
       }
 
       // Check target variants: support targetVariantIds (array) or targetVariantId (single)
@@ -8366,10 +8559,13 @@ module.exports = function mountMerchApi(app, {
         }
       });
     } catch (err) {
-      console.error('[Create Campaign Error]:', err);
-      res.status(500).json({ error: err?.message || 'Failed to create campaign' });
+      console.error('[Save Campaign Error]:', err);
+      res.status(500).json({ error: err?.message || 'Failed to save campaign' });
     }
-  });
+  }
+
+  app.post('/api/merch/admin/campaigns', requireAdmin, (req, res) => handleSaveCampaign(req, res));
+  app.put('/api/merch/admin/campaigns/:id', requireAdmin, (req, res) => handleSaveCampaign(req, res, Number(req.params.id)));
 
   app.patch('/api/merch/admin/campaigns/:id/active', requireAdmin, (req, res) => {
     const id = Number(req.params.id);

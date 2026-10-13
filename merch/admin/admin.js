@@ -2140,6 +2140,7 @@
     campaigns: [],
     campaignsLoading: false,
     latestCreatedCampaign: null,
+    editingCampaignId: null,
   };
 
   const els = {
@@ -4291,7 +4292,14 @@
 
   function renderCampaignCreatorSection(selectedInfluencer) {
     const activeInfluencers = (state.influencers || []).filter((i) => i.active !== 0 && i.active !== false);
-    const selectedInfId = selectedInfluencer ? Number(selectedInfluencer.id) : (state.selectedInfluencerIdForCampaign || '');
+    const editingCampaign = state.editingCampaignId
+      ? (state.campaigns || []).find((c) => Number(c.id) === Number(state.editingCampaignId))
+      : null;
+    const isEditing = Boolean(editingCampaign);
+
+    const selectedInfId = isEditing
+      ? Number(editingCampaign.influencerId)
+      : (selectedInfluencer ? Number(selectedInfluencer.id) : (state.selectedInfluencerIdForCampaign || ''));
     const candidateCoupons = (state.coupons || []).filter((c) => {
       const portalMatch = !c.portal || c.portal === 'merch';
       return portalMatch;
@@ -4299,13 +4307,18 @@
 
     const activeProducts = (state.products || []).filter((p) => Number(p.isActive ?? 1) === 1 && !p.deletedAt);
     const defaultProduct = activeProducts.find((p) => String(p.name || '').toLowerCase().includes('bottle') || Number(p.id) === 11) || activeProducts[0];
-    const selectedProdId = defaultProduct?.id || 11;
+    const selectedProdId = isEditing
+      ? Number(editingCampaign.targetProductId || 11)
+      : (defaultProduct?.id || 11);
+    const selectedCouponCode = isEditing ? String(editingCampaign.couponCode || '').trim() : '';
+    const selectedSlug = isEditing ? String(editingCampaign.slug || '').trim() : '';
+    const selectedVariantIds = isEditing ? (editingCampaign.targetVariantIds || [editingCampaign.targetVariantId]) : [];
 
     return `
       <div class="admin-campaign-creator">
         <div class="admin-campaign-creator__head">
-          <h4 class="admin-campaign-creator__title">CREATE NEW TRACKING LINK</h4>
-          <p class="admin-campaign-creator__desc">Fill in the details below to generate an attributable Instagram Story tracking link (<code>/c/:slug</code>).</p>
+          <h4 class="admin-campaign-creator__title">${isEditing ? `EDIT TRACKING LINK (/c/${escapeHtml(selectedSlug)})` : 'CREATE NEW TRACKING LINK'}</h4>
+          <p class="admin-campaign-creator__desc">${isEditing ? 'Update the influencer, coupon, target product, or variants for this tracking link.' : 'Fill in the details below to generate an attributable Instagram Story tracking link (<code>/c/:slug</code>).'}</p>
         </div>
         
         <form id="campaignCreateForm" class="admin-campaign-form" data-form="campaign-create" onsubmit="return false;">
@@ -4335,8 +4348,9 @@
                 ${candidateCoupons.map((c) => {
                   const isAssigned = selectedInfId && (Number(c.influencerId || c.influencer_id) === Number(selectedInfId));
                   const isAct = Number(c.is_active ?? c.active ?? 1) === 1;
+                  const isSel = isEditing && String(c.code).toLowerCase() === selectedCouponCode.toLowerCase();
                   return `
-                    <option value="${escapeHtml(c.code)}" data-influencer-id="${c.influencerId || c.influencer_id || ''}" data-discount="${escapeHtml(couponDiscountLabel(c))}" data-active="${isAct ? '1' : '0'}">
+                    <option value="${escapeHtml(c.code)}" data-influencer-id="${c.influencerId || c.influencer_id || ''}" data-discount="${escapeHtml(couponDiscountLabel(c))}" data-active="${isAct ? '1' : '0'}" ${isSel ? 'selected' : ''}>
                       ${escapeHtml(c.code)} (${escapeHtml(couponDiscountLabel(c))})${isAssigned ? ' ★ Assigned' : ''}${!isAct ? ' [Inactive]' : ''}
                     </option>
                   `;
@@ -4365,7 +4379,7 @@
                 <label for="campaignVariantDropdownTrigger">Product Variants <span class="admin-required-star">*</span></label>
               </div>
               <div id="campaignVariantDropdownContainer">
-                ${renderCampaignVariantDropdown(selectedProdId)}
+                ${renderCampaignVariantDropdown(selectedProdId, selectedVariantIds)}
               </div>
             </div>
 
@@ -4374,18 +4388,23 @@
                 <span class="admin-step-pill">Step 5</span>
                 <label for="campaignSlugInput">Campaign Slug <span class="admin-required-star">*</span></label>
               </div>
-              <input class="admin-input" name="slug" id="campaignSlugInput" placeholder="e.g. RyanH2" pattern="^[A-Za-z0-9_-]{2,50}$" required style="width:100%;" />
+              <input class="admin-input" name="slug" id="campaignSlugInput" value="${escapeHtml(selectedSlug)}" placeholder="e.g. RyanH2" pattern="^[A-Za-z0-9_-]{2,50}$" required style="width:100%;" />
               <div class="admin-campaign-preview">
                 <span class="admin-campaign-preview__label">Live Link Preview:</span>
-                <span id="campaignSlugLiveUrl" class="admin-campaign-preview__code">${window.location.origin}/c/<span>...</span></span>
+                <span id="campaignSlugLiveUrl" class="admin-campaign-preview__code">${window.location.origin}/c/<span>${escapeHtml(selectedSlug || '...')}</span></span>
               </div>
             </div>
           </div>
 
           <div style="margin-top:6px;display:flex;align-items:center;gap:12px;">
             <button class="admin-btn admin-btn--primary admin-campaign-submit-btn" type="submit" id="btnSubmitCampaign">
-              GENERATE TRACKING LINK
+              ${isEditing ? 'UPDATE TRACKING LINK' : 'GENERATE TRACKING LINK'}
             </button>
+            ${isEditing ? `
+              <button class="admin-btn admin-btn--ghost admin-campaign-submit-btn" type="button" data-action="cancel-edit-campaign">
+                CANCEL
+              </button>
+            ` : ''}
             <span id="campaignFormFeedback" style="font-size:13px;"></span>
           </div>
         </form>
@@ -4489,6 +4508,9 @@
                       : [{ id: 569, color: 'Silver', size: '460ml', sku: 'HM-BTL-460-SLV', price: 2299000 }]);
                 const primaryVariant = targetVariants[0] || {};
                 const variantPrice = primaryVariant.price || c.targetVariantPrice || 2299000;
+                const allCount = Number(c.allProductVariantsCount || 4);
+                const isAllColours = allCount > 1 && targetVariants.length >= allCount;
+                const fullVariantList = targetVariants.map((tv) => `${tv.color || ''}${tv.size ? ` (${tv.size})` : ''}`.trim()).filter(Boolean).join(', ');
 
                 return `
                   <tr>
@@ -4506,15 +4528,27 @@
                     <td>
                       <strong style="font-size:13px;color:var(--admin-text);display:block;">${escapeHtml(c.targetProductName || 'H2 Water Bottle')}</strong>
                       <div style="margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                        ${targetVariants.map((tv) => `
-                          <span class="admin-badge admin-badge--neutral" style="font-size:11px;font-weight:700;background:rgba(200,101,45,0.08);color:var(--admin-accent-dark,#9f3e1f);border:1px solid rgba(200,101,45,0.2);">
-                            ${escapeHtml(tv.color || tv.size || 'Variant')}${tv.size && tv.color ? ` (${escapeHtml(tv.size)})` : ''}
+                        ${isAllColours ? `
+                          <span class="admin-badge admin-badge--active" style="font-size:11px;font-weight:700;letter-spacing:0.04em;background:rgba(46,125,50,0.12);color:#1b5e20;border:1px solid rgba(46,125,50,0.3);" title="${escapeHtml(fullVariantList)}">
+                            ALL ${targetVariants.length} COLOURS
                           </span>
-                        `).join('')}
+                        ` : (targetVariants.length === 1 ? `
+                          <span class="admin-badge admin-badge--neutral" style="font-size:11px;font-weight:700;background:rgba(200,101,45,0.08);color:var(--admin-accent-dark,#9f3e1f);border:1px solid rgba(200,101,45,0.2);">
+                            ${escapeHtml((primaryVariant.color || 'Variant') + (primaryVariant.size ? ` (${primaryVariant.size})` : '')).toUpperCase()}
+                          </span>
+                        ` : (targetVariants.length <= 2 ? targetVariants.map((tv) => `
+                          <span class="admin-badge admin-badge--neutral" style="font-size:11px;font-weight:700;background:rgba(200,101,45,0.08);color:var(--admin-accent-dark,#9f3e1f);border:1px solid rgba(200,101,45,0.2);">
+                            ${escapeHtml((tv.color || 'Variant') + (tv.size ? ` (${tv.size})` : '')).toUpperCase()}
+                          </span>
+                        `).join('') : `
+                          <span class="admin-badge admin-badge--neutral" style="font-size:11px;font-weight:700;letter-spacing:0.04em;background:rgba(200,101,45,0.08);color:var(--admin-accent-dark,#9f3e1f);border:1px solid rgba(200,101,45,0.2);" title="${escapeHtml(fullVariantList)}">
+                            ${targetVariants.length} COLOURS
+                          </span>
+                        `))}
                         <strong style="font-size:12px;color:var(--admin-text);">${money(variantPrice)}</strong>
                       </div>
                       ${targetVariants.length === 1 && primaryVariant.sku ? `<span class="admin-table__muted" style="font-size:11px;display:block;margin-top:3px;">SKU: ${escapeHtml(primaryVariant.sku)}</span>` : ''}
-                      ${targetVariants.length > 1 ? `<span class="admin-table__muted" style="font-size:11px;display:block;margin-top:3px;">${targetVariants.length} variants selected</span>` : ''}
+                      ${targetVariants.length > 1 ? `<span class="admin-table__muted" style="font-size:11px;display:block;margin-top:3px;" title="${escapeHtml(fullVariantList)}">${escapeHtml(fullVariantList)}</span>` : ''}
                     </td>
                     <td style="text-align:center;">
                       <span class="admin-badge ${c.isActive ? 'admin-badge--active' : 'admin-badge--inactive'}" style="font-size:11px;font-weight:700;">
@@ -4533,6 +4567,9 @@
                       <div class="admin-campaign-cell-actions" style="display:inline-flex;gap:8px;align-items:center;justify-content:center;">
                         <button class="admin-btn admin-btn--soft admin-campaign-btn" type="button" data-action="copy-campaign-link" data-url="${fullUrl}" title="Copy tracking URL to clipboard">
                           COPY LINK
+                        </button>
+                        <button class="admin-btn admin-btn--soft admin-campaign-btn" type="button" data-action="edit-campaign" data-id="${c.id}" title="Edit this campaign">
+                          Edit
                         </button>
                         <button class="admin-btn ${c.isActive ? 'admin-btn--ghost' : 'admin-btn--soft'} admin-campaign-btn" type="button" data-action="toggle-campaign-active" data-id="${c.id}" data-active="${c.isActive ? 'true' : 'false'}" title="${c.isActive ? 'Deactivate this tracking link' : 'Activate this tracking link'}">
                           ${c.isActive ? 'Deactivate' : 'Activate'}
@@ -4560,6 +4597,7 @@
   }
 
   async function handleCampaignCreateSubmit(form) {
+    const isEditing = Boolean(state.editingCampaignId);
     const influencerId = Number(form.querySelector('[name="influencerId"]')?.value);
     const couponCode = String(form.querySelector('[name="couponCode"]')?.value || '').trim();
     const targetProductId = Number(form.querySelector('[name="targetProductId"]')?.value) || 11;
@@ -4610,7 +4648,7 @@
     }
 
     // Duplicate check
-    const duplicate = (state.campaigns || []).find((c) => String(c.slug).toLowerCase() === slug.toLowerCase());
+    const duplicate = (state.campaigns || []).find((c) => String(c.slug).toLowerCase() === slug.toLowerCase() && (!isEditing || Number(c.id) !== Number(state.editingCampaignId)));
     if (duplicate) {
       toast('Duplicate Slug', `Campaign slug '${slug}' already exists. Please choose a different slug.`, 'danger');
       return;
@@ -4620,10 +4658,13 @@
     if (submitBtn) submitBtn.disabled = true;
 
     try {
-      const res = await apiRequest('/api/merch/admin/campaigns', {
-        method: 'POST',
+      const endpoint = isEditing ? `/api/merch/admin/campaigns/${state.editingCampaignId}` : '/api/merch/admin/campaigns';
+      const method = isEditing ? 'PUT' : 'POST';
+      const res = await apiRequest(endpoint, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          campaignId: state.editingCampaignId || undefined,
           influencerId,
           couponCode,
           targetProductId,
@@ -4649,7 +4690,9 @@
           couponCode,
           variantName: variantSummary,
         };
-        toast('Campaign Created', `Tracking link for /c/${slug} generated successfully.`, 'success');
+        const wasEditing = isEditing;
+        state.editingCampaignId = null;
+        toast(wasEditing ? 'Campaign Updated' : 'Campaign Created', `Tracking link for /c/${slug} ${wasEditing ? 'updated' : 'generated'} successfully.`, 'success');
         await loadCampaignData();
         renderInfluencers();
 
@@ -4666,7 +4709,7 @@
         }
       }
     } catch (err) {
-      toast('Campaign Creation Failed', err.message || 'Unable to create tracking campaign.', 'danger');
+      toast(isEditing ? 'Campaign Update Failed' : 'Campaign Creation Failed', err.message || 'Unable to save tracking campaign.', 'danger');
     } finally {
       if (submitBtn) submitBtn.disabled = false;
     }
@@ -7842,6 +7885,20 @@
         } catch (err) {
           toast('Update Failed', err.message || 'Failed to toggle campaign status', 'danger');
         }
+        return;
+      }
+      case 'edit-campaign': {
+        const campaignId = Number(target?.dataset?.id);
+        if (!campaignId) return;
+        state.editingCampaignId = campaignId;
+        renderInfluencers();
+        const formEl = document.getElementById('campaignCreateForm');
+        if (formEl) formEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+      case 'cancel-edit-campaign': {
+        state.editingCampaignId = null;
+        renderInfluencers();
         return;
       }
       case 'shiprocket-fulfill':
