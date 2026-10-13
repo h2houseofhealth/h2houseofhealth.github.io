@@ -3482,6 +3482,11 @@
                 ${order.stockShortageReviewStatus ? `
                   <span class="admin-badge ${shortageReviewBadgeClass(order.stockShortageReviewStatus)}">${escapeHtml(getShortageReviewStatusLabel(order.stockShortageReviewStatus))}</span>
                 ` : ''}
+                ${order.stockShortageCommunicationStatus === 'sent' || (Array.isArray(order.stockShortages) && order.stockShortages.length && order.stockShortages.every((s) => s.customerCommunicationStatus === 'sent')) ? `
+                  <span class="admin-badge admin-badge--success" style="font-size:10px;">✉️ Email Sent</span>
+                ` : order.stockShortageCommunicationStatus === 'failed' || (Array.isArray(order.stockShortages) && order.stockShortages.some((s) => s.customerCommunicationStatus === 'failed')) ? `
+                  <span class="admin-badge admin-badge--danger" style="font-size:10px;">⚠️ Email Failed</span>
+                ` : ''}
               </div>
             </div>
             <p class="admin-list__item-sub" style="font-size:11px;color:#595959;margin-bottom:8px;">
@@ -3492,7 +3497,10 @@
                 <div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px dashed #f0f0f0;">
                   <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
                     <strong>${escapeHtml(s.productName)}</strong>
-                    <span class="admin-badge ${shortageReviewBadgeClass(s.reviewStatus)}" style="font-size:10px;">${escapeHtml(getShortageReviewStatusLabel(s.reviewStatus))}</span>
+                    <div style="display:flex;gap:4px;align-items:center;">
+                      <span class="admin-badge ${shortageReviewBadgeClass(s.reviewStatus)}" style="font-size:10px;">${escapeHtml(getShortageReviewStatusLabel(s.reviewStatus))}</span>
+                      ${s.customerCommunicationStatus === 'sent' ? `<span class="admin-badge admin-badge--success" style="font-size:10px;">✉️ Sent</span>` : (s.customerCommunicationStatus === 'failed' ? `<span class="admin-badge admin-badge--danger" style="font-size:10px;">⚠️ Failed</span>` : '')}
+                    </div>
                   </div>
                   <div>(${escapeHtml(s.variantLabel || 'Default')})</div>
                   <div style="margin-top:2px;">
@@ -3505,14 +3513,27 @@
                     <div><strong>Estimated Delivery:</strong> ${s.revisedDeliveryEstimate ? `<strong>${escapeHtml(s.revisedDeliveryEstimate)}</strong>` : '<span class="admin-table__muted"><em>Not yet determined</em></span>'}</div>
                     ${s.internalDelayNote ? `<div style="margin-top:2px;color:#434343;"><strong>Delay Note:</strong> ${escapeHtml(s.internalDelayNote)}</div>` : ''}
                     ${s.reviewedBy ? `<div class="admin-table__muted" style="margin-top:2px;font-size:10px;">Reviewed by ${escapeHtml(s.reviewedBy)}${s.reviewedAt ? ` on ${escapeHtml(dateLabel(s.reviewedAt))}` : ''}</div>` : ''}
+                    ${s.customerCommunicatedAt ? `<div style="margin-top:4px;font-size:10px;color:#237804;font-weight:600;">✉️ Delay email sent to ${escapeHtml(s.customerCommunicationSentTo || order.email)} on ${escapeHtml(dateLabel(s.customerCommunicatedAt))}</div>` : ''}
+                    ${s.customerCommunicationError ? `<div style="margin-top:4px;font-size:10px;color:#cf1322;">⚠️ Email delivery error: ${escapeHtml(s.customerCommunicationError)}</div>` : ''}
                   </div>
                 </div>
               `).join('') : `
                 <span style="color:#cf1322;"><strong>Reason:</strong> Required stock is unavailable for fulfillment</span>
               `}
             </div>
-            <div class="admin-actions" style="display:flex;gap:6px;flex-wrap:wrap;">
+            <div class="admin-actions" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
               <button class="admin-btn admin-btn--soft admin-btn--sm" type="button" data-action="open-stock-shortage-review" data-order-id="${order.id}">📝 Review Delay & Delivery Estimate</button>
+              ${order.stockShortageReviewStatus === 'ready_for_communication' || (Array.isArray(order.stockShortages) && order.stockShortages.some((s) => s.reviewStatus === 'ready_for_communication')) ? `
+                ${order.stockShortageCommunicationStatus === 'sent' || (Array.isArray(order.stockShortages) && order.stockShortages.length && order.stockShortages.every((s) => s.customerCommunicationStatus === 'sent')) ? `
+                  <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-action="open-stock-shortage-email-modal" data-order-id="${order.id}">✉️ View Sent Delay Email</button>
+                ` : order.stockShortageCommunicationStatus === 'failed' || (Array.isArray(order.stockShortages) && order.stockShortages.some((s) => s.customerCommunicationStatus === 'failed')) ? `
+                  <button class="admin-btn admin-btn--danger admin-btn--sm" type="button" data-action="open-stock-shortage-email-modal" data-order-id="${order.id}">⚠️ Retry Customer Delay Email</button>
+                ` : `
+                  <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="open-stock-shortage-email-modal" data-order-id="${order.id}">✉️ Send Customer Delay Email</button>
+                `}
+              ` : `
+                <span class="admin-table__muted" style="font-size:11px;font-style:italic;">Customer email unlocks once marked 'Ready for Communication'</span>
+              `}
               <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-action="resolve-stock-shortage" data-order-id="${order.id}">✓ Resolve Stock Shortage</button>
             </div>
           </div>
@@ -7808,6 +7829,139 @@
     });
   }
 
+  async function openStockShortageEmailModal(order) {
+    if (!order) return;
+    openModal({
+      title: `Customer Delay Notification — ${order.orderNumber || `Order #${order.id}`}`,
+      subtitle: 'Preparing email preview...',
+      body: `
+        <div style="text-align:center;padding:32px 16px;">
+          <div class="admin-spinner" style="margin:0 auto 14px;width:32px;height:32px;border:3px solid rgba(184,93,59,0.2);border-top-color:#b85d3b;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+          <p style="font-weight:600;margin:0 0 4px;">Loading email preview...</p>
+          <p class="admin-table__muted" style="font-size:12px;margin:0;">Generating verified customer communication</p>
+        </div>
+      `,
+      footer: '<button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button>',
+      size: 'lg',
+    });
+
+    try {
+      const preview = await apiRequest(`/api/merch/admin/orders/${encodeURIComponent(order.id)}/stock-shortage/email-preview`);
+      const bodyEl = els.adminModalDialog.querySelector('.admin-modal__body');
+      const footEl = els.adminModalDialog.querySelector('.admin-modal__foot');
+      if (!bodyEl || !footEl) return;
+
+      const isAlreadySent = preview.communicationStatus === 'sent';
+      const isFailed = preview.communicationStatus === 'failed';
+
+      bodyEl.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <div style="background:#fff8f0;border:1px solid #f0d5c3;border-radius:8px;padding:12px 16px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:12px;font-weight:700;color:#5a2c1d;">
+                ✉️ Customer Communication Details
+              </span>
+              <span class="admin-badge ${isAlreadySent ? 'admin-badge--success' : (isFailed ? 'admin-badge--danger' : 'admin-badge--ready-comm')}">
+                ${isAlreadySent ? 'Delivered' : (isFailed ? 'Delivery Failed' : 'Ready to Send')}
+              </span>
+            </div>
+            <div style="font-size:12px;color:#595959;line-height:1.6;">
+              <strong>Recipient:</strong> ${escapeHtml(preview.customerName)} &lt;<code>${escapeHtml(preview.recipientEmail)}</code>&gt;<br>
+              <strong>Order:</strong> ${escapeHtml(preview.orderNumber)}<br>
+              <strong>Revised Delivery Estimate:</strong> ${preview.hasEstimate ? `<strong>${escapeHtml(preview.revisedDeliveryEstimate)}</strong>` : '<span style="color:#8c8c8c;"><em>Not specified — email explains timeline is actively being confirmed</em></span>'}<br>
+              ${isAlreadySent ? `<span style="color:#237804;"><strong>Sent At:</strong> ${escapeHtml(dateLabel(preview.communicatedAt) || 'Previously sent')} to ${escapeHtml(preview.communicationSentTo || preview.recipientEmail)}</span>` : ''}
+              ${isFailed && preview.communicationError ? `<span style="color:#cf1322;"><strong>Last Error:</strong> ${escapeHtml(preview.communicationError)}</span>` : ''}
+            </div>
+          </div>
+
+          <div>
+            <label class="admin-field" style="margin-bottom:6px;">
+              <span style="font-weight:600;font-size:12px;">Subject Line</span>
+            </label>
+            <input class="admin-input" type="text" value="${escapeHtml(preview.subject)}" readonly style="background:#fafafa;font-weight:500;" />
+          </div>
+
+          <div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+              <label class="admin-field" style="margin:0;">
+                <span style="font-weight:600;font-size:12px;">Customer Email Preview</span>
+              </label>
+              <div style="display:flex;gap:6px;">
+                <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" data-action="toggle-email-preview-mode" data-mode="html" style="font-size:11px;padding:2px 8px;">HTML View</button>
+                <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" data-action="toggle-email-preview-mode" data-mode="text" style="font-size:11px;padding:2px 8px;">Plain Text</button>
+              </div>
+            </div>
+            <div id="stockShortageEmailHtmlView" style="border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;background:#fff;max-height:360px;overflow-y:auto;">
+              <iframe srcdoc="${escapeHtml(preview.html)}" style="width:100%;height:340px;border:none;" title="Email HTML Preview"></iframe>
+            </div>
+            <div id="stockShortageEmailTextView" hidden style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;background:#f9f9f9;font-family:monospace;font-size:12px;white-space:pre-wrap;max-height:360px;overflow-y:auto;color:#333;">${escapeHtml(preview.text)}</div>
+          </div>
+
+          <div style="background:#e6f7ff;border:1px solid #91d5ff;border-radius:6px;padding:10px 14px;font-size:11px;color:#0050b3;line-height:1.5;">
+            🔒 <strong>Phase 3 Safety Guardrails:</strong><br>
+            &bull; Internal delay notes and warehouse stock numbers are strictly excluded.<br>
+            &bull; No compensation coupons are promised or issued in this notification.<br>
+            &bull; Payment status, order amounts, and stock reservations remain unchanged.
+          </div>
+
+          ${isAlreadySent ? `
+            <div style="background:#fffbe6;border:1px solid #ffe58f;border-radius:6px;padding:10px 14px;">
+              <label class="admin-field" style="margin:0;">
+                <span style="font-weight:600;font-size:12px;color:#d46b08;">Resend Authorization Reason (Required)</span>
+                <input class="admin-input" id="stockDelayResendReasonInput" type="text" placeholder="e.g. Customer requested copy to new email address" style="margin-top:4px;" />
+              </label>
+            </div>
+          ` : ''}
+
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;cursor:pointer;margin-top:2px;">
+            <input type="checkbox" id="confirmSendDelayEmailCheck" style="width:16px;height:16px;accent-color:#b85d3b;" />
+            <span>I have verified the recipient email and delivery details and confirm sending this customer update.</span>
+          </label>
+        </div>
+      `;
+
+      footEl.innerHTML = `
+        <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button>
+        <button class="admin-btn admin-btn--primary" type="button" data-action="confirm-send-stock-delay-email" data-order-id="${order.id}" ${isAlreadySent ? 'data-force-retry="true"' : ''} disabled>
+          ${isAlreadySent ? 'Resend Delay Email' : (isFailed ? 'Retry Sending Email' : 'Send Delay Notification Email')}
+        </button>
+      `;
+
+      bodyEl.querySelectorAll('[data-action="toggle-email-preview-mode"]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const mode = btn.dataset.mode;
+          const htmlEl = bodyEl.querySelector('#stockShortageEmailHtmlView');
+          const textEl = bodyEl.querySelector('#stockShortageEmailTextView');
+          if (mode === 'html') {
+            htmlEl.hidden = false;
+            textEl.hidden = true;
+          } else {
+            htmlEl.hidden = true;
+            textEl.hidden = false;
+          }
+        });
+      });
+
+      const confirmCheck = bodyEl.querySelector('#confirmSendDelayEmailCheck');
+      const sendBtn = footEl.querySelector('[data-action="confirm-send-stock-delay-email"]');
+      confirmCheck?.addEventListener('change', () => {
+        if (sendBtn) sendBtn.disabled = !confirmCheck.checked;
+      });
+
+    } catch (err) {
+      const bodyEl = els.adminModalDialog.querySelector('.admin-modal__body');
+      if (bodyEl) {
+        bodyEl.innerHTML = `
+          <div style="text-align:center;padding:24px 16px;color:#cf1322;">
+            <p style="font-weight:600;margin:0 0 4px;">Unable to load email preview</p>
+            <p class="admin-table__muted" style="font-size:12px;margin:0;">${escapeHtml(err.message || 'Error fetching email preview.')}</p>
+          </div>
+        `;
+      }
+    }
+  }
+
   async function openShiprocketFulfillModal(order) {
     if (!order) return;
     openModal({
@@ -8213,6 +8367,50 @@
         } catch (err) {
           toast('Failed to save review', err.message || 'Unable to update shortage review.', 'danger');
           target.disabled = false;
+        }
+        return;
+      }
+      case 'open-stock-shortage-email-modal': {
+        const orderId = Number(target?.dataset?.orderId || id);
+        if (!orderId) return;
+        const currentOrder = state.orders.find((o) => Number(o.id) === orderId) || order;
+        await openStockShortageEmailModal(currentOrder);
+        return;
+      }
+      case 'confirm-send-stock-delay-email': {
+        const orderId = Number(target?.dataset?.orderId || id);
+        if (!orderId) return;
+        const forceRetry = target?.dataset?.forceRetry === 'true';
+        let resendReason = '';
+        if (forceRetry) {
+          const reasonEl = els.adminModalDialog.querySelector('#stockDelayResendReasonInput');
+          resendReason = String(reasonEl?.value || '').trim();
+          if (resendReason.length < 5) {
+            toast('Resend Reason Required', 'Please enter a valid administrative reason (at least 5 characters) for resending.', 'warning');
+            reasonEl?.focus();
+            return;
+          }
+        }
+
+        target.disabled = true;
+        const originalText = target.textContent;
+        target.textContent = 'Sending...';
+
+        try {
+          const res = await apiRequest(`/api/merch/admin/orders/${orderId}/stock-shortage/send-email`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ confirmResend: forceRetry, resendReason }),
+          });
+          toast('Delay Email Sent', res.message || `Customer email delivered to ${res.sentTo}.`, 'success');
+          closeModal();
+          await loadOrderData();
+          await loadDashboardStats({ silent: true });
+          renderOrders();
+        } catch (err) {
+          toast('Email Delivery Failed', err.message || 'Unable to deliver delay notification.', 'danger');
+          target.disabled = false;
+          target.textContent = originalText;
         }
         return;
       }

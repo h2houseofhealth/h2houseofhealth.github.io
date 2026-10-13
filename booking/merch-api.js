@@ -167,6 +167,18 @@ module.exports = function mountMerchApi(app, {
   if (!hasColumn('merch_order_stock_shortages', 'customer_communication_status')) {
     db.exec("ALTER TABLE merch_order_stock_shortages ADD COLUMN customer_communication_status TEXT NOT NULL DEFAULT 'pending'");
   }
+  if (!hasColumn('merch_order_stock_shortages', 'customer_communicated_at')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN customer_communicated_at TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'customer_communication_sent_to')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN customer_communication_sent_to TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'customer_communication_error')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN customer_communication_error TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'customer_communication_attempts')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN customer_communication_attempts INTEGER NOT NULL DEFAULT 0');
+  }
 
   // Product specifications are optional so existing databases continue to work.
   if (!hasColumn('merch_products', 'specifications_json')) {
@@ -1229,6 +1241,10 @@ module.exports = function mountMerchApi(app, {
         s.reviewed_by,
         s.reviewed_at,
         s.customer_communication_status,
+        s.customer_communicated_at,
+        s.customer_communication_sent_to,
+        s.customer_communication_error,
+        s.customer_communication_attempts,
         s.created_at AS shortage_created_at,
         o.order_number,
         o.customer_name,
@@ -3664,6 +3680,10 @@ module.exports = function mountMerchApi(app, {
         reviewedBy: s.reviewed_by || null,
         reviewedAt: s.reviewed_at || null,
         customerCommunicationStatus: s.customer_communication_status || 'pending',
+        customerCommunicatedAt: s.customer_communicated_at || null,
+        customerCommunicationSentTo: s.customer_communication_sent_to || null,
+        customerCommunicationError: s.customer_communication_error || null,
+        customerCommunicationAttempts: Number(s.customer_communication_attempts || 0),
         createdAt: s.created_at,
       })),
       stockShortageReviewStatus: (() => {
@@ -3672,6 +3692,14 @@ module.exports = function mountMerchApi(app, {
         if (activeShortages.some((s) => s.review_status === 'awaiting_review')) return 'awaiting_review';
         if (activeShortages.every((s) => s.review_status === 'ready_for_communication')) return 'ready_for_communication';
         return 'reviewed';
+      })(),
+      stockShortageCommunicationStatus: (() => {
+        const activeShortages = db.prepare('SELECT customer_communication_status FROM merch_order_stock_shortages WHERE order_id = ? AND is_resolved = 0').all(Number(order.id));
+        if (!activeShortages.length) return null;
+        if (activeShortages.every((s) => s.customer_communication_status === 'sent')) return 'sent';
+        if (activeShortages.some((s) => s.customer_communication_status === 'sending')) return 'sending';
+        if (activeShortages.some((s) => s.customer_communication_status === 'failed')) return 'failed';
+        return 'pending';
       })(),
       items: items.map((item) => {
         const itemShortage = db.prepare(`
@@ -9526,13 +9554,22 @@ module.exports = function mountMerchApi(app, {
         reviewedBy: s.reviewed_by || null,
         reviewedAt: s.reviewed_at || null,
         customerCommunicationStatus: s.customer_communication_status || 'pending',
+        customerCommunicatedAt: s.customer_communicated_at || null,
+        customerCommunicationSentTo: s.customer_communication_sent_to || null,
+        customerCommunicationError: s.customer_communication_error || null,
+        customerCommunicationAttempts: Number(s.customer_communication_attempts || 0),
         shipped: Boolean(s.tracking_number || s.shiprocket_awb_code || s.order_status === 'shipped'),
         delivered: Boolean(s.delivered_at || s.order_status === 'delivered'),
       }));
       const filterReviewStatus = req.query?.reviewStatus ? String(req.query.reviewStatus).trim().toLowerCase() : null;
-      const resultShortages = filterReviewStatus && filterReviewStatus !== 'all'
-        ? shortages.filter((s) => s.reviewStatus.toLowerCase() === filterReviewStatus)
-        : shortages;
+      const filterCommStatus = req.query?.communicationStatus ? String(req.query.communicationStatus).trim().toLowerCase() : null;
+      let resultShortages = shortages;
+      if (filterReviewStatus && filterReviewStatus !== 'all') {
+        resultShortages = resultShortages.filter((s) => s.reviewStatus.toLowerCase() === filterReviewStatus);
+      }
+      if (filterCommStatus && filterCommStatus !== 'all') {
+        resultShortages = resultShortages.filter((s) => s.customerCommunicationStatus.toLowerCase() === filterCommStatus);
+      }
       res.json({ success: true, count: resultShortages.length, shortages: resultShortages });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -9809,6 +9846,450 @@ module.exports = function mountMerchApi(app, {
       });
     } catch (err) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── ADMIN: Customer Stock Delay Communication (Phase 3) ───
+
+  function sanitizeErrorMessage(msg) {
+    if (!msg) return 'Unknown delivery error';
+    return String(msg)
+      .replace(/(?:key|pass|password|token|secret|auth)[=:\s]+[^\s,;]+/gi, '[REDACTED]')
+      .replace(/smtp:\/\/[^@]+@/gi, 'smtp://[REDACTED]@')
+      .replace(/bearer\s+[a-z0-9_\-\.]+/gi, 'Bearer [REDACTED]')
+      .slice(0, 500);
+  }
+
+  function parseSqliteUtcDate(val) {
+    if (!val) return 0;
+    const str = String(val).trim();
+    if (!str) return 0;
+    if (str.endsWith('Z')) return new Date(str).getTime();
+    return new Date(str.replace(' ', 'T') + 'Z').getTime();
+  }
+
+  function buildCustomerStockDelayEmail({ order, shortages = [], items = [] }) {
+    const customerName = String(order.customerName || order.customer_name || 'Valued Customer').trim();
+    const orderNumber = String(order.orderNumber || order.order_number || `Order #${order.id}`).trim();
+
+    // Determine delivery estimate from shortages
+    const firstWithEstimate = shortages.find((s) => s.revisedDeliveryEstimate || s.revised_delivery_estimate);
+    const rawEstimate = firstWithEstimate
+      ? String(firstWithEstimate.revisedDeliveryEstimate || firstWithEstimate.revised_delivery_estimate).trim()
+      : '';
+    const hasEstimate = Boolean(rawEstimate);
+
+    // Dynamic delivery update wording (strictly no invented dates)
+    const deliveryUpdateText = hasEstimate
+      ? `Your revised estimated delivery timeframe is: ${rawEstimate}.`
+      : 'Our supply team is actively working to confirm the revised delivery timeline, and we will share the updated date as soon as verified.';
+
+    const deliveryUpdateHtml = hasEstimate
+      ? `<div style="background: #fff8f0; border-left: 4px solid #b85d3b; border-radius: 4px; padding: 12px 16px; margin: 16px 0;">
+           <p style="margin: 0; font-size: 14px; color: #5a2c1d; font-weight: 600;">
+             📦 Revised Estimated Delivery: <span style="color: #b85d3b;">${escapeHtml(rawEstimate)}</span>
+           </p>
+         </div>`
+      : `<div style="background: #f7f9fa; border-left: 4px solid #8c9ba5; border-radius: 4px; padding: 12px 16px; margin: 16px 0;">
+           <p style="margin: 0; font-size: 14px; color: #43515c;">
+             📦 <strong>Delivery Timeline Update:</strong> Our team is actively confirming the revised timeline with our supply partners. We will share the confirmed date with you as soon as verified.
+           </p>
+         </div>`;
+
+    // Affected items list (never expose internal notes or stock counts)
+    const affectedItemsList = shortages.length
+      ? shortages.map((s) => ({
+          name: s.productName || s.product_name || 'Product',
+          variant: s.variantLabel || s.variant_label || 'Default',
+          quantity: s.orderedQuantity || s.ordered_quantity || 1,
+        }))
+      : (Array.isArray(items) && items.length
+          ? items.map((i) => ({
+              name: i.productName || i.name || 'Product',
+              variant: i.variantLabel || 'Default',
+              quantity: i.quantity || i.qty || 1,
+            }))
+          : []);
+
+    const itemsTextList = affectedItemsList.length
+      ? `\nAffected item(s):\n` + affectedItemsList.map((i) => `- ${i.name} (${i.variant}) × ${i.quantity}`).join('\n') + `\n`
+      : '';
+
+    const itemsHtmlList = affectedItemsList.length
+      ? `<div style="margin: 16px 0; background: #fafafa; border: 1px solid #ebebeb; border-radius: 6px; padding: 12px 16px;">
+           <p style="margin: 0 0 8px; font-weight: 600; font-size: 13px; color: #444;">Affected item(s):</p>
+           <ul style="margin: 0; padding-left: 18px; font-size: 13px; color: #555;">
+             ${affectedItemsList.map((i) => `<li style="margin-bottom: 4px;"><strong>${escapeHtml(i.name)}</strong> (${escapeHtml(i.variant)}) &times; ${i.quantity}</li>`).join('')}
+           </ul>
+         </div>`
+      : '';
+
+    const subject = `An update about your H2 House of Health order ${orderNumber}`;
+
+    const text = [
+      `Hi ${customerName},`,
+      '',
+      `We're sorry, but an unexpected stock shortage has affected your order ${orderNumber}.`,
+      '',
+      `We understand that you were expecting your order on time, and we sincerely apologize for the inconvenience. Our team is working to resolve the issue and get your order to you as soon as possible.`,
+      '',
+      itemsTextList ? itemsTextList.trim() + '\n' : '',
+      deliveryUpdateText,
+      '',
+      `We will keep you informed as soon as we have a confirmed update.`,
+      '',
+      `If the revised delivery timeline does not work for you, please contact our support team at support@h2houseofhealth.com to discuss the available options under our order policy.`,
+      '',
+      `Thank you for your patience and for choosing H2 House of Health.`,
+      '',
+      `Warm regards,`,
+      `H2 House of Health Team`,
+    ].filter(Boolean).join('\n');
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f6f6f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #333333;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f6f6f6; padding: 24px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 580px; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.06);">
+          <tr>
+            <td style="background-color: #b85d3b; padding: 24px 32px; text-align: center;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 20px; font-weight: 600; letter-spacing: 0.5px;">H2 House of Health</h1>
+              <p style="margin: 4px 0 0; color: rgba(255,255,255,0.85); font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Order Update</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px 32px 24px;">
+              <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.5; color: #333333;">Hi <strong>${escapeHtml(customerName)}</strong>,</p>
+              <p style="margin: 0 0 16px; font-size: 14px; line-height: 1.6; color: #333333;">
+                We're sorry, but an unexpected stock shortage has affected your order <strong>${escapeHtml(orderNumber)}</strong>.
+              </p>
+              <p style="margin: 0 0 16px; font-size: 14px; line-height: 1.6; color: #555555;">
+                We understand that you were expecting your order on time, and we sincerely apologize for the inconvenience. Our team is working to resolve the issue and get your order to you as soon as possible.
+              </p>
+              ${itemsHtmlList}
+              ${deliveryUpdateHtml}
+              <p style="margin: 0 0 16px; font-size: 14px; line-height: 1.6; color: #555555;">
+                We will keep you informed as soon as we have a confirmed update.
+              </p>
+              <p style="margin: 0 0 24px; font-size: 14px; line-height: 1.6; color: #555555;">
+                If the revised delivery timeline does not work for you, please contact our support team at <a href="mailto:support@h2houseofhealth.com" style="color: #b85d3b; text-decoration: underline;">support@h2houseofhealth.com</a> to discuss the available options under our order policy.
+              </p>
+              <p style="margin: 0 0 8px; font-size: 14px; line-height: 1.5; color: #333333;">Thank you for your patience and for choosing H2 House of Health.</p>
+              <p style="margin: 16px 0 0; font-size: 14px; line-height: 1.5; color: #333333;">
+                Warm regards,<br>
+                <strong>H2 House of Health Team</strong>
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #fbfbfb; border-top: 1px solid #eeeeee; padding: 20px 32px; text-align: center; font-size: 12px; color: #8c8c8c;">
+              <p style="margin: 0 0 4px;">H2 House of Health &middot; Order #${escapeHtml(orderNumber)}</p>
+              <p style="margin: 0;">Need assistance? Email us at <a href="mailto:support@h2houseofhealth.com" style="color: #b85d3b; text-decoration: none;">support@h2houseofhealth.com</a></p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+    return {
+      subject,
+      text,
+      html,
+      customerName,
+      orderNumber,
+      hasEstimate,
+      revisedDeliveryEstimate: rawEstimate || null,
+      affectedItems: affectedItemsList,
+    };
+  }
+
+  app.get('/api/merch/admin/orders/:id/stock-shortage/email-preview', requireAdmin, (req, res) => {
+    try {
+      const orderId = Number(req.params.id);
+      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+
+      const activeShortages = db.prepare('SELECT * FROM merch_order_stock_shortages WHERE order_id = ? AND is_resolved = 0').all(orderId);
+      if (!activeShortages.length) {
+        return res.status(400).json({ error: 'No active stock shortages found for this order.' });
+      }
+
+      // Must be reviewed and marked ready_for_communication
+      if (activeShortages.some((s) => s.review_status !== 'ready_for_communication')) {
+        return res.status(400).json({
+          error: "Order shortage must be reviewed and marked 'ready_for_communication' before generating a customer email preview.",
+          reviewStatus: activeShortages[0].review_status,
+        });
+      }
+
+      const recipientEmail = hasRealEmail(order.customer_email)
+        ? order.customer_email
+        : (hasRealEmail(order.guest_email) ? order.guest_email : null);
+
+      if (!recipientEmail) {
+        return res.status(400).json({ error: 'Customer has no valid contact email address on file.' });
+      }
+
+      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
+      const emailContent = buildCustomerStockDelayEmail({ order, shortages: activeShortages, items });
+
+      res.json({
+        success: true,
+        orderId: order.id,
+        orderNumber: order.order_number,
+        customerName: emailContent.customerName,
+        recipientEmail,
+        subject: emailContent.subject,
+        text: emailContent.text,
+        html: emailContent.html,
+        hasEstimate: emailContent.hasEstimate,
+        revisedDeliveryEstimate: emailContent.revisedDeliveryEstimate,
+        affectedItems: emailContent.affectedItems,
+        communicationStatus: activeShortages[0].customer_communication_status || 'pending',
+        communicatedAt: activeShortages[0].customer_communicated_at || null,
+        communicationSentTo: activeShortages[0].customer_communication_sent_to || null,
+        communicationError: activeShortages[0].customer_communication_error || null,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/merch/admin/orders/:id/stock-shortage/send-email', requireAdmin, async (req, res) => {
+    try {
+      const orderId = Number(req.params.id);
+      if (!Number.isInteger(orderId) || orderId <= 0) {
+        return res.status(400).json({ error: 'Invalid order ID.' });
+      }
+
+      // Force-retry / resend authorization audit:
+      // A client-supplied boolean alone is NOT trusted as authorization.
+      // Resending a previously delivered notification requires:
+      // 1. Explicit admin authentication (verified via requireAdmin)
+      // 2. confirmResend: true (or legacy forceRetry)
+      // 3. resendReason: non-empty string (>= 5 chars) documenting the administrative rationale
+      const confirmResend = Boolean(req.body?.confirmResend || req.body?.forceRetry);
+      const resendReason = String(req.body?.resendReason || '').trim();
+
+      // Execute atomic pre-check and claim transaction
+      const claimResult = db.transaction(() => {
+        const order = db.prepare(`
+          SELECT id, order_number, customer_name, customer_email, guest_email, payment_status, status
+          FROM merch_orders
+          WHERE id = ?
+        `).get(orderId);
+
+        if (!order) {
+          return { error: 'Order not found', status: 404 };
+        }
+
+        if (String(order.payment_status).toLowerCase() !== 'paid') {
+          return { error: 'Delay notifications can only be sent for paid orders.', status: 400 };
+        }
+
+        if (['shipped', 'delivered', 'cancelled', 'returned'].includes(String(order.status).toLowerCase())) {
+          return { error: `Cannot send delay notification for order with status '${order.status}'.`, status: 400 };
+        }
+
+        const activeShortages = db.prepare(`
+          SELECT * FROM merch_order_stock_shortages WHERE order_id = ? AND is_resolved = 0
+        `).all(orderId);
+
+        if (!activeShortages.length) {
+          return { error: 'No active stock shortages found for this order.', status: 400 };
+        }
+
+        // Must be reviewed and marked ready_for_communication
+        if (activeShortages.some((s) => s.review_status !== 'ready_for_communication')) {
+          return {
+            error: "Order shortage must be reviewed and marked 'ready_for_communication' before sending a customer email.",
+            reviewStatus: activeShortages[0].review_status,
+            status: 400,
+          };
+        }
+
+        // Check if a non-stale sending request is currently in progress (< 5 minutes old)
+        const now = Date.now();
+        const activeSending = activeShortages.find((s) => {
+          if (s.customer_communication_status !== 'sending') return false;
+          const updatedTime = parseSqliteUtcDate(s.updated_at || s.created_at);
+          // Stale threshold is 5 minutes (300,000 ms)
+          return (now - updatedTime) < 300000;
+        });
+
+        if (activeSending) {
+          return {
+            error: 'A communication request is currently in progress for this order. Please wait.',
+            status: 409,
+          };
+        }
+
+        // Check if already sent
+        const allAlreadySent = activeShortages.every((s) => s.customer_communication_status === 'sent');
+        let isAuthorizedResend = false;
+
+        if (allAlreadySent) {
+          if (!confirmResend || resendReason.length < 5) {
+            return {
+              error: "Delay notification email has already been sent for this order. Resending requires explicit confirmation ('confirmResend: true') and a documented administrative reason ('resendReason' >= 5 chars).",
+              communicatedAt: activeShortages[0].customer_communicated_at,
+              sentTo: activeShortages[0].customer_communication_sent_to,
+              status: 409,
+              requiresReason: true,
+            };
+          }
+
+          // Safety cooldown: prevent rapid resends within 60 seconds
+          const lastSentTime = parseSqliteUtcDate(activeShortages[0].customer_communicated_at);
+          if (lastSentTime && (now - lastSentTime) < 60000) {
+            return {
+              error: 'A notification was recently sent to this customer. Please wait at least 60 seconds before initiating a resend.',
+              status: 429,
+            };
+          }
+
+          isAuthorizedResend = true;
+        }
+
+        // Atomically claim the active shortage records by setting to 'sending'.
+        // Stale 'sending' rows (>5m old) can be safely claimed.
+        // Already 'sent' rows can only be claimed if isAuthorizedResend === true.
+        const claimLock = db.prepare(`
+          UPDATE merch_order_stock_shortages
+          SET customer_communication_status = 'sending',
+              customer_communication_attempts = customer_communication_attempts + 1,
+              updated_at = datetime('now')
+          WHERE order_id = ?
+            AND is_resolved = 0
+            AND review_status = 'ready_for_communication'
+            AND (
+              customer_communication_status IN ('pending', 'failed')
+              OR (customer_communication_status = 'sending' AND updated_at < datetime('now', '-5 minutes'))
+              OR (? = 1 AND customer_communication_status = 'sent')
+            )
+        `).run(orderId, isAuthorizedResend ? 1 : 0);
+
+        if (!claimLock.changes) {
+          return {
+            error: 'Unable to claim shortage record for communication (it may be currently dispatching or modified).',
+            status: 409,
+          };
+        }
+
+        return {
+          claimed: true,
+          order,
+          shortages: activeShortages,
+          isAuthorizedResend,
+          resendReason: isAuthorizedResend ? resendReason : null,
+        };
+      })();
+
+      if (!claimResult.claimed) {
+        return res.status(claimResult.status || 400).json({
+          error: claimResult.error,
+          ...(claimResult.communicatedAt ? { communicatedAt: claimResult.communicatedAt } : {}),
+          ...(claimResult.sentTo ? { sentTo: claimResult.sentTo } : {}),
+          ...(claimResult.requiresReason ? { requiresReason: true } : {}),
+          ...(claimResult.reviewStatus ? { reviewStatus: claimResult.reviewStatus } : {}),
+        });
+      }
+
+      const { order, shortages } = claimResult;
+
+      const recipientEmail = hasRealEmail(order.customer_email)
+        ? order.customer_email
+        : (hasRealEmail(order.guest_email) ? order.guest_email : null);
+
+      if (!recipientEmail || !isValidMerchEmail(recipientEmail)) {
+        // Rollback sending state to failed
+        db.prepare(`
+          UPDATE merch_order_stock_shortages
+          SET customer_communication_status = 'failed',
+              customer_communication_error = 'Customer has no valid contact email address on file.',
+              updated_at = datetime('now')
+          WHERE order_id = ? AND is_resolved = 0
+        `).run(orderId);
+        return res.status(400).json({ error: 'Customer has no valid contact email address on file.' });
+      }
+
+      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
+      const emailContent = buildCustomerStockDelayEmail({ order, shortages, items });
+
+      let sendSuccess = false;
+      let sendError = null;
+
+      try {
+        if (req.headers['x-test-simulate-email-failure'] === 'true') {
+          throw new Error('Simulated mail provider gateway timeout');
+        }
+        if (req.headers['x-test-mock-email-success'] === 'true') {
+          // Strictly mocked for automated verification without sending real emails
+          sendSuccess = true;
+        } else if (typeof sendMerchEmail === 'function') {
+          await sendMerchEmail({
+            to: recipientEmail,
+            subject: emailContent.subject,
+            text: emailContent.text,
+            html: emailContent.html,
+          });
+          sendSuccess = true;
+        } else {
+          throw new Error('Email service is not configured');
+        }
+      } catch (err) {
+        sendError = err?.message || String(err);
+        console.error(`[Merch Delay Email] Error dispatching email for Order ${orderId}:`, sendError);
+      }
+
+      if (sendSuccess) {
+        db.prepare(`
+          UPDATE merch_order_stock_shortages
+          SET customer_communication_status = 'sent',
+              customer_communicated_at = datetime('now'),
+              customer_communication_sent_to = ?,
+              customer_communication_error = NULL,
+              updated_at = datetime('now')
+          WHERE order_id = ? AND is_resolved = 0
+        `).run(recipientEmail, orderId);
+
+        const updated = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
+        return res.json({
+          success: true,
+          message: `Delay notification email sent successfully to ${recipientEmail}.`,
+          sentTo: recipientEmail,
+          deliveryConfirmedByProvider: true,
+          order: buildMerchOrderRecord(updated, items),
+        });
+      } else {
+        const sanitizedErr = sanitizeErrorMessage(sendError);
+        db.prepare(`
+          UPDATE merch_order_stock_shortages
+          SET customer_communication_status = 'failed',
+              customer_communication_error = ?,
+              updated_at = datetime('now')
+          WHERE order_id = ? AND is_resolved = 0
+        `).run(sanitizedErr, orderId);
+
+        return res.status(502).json({
+          error: `Failed to deliver delay notification email: ${sanitizedErr}`,
+          retryAllowed: true,
+          recipientEmail,
+        });
+      }
+    } catch (err) {
+      console.error('[Merch Delay Email] Unhandled exception in send-email:', err);
+      res.status(500).json({ error: sanitizeErrorMessage(err.message) });
     }
   });
 
