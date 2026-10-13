@@ -2064,10 +2064,17 @@ function getWishlistProductPrice(item) {
       });
     }
     if (!preserveCoupon) {
-      clearMerchCoupon();
+      if (state.campaignAttribution?.couponCode) {
+        state.merchCouponCode = state.campaignAttribution.couponCode;
+      } else {
+        clearMerchCoupon();
+      }
     }
     saveCart();
     loadMerchCoupons();
+    if (state.campaignAttribution?.couponCode || state.merchCouponCode) {
+      applyMerchCouponFromCart({ silent: true }).catch(() => {});
+    }
     if (openDrawerAfterAdd) {
       openCart();
     }
@@ -2113,11 +2120,18 @@ function getWishlistProductPrice(item) {
       state.cart = state.cart.filter(item => Number(item.variantId) !== Number(variantId));
     }
     if (!preserveCoupon) {
-      clearMerchCoupon();
+      if (state.campaignAttribution?.couponCode) {
+        state.merchCouponCode = state.campaignAttribution.couponCode;
+      } else {
+        clearMerchCoupon();
+      }
     }
     getMerchBundleDiscountAmount();
     saveCart();
     loadMerchCoupons();
+    if (state.cart.length > 0 && (state.campaignAttribution?.couponCode || state.merchCouponCode)) {
+      applyMerchCouponFromCart({ silent: true }).catch(() => {});
+    }
     renderCart();
   }
 
@@ -2199,6 +2213,94 @@ function getWishlistProductPrice(item) {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
+  }
+
+  function formatDiscountAmount(amountInr) {
+    if (state.currency === 'USD') {
+      const rate = state.currencyConfig?.inrPerUsd || 85;
+      const usd = Math.round((Number(amountInr || 0) / rate) * 100) / 100;
+      return '$' + usd.toLocaleString('en-US', {
+        minimumFractionDigits: Number.isInteger(usd) ? 0 : 2,
+        maximumFractionDigits: 2,
+      });
+    }
+    const num = Number(amountInr || 0);
+    return '₹' + num.toLocaleString('en-IN', {
+      minimumFractionDigits: Number.isInteger(num) ? 0 : 2,
+      maximumFractionDigits: 2,
+    });
+  }
+
+  function formatVariantScopeMessage(targetVariants = [], allProductVariantsCount = 0, productName = 'bottle') {
+    if (!targetVariants || targetVariants.length === 0) return '';
+    const isAll = allProductVariantsCount > 1 && targetVariants.length >= allProductVariantsCount;
+    const colors = targetVariants.map((v) => v.color).filter(Boolean);
+    const size = targetVariants[0]?.size || '';
+    const itemNoun = /bottle/i.test(productName) ? 'bottle' : 'item';
+
+    const joinList = (arr) => {
+      if (!arr || !arr.length) return '';
+      if (arr.length === 1) return arr[0];
+      if (arr.length === 2) return `${arr[0]} and ${arr[1]}`;
+      return `${arr.slice(0, -1).join(', ')}, and ${arr[arr.length - 1]}`;
+    };
+
+    if (isAll) {
+      if (colors.length > 1) {
+        return `Valid on ${joinList(colors)}${size ? ` ${size}` : ''} ${itemNoun}s.`;
+      }
+      return `Valid on all colours of this ${itemNoun}.`;
+    }
+
+    if (targetVariants.length === 1) {
+      const v = targetVariants[0];
+      const desc = [v.color, v.size].filter(Boolean).join(' ');
+      return `Valid on ${desc ? `${desc} ` : ''}${itemNoun}.`;
+    }
+
+    if (colors.length === targetVariants.length) {
+      return `Valid on ${joinList(colors)}${size ? ` ${size}` : ''} ${itemNoun}s.`;
+    }
+
+    const titles = targetVariants.map((v) => [v.color, v.size].filter(Boolean).join(' ')).filter(Boolean);
+    return `Valid on ${joinList(titles)} ${itemNoun}s.`;
+  }
+
+  function isInfluencerAttribution() {
+    if (isRyanAttribution()) return true;
+    if (state.merchCouponPreview && (state.merchCouponPreview.influencerName || Number(state.merchCouponPreview.influencerId || 0) > 0 || (Array.isArray(state.merchCouponPreview.targetVariantIds) && state.merchCouponPreview.targetVariantIds.length > 0))) return true;
+    if (state.campaignAttribution && (state.campaignAttribution.influencerId || state.campaignAttribution.slug)) return true;
+    return false;
+  }
+
+  function getInfluencerCouponDisplayData(totals) {
+    const preview = state.merchCouponPreview || {};
+    const attribution = state.campaignAttribution || {};
+
+    const influencerName = preview.influencerName || attribution.influencerName || (isRyanAttribution() ? 'Ryan' : '');
+    const title = influencerName ? `${influencerName} Influencer Discount Applied` : 'Influencer Discount Applied';
+
+    let scopeMessage = preview.variantScopeMessage || attribution.variantScopeMessage || '';
+    if (!scopeMessage) {
+      const targetVariants = (Array.isArray(preview.targetVariants) && preview.targetVariants.length)
+        ? preview.targetVariants
+        : ((Array.isArray(attribution.targetVariants) && attribution.targetVariants.length) ? attribution.targetVariants : []);
+      const allCount = preview.allProductVariantsCount || attribution.allProductVariantsCount || 4;
+      const prodName = preview.targetProductName || attribution.targetProductName || 'bottle';
+      if (targetVariants.length > 0) {
+        scopeMessage = formatVariantScopeMessage(targetVariants, allCount, prodName);
+      }
+    }
+
+    const discountStr = formatDiscountAmount(totals.couponDiscount);
+    const description = `${discountStr} discount applied.${scopeMessage ? ` ${scopeMessage}` : ''}`;
+
+    return {
+      title,
+      description,
+      influencerName,
+      scopeMessage,
+    };
   }
 
   function getCheckoutDiscountAmount() {
@@ -2302,19 +2404,21 @@ function getWishlistProductPrice(item) {
 
     const totals = getCheckoutTotals();
     const isRyan = isRyanAttribution();
+    const isInfluencer = isInfluencerAttribution();
     const indBottles = getCartIndividualBottleCount();
 
-    if (isRyan) {
+    if (isInfluencer) {
       if (totals.couponDiscount > 0) {
+        const infDisplay = getInfluencerCouponDisplayData(totals);
         els.cartCouponPreview.hidden = false;
         els.cartCouponPreview.innerHTML = `
           <div class="cart-coupon__savings-text" style="color:#0f766e;">
-            <strong style="display:block;margin-bottom:2px;">Ryan Discount Applied</strong>
-            <div>${formatCheckoutMoney(totals.couponDiscount)} ${totals.bundleDiscount > 0 ? `discount applied to ${indBottles} standalone bottle${indBottles === 1 ? '' : 's'}` : `Ryan discount applied to ${indBottles} bottle${indBottles === 1 ? '' : 's'}`}.</div>
+            <strong style="display:block;margin-bottom:2px;">${escapeHtml(infDisplay.title)}</strong>
+            <div>${escapeHtml(infDisplay.description)}</div>
           </div>
         `;
       } else {
-        // When Ryan customer discount is 0: do not show Ryan discount/coupon applied
+        // When customer discount is 0: do not show discount/coupon applied
         els.cartCouponPreview.hidden = true;
         els.cartCouponPreview.innerHTML = '';
       }
@@ -2553,7 +2657,12 @@ function getWishlistProductPrice(item) {
         const indBottles = getCartIndividualBottleCount();
         const labelEl = document.getElementById('cartCouponDiscountLabel');
         const valEl = document.getElementById('cartCouponDiscountVal');
-        if (labelEl) labelEl.textContent = isRyanAttribution() ? `Ryan discount (${indBottles} ${totals.bundleDiscount > 0 ? 'standalone ' : ''}bottle${indBottles === 1 ? '' : 's'})` : 'Coupon discount';
+        if (labelEl) {
+          const infName = state.merchCouponPreview?.influencerName || state.campaignAttribution?.influencerName || (isRyanAttribution() ? 'Ryan' : '');
+          labelEl.textContent = infName
+            ? `${infName} discount (${indBottles} ${totals.bundleDiscount > 0 ? 'standalone ' : ''}bottle${indBottles === 1 ? '' : 's'})`
+            : 'Coupon discount';
+        }
         if (valEl) valEl.textContent = `- ${formatPrice(totals.couponDiscount)}`;
       } else {
         couponDiscountRow.hidden = true;
@@ -6602,16 +6711,18 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           </div>
           ${(() => {
             if (state.merchCouponError) return '';
-            if (isRyan) {
+            const isInfluencer = isInfluencerAttribution();
+            if (isInfluencer) {
               if (totals.couponDiscount > 0) {
+                const infDisplay = getInfluencerCouponDisplayData(totals);
                 return `
                   <div class="shopify-coupon__savings-text" style="color:#0f766e;font-size:13px;line-height:1.4;margin-top:6px;">
-                    <strong style="display:block;color:#0f766e;margin-bottom:2px;">Ryan Discount Applied</strong>
-                    <span>${formatCheckoutMoney(totals.couponDiscount)} ${totals.bundleDiscount > 0 ? `discount applied to ${indBottles} standalone bottle${indBottles === 1 ? '' : 's'}` : `Ryan discount applied to ${indBottles} bottle${indBottles === 1 ? '' : 's'}`}.</span>
+                    <strong style="display:block;color:#0f766e;margin-bottom:2px;">${escapeHtml(infDisplay.title)}</strong>
+                    <span>${escapeHtml(infDisplay.description)}</span>
                   </div>
                 `;
               }
-              // When Ryan customer discount is 0: do not show Ryan discount/coupon applied
+              // When customer discount is 0: do not show discount/coupon applied
               return '';
             }
             if (totals.couponDiscount > 0 && state.merchCouponPreview) {
@@ -6673,7 +6784,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           ` : ''}
           ${totals.couponDiscount > 0 ? `
             <div class="shopify-price-row shopify-price-row--discount">
-              <span>${isRyan ? `Ryan Discount (${indBottles} ${totals.bundleDiscount > 0 ? 'standalone ' : ''}bottle${indBottles === 1 ? '' : 's'})` : `Coupon (${escapeHtml(state.merchCouponCode || '')})`}</span>
+              <span>${(() => {
+                const isInfluencer = isInfluencerAttribution();
+                if (isInfluencer) {
+                  const infName = state.merchCouponPreview?.influencerName || state.campaignAttribution?.influencerName || (isRyan ? 'Ryan' : '');
+                  return `${infName ? `${infName} ` : ''}Discount (${indBottles} ${totals.bundleDiscount > 0 ? 'standalone ' : ''}bottle${indBottles === 1 ? '' : 's'})`;
+                }
+                return `Coupon (${escapeHtml(state.merchCouponCode || '')})`;
+              })()}</span>
               <strong>- ${formatCheckoutMoney(totals.couponDiscount)}</strong>
             </div>
           ` : ''}
@@ -6696,17 +6814,19 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             `;
           }
           let couponLine = '';
-          if (isRyan && totals.couponDiscount > 0) {
+          const isInfluencer = isInfluencerAttribution();
+          if (isInfluencer && totals.couponDiscount > 0) {
+            const infName = state.merchCouponPreview?.influencerName || state.campaignAttribution?.influencerName || (isRyan ? 'Ryan' : '');
             couponLine = `
               <div class="shopify-savings-breakdown__row">
                 <div>
-                  <strong>Ryan Discount</strong>
+                  <strong>${escapeHtml(infName ? `${infName} Influencer Discount` : 'Influencer Discount')}</strong>
                   <small>Applied to ${indBottles} eligible ${totals.bundleDiscount > 0 ? 'standalone ' : ''}bottle${indBottles === 1 ? '' : 's'}</small>
                 </div>
                 <strong class="shopify-savings-breakdown__amt">${formatCheckoutMoney(totals.couponDiscount)}</strong>
               </div>
             `;
-          } else if (!isRyan && totals.couponDiscount > 0) {
+          } else if (!isInfluencer && totals.couponDiscount > 0) {
             couponLine = `
               <div class="shopify-savings-breakdown__row">
                 <div>
@@ -7854,10 +7974,15 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             campaignId: res.campaign.id,
             slug: res.campaign.slug,
             influencerId: res.campaign.influencerId,
+            influencerName: res.campaign.influencerName || '',
             couponCode: res.campaign.couponCode,
             targetProductId: Number(res.campaign.targetProductId || 11),
+            targetProductName: res.campaign.targetProductName || '',
             targetVariantId: Number(res.campaign.targetVariantId || parsedVariantIds[0] || 569),
             targetVariantIds: parsedVariantIds,
+            targetVariants: res.campaign.targetVariants || [],
+            allProductVariantsCount: res.campaign.allProductVariantsCount || null,
+            variantScopeMessage: res.campaign.variantScopeMessage || '',
             timestamp: Date.now(),
           };
           document.cookie = `h2_campaign_attribution=${encodeURIComponent(JSON.stringify(attribution))}; max-age=${30 * 24 * 60 * 60}; path=/; SameSite=Lax`;
