@@ -7882,13 +7882,17 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       try {
         const res = await api(`/api/merch/campaigns/resolve?slug=${encodeURIComponent(paramSlug)}`);
         if (res?.campaign) {
+          const parsedVariantIds = Array.isArray(res.campaign.targetVariantIds) && res.campaign.targetVariantIds.length
+            ? res.campaign.targetVariantIds.map(Number)
+            : [Number(res.campaign.targetVariantId || 569)];
           attribution = {
             campaignId: res.campaign.id,
             slug: res.campaign.slug,
             influencerId: res.campaign.influencerId,
             couponCode: res.campaign.couponCode,
             targetProductId: Number(res.campaign.targetProductId || 11),
-            targetVariantId: Number(res.campaign.targetVariantId || 569),
+            targetVariantId: Number(res.campaign.targetVariantId || parsedVariantIds[0] || 569),
+            targetVariantIds: parsedVariantIds,
             timestamp: Date.now(),
           };
           document.cookie = `h2_campaign_attribution=${encodeURIComponent(JSON.stringify(attribution))}; max-age=${30 * 24 * 60 * 60}; path=/; SameSite=Lax`;
@@ -7921,8 +7925,11 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
           if (bottleIndex >= 0) {
             const currentItem = state.cart[bottleIndex];
-            // If user arrived via campaign link and current bottle variant is different, swap to the campaign variant
-            if (Number(currentItem.variantId) !== Number(targetVariant.id)) {
+            const allowedVariantIds = Array.isArray(attribution.targetVariantIds) && attribution.targetVariantIds.length
+              ? attribution.targetVariantIds.map(Number)
+              : [Number(attribution.targetVariantId || targetVariant.id)];
+            // If user arrived via campaign link and current bottle variant is not one of the campaign variants, swap to the primary campaign variant
+            if (!allowedVariantIds.includes(Number(currentItem.variantId))) {
               state.cart.splice(bottleIndex, 1);
               addToCart(targetVariant.id, currentItem.quantity || 1, bottleProduct, { openDrawerAfterAdd: false, preserveCoupon: true });
             }

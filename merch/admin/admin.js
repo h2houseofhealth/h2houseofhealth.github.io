@@ -4127,15 +4127,179 @@
     });
   }
 
+  function closeCampaignVariantDropdown() {
+    const dropdown = document.querySelector('[data-campaign-variant-dropdown].is-open');
+    if (!dropdown) return false;
+    const menu = dropdown.querySelector('[data-campaign-variant-menu]');
+    const toggle = dropdown.querySelector('[data-campaign-variant-toggle]');
+    if (menu) menu.hidden = true;
+    toggle?.setAttribute('aria-expanded', 'false');
+    dropdown.classList.remove('is-open');
+    return true;
+  }
+
+  function toggleCampaignVariantDropdown() {
+    const dropdown = document.querySelector('[data-campaign-variant-dropdown]');
+    if (!dropdown) return;
+    const menu = dropdown.querySelector('[data-campaign-variant-menu]');
+    const toggle = dropdown.querySelector('[data-campaign-variant-toggle]');
+    const isOpen = dropdown.classList.contains('is-open');
+    if (isOpen) {
+      closeCampaignVariantDropdown();
+    } else {
+      closeCouponProductDropdown();
+      dropdown.classList.add('is-open');
+      if (menu) menu.hidden = false;
+      toggle?.setAttribute('aria-expanded', 'true');
+    }
+  }
+
+  function updateCampaignVariantsDropdownState() {
+    const dropdown = document.getElementById('campaignVariantDropdown');
+    if (!dropdown) return;
+    const checkedBoxes = Array.from(dropdown.querySelectorAll('input[name="targetVariantIds"]:checked'));
+    const allBoxes = Array.from(dropdown.querySelectorAll('input[name="targetVariantIds"]'));
+    const trigger = dropdown.querySelector('[data-campaign-variant-toggle]');
+    const countEl = dropdown.querySelector('#campaignVariantsCount');
+    const numEl = dropdown.querySelector('#campaignSelectedVariantsNum');
+
+    if (numEl) numEl.textContent = String(checkedBoxes.length);
+    if (countEl) {
+      countEl.innerHTML = `<span id="campaignSelectedVariantsNum">${checkedBoxes.length}</span> of ${allBoxes.length} selected`;
+    }
+
+    if (trigger) {
+      if (!checkedBoxes.length) {
+        trigger.textContent = 'Select variants...';
+      } else if (checkedBoxes.length === 1) {
+        trigger.textContent = checkedBoxes[0].dataset.name || '1 variant selected';
+      } else if (allBoxes.length > 0 && checkedBoxes.length === allBoxes.length) {
+        trigger.textContent = `All variants selected (${allBoxes.length})`;
+      } else {
+        const names = checkedBoxes.map((b) => b.dataset.name || '').filter(Boolean);
+        const joined = names.join(', ');
+        trigger.textContent = joined.length <= 28 ? joined : `${checkedBoxes.length} variants selected`;
+      }
+    }
+  }
+
+  function updateCampaignVariantsCount() {
+    updateCampaignVariantsDropdownState();
+  }
+
+  function renderCampaignVariantDropdown(productId, selectedIds = []) {
+    const product = (state.products || []).find((p) => Number(p.id) === Number(productId))
+      || (state.products || []).find((p) => String(p.name || '').toLowerCase().includes('bottle') || Number(p.id) === 11);
+
+    let variants = Array.isArray(product?.variants) && product.variants.length
+      ? product.variants.filter((v) => Number(v.isActive ?? 1) === 1 && !v.deletedAt)
+      : [];
+
+    if (!variants.length && (Number(productId) === 11 || !productId)) {
+      variants = [
+        { id: 569, sku: 'HM-BTL-460-SLV', color: 'Silver', size: '460ml', price: 22990, stock: 85 },
+        { id: 570, sku: 'HM-BTL-460-BLK', color: 'Black', size: '460ml', price: 22990, stock: 47 },
+        { id: 571, sku: 'HM-BTL-460-GLD', color: 'Gold', size: '460ml', price: 22990, stock: 50 },
+        { id: 572, sku: 'HM-BTL-460-BLU', color: 'Blue', size: '460ml', price: 22990, stock: 50 },
+      ];
+    }
+
+    if (!variants.length) {
+      return `
+        <div class="admin-campaign-variant-dropdown" id="campaignVariantDropdown" data-campaign-variant-dropdown>
+          <button class="admin-select admin-product-multiselect__trigger" type="button" id="campaignVariantDropdownTrigger" disabled style="opacity:0.6;cursor:not-allowed;">
+            No variants available
+          </button>
+        </div>
+      `;
+    }
+
+    const selectedSet = new Set(
+      selectedIds && selectedIds.length
+        ? selectedIds.map(Number)
+        : [Number(variants[0].id)]
+    );
+
+    const selectedVariants = variants.filter((v) => selectedSet.has(Number(v.id)));
+    let summaryText = 'Select variants...';
+    if (selectedVariants.length === 1) {
+      const v = selectedVariants[0];
+      summaryText = [v.color, v.size].filter(Boolean).join(' ') || v.name || `Variant #${v.id}`;
+    } else if (selectedVariants.length === variants.length) {
+      summaryText = `All variants selected (${variants.length})`;
+    } else if (selectedVariants.length > 1) {
+      const names = selectedVariants.map((v) => [v.color, v.size].filter(Boolean).join(' ') || v.name || `#${v.id}`);
+      const joined = names.join(', ');
+      summaryText = joined.length <= 28 ? joined : `${selectedVariants.length} variants selected`;
+    }
+
+    return `
+      <div class="admin-campaign-variant-dropdown" id="campaignVariantDropdown" data-campaign-variant-dropdown>
+        <button
+          class="admin-select admin-product-multiselect__trigger"
+          type="button"
+          id="campaignVariantDropdownTrigger"
+          data-campaign-variant-toggle
+          aria-expanded="false"
+        >
+          ${escapeHtml(summaryText)}
+        </button>
+        <div class="admin-campaign-variant-dropdown__menu" data-campaign-variant-menu hidden>
+          <div class="admin-campaign-variant-dropdown__header">
+            <span class="admin-campaign-variant-dropdown__count" id="campaignVariantsCount">
+              <span id="campaignSelectedVariantsNum">${selectedVariants.length}</span> of ${variants.length} selected
+            </span>
+            <div class="admin-campaign-variant-dropdown__actions">
+              <button type="button" class="admin-btn admin-btn--soft admin-btn--xs" data-action="campaign-select-all-variants">Select All</button>
+              <button type="button" class="admin-btn admin-btn--ghost admin-btn--xs" data-action="campaign-clear-all-variants">Clear All</button>
+            </div>
+          </div>
+          <div class="admin-campaign-variant-dropdown__options" id="campaignVariantCheckboxes">
+            ${variants.map((v) => {
+              const isChecked = selectedSet.has(Number(v.id));
+              const variantTitle = [v.color, v.size].filter(Boolean).join(' ') || v.name || 'Default Variant';
+              const priceDisplay = catalogPrice(v.price || 22990);
+              return `
+                <label class="admin-campaign-variant-option ${isChecked ? 'is-selected' : ''}" data-variant-id="${v.id}">
+                  <input
+                    type="checkbox"
+                    name="targetVariantIds"
+                    value="${v.id}"
+                    data-name="${escapeHtml(variantTitle)}"
+                    data-sku="${escapeHtml(v.sku || '')}"
+                    data-color="${escapeHtml(v.color || '')}"
+                    data-price="${v.price || 22990}"
+                    ${isChecked ? 'checked' : ''}
+                  />
+                  <div class="admin-campaign-variant-option__info">
+                    <span class="admin-campaign-variant-option__title">${escapeHtml(variantTitle)}</span>
+                    ${v.sku ? `<span class="admin-campaign-variant-option__sku">${escapeHtml(v.sku)}</span>` : ''}
+                  </div>
+                  <span class="admin-campaign-variant-option__price">${escapeHtml(priceDisplay)}</span>
+                </label>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderCampaignVariantCards(productId, selectedIds = []) {
+    return renderCampaignVariantDropdown(productId, selectedIds);
+  }
+
   function renderCampaignCreatorSection(selectedInfluencer) {
     const activeInfluencers = (state.influencers || []).filter((i) => i.active !== 0 && i.active !== false);
-    const selectedInfId = selectedInfluencer ? Number(selectedInfluencer.id) : '';
-
-    // Get candidate coupons: portal === 'merch'
+    const selectedInfId = selectedInfluencer ? Number(selectedInfluencer.id) : (state.selectedInfluencerIdForCampaign || '');
     const candidateCoupons = (state.coupons || []).filter((c) => {
       const portalMatch = !c.portal || c.portal === 'merch';
       return portalMatch;
     });
+
+    const activeProducts = (state.products || []).filter((p) => Number(p.isActive ?? 1) === 1 && !p.deletedAt);
+    const defaultProduct = activeProducts.find((p) => String(p.name || '').toLowerCase().includes('bottle') || Number(p.id) === 11) || activeProducts[0];
+    const selectedProdId = defaultProduct?.id || 11;
 
     return `
       <div class="admin-campaign-creator">
@@ -4184,44 +4348,30 @@
             <div class="admin-campaign-field">
               <div class="admin-step-label">
                 <span class="admin-step-pill">Step 3</span>
-                <label for="campaignTargetProductSelect">Target Product</label>
+                <label for="campaignTargetProductSelect">Target Product <span class="admin-required-star">*</span></label>
               </div>
-              <input type="hidden" name="targetProductId" value="${escapeHtml(String((state.products || []).find((p) => String(p.name || '').toLowerCase().includes('bottle'))?.id || 11))}" />
-              <select class="admin-select" id="campaignTargetProductSelect" disabled style="width:100%;background:#ffffff;color:var(--admin-text);opacity:0.95;cursor:default;">
-                <option value="11" selected>${escapeHtml((state.products || []).find((p) => String(p.name || '').toLowerCase().includes('bottle'))?.name || 'H2 Molecular Hydrogen Water Bottle')}</option>
+              <select class="admin-select" name="targetProductId" id="campaignTargetProductSelect" required style="width:100%;">
+                ${activeProducts.map((p) => `
+                  <option value="${p.id}" ${Number(p.id) === Number(selectedProdId) ? 'selected' : ''}>
+                    ${escapeHtml(p.name)}
+                  </option>
+                `).join('')}
               </select>
             </div>
 
             <div class="admin-campaign-field">
               <div class="admin-step-label">
-                <label for="campaignVariantSelect">Variant <span class="admin-required-star">*</span></label>
+                <span class="admin-step-pill">Step 4</span>
+                <label for="campaignVariantDropdownTrigger">Product Variants <span class="admin-required-star">*</span></label>
               </div>
-              <select class="admin-select" name="targetVariantId" id="campaignVariantSelect" required style="width:100%;">
-                ${(() => {
-                  const bProduct = (state.products || []).find((p) => String(p.name || '').toLowerCase().includes('bottle') || Number(p.id) === 11);
-                  const bVariants = Array.isArray(bProduct?.variants) && bProduct.variants.length
-                    ? bProduct.variants.filter((v) => Number(v.isActive ?? 1) === 1 && !v.deletedAt)
-                    : [];
-                  if (bVariants.length) {
-                    return bVariants.map((v, i) => `
-                      <option value="${v.id}" data-sku="${escapeHtml(v.sku || '')}" data-color="${escapeHtml(v.color || '')}" ${i === 0 ? 'selected' : ''}>
-                        ${escapeHtml(v.color || v.size || 'Bottle')} (${escapeHtml(v.sku || '')}) — ₹${(Number(v.price || 2299000) / 100).toLocaleString('en-IN')}${i === 0 ? ' (Default)' : ''}
-                      </option>
-                    `).join('');
-                  }
-                  return `
-                    <option value="569" data-sku="HM-BTL-460-SLV" data-color="Silver" selected>Silver (SKU: HM-BTL-460-SLV) — ₹22,990 (Default)</option>
-                    <option value="570" data-sku="HM-BTL-460-BLK" data-color="Black">Black (SKU: HM-BTL-460-BLK) — ₹22,990</option>
-                    <option value="571" data-sku="HM-BTL-460-GLD" data-color="Gold">Gold (SKU: HM-BTL-460-GLD) — ₹22,990</option>
-                    <option value="572" data-sku="HM-BTL-460-BLU" data-color="Blue">Blue (SKU: HM-BTL-460-BLU) — ₹22,990</option>
-                  `;
-                })()}
-              </select>
+              <div id="campaignVariantDropdownContainer">
+                ${renderCampaignVariantDropdown(selectedProdId)}
+              </div>
             </div>
 
             <div class="admin-campaign-field" style="grid-column: 1 / -1;">
               <div class="admin-step-label">
-                <span class="admin-step-pill">Step 4</span>
+                <span class="admin-step-pill">Step 5</span>
                 <label for="campaignSlugInput">Campaign Slug <span class="admin-required-star">*</span></label>
               </div>
               <input class="admin-input" name="slug" id="campaignSlugInput" placeholder="e.g. RyanH2" pattern="^[A-Za-z0-9_-]{2,50}$" required style="width:100%;" />
@@ -4332,16 +4482,13 @@
             <tbody>
               ${list.length ? list.map((c) => {
                 const fullUrl = `${window.location.origin}/c/${escapeHtml(c.slug)}`;
-                const variantMeta = {
-                  569: { color: 'Silver', size: '460ml', sku: 'HM-BTL-460-SLV', price: 2299000 },
-                  570: { color: 'Black', size: '460ml', sku: 'HM-BTL-460-BLK', price: 2299000 },
-                  571: { color: 'Gold', size: '460ml', sku: 'HM-BTL-460-GLD', price: 2299000 },
-                  572: { color: 'Blue', size: '460ml', sku: 'HM-BTL-460-BLU', price: 2299000 },
-                }[c.targetVariantId] || {};
-                const variantColor = c.targetVariantColor || variantMeta.color || 'Silver';
-                const variantSize = c.targetVariantSize || variantMeta.size || '460ml';
-                const variantSku = c.targetVariantSku || variantMeta.sku || '';
-                const variantPrice = c.targetVariantPrice || variantMeta.price || 2299000;
+                const targetVariants = Array.isArray(c.targetVariants) && c.targetVariants.length
+                  ? c.targetVariants
+                  : (c.targetVariantColor
+                      ? [{ id: c.targetVariantId, color: c.targetVariantColor, size: c.targetVariantSize, sku: c.targetVariantSku, price: c.targetVariantPrice }]
+                      : [{ id: 569, color: 'Silver', size: '460ml', sku: 'HM-BTL-460-SLV', price: 2299000 }]);
+                const primaryVariant = targetVariants[0] || {};
+                const variantPrice = primaryVariant.price || c.targetVariantPrice || 2299000;
 
                 return `
                   <tr>
@@ -4359,12 +4506,15 @@
                     <td>
                       <strong style="font-size:13px;color:var(--admin-text);display:block;">${escapeHtml(c.targetProductName || 'H2 Water Bottle')}</strong>
                       <div style="margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                        <span class="admin-badge admin-badge--neutral" style="font-size:11px;font-weight:700;background:rgba(200,101,45,0.08);color:var(--admin-accent-dark,#9f3e1f);border:1px solid rgba(200,101,45,0.2);">
-                          ${escapeHtml(variantColor)} (${escapeHtml(variantSize)})
-                        </span>
+                        ${targetVariants.map((tv) => `
+                          <span class="admin-badge admin-badge--neutral" style="font-size:11px;font-weight:700;background:rgba(200,101,45,0.08);color:var(--admin-accent-dark,#9f3e1f);border:1px solid rgba(200,101,45,0.2);">
+                            ${escapeHtml(tv.color || tv.size || 'Variant')}${tv.size && tv.color ? ` (${escapeHtml(tv.size)})` : ''}
+                          </span>
+                        `).join('')}
                         <strong style="font-size:12px;color:var(--admin-text);">${money(variantPrice)}</strong>
                       </div>
-                      ${variantSku ? `<span class="admin-table__muted" style="font-size:11px;display:block;margin-top:3px;">SKU: ${escapeHtml(variantSku)}</span>` : ''}
+                      ${targetVariants.length === 1 && primaryVariant.sku ? `<span class="admin-table__muted" style="font-size:11px;display:block;margin-top:3px;">SKU: ${escapeHtml(primaryVariant.sku)}</span>` : ''}
+                      ${targetVariants.length > 1 ? `<span class="admin-table__muted" style="font-size:11px;display:block;margin-top:3px;">${targetVariants.length} variants selected</span>` : ''}
                     </td>
                     <td style="text-align:center;">
                       <span class="admin-badge ${c.isActive ? 'admin-badge--active' : 'admin-badge--inactive'}" style="font-size:11px;font-weight:700;">
@@ -4413,15 +4563,18 @@
     const influencerId = Number(form.querySelector('[name="influencerId"]')?.value);
     const couponCode = String(form.querySelector('[name="couponCode"]')?.value || '').trim();
     const targetProductId = Number(form.querySelector('[name="targetProductId"]')?.value) || 11;
-    const targetVariantSelect = form.querySelector('[name="targetVariantId"]');
-    const targetVariantId = Number(targetVariantSelect?.value) || 569;
-    const targetVariantSku = targetVariantSelect?.selectedOptions?.[0]?.dataset?.sku || {
-      569: 'HM-BTL-460-SLV',
-      570: 'HM-BTL-460-BLK',
-      571: 'HM-BTL-460-GLD',
-      572: 'HM-BTL-460-BLU',
-    }[targetVariantId] || '';
-    const selectedVariantColor = targetVariantSelect?.selectedOptions?.[0]?.dataset?.color || '';
+    
+    const checkedVariantBoxes = Array.from(form.querySelectorAll('#campaignVariantCheckboxes input[name="targetVariantIds"]:checked'));
+    if (!checkedVariantBoxes.length) {
+      toast('Variant Required', 'Please select at least one product variant for this campaign.', 'warning');
+      return;
+    }
+
+    const targetVariantIds = checkedVariantBoxes.map((cb) => Number(cb.value)).filter(Boolean);
+    const primaryBox = checkedVariantBoxes[0];
+    const targetVariantId = Number(primaryBox.value) || 569;
+    const targetVariantSku = primaryBox.dataset.sku || '';
+    const selectedVariantColor = primaryBox.dataset.color || '';
     const slug = String(form.querySelector('[name="slug"]')?.value || '').trim();
 
     if (!influencerId) {
@@ -4475,6 +4628,7 @@
           couponCode,
           targetProductId,
           targetVariantId,
+          targetVariantIds,
           targetVariantSku,
           slug,
           name: `${slug} Instagram Story`,
@@ -4484,16 +4638,16 @@
       if (res?.campaign) {
         const fullUrl = `${window.location.origin}/c/${res.campaign.slug}`;
         const selectedInf = (state.influencers || []).find((i) => Number(i.id) === influencerId);
-        const variantName = selectedVariantColor
-          ? `${selectedVariantColor} (460ml)`
-          : ({ 569: 'Silver (460ml)', 570: 'Black (460ml)', 571: 'Gold (460ml)', 572: 'Blue (460ml)' }[targetVariantId] || 'Silver (460ml)');
+        const variantSummary = targetVariantIds.length > 1
+          ? `${targetVariantIds.length} Variants (${checkedVariantBoxes.map((b) => b.dataset.color || 'Variant').join(', ')})`
+          : (selectedVariantColor ? `${selectedVariantColor} (460ml)` : 'Default Variant');
         state.latestCreatedCampaign = {
           slug: res.campaign.slug,
           fullUrl,
           name: res.campaign.name || `${slug} Instagram Story`,
           influencerName: selectedInf?.name || 'Influencer',
           couponCode,
-          variantName,
+          variantName: variantSummary,
         };
         toast('Campaign Created', `Tracking link for /c/${slug} generated successfully.`, 'success');
         await loadCampaignData();
@@ -7648,6 +7802,24 @@
         }
         return;
       }
+      case 'campaign-select-all-variants': {
+        const boxes = document.querySelectorAll('#campaignVariantCheckboxes input[name="targetVariantIds"]');
+        boxes.forEach((box) => {
+          box.checked = true;
+          box.closest('.admin-campaign-variant-option')?.classList.add('is-selected');
+        });
+        updateCampaignVariantsDropdownState();
+        return;
+      }
+      case 'campaign-clear-all-variants': {
+        const boxes = document.querySelectorAll('#campaignVariantCheckboxes input[name="targetVariantIds"]');
+        boxes.forEach((box) => {
+          box.checked = false;
+          box.closest('.admin-campaign-variant-option')?.classList.remove('is-selected');
+        });
+        updateCampaignVariantsDropdownState();
+        return;
+      }
       case 'dismiss-campaign-success': {
         state.latestCreatedCampaign = null;
         const banner = document.getElementById('campaignGeneratedSuccessBanner');
@@ -9256,6 +9428,18 @@
         closeCouponProductDropdown();
       }
 
+      const openVariantDropdown = document.querySelector('[data-campaign-variant-dropdown].is-open');
+      if (openVariantDropdown && !target.closest('[data-campaign-variant-dropdown]')) {
+        closeCampaignVariantDropdown();
+      }
+
+      const variantToggle = target.closest('[data-campaign-variant-toggle]');
+      if (variantToggle) {
+        event.preventDefault();
+        toggleCampaignVariantDropdown();
+        return;
+      }
+
       if (els.profileDropdown && !els.profileDropdown.hidden && !target.closest('[data-profile-menu], [data-action="open-profile"]')) {
         closeProfileDropdown();
       }
@@ -9325,6 +9509,21 @@
           }
         }
       }
+      if (target.matches('#campaignTargetProductSelect')) {
+        const prodId = Number(target.value);
+        const container = document.getElementById('campaignVariantDropdownContainer') || document.getElementById('campaignVariantCardsContainer');
+        if (container) {
+          container.innerHTML = renderCampaignVariantDropdown(prodId);
+          updateCampaignVariantsDropdownState();
+        }
+      }
+      if (target.matches('#campaignVariantCheckboxes input[name="targetVariantIds"]')) {
+        const opt = target.closest('.admin-campaign-variant-option') || target.closest('.admin-campaign-variant-card');
+        if (opt) {
+          opt.classList.toggle('is-selected', target.checked);
+        }
+        updateCampaignVariantsDropdownState();
+      }
       if (target.matches('[data-hype-label-select]')) {
         const customWrap = target.closest('.admin-hype-row')?.querySelector('[data-hype-custom-wrap]');
         if (customWrap) customWrap.hidden = target.value !== 'Custom Label';
@@ -9376,6 +9575,10 @@
           return;
         }
         if (closeCouponProductDropdown()) {
+          event.preventDefault();
+          return;
+        }
+        if (closeCampaignVariantDropdown()) {
           event.preventDefault();
           return;
         }

@@ -3227,6 +3227,131 @@ body.merch-admin-page {
   white-space: nowrap;
 }
 
+/* Campaign Variant Multi-Select Dropdown */
+.admin-campaign-variant-dropdown {
+  position: relative;
+  width: 100%;
+}
+
+.admin-campaign-variant-dropdown .admin-product-multiselect__trigger {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.admin-campaign-variant-dropdown.is-open .admin-product-multiselect__trigger {
+  border-color: rgba(200, 101, 45, 0.42);
+  box-shadow: 0 0 0 3px rgba(200, 101, 45, 0.08);
+}
+
+.admin-campaign-variant-dropdown__menu {
+  position: absolute;
+  z-index: 100;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid var(--admin-border, #e4e4e7);
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.admin-campaign-variant-dropdown__menu[hidden] {
+  display: none !important;
+}
+
+.admin-campaign-variant-dropdown__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 6px 6px;
+  border-bottom: 1px solid var(--admin-border-subtle, #f4f4f5);
+  gap: 8px;
+}
+
+.admin-campaign-variant-dropdown__count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--admin-muted, #71717a);
+}
+
+.admin-campaign-variant-dropdown__actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.admin-campaign-variant-dropdown__options {
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.admin-campaign-variant-option {
+  display: flex !important;
+  align-items: center !important;
+  gap: 9px !important;
+  padding: 7px 8px !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  transition: background 0.15s ease;
+  user-select: none !important;
+}
+
+.admin-campaign-variant-option:hover {
+  background: rgba(200, 101, 45, 0.06) !important;
+}
+
+.admin-campaign-variant-option.is-selected {
+  background: rgba(200, 101, 45, 0.04);
+}
+
+.admin-campaign-variant-option input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--admin-accent-dark, #9f3e1f);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.admin-campaign-variant-option__info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-campaign-variant-option__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--admin-text, #18181b);
+  line-height: 1.2;
+}
+
+.admin-campaign-variant-option__sku {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: var(--admin-muted, #71717a);
+}
+
+.admin-campaign-variant-option__price {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--admin-accent-dark, #9f3e1f);
+  margin-left: auto;
+  padding-left: 8px;
+  white-space: nowrap;
+}
+
 /* Success Card */
 .admin-campaign-success-card {
   margin-bottom: 24px;
