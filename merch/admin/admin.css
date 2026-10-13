@@ -3227,6 +3227,114 @@ body.merch-admin-page {
   white-space: nowrap;
 }
 
+/* Campaign Variant Multi-Select */
+.admin-campaign-variants-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.admin-campaign-variants-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-campaign-variants-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--admin-muted, #71717a);
+}
+
+.admin-campaign-variants-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.admin-campaign-variants-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.admin-campaign-variant-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 13px;
+  background: #ffffff;
+  border: 1.5px solid var(--admin-border, #e4e4e7);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.admin-campaign-variant-card:hover {
+  border-color: rgba(200, 101, 45, 0.45);
+  background: rgba(200, 101, 45, 0.02);
+}
+
+.admin-campaign-variant-card.is-selected {
+  border-color: var(--admin-accent, #c8652d);
+  background: rgba(200, 101, 45, 0.05);
+  box-shadow: 0 0 0 1px rgba(200, 101, 45, 0.25);
+}
+
+.admin-campaign-variant-card input[type="checkbox"] {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--admin-accent-dark, #9f3e1f);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.admin-campaign-variant-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-campaign-variant-card__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--admin-text, #18181b);
+  line-height: 1.3;
+}
+
+.admin-campaign-variant-card__sku {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: var(--admin-muted, #71717a);
+}
+
+.admin-campaign-variant-card__price-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  gap: 6px;
+}
+
+.admin-campaign-variant-card__price {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--admin-accent-dark, #9f3e1f);
+}
+
+.admin-campaign-variant-card__stock {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--admin-muted, #71717a);
+}
+
 /* Success Card */
 .admin-campaign-success-card {
   margin-bottom: 24px;
