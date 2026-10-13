@@ -3513,7 +3513,26 @@
                     <div><strong>Estimated Delivery:</strong> ${s.revisedDeliveryEstimate ? `<strong>${escapeHtml(s.revisedDeliveryEstimate)}</strong>` : '<span class="admin-table__muted"><em>Not yet determined</em></span>'}</div>
                     ${s.internalDelayNote ? `<div style="margin-top:2px;color:#434343;"><strong>Delay Note:</strong> ${escapeHtml(s.internalDelayNote)}</div>` : ''}
                     ${s.reviewedBy ? `<div class="admin-table__muted" style="margin-top:2px;font-size:10px;">Reviewed by ${escapeHtml(s.reviewedBy)}${s.reviewedAt ? ` on ${escapeHtml(dateLabel(s.reviewedAt))}` : ''}</div>` : ''}
-                    ${s.customerCommunicatedAt ? `<div style="margin-top:4px;font-size:10px;color:#237804;font-weight:600;">✉️ Delay email sent to ${escapeHtml(s.customerCommunicationSentTo || order.email)} on ${escapeHtml(dateLabel(s.customerCommunicatedAt))}</div>` : ''}
+                    ${s.customerCommunicatedAt ? `
+                      <div style="margin-top:4px;padding:4px 8px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:4px;font-size:10px;color:#135200;">
+                        <div>✉️ <strong>Delay notification sent</strong> to <code>${escapeHtml(s.customerCommunicationSentTo || order.email)}</code> on ${escapeHtml(dateLabel(s.customerCommunicatedAt))}</div>
+                        ${s.compensationCouponCode ? `
+                          <div style="margin-top:2px;font-weight:600;">
+                            🎁 Courtesy Coupon: <code style="padding:1px 4px;background:#fff;border:1px solid #52c41a;border-radius:3px;color:#237804;">${escapeHtml(s.compensationCouponCode)}</code> (${escapeHtml(s.compensationCouponBenefit || '')})
+                          </div>
+                        ` : `
+                          <div style="margin-top:2px;color:#595959;">
+                            <em>No coupon was attached (apology notification only)</em>
+                          </div>
+                        `}
+                        ${s.communicationAuthorizedBy ? `
+                          <div style="margin-top:2px;color:#8c8c8c;">
+                            Authorized by: ${escapeHtml(s.communicationAuthorizedBy)}
+                            ${s.resendReason ? ` &middot; Reason: "${escapeHtml(s.resendReason)}"` : ''}
+                          </div>
+                        ` : ''}
+                      </div>
+                    ` : ''}
                     ${s.customerCommunicationError ? `<div style="margin-top:4px;font-size:10px;color:#cf1322;">⚠️ Email delivery error: ${escapeHtml(s.customerCommunicationError)}</div>` : ''}
                   </div>
                 </div>
@@ -7846,13 +7865,18 @@
     });
 
     try {
-      const preview = await apiRequest(`/api/merch/admin/orders/${encodeURIComponent(order.id)}/stock-shortage/email-preview`);
+      const [preview, couponsData] = await Promise.all([
+        apiRequest(`/api/merch/admin/orders/${encodeURIComponent(order.id)}/stock-shortage/email-preview`),
+        apiRequest(`/api/merch/admin/orders/${encodeURIComponent(order.id)}/compensation-coupons`).catch(() => ({ eligibleCoupons: [], ineligibleCoupons: [] })),
+      ]);
       const bodyEl = els.adminModalDialog.querySelector('.admin-modal__body');
       const footEl = els.adminModalDialog.querySelector('.admin-modal__foot');
       if (!bodyEl || !footEl) return;
 
       const isAlreadySent = preview.communicationStatus === 'sent';
       const isFailed = preview.communicationStatus === 'failed';
+      const eligibleCoupons = Array.isArray(couponsData?.eligibleCoupons) ? couponsData.eligibleCoupons : [];
+      const ineligibleCoupons = Array.isArray(couponsData?.ineligibleCoupons) ? couponsData.ineligibleCoupons : [];
 
       bodyEl.innerHTML = `
         <div style="display:flex;flex-direction:column;gap:14px;">
@@ -7872,6 +7896,46 @@
               ${isAlreadySent ? `<span style="color:#237804;"><strong>Sent At:</strong> ${escapeHtml(dateLabel(preview.communicatedAt) || 'Previously sent')} to ${escapeHtml(preview.communicationSentTo || preview.recipientEmail)}</span>` : ''}
               ${isFailed && preview.communicationError ? `<span style="color:#cf1322;"><strong>Last Error:</strong> ${escapeHtml(preview.communicationError)}</span>` : ''}
             </div>
+          </div>
+
+          <!-- Phase 4: Admin-Controlled Courtesy Compensation -->
+          <div style="background:#f6ffed;border:1px solid #b7eb8f;border-radius:8px;padding:12px 16px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+              <span style="font-size:12px;font-weight:700;color:#135200;">
+                🎁 Courtesy Compensation (Optional)
+              </span>
+              <span class="admin-badge admin-badge--success" style="font-size:10px;">Admin Controlled</span>
+            </div>
+            <p style="font-size:11px;color:#389e0d;margin:0 0 10px;line-height:1.4;">
+              Select an existing eligible Private Coupon to attach as courtesy compensation, or choose to send an apology update only.
+            </p>
+
+            <label class="admin-field" style="margin-bottom:6px;">
+              <span style="font-weight:600;font-size:12px;color:#262626;">Courtesy Coupon Selection</span>
+              <select id="stockDelayCompensationCouponSelect" class="admin-select" style="width:100%;font-size:12px;background:#fff;">
+                <option value="">No coupon — send email only</option>
+                ${eligibleCoupons.map((c) => `
+                  <option value="${c.id}">${escapeHtml(c.code)} &middot; ${escapeHtml(c.benefit)} &middot; Exp: ${escapeHtml(c.expiryLabel)} &middot; ${escapeHtml(c.remainingUsagesLabel || 'Available')}</option>
+                `).join('')}
+              </select>
+            </label>
+
+            <div id="stockDelayCouponDetailsCard" style="display:none;background:#fff;border:1px solid #d9f7be;border-radius:6px;padding:10px 12px;margin-top:8px;font-size:11px;color:#333;"></div>
+
+            ${eligibleCoupons.length === 0 ? `
+              <div style="margin-top:6px;font-size:11px;color:#8c8c8c;font-style:italic;">
+                ℹ️ No eligible private coupons found for this order. Email will be sent with delay details only.
+              </div>
+            ` : ''}
+
+            ${ineligibleCoupons.length > 0 ? `
+              <details style="margin-top:8px;font-size:11px;color:#8c8c8c;cursor:pointer;">
+                <summary style="font-weight:600;color:#8c8c8c;">${ineligibleCoupons.length} private coupon(s) unavailable for this order (click to expand)</summary>
+                <ul style="margin:4px 0 0 16px;padding:0;color:#595959;line-height:1.5;">
+                  ${ineligibleCoupons.map((ic) => `<li><code>${escapeHtml(ic.code)}</code>: ${escapeHtml(ic.reason)}</li>`).join('')}
+                </ul>
+              </details>
+            ` : ''}
           </div>
 
           <div>
@@ -7898,10 +7962,10 @@
           </div>
 
           <div style="background:#e6f7ff;border:1px solid #91d5ff;border-radius:6px;padding:10px 14px;font-size:11px;color:#0050b3;line-height:1.5;">
-            🔒 <strong>Phase 3 Safety Guardrails:</strong><br>
-            &bull; Internal delay notes and warehouse stock numbers are strictly excluded.<br>
-            &bull; No compensation coupons are promised or issued in this notification.<br>
-            &bull; Payment status, order amounts, and stock reservations remain unchanged.
+            🔒 <strong>Phase 4 Safety Guardrails:</strong><br>
+            &bull; Internal delay notes and warehouse stock counts are strictly excluded.<br>
+            &bull; Courtesy compensation coupons are admin-selected and verified before dispatch.<br>
+            &bull; Email dispatch does NOT consume coupon usage or modify order financial balances.
           </div>
 
           ${isAlreadySent ? `
@@ -7915,7 +7979,7 @@
 
           <label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;cursor:pointer;margin-top:2px;">
             <input type="checkbox" id="confirmSendDelayEmailCheck" style="width:16px;height:16px;accent-color:#b85d3b;" />
-            <span>I have verified the recipient email and delivery details and confirm sending this customer update.</span>
+            <span>I have verified the recipient email, delivery timeline, and compensation details, and explicitly confirm sending this customer update.</span>
           </label>
         </div>
       `;
@@ -7941,6 +8005,43 @@
             textEl.hidden = false;
           }
         });
+      });
+
+      const couponSelect = bodyEl.querySelector('#stockDelayCompensationCouponSelect');
+      const couponCard = bodyEl.querySelector('#stockDelayCouponDetailsCard');
+      const htmlIframe = bodyEl.querySelector('#stockShortageEmailHtmlView iframe');
+      const textEl = bodyEl.querySelector('#stockShortageEmailTextView');
+
+      couponSelect?.addEventListener('change', async () => {
+        const selectedId = couponSelect.value ? Number(couponSelect.value) : null;
+        const chosen = eligibleCoupons.find((c) => c.id === selectedId);
+
+        if (chosen && couponCard) {
+          couponCard.style.display = 'block';
+          couponCard.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <span><strong>Selected Code:</strong> <code style="font-weight:700;color:#237804;font-size:12px;">${escapeHtml(chosen.code)}</code></span>
+              <span class="admin-badge admin-badge--success">${escapeHtml(chosen.benefit)}</span>
+            </div>
+            <div style="color:#595959;line-height:1.5;">
+              <strong>Scope:</strong> ${escapeHtml(chosen.scopeLabel)} &middot;
+              <strong>Valid Until:</strong> ${escapeHtml(chosen.expiryLabel)} &middot;
+              <strong>Availability:</strong> ${escapeHtml(chosen.remainingUsagesLabel || 'Available')}
+            </div>
+          `;
+        } else if (couponCard) {
+          couponCard.style.display = 'none';
+          couponCard.innerHTML = '';
+        }
+
+        try {
+          const previewUrl = `/api/merch/admin/orders/${encodeURIComponent(order.id)}/stock-shortage/email-preview${selectedId ? `?couponId=${selectedId}` : ''}`;
+          const updated = await apiRequest(previewUrl);
+          if (htmlIframe) htmlIframe.srcdoc = updated.html;
+          if (textEl) textEl.textContent = updated.text;
+        } catch (err) {
+          toast('Preview Update Error', err.message || 'Unable to update email preview for selected coupon.', 'warning');
+        }
       });
 
       const confirmCheck = bodyEl.querySelector('#confirmSendDelayEmailCheck');
@@ -8392,6 +8493,9 @@
           }
         }
 
+        const couponSelect = els.adminModalDialog.querySelector('#stockDelayCompensationCouponSelect');
+        const couponId = couponSelect && couponSelect.value ? Number(couponSelect.value) : null;
+
         target.disabled = true;
         const originalText = target.textContent;
         target.textContent = 'Sending...';
@@ -8400,7 +8504,11 @@
           const res = await apiRequest(`/api/merch/admin/orders/${orderId}/stock-shortage/send-email`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ confirmResend: forceRetry, resendReason }),
+            body: JSON.stringify({
+              couponId: couponId || null,
+              confirmResend: forceRetry,
+              resendReason,
+            }),
           });
           toast('Delay Email Sent', res.message || `Customer email delivered to ${res.sentTo}.`, 'success');
           closeModal();
