@@ -4127,18 +4127,67 @@
     });
   }
 
-  function updateCampaignVariantsCount() {
-    const checked = document.querySelectorAll('#campaignVariantCheckboxes input[name="targetVariantIds"]:checked');
-    const all = document.querySelectorAll('#campaignVariantCheckboxes input[name="targetVariantIds"]');
-    const numEl = document.getElementById('campaignSelectedVariantsNum');
-    if (numEl) numEl.textContent = checked.length;
-    const countEl = document.getElementById('campaignVariantsCount');
-    if (countEl) {
-      countEl.innerHTML = `<span id="campaignSelectedVariantsNum">${checked.length}</span> of ${all.length} selected`;
+  function closeCampaignVariantDropdown() {
+    const dropdown = document.querySelector('[data-campaign-variant-dropdown].is-open');
+    if (!dropdown) return false;
+    const menu = dropdown.querySelector('[data-campaign-variant-menu]');
+    const toggle = dropdown.querySelector('[data-campaign-variant-toggle]');
+    if (menu) menu.hidden = true;
+    toggle?.setAttribute('aria-expanded', 'false');
+    dropdown.classList.remove('is-open');
+    return true;
+  }
+
+  function toggleCampaignVariantDropdown() {
+    const dropdown = document.querySelector('[data-campaign-variant-dropdown]');
+    if (!dropdown) return;
+    const menu = dropdown.querySelector('[data-campaign-variant-menu]');
+    const toggle = dropdown.querySelector('[data-campaign-variant-toggle]');
+    const isOpen = dropdown.classList.contains('is-open');
+    if (isOpen) {
+      closeCampaignVariantDropdown();
+    } else {
+      closeCouponProductDropdown();
+      dropdown.classList.add('is-open');
+      if (menu) menu.hidden = false;
+      toggle?.setAttribute('aria-expanded', 'true');
     }
   }
 
-  function renderCampaignVariantCards(productId, selectedIds = []) {
+  function updateCampaignVariantsDropdownState() {
+    const dropdown = document.getElementById('campaignVariantDropdown');
+    if (!dropdown) return;
+    const checkedBoxes = Array.from(dropdown.querySelectorAll('input[name="targetVariantIds"]:checked'));
+    const allBoxes = Array.from(dropdown.querySelectorAll('input[name="targetVariantIds"]'));
+    const trigger = dropdown.querySelector('[data-campaign-variant-toggle]');
+    const countEl = dropdown.querySelector('#campaignVariantsCount');
+    const numEl = dropdown.querySelector('#campaignSelectedVariantsNum');
+
+    if (numEl) numEl.textContent = String(checkedBoxes.length);
+    if (countEl) {
+      countEl.innerHTML = `<span id="campaignSelectedVariantsNum">${checkedBoxes.length}</span> of ${allBoxes.length} selected`;
+    }
+
+    if (trigger) {
+      if (!checkedBoxes.length) {
+        trigger.textContent = 'Select variants...';
+      } else if (checkedBoxes.length === 1) {
+        trigger.textContent = checkedBoxes[0].dataset.name || '1 variant selected';
+      } else if (allBoxes.length > 0 && checkedBoxes.length === allBoxes.length) {
+        trigger.textContent = `All variants selected (${allBoxes.length})`;
+      } else {
+        const names = checkedBoxes.map((b) => b.dataset.name || '').filter(Boolean);
+        const joined = names.join(', ');
+        trigger.textContent = joined.length <= 28 ? joined : `${checkedBoxes.length} variants selected`;
+      }
+    }
+  }
+
+  function updateCampaignVariantsCount() {
+    updateCampaignVariantsDropdownState();
+  }
+
+  function renderCampaignVariantDropdown(productId, selectedIds = []) {
     const product = (state.products || []).find((p) => Number(p.id) === Number(productId))
       || (state.products || []).find((p) => String(p.name || '').toLowerCase().includes('bottle') || Number(p.id) === 11);
 
@@ -4157,8 +4206,10 @@
 
     if (!variants.length) {
       return `
-        <div class="admin-campaign-variants-empty" style="padding:16px;background:#fcfbf8;border:1px dashed var(--admin-border);border-radius:8px;text-align:center;color:var(--admin-muted);font-size:13px;">
-          No active variants found for this product.
+        <div class="admin-campaign-variant-dropdown" id="campaignVariantDropdown" data-campaign-variant-dropdown>
+          <button class="admin-select admin-product-multiselect__trigger" type="button" id="campaignVariantDropdownTrigger" disabled style="opacity:0.6;cursor:not-allowed;">
+            No variants available
+          </button>
         </div>
       `;
     }
@@ -4169,48 +4220,73 @@
         : [Number(variants[0].id)]
     );
 
+    const selectedVariants = variants.filter((v) => selectedSet.has(Number(v.id)));
+    let summaryText = 'Select variants...';
+    if (selectedVariants.length === 1) {
+      const v = selectedVariants[0];
+      summaryText = [v.color, v.size].filter(Boolean).join(' ') || v.name || `Variant #${v.id}`;
+    } else if (selectedVariants.length === variants.length) {
+      summaryText = `All variants selected (${variants.length})`;
+    } else if (selectedVariants.length > 1) {
+      const names = selectedVariants.map((v) => [v.color, v.size].filter(Boolean).join(' ') || v.name || `#${v.id}`);
+      const joined = names.join(', ');
+      summaryText = joined.length <= 28 ? joined : `${selectedVariants.length} variants selected`;
+    }
+
     return `
-      <div class="admin-campaign-variants-wrap">
-        <div class="admin-campaign-variants-header">
-          <span class="admin-campaign-variants-count" id="campaignVariantsCount">
-            <span id="campaignSelectedVariantsNum">${selectedSet.size}</span> of ${variants.length} selected
-          </span>
-          <div class="admin-campaign-variants-actions">
-            <button type="button" class="admin-btn admin-btn--soft admin-btn--xs" data-action="campaign-select-all-variants">Select All</button>
-            <button type="button" class="admin-btn admin-btn--ghost admin-btn--xs" data-action="campaign-clear-all-variants">Clear All</button>
+      <div class="admin-campaign-variant-dropdown" id="campaignVariantDropdown" data-campaign-variant-dropdown>
+        <button
+          class="admin-select admin-product-multiselect__trigger"
+          type="button"
+          id="campaignVariantDropdownTrigger"
+          data-campaign-variant-toggle
+          aria-expanded="false"
+        >
+          ${escapeHtml(summaryText)}
+        </button>
+        <div class="admin-campaign-variant-dropdown__menu" data-campaign-variant-menu hidden>
+          <div class="admin-campaign-variant-dropdown__header">
+            <span class="admin-campaign-variant-dropdown__count" id="campaignVariantsCount">
+              <span id="campaignSelectedVariantsNum">${selectedVariants.length}</span> of ${variants.length} selected
+            </span>
+            <div class="admin-campaign-variant-dropdown__actions">
+              <button type="button" class="admin-btn admin-btn--soft admin-btn--xs" data-action="campaign-select-all-variants">Select All</button>
+              <button type="button" class="admin-btn admin-btn--ghost admin-btn--xs" data-action="campaign-clear-all-variants">Clear All</button>
+            </div>
           </div>
-        </div>
-        <div class="admin-campaign-variants-grid" id="campaignVariantCheckboxes">
-          ${variants.map((v) => {
-            const isChecked = selectedSet.has(Number(v.id));
-            const variantTitle = [v.color, v.size].filter(Boolean).join(' ') || v.name || 'Default Variant';
-            const priceDisplay = catalogPrice(v.price || 22990);
-            return `
-              <label class="admin-campaign-variant-card ${isChecked ? 'is-selected' : ''}" data-variant-id="${v.id}">
-                <input
-                  type="checkbox"
-                  class="admin-checkbox"
-                  name="targetVariantIds"
-                  value="${v.id}"
-                  data-sku="${escapeHtml(v.sku || '')}"
-                  data-color="${escapeHtml(v.color || '')}"
-                  data-price="${v.price || 22990}"
-                  ${isChecked ? 'checked' : ''}
-                />
-                <div class="admin-campaign-variant-card__body">
-                  <div class="admin-campaign-variant-card__title">${escapeHtml(variantTitle)}</div>
-                  ${v.sku ? `<div class="admin-campaign-variant-card__sku">SKU: ${escapeHtml(v.sku)}</div>` : ''}
-                  <div class="admin-campaign-variant-card__price-row">
-                    <span class="admin-campaign-variant-card__price">${escapeHtml(priceDisplay)}</span>
-                    <span class="admin-campaign-variant-card__stock">${Number(v.stock || 0) > 0 ? `${v.stock} in stock` : 'Out of stock'}</span>
+          <div class="admin-campaign-variant-dropdown__options" id="campaignVariantCheckboxes">
+            ${variants.map((v) => {
+              const isChecked = selectedSet.has(Number(v.id));
+              const variantTitle = [v.color, v.size].filter(Boolean).join(' ') || v.name || 'Default Variant';
+              const priceDisplay = catalogPrice(v.price || 22990);
+              return `
+                <label class="admin-campaign-variant-option ${isChecked ? 'is-selected' : ''}" data-variant-id="${v.id}">
+                  <input
+                    type="checkbox"
+                    name="targetVariantIds"
+                    value="${v.id}"
+                    data-name="${escapeHtml(variantTitle)}"
+                    data-sku="${escapeHtml(v.sku || '')}"
+                    data-color="${escapeHtml(v.color || '')}"
+                    data-price="${v.price || 22990}"
+                    ${isChecked ? 'checked' : ''}
+                  />
+                  <div class="admin-campaign-variant-option__info">
+                    <span class="admin-campaign-variant-option__title">${escapeHtml(variantTitle)}</span>
+                    ${v.sku ? `<span class="admin-campaign-variant-option__sku">${escapeHtml(v.sku)}</span>` : ''}
                   </div>
-                </div>
-              </label>
-            `;
-          }).join('')}
+                  <span class="admin-campaign-variant-option__price">${escapeHtml(priceDisplay)}</span>
+                </label>
+              `;
+            }).join('')}
+          </div>
         </div>
       </div>
     `;
+  }
+
+  function renderCampaignVariantCards(productId, selectedIds = []) {
+    return renderCampaignVariantDropdown(productId, selectedIds);
   }
 
   function renderCampaignCreatorSection(selectedInfluencer) {
@@ -4283,13 +4359,13 @@
               </select>
             </div>
 
-            <div class="admin-campaign-field" style="grid-column: 1 / -1;">
+            <div class="admin-campaign-field">
               <div class="admin-step-label">
                 <span class="admin-step-pill">Step 4</span>
-                <label>Product Variants <span class="admin-required-star">*</span> <span style="font-weight:400;font-size:12px;color:var(--admin-muted);margin-left:4px;">(Select one or more variants)</span></label>
+                <label for="campaignVariantDropdownTrigger">Product Variants <span class="admin-required-star">*</span></label>
               </div>
-              <div id="campaignVariantCardsContainer">
-                ${renderCampaignVariantCards(selectedProdId)}
+              <div id="campaignVariantDropdownContainer">
+                ${renderCampaignVariantDropdown(selectedProdId)}
               </div>
             </div>
 
@@ -7730,18 +7806,18 @@
         const boxes = document.querySelectorAll('#campaignVariantCheckboxes input[name="targetVariantIds"]');
         boxes.forEach((box) => {
           box.checked = true;
-          box.closest('.admin-campaign-variant-card')?.classList.add('is-selected');
+          box.closest('.admin-campaign-variant-option')?.classList.add('is-selected');
         });
-        updateCampaignVariantsCount();
+        updateCampaignVariantsDropdownState();
         return;
       }
       case 'campaign-clear-all-variants': {
         const boxes = document.querySelectorAll('#campaignVariantCheckboxes input[name="targetVariantIds"]');
         boxes.forEach((box) => {
           box.checked = false;
-          box.closest('.admin-campaign-variant-card')?.classList.remove('is-selected');
+          box.closest('.admin-campaign-variant-option')?.classList.remove('is-selected');
         });
-        updateCampaignVariantsCount();
+        updateCampaignVariantsDropdownState();
         return;
       }
       case 'dismiss-campaign-success': {
@@ -9352,6 +9428,18 @@
         closeCouponProductDropdown();
       }
 
+      const openVariantDropdown = document.querySelector('[data-campaign-variant-dropdown].is-open');
+      if (openVariantDropdown && !target.closest('[data-campaign-variant-dropdown]')) {
+        closeCampaignVariantDropdown();
+      }
+
+      const variantToggle = target.closest('[data-campaign-variant-toggle]');
+      if (variantToggle) {
+        event.preventDefault();
+        toggleCampaignVariantDropdown();
+        return;
+      }
+
       if (els.profileDropdown && !els.profileDropdown.hidden && !target.closest('[data-profile-menu], [data-action="open-profile"]')) {
         closeProfileDropdown();
       }
@@ -9423,18 +9511,18 @@
       }
       if (target.matches('#campaignTargetProductSelect')) {
         const prodId = Number(target.value);
-        const container = document.getElementById('campaignVariantCardsContainer');
+        const container = document.getElementById('campaignVariantDropdownContainer') || document.getElementById('campaignVariantCardsContainer');
         if (container) {
-          container.innerHTML = renderCampaignVariantCards(prodId);
-          updateCampaignVariantsCount();
+          container.innerHTML = renderCampaignVariantDropdown(prodId);
+          updateCampaignVariantsDropdownState();
         }
       }
       if (target.matches('#campaignVariantCheckboxes input[name="targetVariantIds"]')) {
-        const card = target.closest('.admin-campaign-variant-card');
-        if (card) {
-          card.classList.toggle('is-selected', target.checked);
+        const opt = target.closest('.admin-campaign-variant-option') || target.closest('.admin-campaign-variant-card');
+        if (opt) {
+          opt.classList.toggle('is-selected', target.checked);
         }
-        updateCampaignVariantsCount();
+        updateCampaignVariantsDropdownState();
       }
       if (target.matches('[data-hype-label-select]')) {
         const customWrap = target.closest('.admin-hype-row')?.querySelector('[data-hype-custom-wrap]');
@@ -9487,6 +9575,10 @@
           return;
         }
         if (closeCouponProductDropdown()) {
+          event.preventDefault();
+          return;
+        }
+        if (closeCampaignVariantDropdown()) {
           event.preventDefault();
           return;
         }
