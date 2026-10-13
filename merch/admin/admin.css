@@ -1314,6 +1314,17 @@ a {
   color: #555;
 }
 
+.admin-badge--stock-shortage {
+  background: rgba(178, 59, 46, 0.15);
+  color: #b82b1d;
+  border: 1px solid rgba(178, 59, 46, 0.28);
+}
+
+.admin-stock-shortage-card {
+  border-left: 4px solid #cf1322 !important;
+  box-shadow: 0 2px 8px rgba(207, 19, 34, 0.08);
+}
+
 .admin-badge--general {
   background: rgba(200, 101, 45, 0.09);
   color: var(--admin-accent-dark);
