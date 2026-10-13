@@ -2775,7 +2775,15 @@ body.is-auth-loading .merch-auth-cta {
   background-color: rgba(211, 47, 47, 0.08);
 }
 
-/* Quantity Stepper in Order Summary */
+/* Quantity Stepper & Variant Controls in Order Summary */
+.shopify-summary-product__controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .shopify-summary-product__stepper {
   display: inline-flex;
   align-items: center;
@@ -2786,6 +2794,48 @@ body.is-auth-loading .merch-auth-cta {
   margin-top: 8px;
   overflow: hidden;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.shopify-summary-product__controls .shopify-summary-product__stepper {
+  margin-top: 0;
+  flex-shrink: 0;
+}
+
+.shopify-summary-product__variant-select {
+  display: inline-block;
+  height: 28px;
+  padding: 0 24px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f2937;
+  background-color: #fff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%234b5563' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  background-size: 11px;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  max-width: 155px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.shopify-summary-product__variant-select:hover {
+  border-color: #b94b24;
+  background-color: #fbf9f6;
+}
+
+.shopify-summary-product__variant-select:focus {
+  border-color: #b94b24;
+  box-shadow: 0 0 0 2px rgba(185, 75, 36, 0.18);
 }
 
 .shopify-summary-product__step-btn {
@@ -8153,6 +8203,17 @@ body.merch-page:not(.merch-admin-page) .category-card__image {
     grid-column: 2;
     width: 100%;
     justify-content: space-between;
+  }
+
+  .shopify-summary-product__controls {
+    gap: 6px;
+    margin-top: 6px;
+  }
+
+  .shopify-summary-product__variant-select {
+    max-width: 135px;
+    font-size: 11px;
+    padding: 0 20px 0 6px;
   }
 
   .shopify-coupon {
