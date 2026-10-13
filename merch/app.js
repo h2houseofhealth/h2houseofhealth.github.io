@@ -197,16 +197,16 @@
   // Presentation-only fallbacks for the storefront card redesign. These are
   // not product/API fields and should be replaced with real catalog metadata.
   const PRODUCT_CARD_PRESENTATION = {
-    bottles: { badge: 'BESTSELLER', stars: '★★★★☆', reviews: 128, annotation: 'Molecular Hydrogen on the go' },
+    bottles: { badge: 'BESTSELLER', stars: '★★★★★', reviews: 128, annotation: 'Molecular Hydrogen on the go' },
     sprays: { badge: 'NEW ARRIVAL', stars: '★★★★★', reviews: 96, annotation: 'Refresh & rejuvenate anywhere' },
-    hoodies: { badge: 'LIMITED DROP', stars: '★★★★☆', reviews: 74, annotation: 'Wear the wellness lifestyle' },
+    hoodies: { badge: 'LIMITED DROP', stars: '★★★★★', reviews: 74, annotation: 'Wear the wellness lifestyle' },
   };
 
   function getProductCardPresentation(product) {
     const category = String(product?.category || '').trim().toLowerCase();
     return PRODUCT_CARD_PRESENTATION[category] || {
       badge: 'NEW ARRIVAL',
-      stars: '★★★★☆',
+      stars: '★★★★★',
       reviews: 0,
       annotation: 'Made for your everyday ritual',
     };
@@ -878,14 +878,14 @@
 
     if (stock <= LOW_STOCK_THRESHOLD) {
       return {
-        label: `Low stock (${stock} left)`,
+        label: 'Low stock',
         className: 'low-stock',
         detail: `${label} is running low. Restock soon.`,
       };
     }
 
     return {
-      label: `In stock (${stock} available)`,
+      label: 'In stock',
       className: 'in-stock',
       detail: `${label} is available for purchase.`,
     };
@@ -5145,6 +5145,43 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     return products;
   }
 
+  function getProductStockMessaging(product, displayVariant) {
+    const stock = Number(displayVariant?.stock || 0);
+    const isHoodie = isHoodieProduct(product);
+    if (!displayVariant || stock <= 0) {
+      return {
+        label: isHoodie ? 'Sold out' : 'Out of stock',
+        className: 'out-of-stock',
+      };
+    }
+
+    const normalizedCategory = String(product?.category || '').toLowerCase();
+    const normalizedName = String(product?.name || '').toLowerCase();
+    const isMist = normalizedCategory.includes('mist') || normalizedCategory === 'sprays'
+      || normalizedName.includes('mist') || normalizedName.includes('spray');
+    const isLowStock = stock <= LOW_STOCK_THRESHOLD;
+
+    if (isMist) {
+      return {
+        label: 'Selling fast · Grab yours now',
+        className: 'low-stock',
+      };
+    }
+
+    const hasSalesVelocity = Number(product?.sales || 0) > 0 || Number(product?.orderCount || 0) > 0;
+    if (isLowStock && hasSalesVelocity) {
+      return {
+        label: 'Selling fast',
+        className: 'low-stock',
+      };
+    }
+
+    return {
+      label: 'In stock',
+      className: 'in-stock',
+    };
+  }
+
   function renderProductCard(product, hypeLabel = '') {
       const displayVariant = product.displayVariant || getDefaultPurchasableVariant(product);
       const isSoldOut = !displayVariant || Number(displayVariant.stock || 0) <= 0;
@@ -5169,11 +5206,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       const cardSpecifications = Object.entries(getProductSpecifications(product, displayVariant))
         .filter(([label, value]) => String(label).trim() && String(value).trim())
         .slice(0, 2);
-      const stockLabel = isSoldOut
-        ? (isHoodie ? 'Sold out' : 'Out of stock')
-        : Number(displayVariant?.stock || 0) <= LOW_STOCK_THRESHOLD
-          ? `Low stock · ${Number(displayVariant.stock)} left`
-          : `In stock · ${Number(displayVariant.stock)} available`;
+      const stockInfo = getProductStockMessaging(product, displayVariant);
+      const stockLabel = stockInfo.label;
+      const stockClass = stockInfo.className;
       const cardClasses = [
         isHoodie ? 'product-card--hoodie' : '',
         isMist ? 'product-card--mist' : '',
@@ -5202,9 +5237,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           <h3 class="product-card__name">${escapeHtml(product.name)}</h3>
           ${(cardSizes.length || cardColors.length) ? `<p class="product-card__variant">${cardSizes.length ? `Size: ${cardSizes.join(', ')}` : ''}${cardSizes.length && cardColors.length ? ' · ' : ''}${cardColors.length ? `Color: ${cardColors.join(', ')}` : ''}</p>` : ''}
           ${cardSpecifications.length ? `<div class="product-card__specs">${cardSpecifications.map(([label, value]) => `<span><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</span>`).join('')}</div>` : ''}
-          <p class="product-card__stock ${isSoldOut ? 'out-of-stock' : Number(displayVariant?.stock || 0) <= LOW_STOCK_THRESHOLD ? 'low-stock' : 'in-stock'}">${escapeHtml(stockLabel)}</p>
-          <div class="product-card__rating" aria-label="${escapeHtml(`${presentation.stars} (${presentation.reviews} reviews)`) }">
-            <span class="product-card__stars" aria-hidden="true">${presentation.stars}</span>
+          <p class="product-card__stock ${stockClass}">${escapeHtml(stockLabel)}</p>
+          <div class="product-card__rating" aria-label="${escapeHtml(`${presentation.stars || '★★★★★'} (${presentation.reviews} reviews)`)}">
+            <span class="product-card__stars" aria-hidden="true">${presentation.stars || '★★★★★'}</span>
             <span>(${presentation.reviews})</span>
           </div>
           <p class="product-card__price">
