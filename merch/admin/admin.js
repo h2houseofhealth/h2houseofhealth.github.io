@@ -7904,6 +7904,15 @@
             &bull; Payment status, order amounts, and stock reservations remain unchanged.
           </div>
 
+          ${isAlreadySent ? `
+            <div style="background:#fffbe6;border:1px solid #ffe58f;border-radius:6px;padding:10px 14px;">
+              <label class="admin-field" style="margin:0;">
+                <span style="font-weight:600;font-size:12px;color:#d46b08;">Resend Authorization Reason (Required)</span>
+                <input class="admin-input" id="stockDelayResendReasonInput" type="text" placeholder="e.g. Customer requested copy to new email address" style="margin-top:4px;" />
+              </label>
+            </div>
+          ` : ''}
+
           <label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;cursor:pointer;margin-top:2px;">
             <input type="checkbox" id="confirmSendDelayEmailCheck" style="width:16px;height:16px;accent-color:#b85d3b;" />
             <span>I have verified the recipient email and delivery details and confirm sending this customer update.</span>
@@ -8372,6 +8381,16 @@
         const orderId = Number(target?.dataset?.orderId || id);
         if (!orderId) return;
         const forceRetry = target?.dataset?.forceRetry === 'true';
+        let resendReason = '';
+        if (forceRetry) {
+          const reasonEl = els.adminModalDialog.querySelector('#stockDelayResendReasonInput');
+          resendReason = String(reasonEl?.value || '').trim();
+          if (resendReason.length < 5) {
+            toast('Resend Reason Required', 'Please enter a valid administrative reason (at least 5 characters) for resending.', 'warning');
+            reasonEl?.focus();
+            return;
+          }
+        }
 
         target.disabled = true;
         const originalText = target.textContent;
@@ -8381,7 +8400,7 @@
           const res = await apiRequest(`/api/merch/admin/orders/${orderId}/stock-shortage/send-email`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ forceRetry }),
+            body: JSON.stringify({ confirmResend: forceRetry, resendReason }),
           });
           toast('Delay Email Sent', res.message || `Customer email delivered to ${res.sentTo}.`, 'success');
           closeModal();

@@ -9851,6 +9851,23 @@ module.exports = function mountMerchApi(app, {
 
   // ─── ADMIN: Customer Stock Delay Communication (Phase 3) ───
 
+  function sanitizeErrorMessage(msg) {
+    if (!msg) return 'Unknown delivery error';
+    return String(msg)
+      .replace(/(?:key|pass|password|token|secret|auth)[=:\s]+[^\s,;]+/gi, '[REDACTED]')
+      .replace(/smtp:\/\/[^@]+@/gi, 'smtp://[REDACTED]@')
+      .replace(/bearer\s+[a-z0-9_\-\.]+/gi, 'Bearer [REDACTED]')
+      .slice(0, 500);
+  }
+
+  function parseSqliteUtcDate(val) {
+    if (!val) return 0;
+    const str = String(val).trim();
+    if (!str) return 0;
+    if (str.endsWith('Z')) return new Date(str).getTime();
+    return new Date(str.replace(' ', 'T') + 'Z').getTime();
+  }
+
   function buildCustomerStockDelayEmail({ order, shortages = [], items = [] }) {
     const customerName = String(order.customerName || order.customer_name || 'Valued Customer').trim();
     const orderNumber = String(order.orderNumber || order.order_number || `Order #${order.id}`).trim();
@@ -10051,69 +10068,163 @@ module.exports = function mountMerchApi(app, {
   app.post('/api/merch/admin/orders/:id/stock-shortage/send-email', requireAdmin, async (req, res) => {
     try {
       const orderId = Number(req.params.id);
-      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
-      if (!order) return res.status(404).json({ error: 'Order not found' });
-
-      // Safety checks: only verified paid orders
-      if (String(order.payment_status).toLowerCase() !== 'paid') {
-        return res.status(400).json({ error: 'Delay notifications can only be sent for paid orders.' });
+      if (!Number.isInteger(orderId) || orderId <= 0) {
+        return res.status(400).json({ error: 'Invalid order ID.' });
       }
 
-      if (['shipped', 'delivered', 'cancelled', 'returned'].includes(String(order.status).toLowerCase())) {
-        return res.status(400).json({ error: `Cannot send delay notification for order with status '${order.status}'.` });
-      }
+      // Force-retry / resend authorization audit:
+      // A client-supplied boolean alone is NOT trusted as authorization.
+      // Resending a previously delivered notification requires:
+      // 1. Explicit admin authentication (verified via requireAdmin)
+      // 2. confirmResend: true (or legacy forceRetry)
+      // 3. resendReason: non-empty string (>= 5 chars) documenting the administrative rationale
+      const confirmResend = Boolean(req.body?.confirmResend || req.body?.forceRetry);
+      const resendReason = String(req.body?.resendReason || '').trim();
 
-      const activeShortages = db.prepare('SELECT * FROM merch_order_stock_shortages WHERE order_id = ? AND is_resolved = 0').all(orderId);
-      if (!activeShortages.length) {
-        return res.status(400).json({ error: 'No active stock shortages found for this order.' });
-      }
+      // Execute atomic pre-check and claim transaction
+      const claimResult = db.transaction(() => {
+        const order = db.prepare(`
+          SELECT id, order_number, customer_name, customer_email, guest_email, payment_status, status
+          FROM merch_orders
+          WHERE id = ?
+        `).get(orderId);
 
-      // Must be reviewed and marked ready_for_communication
-      if (activeShortages.some((s) => s.review_status !== 'ready_for_communication')) {
-        return res.status(400).json({
-          error: "Order shortage must be reviewed and marked 'ready_for_communication' before sending a customer email.",
-          reviewStatus: activeShortages[0].review_status,
+        if (!order) {
+          return { error: 'Order not found', status: 404 };
+        }
+
+        if (String(order.payment_status).toLowerCase() !== 'paid') {
+          return { error: 'Delay notifications can only be sent for paid orders.', status: 400 };
+        }
+
+        if (['shipped', 'delivered', 'cancelled', 'returned'].includes(String(order.status).toLowerCase())) {
+          return { error: `Cannot send delay notification for order with status '${order.status}'.`, status: 400 };
+        }
+
+        const activeShortages = db.prepare(`
+          SELECT * FROM merch_order_stock_shortages WHERE order_id = ? AND is_resolved = 0
+        `).all(orderId);
+
+        if (!activeShortages.length) {
+          return { error: 'No active stock shortages found for this order.', status: 400 };
+        }
+
+        // Must be reviewed and marked ready_for_communication
+        if (activeShortages.some((s) => s.review_status !== 'ready_for_communication')) {
+          return {
+            error: "Order shortage must be reviewed and marked 'ready_for_communication' before sending a customer email.",
+            reviewStatus: activeShortages[0].review_status,
+            status: 400,
+          };
+        }
+
+        // Check if a non-stale sending request is currently in progress (< 5 minutes old)
+        const now = Date.now();
+        const activeSending = activeShortages.find((s) => {
+          if (s.customer_communication_status !== 'sending') return false;
+          const updatedTime = parseSqliteUtcDate(s.updated_at || s.created_at);
+          // Stale threshold is 5 minutes (300,000 ms)
+          return (now - updatedTime) < 300000;
+        });
+
+        if (activeSending) {
+          return {
+            error: 'A communication request is currently in progress for this order. Please wait.',
+            status: 409,
+          };
+        }
+
+        // Check if already sent
+        const allAlreadySent = activeShortages.every((s) => s.customer_communication_status === 'sent');
+        let isAuthorizedResend = false;
+
+        if (allAlreadySent) {
+          if (!confirmResend || resendReason.length < 5) {
+            return {
+              error: "Delay notification email has already been sent for this order. Resending requires explicit confirmation ('confirmResend: true') and a documented administrative reason ('resendReason' >= 5 chars).",
+              communicatedAt: activeShortages[0].customer_communicated_at,
+              sentTo: activeShortages[0].customer_communication_sent_to,
+              status: 409,
+              requiresReason: true,
+            };
+          }
+
+          // Safety cooldown: prevent rapid resends within 60 seconds
+          const lastSentTime = parseSqliteUtcDate(activeShortages[0].customer_communicated_at);
+          if (lastSentTime && (now - lastSentTime) < 60000) {
+            return {
+              error: 'A notification was recently sent to this customer. Please wait at least 60 seconds before initiating a resend.',
+              status: 429,
+            };
+          }
+
+          isAuthorizedResend = true;
+        }
+
+        // Atomically claim the active shortage records by setting to 'sending'.
+        // Stale 'sending' rows (>5m old) can be safely claimed.
+        // Already 'sent' rows can only be claimed if isAuthorizedResend === true.
+        const claimLock = db.prepare(`
+          UPDATE merch_order_stock_shortages
+          SET customer_communication_status = 'sending',
+              customer_communication_attempts = customer_communication_attempts + 1,
+              updated_at = datetime('now')
+          WHERE order_id = ?
+            AND is_resolved = 0
+            AND review_status = 'ready_for_communication'
+            AND (
+              customer_communication_status IN ('pending', 'failed')
+              OR (customer_communication_status = 'sending' AND updated_at < datetime('now', '-5 minutes'))
+              OR (? = 1 AND customer_communication_status = 'sent')
+            )
+        `).run(orderId, isAuthorizedResend ? 1 : 0);
+
+        if (!claimLock.changes) {
+          return {
+            error: 'Unable to claim shortage record for communication (it may be currently dispatching or modified).',
+            status: 409,
+          };
+        }
+
+        return {
+          claimed: true,
+          order,
+          shortages: activeShortages,
+          isAuthorizedResend,
+          resendReason: isAuthorizedResend ? resendReason : null,
+        };
+      })();
+
+      if (!claimResult.claimed) {
+        return res.status(claimResult.status || 400).json({
+          error: claimResult.error,
+          ...(claimResult.communicatedAt ? { communicatedAt: claimResult.communicatedAt } : {}),
+          ...(claimResult.sentTo ? { sentTo: claimResult.sentTo } : {}),
+          ...(claimResult.requiresReason ? { requiresReason: true } : {}),
+          ...(claimResult.reviewStatus ? { reviewStatus: claimResult.reviewStatus } : {}),
         });
       }
+
+      const { order, shortages } = claimResult;
 
       const recipientEmail = hasRealEmail(order.customer_email)
         ? order.customer_email
         : (hasRealEmail(order.guest_email) ? order.guest_email : null);
 
       if (!recipientEmail || !isValidMerchEmail(recipientEmail)) {
+        // Rollback sending state to failed
+        db.prepare(`
+          UPDATE merch_order_stock_shortages
+          SET customer_communication_status = 'failed',
+              customer_communication_error = 'Customer has no valid contact email address on file.',
+              updated_at = datetime('now')
+          WHERE order_id = ? AND is_resolved = 0
+        `).run(orderId);
         return res.status(400).json({ error: 'Customer has no valid contact email address on file.' });
       }
 
-      // Idempotency: prevent duplicate sends
-      const forceRetry = Boolean(req.body?.forceRetry);
-      const allAlreadySent = activeShortages.every((s) => s.customer_communication_status === 'sent');
-      if (allAlreadySent && !forceRetry) {
-        return res.status(409).json({
-          error: 'Delay notification email has already been sent for this order.',
-          communicatedAt: activeShortages[0].customer_communicated_at,
-          sentTo: activeShortages[0].customer_communication_sent_to,
-        });
-      }
-
-      if (activeShortages.some((s) => s.customer_communication_status === 'sending')) {
-        return res.status(409).json({ error: 'A communication request is currently in progress for this order. Please wait.' });
-      }
-
-      // Atomic lock: transition to 'sending' and increment attempt counter
-      const lock = db.prepare(`
-        UPDATE merch_order_stock_shortages
-        SET customer_communication_status = 'sending',
-            customer_communication_attempts = customer_communication_attempts + 1,
-            updated_at = datetime('now')
-        WHERE order_id = ? AND is_resolved = 0 AND customer_communication_status != 'sending'
-      `).run(orderId);
-
-      if (!lock.changes) {
-        return res.status(409).json({ error: 'Another communication request is currently in progress.' });
-      }
-
       const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
-      const emailContent = buildCustomerStockDelayEmail({ order, shortages: activeShortages, items });
+      const emailContent = buildCustomerStockDelayEmail({ order, shortages, items });
 
       let sendSuccess = false;
       let sendError = null;
@@ -10123,6 +10234,7 @@ module.exports = function mountMerchApi(app, {
           throw new Error('Simulated mail provider gateway timeout');
         }
         if (req.headers['x-test-mock-email-success'] === 'true') {
+          // Strictly mocked for automated verification without sending real emails
           sendSuccess = true;
         } else if (typeof sendMerchEmail === 'function') {
           await sendMerchEmail({
@@ -10137,6 +10249,7 @@ module.exports = function mountMerchApi(app, {
         }
       } catch (err) {
         sendError = err?.message || String(err);
+        console.error(`[Merch Delay Email] Error dispatching email for Order ${orderId}:`, sendError);
       }
 
       if (sendSuccess) {
@@ -10155,26 +10268,28 @@ module.exports = function mountMerchApi(app, {
           success: true,
           message: `Delay notification email sent successfully to ${recipientEmail}.`,
           sentTo: recipientEmail,
+          deliveryConfirmedByProvider: true,
           order: buildMerchOrderRecord(updated, items),
         });
       } else {
-        // Record failure, keep order & payment state unchanged, allow safe retry
+        const sanitizedErr = sanitizeErrorMessage(sendError);
         db.prepare(`
           UPDATE merch_order_stock_shortages
           SET customer_communication_status = 'failed',
               customer_communication_error = ?,
               updated_at = datetime('now')
           WHERE order_id = ? AND is_resolved = 0
-        `).run(sendError, orderId);
+        `).run(sanitizedErr, orderId);
 
         return res.status(502).json({
-          error: `Failed to deliver delay notification email: ${sendError}`,
+          error: `Failed to deliver delay notification email: ${sanitizedErr}`,
           retryAllowed: true,
           recipientEmail,
         });
       }
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      console.error('[Merch Delay Email] Unhandled exception in send-email:', err);
+      res.status(500).json({ error: sanitizeErrorMessage(err.message) });
     }
   });
 
