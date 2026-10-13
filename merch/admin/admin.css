@@ -1325,6 +1325,24 @@ a {
   box-shadow: 0 2px 8px rgba(207, 19, 34, 0.08);
 }
 
+.admin-badge--awaiting-review {
+  background: rgba(212, 107, 8, 0.12);
+  color: #d46b08;
+  border: 1px solid rgba(212, 107, 8, 0.25);
+}
+
+.admin-badge--reviewed {
+  background: rgba(24, 144, 255, 0.12);
+  color: #096dd9;
+  border: 1px solid rgba(24, 144, 255, 0.25);
+}
+
+.admin-badge--ready-comm {
+  background: rgba(82, 196, 26, 0.14);
+  color: #389e0d;
+  border: 1px solid rgba(82, 196, 26, 0.28);
+}
+
 .admin-badge--general {
   background: rgba(200, 101, 45, 0.09);
   color: var(--admin-accent-dark);

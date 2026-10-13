@@ -132,6 +132,12 @@ module.exports = function mountMerchApi(app, {
       ordered_quantity INTEGER NOT NULL DEFAULT 1,
       available_stock INTEGER NOT NULL DEFAULT 0,
       reason TEXT NOT NULL,
+      review_status TEXT NOT NULL DEFAULT 'awaiting_review',
+      revised_delivery_estimate TEXT,
+      internal_delay_note TEXT,
+      reviewed_by TEXT,
+      reviewed_at TEXT,
+      customer_communication_status TEXT NOT NULL DEFAULT 'pending',
       is_resolved INTEGER NOT NULL DEFAULT 0,
       resolved_at TEXT,
       resolved_by TEXT,
@@ -142,6 +148,25 @@ module.exports = function mountMerchApi(app, {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_order_stock_shortage_active
       ON merch_order_stock_shortages(order_id, COALESCE(variant_id, order_item_id, 0)) WHERE is_resolved = 0;
   `);
+
+  if (!hasColumn('merch_order_stock_shortages', 'review_status')) {
+    db.exec("ALTER TABLE merch_order_stock_shortages ADD COLUMN review_status TEXT NOT NULL DEFAULT 'awaiting_review'");
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'revised_delivery_estimate')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN revised_delivery_estimate TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'internal_delay_note')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN internal_delay_note TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'reviewed_by')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN reviewed_by TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'reviewed_at')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN reviewed_at TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'customer_communication_status')) {
+    db.exec("ALTER TABLE merch_order_stock_shortages ADD COLUMN customer_communication_status TEXT NOT NULL DEFAULT 'pending'");
+  }
 
   // Product specifications are optional so existing databases continue to work.
   if (!hasColumn('merch_products', 'specifications_json')) {
@@ -1198,6 +1223,12 @@ module.exports = function mountMerchApi(app, {
         s.ordered_quantity,
         s.available_stock,
         s.reason,
+        s.review_status,
+        s.revised_delivery_estimate,
+        s.internal_delay_note,
+        s.reviewed_by,
+        s.reviewed_at,
+        s.customer_communication_status,
         s.created_at AS shortage_created_at,
         o.order_number,
         o.customer_name,
@@ -3627,8 +3658,21 @@ module.exports = function mountMerchApi(app, {
         productName: s.item_product_name,
         variantLabel: s.shortage_variant_label || [s.v_color, s.v_size].filter(Boolean).join(' · ') || 'Default',
         reason: s.reason,
+        reviewStatus: s.review_status || 'awaiting_review',
+        revisedDeliveryEstimate: s.revised_delivery_estimate || null,
+        internalDelayNote: s.internal_delay_note || null,
+        reviewedBy: s.reviewed_by || null,
+        reviewedAt: s.reviewed_at || null,
+        customerCommunicationStatus: s.customer_communication_status || 'pending',
         createdAt: s.created_at,
       })),
+      stockShortageReviewStatus: (() => {
+        const activeShortages = db.prepare('SELECT review_status FROM merch_order_stock_shortages WHERE order_id = ? AND is_resolved = 0').all(Number(order.id));
+        if (!activeShortages.length) return null;
+        if (activeShortages.some((s) => s.review_status === 'awaiting_review')) return 'awaiting_review';
+        if (activeShortages.every((s) => s.review_status === 'ready_for_communication')) return 'ready_for_communication';
+        return 'reviewed';
+      })(),
       items: items.map((item) => {
         const itemShortage = db.prepare(`
           SELECT reason FROM merch_order_stock_shortages
@@ -6432,6 +6476,7 @@ module.exports = function mountMerchApi(app, {
     const result = db.prepare('UPDATE merch_variants SET stock = stock - ? WHERE id = ? AND stock >= ?')
       .run(quantity, Number(variantId), quantity);
     if (!result.changes) throw new Error(`Stock changed while confirming ${purchase.variant.product_name}.`);
+    try { syncInventoryAlerts(); } catch (err) { console.error('[Merch] Alert sync error:', err?.message); }
   }
 
   // Put the inventory reserved by an order back when that order is cancelled
@@ -6448,6 +6493,7 @@ module.exports = function mountMerchApi(app, {
     for (const item of items) {
       increment.run(Number(item.quantity || 0), Number(item.variantId));
     }
+    try { syncInventoryAlerts(); } catch (err) { console.error('[Merch] Alert sync error:', err?.message); }
   }
 
   // ─── PUBLIC: Create Razorpay order for checkout ───
@@ -9474,10 +9520,20 @@ module.exports = function mountMerchApi(app, {
         createdAt: s.order_created_at,
         shortageCreatedAt: s.shortage_created_at,
         reason: s.reason,
+        reviewStatus: s.review_status || 'awaiting_review',
+        revisedDeliveryEstimate: s.revised_delivery_estimate || null,
+        internalDelayNote: s.internal_delay_note || null,
+        reviewedBy: s.reviewed_by || null,
+        reviewedAt: s.reviewed_at || null,
+        customerCommunicationStatus: s.customer_communication_status || 'pending',
         shipped: Boolean(s.tracking_number || s.shiprocket_awb_code || s.order_status === 'shipped'),
         delivered: Boolean(s.delivered_at || s.order_status === 'delivered'),
       }));
-      res.json({ success: true, count: shortages.length, shortages });
+      const filterReviewStatus = req.query?.reviewStatus ? String(req.query.reviewStatus).trim().toLowerCase() : null;
+      const resultShortages = filterReviewStatus && filterReviewStatus !== 'all'
+        ? shortages.filter((s) => s.reviewStatus.toLowerCase() === filterReviewStatus)
+        : shortages;
+      res.json({ success: true, count: resultShortages.length, shortages: resultShortages });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -9664,13 +9720,93 @@ module.exports = function mountMerchApi(app, {
 
         const remainingActive = db.prepare('SELECT COUNT(*) AS count FROM merch_order_stock_shortages WHERE order_id = ? AND is_resolved = 0').get(orderId).count;
         if (remainingActive === 0 && order.status === 'stock_shortage') {
-          db.prepare(`UPDATE merch_orders SET status = 'processing', updated_at = datetime('now') WHERE id = ?`).run(orderId);
+          if (String(order.payment_status).toLowerCase() === 'paid' && !['cancelled', 'refunded', 'returned'].includes(String(order.status).toLowerCase())) {
+            db.prepare(`UPDATE merch_orders SET status = 'processing', updated_at = datetime('now') WHERE id = ?`).run(orderId);
+          }
         }
       })();
 
       const updated = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
       const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
       res.json({ success: true, order: buildMerchOrderRecord(updated, items) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/merch/admin/orders/:id/stock-shortage/review', requireAdmin, (req, res) => {
+    try {
+      const orderId = Number(req.params.id);
+      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+
+      const activeShortages = db.prepare('SELECT * FROM merch_order_stock_shortages WHERE order_id = ? AND is_resolved = 0').all(orderId);
+      if (!activeShortages.length) {
+        return res.status(400).json({ error: 'No active stock shortages found for this order.' });
+      }
+
+      const rawReviewStatus = String(req.body?.reviewStatus || 'reviewed').trim().toLowerCase();
+      const validStatuses = ['awaiting_review', 'reviewed', 'ready_for_communication'];
+      if (!validStatuses.includes(rawReviewStatus)) {
+        return res.status(400).json({ error: `Invalid review status. Allowed values: ${validStatuses.join(', ')}` });
+      }
+
+      const revisedDeliveryEstimate = req.body?.revisedDeliveryEstimate != null && String(req.body.revisedDeliveryEstimate).trim() !== ''
+        ? String(req.body.revisedDeliveryEstimate).trim()
+        : null;
+      const internalDelayNote = req.body?.internalDelayNote != null && String(req.body.internalDelayNote).trim() !== ''
+        ? String(req.body.internalDelayNote).trim()
+        : null;
+      const shortageId = req.body?.shortageId ? Number(req.body.shortageId) : null;
+      const orderItemId = req.body?.orderItemId ? Number(req.body.orderItemId) : null;
+
+      const adminUser = getMerchAuthUser(req);
+      const reviewedBy = adminUser?.email || 'admin';
+
+      db.transaction(() => {
+        if (shortageId) {
+          db.prepare(`
+            UPDATE merch_order_stock_shortages
+            SET review_status = ?,
+                revised_delivery_estimate = ?,
+                internal_delay_note = ?,
+                reviewed_by = ?,
+                reviewed_at = datetime('now'),
+                updated_at = datetime('now')
+            WHERE id = ? AND order_id = ? AND is_resolved = 0
+          `).run(rawReviewStatus, revisedDeliveryEstimate, internalDelayNote, reviewedBy, shortageId, orderId);
+        } else if (orderItemId) {
+          db.prepare(`
+            UPDATE merch_order_stock_shortages
+            SET review_status = ?,
+                revised_delivery_estimate = ?,
+                internal_delay_note = ?,
+                reviewed_by = ?,
+                reviewed_at = datetime('now'),
+                updated_at = datetime('now')
+            WHERE order_item_id = ? AND order_id = ? AND is_resolved = 0
+          `).run(rawReviewStatus, revisedDeliveryEstimate, internalDelayNote, reviewedBy, orderItemId, orderId);
+        } else {
+          db.prepare(`
+            UPDATE merch_order_stock_shortages
+            SET review_status = ?,
+                revised_delivery_estimate = ?,
+                internal_delay_note = ?,
+                reviewed_by = ?,
+                reviewed_at = datetime('now'),
+                updated_at = datetime('now')
+            WHERE order_id = ? AND is_resolved = 0
+          `).run(rawReviewStatus, revisedDeliveryEstimate, internalDelayNote, reviewedBy, orderId);
+        }
+      })();
+
+      const updated = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
+      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
+      res.json({
+        success: true,
+        message: 'Stock shortage review updated successfully.',
+        order: buildMerchOrderRecord(updated, items),
+      });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
