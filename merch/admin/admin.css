@@ -719,12 +719,15 @@ a {
   transform: translateY(-1px);
 }
 
+.admin-btn.is-active,
 .admin-btn--primary {
   background: var(--admin-accent);
   color: #fff;
+  border-color: var(--admin-accent);
   box-shadow: var(--admin-shadow-soft);
 }
 
+.admin-btn.is-active:hover,
 .admin-btn--primary:hover {
   background: var(--admin-accent-dark);
 }
@@ -733,6 +736,13 @@ a {
   background: rgba(255, 255, 255, 0.95);
   color: var(--admin-text);
   border-color: rgba(0, 0, 0, 0.1);
+}
+
+.admin-btn--ghost.is-active {
+  background: var(--admin-accent);
+  color: #fff;
+  border-color: var(--admin-accent);
+  box-shadow: var(--admin-shadow-soft);
 }
 
 .admin-btn--soft {

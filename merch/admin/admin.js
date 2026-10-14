@@ -3421,7 +3421,8 @@
     if (rangeEnd) rangeEnd.setDate(rangeEnd.getDate() + 1);
 
     return [...state.orders].filter((order) => {
-      const matchesStatus = state.ordersStatus === 'all'
+      const isTodayFilter = state.ordersStatus === 'today' || Boolean(state.ordersTodayOnly);
+      const matchesStatus = (state.ordersStatus === 'all' || isTodayFilter)
         ? true
         : state.ordersStatus === 'stock_shortage'
           ? (order.status === 'stock_shortage' || Boolean(order.hasStockShortage))
@@ -3432,7 +3433,7 @@
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(query));
       const createdAt = getOrderCreatedAt(order);
-      const matchesToday = !state.ordersTodayOnly || (createdAt >= todayStart && createdAt < tomorrowStart);
+      const matchesToday = !isTodayFilter || (createdAt >= todayStart && createdAt < tomorrowStart);
       const matchesFrom = !rangeStart || (createdAt >= rangeStart);
       const matchesTo = !rangeEnd || (createdAt < rangeEnd);
       return matchesStatus && matchesQuery && matchesToday && matchesFrom && matchesTo;
@@ -3780,15 +3781,15 @@
                 </div>
               </div>
               <div class="admin-toolbar__group">
-                <button class="admin-btn ${state.ordersStatus === 'all' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="all">All</button>
-                <button class="admin-btn ${state.ordersTodayOnly ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-action="toggle-orders-today">Today</button>
-                <button class="admin-btn ${state.ordersStatus === 'pending' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="pending">Pending</button>
-                <button class="admin-btn ${state.ordersStatus === 'processing' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="processing">Processing</button>
-                <button class="admin-btn ${state.ordersStatus === 'stock_shortage' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="stock_shortage">Stock Shortage${stockShortageCount ? ` (${stockShortageCount})` : ''}</button>
-                <button class="admin-btn ${state.ordersStatus === 'shipped' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="shipped">Shipped</button>
-                <button class="admin-btn ${state.ordersStatus === 'delivered' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="delivered">Delivered</button>
-                <button class="admin-btn ${state.ordersStatus === 'cancelled' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="cancelled">Cancelled</button>
-                <button class="admin-btn ${state.ordersStatus === 'returned' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="returned">Returned</button>
+                <button class="admin-btn ${state.ordersStatus === 'all' ? 'admin-btn--primary is-active' : 'admin-btn--ghost'}" type="button" data-order-filter="all">All</button>
+                <button class="admin-btn ${state.ordersStatus === 'today' ? 'admin-btn--primary is-active' : 'admin-btn--ghost'}" type="button" data-order-filter="today" data-action="toggle-orders-today">Today</button>
+                <button class="admin-btn ${state.ordersStatus === 'pending' ? 'admin-btn--primary is-active' : 'admin-btn--ghost'}" type="button" data-order-filter="pending">Pending</button>
+                <button class="admin-btn ${state.ordersStatus === 'processing' ? 'admin-btn--primary is-active' : 'admin-btn--ghost'}" type="button" data-order-filter="processing">Processing</button>
+                <button class="admin-btn ${state.ordersStatus === 'stock_shortage' ? 'admin-btn--primary is-active' : 'admin-btn--ghost'}" type="button" data-order-filter="stock_shortage">Stock Shortage${stockShortageCount ? ` (${stockShortageCount})` : ''}</button>
+                <button class="admin-btn ${state.ordersStatus === 'shipped' ? 'admin-btn--primary is-active' : 'admin-btn--ghost'}" type="button" data-order-filter="shipped">Shipped</button>
+                <button class="admin-btn ${state.ordersStatus === 'delivered' ? 'admin-btn--primary is-active' : 'admin-btn--ghost'}" type="button" data-order-filter="delivered">Delivered</button>
+                <button class="admin-btn ${state.ordersStatus === 'cancelled' ? 'admin-btn--primary is-active' : 'admin-btn--ghost'}" type="button" data-order-filter="cancelled">Cancelled</button>
+                <button class="admin-btn ${state.ordersStatus === 'returned' ? 'admin-btn--primary is-active' : 'admin-btn--ghost'}" type="button" data-order-filter="returned">Returned</button>
               </div>
             </div>
           </div>
@@ -9755,13 +9756,12 @@
         renderCustomers();
         return;
       case 'toggle-orders-today':
-        state.ordersTodayOnly = !state.ordersTodayOnly;
-        if (state.ordersTodayOnly) {
-          state.ordersDateFrom = '';
-          state.ordersDateTo = '';
-          state.ordersAppliedDateFrom = '';
-          state.ordersAppliedDateTo = '';
-        }
+        state.ordersStatus = 'today';
+        state.ordersTodayOnly = true;
+        state.ordersDateFrom = '';
+        state.ordersDateTo = '';
+        state.ordersAppliedDateFrom = '';
+        state.ordersAppliedDateTo = '';
         state.ordersPage = 1;
         renderOrders();
         return;
@@ -9777,6 +9777,9 @@
           return;
         }
         state.ordersTodayOnly = false;
+        if (state.ordersStatus === 'today') {
+          state.ordersStatus = 'all';
+        }
         state.ordersAppliedDateFrom = from;
         state.ordersAppliedDateTo = to;
         state.ordersPage = 1;
@@ -10637,7 +10640,15 @@
 
       const orderFilter = target.closest('[data-order-filter]');
       if (orderFilter) {
-        state.ordersStatus = orderFilter.dataset.orderFilter;
+        const filterVal = orderFilter.dataset.orderFilter;
+        state.ordersStatus = filterVal;
+        state.ordersTodayOnly = (filterVal === 'today');
+        if (filterVal === 'today') {
+          state.ordersDateFrom = '';
+          state.ordersDateTo = '';
+          state.ordersAppliedDateFrom = '';
+          state.ordersAppliedDateTo = '';
+        }
         state.ordersPage = 1;
         renderOrders();
         return;
