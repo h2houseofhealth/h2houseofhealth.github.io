@@ -434,7 +434,80 @@ async function main() {
   // Reset order 43 back to clean state for normal operation
   dbTest.prepare("UPDATE merch_order_stock_shortages SET customer_communication_status = 'pending', revised_delivery_estimate = '2026-10-25' WHERE order_id = ?").run(testOrderId);
   dbTest.close();
-  console.log('✓ Test 17 passed');
+  // ─── Test 18: Compensation Coupons Categorization & Ranking ───
+  console.log('[Test 18] Compensation coupons ranking, categorization, and concise capping');
+  const compRes = await fetch(`${BASE_URL}/api/merch/admin/orders/${testOrderId}/compensation-coupons`, { headers });
+  assert.strictEqual(compRes.status, 200, 'Compensation coupons fetch failed');
+  const compData = await compRes.json();
+  assert.strictEqual(compData.success, true);
+  assert.ok(Array.isArray(compData.eligibleCoupons), 'eligibleCoupons must be an array');
+  assert.ok(Array.isArray(compData.ineligibleCoupons), 'ineligibleCoupons must be an array');
+
+  // Verify ranking: order_specific before customer_specific before other_private
+  let seenCustomerSpecific = false;
+  let seenOtherPrivate = false;
+  let otherPrivateCount = 0;
+
+  for (const c of compData.eligibleCoupons) {
+    assert.ok(['order_specific', 'customer_specific', 'other_private'].includes(c.category), `Invalid category: ${c.category}`);
+    if (c.category === 'order_specific') {
+      assert.ok(!seenCustomerSpecific, 'order_specific must come before customer_specific');
+      assert.ok(!seenOtherPrivate, 'order_specific must come before other_private');
+      assert.strictEqual(c.isOrderSpecific, true);
+    } else if (c.category === 'customer_specific') {
+      seenCustomerSpecific = true;
+      assert.ok(!seenOtherPrivate, 'customer_specific must come before other_private');
+      assert.strictEqual(c.isCustomerSpecific, true);
+      assert.strictEqual(c.assignedUserEmail, 'sowmyaram63@gmail.com');
+    } else if (c.category === 'other_private') {
+      seenOtherPrivate = true;
+      otherPrivateCount++;
+    }
+  }
+
+  assert.ok(otherPrivateCount <= 5, `other_private count must not exceed 5 (found ${otherPrivateCount})`);
+
+  // Verify public coupons are NOT in eligibleCoupons
+  const dbVerify = new Database('./booking/data/booking.db');
+  const publicCouponCodes = dbVerify.prepare("SELECT code FROM coupons WHERE LOWER(coupon_type) = 'public'").all().map((r) => r.code.toUpperCase());
+  dbVerify.close();
+  for (const c of compData.eligibleCoupons) {
+    assert.ok(!publicCouponCodes.includes(c.code.toUpperCase()), `Public coupon ${c.code} must not be in eligibleCoupons`);
+  }
+  console.log('✓ Test 18 passed');
+
+  // ─── Test 19: Compensation Coupon Creation & Preview Integration ───
+  console.log('[Test 19] Created compensation coupon metadata and preview integration');
+  const test19Code = `CARE-AUTO-${Date.now().toString().slice(-6)}`;
+  const create19Res = await fetch(`${BASE_URL}/api/merch/admin/orders/${testOrderId}/compensation-coupons`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      code: test19Code,
+      discountType: 'percentage',
+      discountValue: 12,
+      maxRedemptions: 1,
+      appliesTo: 'merch',
+    }),
+  });
+  assert.strictEqual(create19Res.status, 201);
+  const create19Data = await create19Res.json();
+  assert.strictEqual(create19Data.coupon.code, test19Code);
+  assert.strictEqual(create19Data.coupon.category, 'order_specific');
+  assert.strictEqual(create19Data.coupon.isOrderSpecific, true);
+  assert.strictEqual(create19Data.coupon.isCustomerSpecific, true);
+  assert.strictEqual(create19Data.coupon.categoryLabel, 'Created for this Order');
+
+  // Verify preview with newly created coupon
+  const p19Res = await fetch(`${BASE_URL}/api/merch/admin/orders/${testOrderId}/stock-shortage/email-preview?couponId=${create19Data.coupon.id}`, { headers });
+  assert.strictEqual(p19Res.status, 200);
+  const p19 = await p19Res.json();
+  assert.strictEqual(p19.selectedCoupon.id, create19Data.coupon.id);
+  assert.ok(p19.text.includes(test19Code));
+  assert.ok(p19.text.includes('12% OFF'));
+  assert.ok(p19.html.includes(test19Code));
+  assert.ok(p19.html.includes('12% OFF'));
+  console.log('✓ Test 19 passed');
 
   console.log('\n========================================');
   console.log('ALL MODAL, SCOPE & RESEND TESTS PASSED SUCCESSFULLY!');
