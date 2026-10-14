@@ -11931,15 +11931,6 @@ module.exports = function mountMerchApi(app, {
     if (deletedRows.length !== productIds.length) {
       return res.status(400).json({ message: 'Every selected product must already be in Bin.' });
     }
-    const variantRowsForOrders = db.prepare(`SELECT id FROM merch_variants WHERE product_id IN (${placeholders})`).all(...productIds);
-    const variantIdsForOrders = variantRowsForOrders.map((row) => Number(row.id));
-    if (variantIdsForOrders.length) {
-      const variantPlaceholders = variantIdsForOrders.map(() => '?').join(', ');
-      const orderReference = db.prepare(`SELECT 1 FROM merch_order_items WHERE variant_id IN (${variantPlaceholders}) LIMIT 1`).get(...variantIdsForOrders);
-      if (orderReference) {
-        return res.status(409).json({ message: 'This product is referenced by order history and cannot be permanently deleted.' });
-      }
-    }
     const permanentDelete = db.transaction(() => {
       const variantRows = db.prepare(`SELECT id FROM merch_variants WHERE product_id IN (${placeholders})`).all(...productIds);
       const variantIds = variantRows.map((row) => Number(row.id));
@@ -11947,10 +11938,15 @@ module.exports = function mountMerchApi(app, {
         const variantPlaceholders = variantIds.map(() => '?').join(', ');
         db.prepare(`DELETE FROM merch_customer_cart_items WHERE variant_id IN (${variantPlaceholders})`).run(...variantIds);
         db.prepare(`DELETE FROM merch_customer_wishlist_items WHERE variant_id IN (${variantPlaceholders})`).run(...variantIds);
+        db.prepare(`DELETE FROM merch_inventory_alerts WHERE variant_id IN (${variantPlaceholders})`).run(...variantIds);
+        db.prepare(`UPDATE merch_offers SET variant_id = NULL WHERE variant_id IN (${variantPlaceholders})`).run(...variantIds);
+        db.prepare(`DELETE FROM merch_combo_items WHERE component_variant_id IN (${variantPlaceholders})`).run(...variantIds);
       }
       db.prepare(`DELETE FROM merch_customer_wishlist_items WHERE product_id IN (${placeholders})`).run(...productIds);
       db.prepare(`DELETE FROM merch_combo_items WHERE combo_product_id IN (${placeholders}) OR component_product_id IN (${placeholders})`).run(...productIds, ...productIds);
       db.prepare(`DELETE FROM merch_product_hypes WHERE product_id IN (${placeholders})`).run(...productIds);
+      db.prepare(`DELETE FROM merch_inventory_alerts WHERE product_id IN (${placeholders})`).run(...productIds);
+      db.prepare(`UPDATE merch_offers SET product_id = NULL WHERE product_id IN (${placeholders})`).run(...productIds);
       db.prepare(`DELETE FROM merch_variants WHERE product_id IN (${placeholders})`).run(...productIds);
       db.prepare(`DELETE FROM merch_products WHERE id IN (${placeholders})`).run(...productIds);
     });
@@ -11971,13 +11967,11 @@ module.exports = function mountMerchApi(app, {
     if (deletedRows.length !== variantIds.length) {
       return res.status(400).json({ message: 'Every selected variant must already be in Bin.' });
     }
-    const orderReference = db.prepare(`SELECT 1 FROM merch_order_items WHERE variant_id IN (${placeholders}) LIMIT 1`).get(...variantIds);
-    if (orderReference) {
-      return res.status(409).json({ message: 'A selected variant is referenced by order history and cannot be permanently deleted.' });
-    }
     const permanentDelete = db.transaction(() => {
       db.prepare(`DELETE FROM merch_customer_cart_items WHERE variant_id IN (${placeholders})`).run(...variantIds);
       db.prepare(`DELETE FROM merch_customer_wishlist_items WHERE variant_id IN (${placeholders})`).run(...variantIds);
+      db.prepare(`DELETE FROM merch_inventory_alerts WHERE variant_id IN (${placeholders})`).run(...variantIds);
+      db.prepare(`UPDATE merch_offers SET variant_id = NULL WHERE variant_id IN (${placeholders})`).run(...variantIds);
       db.prepare(`DELETE FROM merch_combo_items WHERE component_variant_id IN (${placeholders})`).run(...variantIds);
       db.prepare(`DELETE FROM merch_variants WHERE id IN (${placeholders}) AND deleted_at IS NOT NULL`).run(...variantIds);
 
@@ -11986,15 +11980,12 @@ module.exports = function mountMerchApi(app, {
       for (const pid of parentProductIds) {
         const remaining = db.prepare('SELECT count(*) as count FROM merch_variants WHERE product_id = ?').get(pid);
         if (Number(remaining?.count || 0) === 0) {
-          const inOrders = db.prepare('SELECT 1 FROM merch_order_items WHERE product_name = (SELECT name FROM merch_products WHERE id = ?) LIMIT 1').get(pid);
-          if (!inOrders) {
-            db.prepare('DELETE FROM merch_customer_wishlist_items WHERE product_id = ?').run(pid);
-            db.prepare('DELETE FROM merch_combo_items WHERE combo_product_id = ? OR component_product_id = ?').run(pid, pid);
-            db.prepare('DELETE FROM merch_product_hypes WHERE product_id = ?').run(pid);
-            db.prepare('DELETE FROM merch_products WHERE id = ?').run(pid);
-          } else {
-            db.prepare("UPDATE merch_products SET is_active = 0, deleted_at = datetime('now') WHERE id = ?").run(pid);
-          }
+          db.prepare('DELETE FROM merch_customer_wishlist_items WHERE product_id = ?').run(pid);
+          db.prepare('DELETE FROM merch_combo_items WHERE combo_product_id = ? OR component_product_id = ?').run(pid, pid);
+          db.prepare('DELETE FROM merch_product_hypes WHERE product_id = ?').run(pid);
+          db.prepare('DELETE FROM merch_inventory_alerts WHERE product_id = ?').run(pid);
+          db.prepare('UPDATE merch_offers SET product_id = NULL WHERE product_id = ?').run(pid);
+          db.prepare('DELETE FROM merch_products WHERE id = ?').run(pid);
         }
       }
     });
