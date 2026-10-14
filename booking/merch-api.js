@@ -9991,19 +9991,22 @@ module.exports = function mountMerchApi(app, {
     let scopeLabel = 'All Merch';
 
     if (appliesTo.startsWith('product:')) {
-      scopeLabel = 'Specific Products';
       const rawIds = appliesTo.replace('product:', '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0);
-      const orderProductIds = (items || []).map((it) => Number(it.product_id || it.productId)).filter(Boolean);
-      const matches = rawIds.some((id) => orderProductIds.includes(id));
-      if (!matches) {
-        return { eligible: false, reason: 'Coupon only applies to specific products not included in this order.' };
+      if (!rawIds.length) {
+        return { eligible: false, reason: 'Coupon has an invalid product restriction.' };
+      }
+      try {
+        const placeholders = rawIds.map(() => '?').join(',');
+        const prodRows = db.prepare(`SELECT id, name FROM merch_products WHERE id IN (${placeholders})`).all(...rawIds);
+        const prodNames = prodRows.map((p) => p.name);
+        scopeLabel = prodNames.length ? `Selected Products (${prodNames.join(', ')})` : `Selected Products (#${rawIds.join(', #')})`;
+      } catch {
+        scopeLabel = `Selected Products (#${rawIds.join(', #')})`;
       }
     } else if (appliesTo.startsWith('variant:')) {
       scopeLabel = 'Specific Variants';
       const rawIds = appliesTo.replace('variant:', '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0);
-      const orderVariantIds = (items || []).map((it) => Number(it.variant_id || it.variantId)).filter(Boolean);
-      const matches = rawIds.some((id) => orderVariantIds.includes(id));
-      if (!matches) {
+      if (!rawIds.length) {
         return { eligible: false, reason: 'Coupon only applies to specific variants not included in this order.' };
       }
     } else if (appliesTo.startsWith('category:')) {
@@ -10114,9 +10117,14 @@ module.exports = function mountMerchApi(app, {
       const code = String(coupon.code).trim().toUpperCase();
       const benefit = String(coupon.benefit || '').trim();
       const expiry = String(coupon.expiryLabel || (coupon.validTill ? String(coupon.validTill).split('T')[0] : 'No expiration date')).trim();
-      couponSummary = { code, benefit, expiry };
+      const scope = String(coupon.scopeLabel || (coupon.appliesTo && coupon.appliesTo !== 'merch' ? coupon.appliesTo : 'Entire Merch Store')).trim();
+      couponSummary = { code, benefit, expiry, scope };
 
-      couponTextClause = `As a courtesy, we've included your coupon ${code}, which provides ${benefit}. It is valid until ${expiry} and can be redeemed under the applicable terms.`;
+      const scopeText = scope.toLowerCase().includes('entire') || scope.toLowerCase() === 'all merch'
+        ? 'across the entire store'
+        : `on ${scope}`;
+
+      couponTextClause = `As a courtesy, we've included your coupon ${code}, which provides ${benefit}. It is valid until ${expiry} ${scopeText} and can be redeemed under the applicable terms.`;
 
       compensationHtml = `
         <div style="background: #f6ffed; border: 1px solid #b7eb8f; border-radius: 8px; padding: 20px 24px; margin: 20px 0; text-align: center;">
@@ -10131,6 +10139,9 @@ module.exports = function mountMerchApi(app, {
           </div>
           <p style="margin: 0 0 6px; font-size: 15px; font-weight: 700; color: #135200;">
             Courtesy Benefit: ${escapeHtml(benefit)}
+          </p>
+          <p style="margin: 0 0 6px; font-size: 13px; color: #389e0d;">
+            Applies To: <strong>${escapeHtml(scope)}</strong>
           </p>
           <p style="margin: 0 0 12px; font-size: 13px; color: #52c41a;">
             Valid Until: <strong>${escapeHtml(expiry)}</strong>
@@ -10393,7 +10404,23 @@ module.exports = function mountMerchApi(app, {
       }
 
       const appliesToRaw = String(req.body?.appliesTo || 'merch').trim().toLowerCase();
-      const appliesTo = appliesToRaw.startsWith('product:') ? appliesToRaw : 'merch';
+      let appliesTo = 'merch';
+      if (appliesToRaw === 'selected_products' || appliesToRaw.startsWith('product:') || (Array.isArray(req.body?.productIds) && req.body.productIds.length > 0)) {
+        let productIds = Array.isArray(req.body?.productIds)
+          ? req.body.productIds.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+          : (appliesToRaw.startsWith('product:') ? appliesToRaw.replace('product:', '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0) : []);
+        productIds = [...new Set(productIds)];
+        if (productIds.length === 0) {
+          return res.status(400).json({ error: 'At least one product must be selected when restricting to Selected Products.' });
+        }
+        const placeholders = productIds.map(() => '?').join(',');
+        const validProds = db.prepare(`SELECT id, name FROM merch_products WHERE id IN (${placeholders})`).all(...productIds);
+        if (validProds.length === 0) {
+          return res.status(400).json({ error: 'None of the selected products exist in the store catalog.' });
+        }
+        const validIds = validProds.map((p) => p.id);
+        appliesTo = `product:${validIds.join(',')}`;
+      }
       const description = String(req.body?.description || `Courtesy delay compensation for order ${order.order_number}`).trim();
 
       const insertResult = db.prepare(`
@@ -10516,6 +10543,47 @@ module.exports = function mountMerchApi(app, {
         customApologyMessage,
       });
 
+      // Evaluate dispatch status accurately
+      const now = Date.now();
+      const activeSending = activeShortages.find((s) => {
+        if (s.customer_communication_status !== 'sending') return false;
+        const updatedTime = parseSqliteUtcDate(s.updated_at || s.created_at);
+        return (now - updatedTime) < 300000;
+      });
+      const isStaleSending = activeShortages.some((s) => {
+        if (s.customer_communication_status !== 'sending') return false;
+        const updatedTime = parseSqliteUtcDate(s.updated_at || s.created_at);
+        return (now - updatedTime) >= 300000;
+      });
+      const allAlreadySent = activeShortages.length > 0 && activeShortages.every((s) => s.customer_communication_status === 'sent');
+      const isFailed = activeShortages.some((s) => s.customer_communication_status === 'failed');
+
+      let dispatchMode = 'first_time';
+      let requiresResendReason = false;
+      let buttonLabel = 'Send Customer Delay Email';
+
+      if (activeSending) {
+        dispatchMode = 'in_flight';
+        requiresResendReason = false;
+        buttonLabel = 'Sending In Progress...';
+      } else if (isStaleSending) {
+        dispatchMode = 'stale_recovery';
+        requiresResendReason = true;
+        buttonLabel = 'Authorize Resend (Recover Interrupted Dispatch)';
+      } else if (allAlreadySent) {
+        dispatchMode = 'resend_authorized';
+        requiresResendReason = true;
+        buttonLabel = 'Resend Delay Email';
+      } else if (isFailed) {
+        dispatchMode = 'retry_failed';
+        requiresResendReason = false;
+        buttonLabel = 'Retry Sending Customer Delay Email';
+      } else {
+        dispatchMode = 'first_time';
+        requiresResendReason = false;
+        buttonLabel = 'Send Customer Delay Email';
+      }
+
       res.json({
         success: true,
         orderId: order.id,
@@ -10539,6 +10607,13 @@ module.exports = function mountMerchApi(app, {
         compensationCouponCode: activeShortages[0].compensation_coupon_code || null,
         compensationCouponBenefit: activeShortages[0].compensation_coupon_benefit || null,
         communicationAuthorizedBy: activeShortages[0].communication_authorized_by || null,
+        dispatchMode,
+        requiresResendReason,
+        buttonLabel,
+        isAlreadySent: allAlreadySent,
+        isStaleSending,
+        isActiveSending: Boolean(activeSending),
+        isFailed,
       });
     } catch (err) {
       res.status(500).json({ error: sanitizeErrorMessage(err.message) });

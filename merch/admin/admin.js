@@ -7815,6 +7815,24 @@
     });
   }
 
+  function getAvailableMerchProducts() {
+    const prods = [];
+    const seen = new Set();
+    const source = Array.isArray(state.products) ? state.products : [];
+    for (const p of source) {
+      const pid = Number(p.parentProductId ?? p.productId ?? p.id);
+      if (!Number.isInteger(pid) || pid <= 0 || seen.has(pid)) continue;
+      if (p.status === 'archived' || p.archived) continue;
+      seen.add(pid);
+      prods.push({
+        id: pid,
+        name: p.productName || p.name || `Product #${pid}`,
+        category: p.category || 'General',
+      });
+    }
+    return prods;
+  }
+
   async function openStockShortageEmailModal(order) {
     if (!order) return;
     openModal({
@@ -7832,6 +7850,11 @@
     });
 
     try {
+      if (!state.productsLoaded || !state.products?.length) {
+        await loadProductData().catch(() => {});
+      }
+      const availableProducts = getAvailableMerchProducts();
+
       const [preview, couponsData] = await Promise.all([
         apiRequest(`/api/merch/admin/orders/${encodeURIComponent(order.id)}/stock-shortage/email-preview`),
         apiRequest(`/api/merch/admin/orders/${encodeURIComponent(order.id)}/compensation-coupons`).catch(() => ({ eligibleCoupons: [], ineligibleCoupons: [] })),
@@ -7845,8 +7868,14 @@
         subEl.textContent = 'Preview apology email, attach courtesy compensation, and confirm customer notification';
       }
 
-      const isAlreadySent = preview.communicationStatus === 'sent';
-      const isFailed = preview.communicationStatus === 'failed';
+      const requiresResendReason = Boolean(preview.requiresResendReason);
+      const isAlreadySent = Boolean(preview.isAlreadySent);
+      const isFailed = Boolean(preview.isFailed);
+      const isActiveSending = Boolean(preview.isActiveSending);
+      const isStaleSending = Boolean(preview.isStaleSending);
+      const dispatchMode = preview.dispatchMode || (isAlreadySent ? 'resend_authorized' : 'first_time');
+      const buttonLabel = preview.buttonLabel || (isAlreadySent ? 'Resend Delay Email' : (isFailed ? 'Retry Sending Email' : 'Send Customer Delay Email'));
+
       let eligibleCoupons = Array.isArray(couponsData?.eligibleCoupons) ? [...couponsData.eligibleCoupons] : [];
       const ineligibleCoupons = Array.isArray(couponsData?.ineligibleCoupons) ? couponsData.ineligibleCoupons : [];
       const customerEmail = String(preview.recipientEmail || order.customerEmail || order.email || '').trim().toLowerCase();
@@ -7858,16 +7887,26 @@
               <span style="font-size:12px;font-weight:700;color:#5a2c1d;">
                 ✉️ Customer Communication Details
               </span>
-              <span class="admin-badge ${isAlreadySent ? 'admin-badge--success' : (isFailed ? 'admin-badge--danger' : 'admin-badge--ready-comm')}">
-                ${isAlreadySent ? 'Delivered' : (isFailed ? 'Delivery Failed' : 'Ready to Send')}
+              <span class="admin-badge ${isAlreadySent ? 'admin-badge--success' : (isFailed ? 'admin-badge--danger' : (isActiveSending ? 'admin-badge--warning' : 'admin-badge--ready-comm'))}">
+                ${isAlreadySent ? 'Delivered' : (isFailed ? 'Delivery Failed' : (isActiveSending ? 'Send In Flight' : 'Ready to Send'))}
               </span>
             </div>
             <div style="font-size:12px;color:#595959;line-height:1.6;">
               <strong>Recipient:</strong> ${escapeHtml(preview.customerName)} &lt;<code>${escapeHtml(preview.recipientEmail)}</code>&gt;<br>
               <strong>Order:</strong> ${escapeHtml(preview.orderNumber)}<br>
-              <strong>Revised Delivery Estimate:</strong> ${preview.hasEstimate ? `<strong>${escapeHtml(preview.revisedDeliveryEstimate)}</strong>` : '<span style="color:#8c8c8c;"><em>Not specified — email explains timeline is actively being confirmed</em></span>'}<br>
-              ${isAlreadySent ? `<span style="color:#237804;"><strong>Sent At:</strong> ${escapeHtml(dateLabel(preview.communicatedAt) || 'Previously sent')} to ${escapeHtml(preview.communicationSentTo || preview.recipientEmail)}</span>` : ''}
-              ${isFailed && preview.communicationError ? `<span style="color:#cf1322;"><strong>Last Error:</strong> ${escapeHtml(preview.communicationError)}</span>` : ''}
+              <strong>Revised Delivery Estimate:</strong>
+              ${preview.hasEstimate
+                ? `<strong style="color:#262626;">${escapeHtml(preview.revisedDeliveryEstimate)}</strong>`
+                : '<span style="color:#8c8c8c;"><em>Not confirmed yet — timeline is actively being verified with suppliers</em></span>'
+              }
+              <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" id="editDeliveryEstimateInReviewBtn" style="margin-left:8px;padding:1px 8px;font-size:11px;vertical-align:middle;color:#b85d3b;">
+                📝 Edit in Review
+              </button>
+              <span class="admin-table__muted" style="display:block;font-size:10.5px;margin-top:2px;font-style:italic;">
+                Delivery estimate is verified and managed via "Review Delay & Delivery Estimate".
+              </span>
+              ${isAlreadySent ? `<span style="color:#237804;"><strong>Sent At:</strong> ${escapeHtml(dateLabel(preview.communicatedAt) || 'Previously sent')} to ${escapeHtml(preview.communicationSentTo || preview.recipientEmail)}</span><br>` : ''}
+              ${isFailed && preview.communicationError ? `<span style="color:#cf1322;"><strong>Last Error:</strong> ${escapeHtml(preview.communicationError)}</span><br>` : ''}
             </div>
           </div>
 
@@ -7931,9 +7970,34 @@
                   <span style="font-size:11px;font-weight:600;">Eligibility Scope</span>
                   <select class="admin-select" id="newCompensationCouponScope" style="margin-top:2px;font-size:12px;">
                     <option value="merch">Entire Merch Store</option>
+                    <option value="selected_products">Selected Products</option>
                   </select>
                 </label>
               </div>
+
+              <!-- Multi-select for Selected Products (hidden by default) -->
+              <div id="compensationCouponProductsContainer" style="display:none;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px 12px;margin-bottom:10px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                  <span style="font-size:11px;font-weight:700;color:#374151;">Eligible Products (select at least one):</span>
+                  <div style="display:flex;gap:6px;">
+                    <button type="button" id="selectAllCompensationProductsBtn" class="admin-btn admin-btn--soft admin-btn--sm" style="padding:1px 6px;font-size:10.5px;">Select All</button>
+                    <button type="button" id="clearAllCompensationProductsBtn" class="admin-btn admin-btn--ghost admin-btn--sm" style="padding:1px 6px;font-size:10.5px;">Clear</button>
+                  </div>
+                </div>
+                <div id="compensationProductCheckboxesList" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));gap:6px;max-height:160px;overflow-y:auto;">
+                  ${availableProducts.map((p) => `
+                    <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#374151;cursor:pointer;background:#fff;border:1px solid #e5e7eb;border-radius:4px;padding:4px 8px;">
+                      <input type="checkbox" class="compensation-product-cb" value="${p.id}" data-name="${escapeHtml(p.name)}" style="accent-color:#237804;" />
+                      <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><strong>${escapeHtml(p.name)}</strong></span>
+                    </label>
+                  `).join('')}
+                </div>
+                <div id="compensationCouponProductsError" style="display:none;color:#cf1322;font-size:11px;margin-top:6px;font-weight:600;">
+                  ⚠️ Please select at least one product when restricting to Selected Products.
+                </div>
+              </div>
+
+              <div id="compensationCouponScopeNotice" style="display:none;font-size:11px;color:#237804;background:#f6ffed;border:1px solid #b7eb8f;border-radius:4px;padding:6px 10px;margin-bottom:10px;"></div>
 
               <div style="background:#f6ffed;border:1px solid #d9f7be;border-radius:4px;padding:8px 10px;font-size:11px;color:#237804;margin-bottom:10px;">
                 <strong>🔒 Customer Restriction:</strong> Exclusively assigned to <code>${escapeHtml(customerEmail || 'affected customer')}</code>. The checkout backend will securely reject redemption attempts by any other account.
@@ -8019,12 +8083,21 @@
             &bull; Email dispatch does NOT consume coupon usage or modify order financial balances.
           </div>
 
-          ${isAlreadySent ? `
+          ${requiresResendReason ? `
             <div style="background:#fffbe6;border:1px solid #ffe58f;border-radius:6px;padding:10px 14px;">
               <label class="admin-field" style="margin:0;">
-                <span style="font-weight:600;font-size:12px;color:#d46b08;">Resend Authorization Reason (Required)</span>
-                <input class="admin-input" id="stockDelayResendReasonInput" type="text" placeholder="e.g. Customer requested copy to new email address" style="margin-top:4px;" />
+                <span style="font-weight:600;font-size:12px;color:#d46b08;">
+                  ${dispatchMode === 'stale_recovery' ? 'Stale Dispatch Recovery Reason (Required)' : 'Resend Authorization Reason (Required)'}
+                </span>
+                <input class="admin-input" id="stockDelayResendReasonInput" type="text" placeholder="${dispatchMode === 'stale_recovery' ? 'e.g. Previous attempt timed out after server restart; customer confirmed non-receipt' : 'e.g. Customer requested copy to new email address'}" style="margin-top:4px;" />
+                <small class="admin-table__muted" style="font-size:10px;margin-top:2px;">Document an administrative reason (at least 5 characters) for audit trail.</small>
               </label>
+            </div>
+          ` : ''}
+
+          ${isActiveSending ? `
+            <div style="background:#fff7e6;border:1px solid #ffd591;border-radius:6px;padding:10px 14px;color:#d46b08;font-size:12px;">
+              ⏳ <strong>Send in Progress:</strong> A delay notification dispatch is currently in flight for this order. Please wait for provider response before initiating a new dispatch.
             </div>
           ` : ''}
 
@@ -8037,8 +8110,8 @@
 
       footEl.innerHTML = `
         <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button>
-        <button class="admin-btn admin-btn--primary" type="button" data-action="confirm-send-stock-delay-email" data-order-id="${order.id}" ${isAlreadySent ? 'data-force-retry="true"' : ''} disabled>
-          ${isAlreadySent ? 'Resend Delay Email' : (isFailed ? 'Retry Sending Email' : 'Send Delay Notification Email')}
+        <button class="admin-btn admin-btn--primary" type="button" data-action="confirm-send-stock-delay-email" data-order-id="${order.id}" data-requires-reason="${requiresResendReason ? 'true' : 'false'}" ${isActiveSending ? 'disabled title="Send currently in flight"' : 'disabled'}>
+          ${escapeHtml(buttonLabel)}
         </button>
       `;
 
@@ -8134,6 +8207,13 @@
         }
       });
 
+      // ─── Edit Delivery Estimate in Review Workflow ───
+      const editEstimateBtn = bodyEl.querySelector('#editDeliveryEstimateInReviewBtn');
+      editEstimateBtn?.addEventListener('click', () => {
+        state.returnToEmailModalOrderId = order.id;
+        openStockShortageReviewModal(order);
+      });
+
       // ─── Inline Coupon Creation Workflow ───
       const openCreateBtn = bodyEl.querySelector('#openCreateCompensationCouponBtn');
       const createForm = bodyEl.querySelector('#stockDelayCreateCouponForm');
@@ -8147,6 +8227,22 @@
       const limitInput = bodyEl.querySelector('#newCompensationCouponLimit');
       const scopeSelect = bodyEl.querySelector('#newCompensationCouponScope');
       const summaryBox = bodyEl.querySelector('#newCompensationCouponSummaryBox');
+      const productsContainer = bodyEl.querySelector('#compensationCouponProductsContainer');
+      const selectAllProdsBtn = bodyEl.querySelector('#selectAllCompensationProductsBtn');
+      const clearAllProdsBtn = bodyEl.querySelector('#clearAllCompensationProductsBtn');
+      const prodsError = bodyEl.querySelector('#compensationCouponProductsError');
+      const scopeNotice = bodyEl.querySelector('#compensationCouponScopeNotice');
+      const productCheckboxes = Array.from(bodyEl.querySelectorAll('.compensation-product-cb'));
+
+      function getSelectedProductDetails() {
+        const selected = [];
+        productCheckboxes.forEach((cb) => {
+          if (cb.checked) {
+            selected.push({ id: Number(cb.value), name: cb.dataset.name || `Product #${cb.value}` });
+          }
+        });
+        return selected;
+      }
 
       function generateCouponCode() {
         const cleanOrder = String(order.orderNumber || order.id || 'DELAY').replace(/[^A-Za-z0-9]/g, '').slice(-6).toUpperCase();
@@ -8162,10 +8258,64 @@
         const benefitStr = typeSelect?.value === 'flat' ? `₹${cVal} OFF` : `${cVal}% OFF`;
         const cExpiry = expiryInput?.value || 'No date set';
         const cLimit = Number(limitInput?.value || 1);
+        const isSelectedProducts = scopeSelect?.value === 'selected_products';
+        let scopeSummaryText = 'Entire Merch Store';
+        if (isSelectedProducts) {
+          const selected = getSelectedProductDetails();
+          if (selected.length === 0) {
+            scopeSummaryText = '<span style="color:#cf1322;font-weight:600;">Selected Products (⚠️ None selected)</span>';
+          } else {
+            scopeSummaryText = `<strong>Selected Products:</strong> ${escapeHtml(selected.map((p) => p.name).join(', '))} (${selected.length} product${selected.length === 1 ? '' : 's'})`;
+          }
+        }
         summaryBox.innerHTML = `
-          <strong>Preview:</strong> Private coupon <code>${escapeHtml(cCode)}</code> providing <strong>${escapeHtml(benefitStr)}</strong>, valid until <strong>${escapeHtml(cExpiry)}</strong> (${cLimit} redemption) for <code>${escapeHtml(customerEmail)}</code>.
+          <strong>Preview:</strong> Private coupon <code>${escapeHtml(cCode)}</code> providing <strong>${escapeHtml(benefitStr)}</strong>, valid until <strong>${escapeHtml(cExpiry)}</strong> (${cLimit} redemption) for <code>${escapeHtml(customerEmail)}</code>.<br>
+          <div style="margin-top:4px;font-size:11px;color:#555;"><strong>Eligibility Scope:</strong> ${scopeSummaryText}</div>
         `;
       }
+
+      scopeSelect?.addEventListener('change', () => {
+        if (scopeSelect.value === 'selected_products') {
+          if (productsContainer) productsContainer.style.display = 'block';
+          if (scopeNotice) scopeNotice.style.display = 'none';
+        } else {
+          if (productsContainer) productsContainer.style.display = 'none';
+          if (prodsError) prodsError.style.display = 'none';
+          // Discard and clear any existing product selection when switching back to Entire Merch Store
+          let hadSelection = false;
+          productCheckboxes.forEach((cb) => {
+            if (cb.checked) hadSelection = true;
+            cb.checked = false;
+          });
+          if (scopeNotice) {
+            if (hadSelection) {
+              scopeNotice.textContent = 'ℹ️ Previous product selection discarded. Scope reset to Entire Merch Store.';
+              scopeNotice.style.display = 'block';
+            } else {
+              scopeNotice.style.display = 'none';
+            }
+          }
+        }
+        updateCreateCouponSummary();
+      });
+
+      selectAllProdsBtn?.addEventListener('click', () => {
+        productCheckboxes.forEach((cb) => { cb.checked = true; });
+        if (prodsError) prodsError.style.display = 'none';
+        updateCreateCouponSummary();
+      });
+
+      clearAllProdsBtn?.addEventListener('click', () => {
+        productCheckboxes.forEach((cb) => { cb.checked = false; });
+        updateCreateCouponSummary();
+      });
+
+      productCheckboxes.forEach((cb) => {
+        cb.addEventListener('change', () => {
+          if (prodsError) prodsError.style.display = 'none';
+          updateCreateCouponSummary();
+        });
+      });
 
       openCreateBtn?.addEventListener('click', () => {
         if (!createForm) return;
@@ -8179,6 +8329,11 @@
             valInput.max = 100;
           }
           if (limitInput) limitInput.value = 1;
+          if (scopeSelect) scopeSelect.value = 'merch';
+          if (productsContainer) productsContainer.style.display = 'none';
+          if (prodsError) prodsError.style.display = 'none';
+          if (scopeNotice) scopeNotice.style.display = 'none';
+          productCheckboxes.forEach((cb) => { cb.checked = false; });
           if (expiryInput) {
             const d = new Date();
             d.setDate(d.getDate() + 30);
@@ -8216,7 +8371,7 @@
         updateCreateCouponSummary();
       });
 
-      [codeInput, valInput, expiryInput, limitInput, scopeSelect].forEach((el) => {
+      [codeInput, valInput, expiryInput, limitInput].forEach((el) => {
         el?.addEventListener('input', updateCreateCouponSummary);
         el?.addEventListener('change', updateCreateCouponSummary);
       });
@@ -8250,6 +8405,16 @@
           return;
         }
 
+        let selectedProductIds = [];
+        if (appliesTo === 'selected_products') {
+          selectedProductIds = getSelectedProductDetails().map((p) => p.id);
+          if (selectedProductIds.length === 0) {
+            if (prodsError) prodsError.style.display = 'block';
+            toast('Product Required', 'Please select at least one product when restricting to Selected Products.', 'warning');
+            return;
+          }
+        }
+
         submitCreateBtn.disabled = true;
         const originalBtnText = submitCreateBtn.textContent;
         submitCreateBtn.textContent = 'Creating...';
@@ -8264,7 +8429,8 @@
               discountValue,
               validTill,
               maxRedemptions,
-              appliesTo,
+              appliesTo: appliesTo === 'selected_products' ? 'selected_products' : 'merch',
+              productIds: appliesTo === 'selected_products' ? selectedProductIds : undefined,
             }),
           });
 
@@ -8718,10 +8884,17 @@
             body: JSON.stringify({ reviewStatus, revisedDeliveryEstimate, internalDelayNote }),
           });
           toast('Delay Review Saved', `Order ${res.order?.orderNumber || orderId} shortage review updated.`, 'success');
-          closeModal();
           await loadOrderData();
           await loadDashboardStats({ silent: true });
           renderOrders();
+
+          if (state.returnToEmailModalOrderId === orderId) {
+            state.returnToEmailModalOrderId = null;
+            const updatedOrder = state.orders.find((o) => Number(o.id) === orderId) || res.order || order;
+            await openStockShortageEmailModal(updatedOrder);
+          } else {
+            closeModal();
+          }
         } catch (err) {
           toast('Failed to save review', err.message || 'Unable to update shortage review.', 'danger');
           target.disabled = false;
@@ -8738,9 +8911,9 @@
       case 'confirm-send-stock-delay-email': {
         const orderId = Number(target?.dataset?.orderId || id);
         if (!orderId) return;
-        const forceRetry = target?.dataset?.forceRetry === 'true';
+        const requiresReason = target?.dataset?.requiresReason === 'true';
         let resendReason = '';
-        if (forceRetry) {
+        if (requiresReason) {
           const reasonEl = els.adminModalDialog.querySelector('#stockDelayResendReasonInput');
           resendReason = String(reasonEl?.value || '').trim();
           if (resendReason.length < 5) {
@@ -8765,8 +8938,8 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               couponId: couponId || null,
-              confirmResend: forceRetry,
-              resendReason,
+              confirmResend: requiresReason,
+              resendReason: requiresReason ? resendReason : undefined,
               customMessage: customMessage || undefined,
             }),
           });
@@ -9005,9 +9178,17 @@
         }
         return;
       }
-      case 'close-modal':
+      case 'close-modal': {
+        const returnOrderId = state.returnToEmailModalOrderId;
+        state.returnToEmailModalOrderId = null;
+        if (returnOrderId) {
+          const returnOrder = state.orders.find((o) => Number(o.id) === returnOrderId) || { id: returnOrderId };
+          await openStockShortageEmailModal(returnOrder);
+          return;
+        }
         closeModal();
         return;
+      }
       case 'logout':
   closeModal();
 

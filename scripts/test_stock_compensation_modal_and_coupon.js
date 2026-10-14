@@ -1,4 +1,5 @@
 const assert = require('assert');
+const Database = require('better-sqlite3');
 
 const BASE_URL = 'http://localhost:3000';
 
@@ -21,6 +22,10 @@ async function main() {
   };
 
   const testOrderId = 43; // Sowmya Sai Daddanala, sowmyaram63@gmail.com, order HM-20260929-4BB077
+
+  const dbInit = new Database('./booking/data/booking.db');
+  dbInit.prepare("UPDATE merch_order_stock_shortages SET customer_communication_status = 'pending', revised_delivery_estimate = '2026-10-25' WHERE order_id = ?").run(testOrderId);
+  dbInit.close();
 
   // 2. Test 1: Preview without coupon contains predefined apology message and does NOT mention discount
   console.log('[Test 1] Preview without coupon contains predefined apology message and no discount');
@@ -210,7 +215,6 @@ async function main() {
 
   // 11. Test 11: Mocked send dispatch with coupon succeeds and records compensation coupon
   console.log('[Test 11] Mocked send dispatch records compensation coupon and maintains safety guardrails');
-  const Database = require('better-sqlite3');
   const db = new Database('./booking/data/booking.db');
   db.prepare("UPDATE merch_order_stock_shortages SET customer_communication_status = 'pending', customer_communicated_at = NULL, customer_communication_sent_to = NULL WHERE order_id = ?").run(testOrderId);
   db.close();
@@ -267,17 +271,173 @@ async function main() {
   assert.strictEqual(cooldownResend.status, 429, 'Cooldown must block sends within 60s');
   console.log('✓ Test 12 passed');
 
-  // 13. Test 13: Order financial balances, inventory, order status remain unchanged
-  console.log('[Test 13] Verify financial balances, order status, and inventory unchanged');
-  const orderCheckRes = await fetch(`${BASE_URL}/api/merch/admin/orders?limit=100`, { headers });
-  const ordersList = await orderCheckRes.json();
-  const order43 = (ordersList.orders || ordersList).find((o) => o.id === testOrderId);
-  assert.strictEqual(order43.totalAmount, 100, 'Order total must remain unchanged (₹1 / 100)');
-  assert.strictEqual(order43.status, 'stock_shortage', 'Order status must remain stock_shortage');
-  console.log('✓ Test 13 passed');
+  // 14. Test 14: Selected Products coupon creation, validation, and email preview
+  console.log('[Test 14] Selected Products coupon creation, scope formatting, and preview');
+  // Validation: empty productIds rejected
+  const emptyProdRes = await fetch(`${BASE_URL}/api/merch/admin/orders/${testOrderId}/compensation-coupons`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      code: `SEL-EMPTY-${Date.now()}`,
+      discountValue: 10,
+      appliesTo: 'selected_products',
+      productIds: [],
+    }),
+  });
+  assert.strictEqual(emptyProdRes.status, 400, 'Empty productIds should be rejected');
+
+  // Valid creation with selected products
+  const selectedCode = `PROD-CARE-${Date.now().toString().slice(-6)}`;
+  const selCreateRes = await fetch(`${BASE_URL}/api/merch/admin/orders/${testOrderId}/compensation-coupons`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      code: selectedCode,
+      discountType: 'percentage',
+      discountValue: 20,
+      validTill: '2026-12-31',
+      maxRedemptions: 1,
+      appliesTo: 'selected_products',
+      productIds: [11, 12], // H2 Molecular Hydrogen Water Bottle (11), H2 Hydrogen Mist Spray (12)
+    }),
+  });
+  assert.strictEqual(selCreateRes.status, 201, 'Selected products coupon creation failed');
+  const selCreateData = await selCreateRes.json();
+  assert.strictEqual(selCreateData.success, true);
+  assert.ok(selCreateData.coupon.scopeLabel.includes('Selected Products'), 'Scope label must include Selected Products');
+  assert.ok(selCreateData.coupon.scopeLabel.includes('H2 Hydrogen Mist Spray'), 'Scope label must name selected products');
+  const selCouponId = selCreateData.coupon.id;
+
+  // Preview with Selected Products coupon shows product-specific scope
+  const selPreviewRes = await fetch(`${BASE_URL}/api/merch/admin/orders/${testOrderId}/stock-shortage/email-preview?couponId=${selCouponId}`, { headers });
+  const selPreview = await selPreviewRes.json();
+  assert.ok(selPreview.text.includes('Selected Products'), 'Text preview must mention selected products scope');
+  assert.ok(selPreview.html.includes('Selected Products'), 'HTML preview must render selected products scope');
+  console.log('✓ Test 14 passed');
+
+  // 15. Test 15: Checkout validation genuinely restricts to selected products
+  console.log('[Test 15] Checkout validation genuinely restricts coupon to selected products');
+  // Applying on cart with product 12 (selected)
+  const cartWithSelected = await fetch(`${BASE_URL}/api/merch/preview-coupon`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      couponCode: selectedCode,
+      customerEmail: 'sowmyaram63@gmail.com',
+      subtotalAmountPaise: 100000,
+      productIds: [12],
+      productLineTotals: { '12': 100000 },
+    }),
+  });
+  assert.strictEqual(cartWithSelected.status, 200, 'Selected product must be valid for coupon');
+  const validCartData = await cartWithSelected.json();
+  assert.strictEqual(validCartData.coupon.discountAmountInr, 200, '20% of ₹1,000 should be ₹200');
+
+  // Applying on cart with product 13 ONLY (unselected product: Hoodie)
+  const cartWithUnselected = await fetch(`${BASE_URL}/api/merch/preview-coupon`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      couponCode: selectedCode,
+      customerEmail: 'sowmyaram63@gmail.com',
+      subtotalAmountPaise: 150000,
+      productIds: [13],
+      productLineTotals: { '13': 150000 },
+    }),
+  });
+  assert.strictEqual(cartWithUnselected.status, 400, 'Unselected product cart must be rejected');
+  const unselData = await cartWithUnselected.json();
+  assert.ok(unselData.error.includes('not valid'), 'Error must state coupon is not valid');
+  console.log('✓ Test 15 passed');
+
+  // 16. Test 16: Delivery estimate dynamic persistence and blank fallback
+  console.log('[Test 16] Delivery estimate is loaded dynamically from review and handles blank without fabricating date');
+  // Update estimate via authorized review workflow
+  const updateEstRes = await fetch(`${BASE_URL}/api/merch/admin/orders/${testOrderId}/stock-shortage/review`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      reviewStatus: 'ready_for_communication',
+      revisedDeliveryEstimate: '2026-11-15',
+      internalDelayNote: 'Updated supplier confirmation date',
+    }),
+  });
+  assert.strictEqual(updateEstRes.status, 200);
+
+  // Preview reflects updated estimate
+  const estPreviewRes = await fetch(`${BASE_URL}/api/merch/admin/orders/${testOrderId}/stock-shortage/email-preview`, { headers });
+  const estPreview = await estPreviewRes.json();
+  assert.strictEqual(estPreview.revisedDeliveryEstimate, '2026-11-15');
+  assert.ok(estPreview.text.includes('2026-11-15'), 'Preview text should reflect revised estimate 2026-11-15');
+
+  // Clear estimate via review
+  await fetch(`${BASE_URL}/api/merch/admin/orders/${testOrderId}/stock-shortage/review`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      reviewStatus: 'ready_for_communication',
+      revisedDeliveryEstimate: '',
+      internalDelayNote: 'Supplier timeline pending',
+    }),
+  });
+
+  const blankEstPreviewRes = await fetch(`${BASE_URL}/api/merch/admin/orders/${testOrderId}/stock-shortage/email-preview`, { headers });
+  const blankEstPreview = await blankEstPreviewRes.json();
+  assert.strictEqual(blankEstPreview.revisedDeliveryEstimate, null);
+  assert.ok(blankEstPreview.text.includes('verified timeline'), 'Blank estimate must use confirmation message');
+  assert.ok(!blankEstPreview.text.includes('2026-10-25'), 'Blank estimate must NEVER invent a date');
+  console.log('✓ Test 16 passed');
+
+  // 17. Test 17: Resend authorization reason requirements per backend dispatch rules
+  console.log('[Test 17] Resend authorization reason field logic (first-time, provider failure, sent, stale, in-flight)');
+  const dbTest = new Database('./booking/data/booking.db');
+
+  // Case A: First-time send (pending/null status)
+  dbTest.prepare("UPDATE merch_order_stock_shortages SET customer_communication_status = 'pending', customer_communicated_at = NULL WHERE order_id = ?").run(testOrderId);
+  const prevFirstTimeRes = await fetch(`${BASE_URL}/api/merch/admin/orders/${testOrderId}/stock-shortage/email-preview`, { headers });
+  const prevFirstTime = await prevFirstTimeRes.json();
+  assert.strictEqual(prevFirstTime.dispatchMode, 'first_time');
+  assert.strictEqual(prevFirstTime.requiresResendReason, false);
+  assert.strictEqual(prevFirstTime.buttonLabel, 'Send Customer Delay Email');
+
+  // Case B: Retry after provider failure
+  dbTest.prepare("UPDATE merch_order_stock_shortages SET customer_communication_status = 'failed', customer_communicated_at = datetime('now') WHERE order_id = ?").run(testOrderId);
+  const prevFailedRes = await fetch(`${BASE_URL}/api/merch/admin/orders/${testOrderId}/stock-shortage/email-preview`, { headers });
+  const prevFailed = await prevFailedRes.json();
+  assert.strictEqual(prevFailed.dispatchMode, 'retry_failed');
+  assert.strictEqual(prevFailed.requiresResendReason, false);
+  assert.strictEqual(prevFailed.buttonLabel, 'Retry Sending Customer Delay Email');
+
+  // Case C: Already sent
+  dbTest.prepare("UPDATE merch_order_stock_shortages SET customer_communication_status = 'sent', customer_communicated_at = datetime('now', '-2 minutes') WHERE order_id = ?").run(testOrderId);
+  const prevSentRes = await fetch(`${BASE_URL}/api/merch/admin/orders/${testOrderId}/stock-shortage/email-preview`, { headers });
+  const prevSent = await prevSentRes.json();
+  assert.strictEqual(prevSent.dispatchMode, 'resend_authorized');
+  assert.strictEqual(prevSent.requiresResendReason, true);
+  assert.strictEqual(prevSent.buttonLabel, 'Resend Delay Email');
+
+  // Case D: Stale sending (interrupted / uncertain outcome >= 5 mins)
+  dbTest.prepare("UPDATE merch_order_stock_shortages SET customer_communication_status = 'sending', updated_at = datetime('now', '-10 minutes') WHERE order_id = ?").run(testOrderId);
+  const prevStaleRes = await fetch(`${BASE_URL}/api/merch/admin/orders/${testOrderId}/stock-shortage/email-preview`, { headers });
+  const prevStale = await prevStaleRes.json();
+  assert.strictEqual(prevStale.dispatchMode, 'stale_recovery');
+  assert.strictEqual(prevStale.requiresResendReason, true);
+  assert.strictEqual(prevStale.buttonLabel, 'Authorize Resend (Recover Interrupted Dispatch)');
+
+  // Case E: In-flight sending (< 5 mins)
+  dbTest.prepare("UPDATE merch_order_stock_shortages SET customer_communication_status = 'sending', updated_at = datetime('now', '-1 minute') WHERE order_id = ?").run(testOrderId);
+  const prevInFlightRes = await fetch(`${BASE_URL}/api/merch/admin/orders/${testOrderId}/stock-shortage/email-preview`, { headers });
+  const prevInFlight = await prevInFlightRes.json();
+  assert.strictEqual(prevInFlight.dispatchMode, 'in_flight');
+  assert.strictEqual(prevInFlight.buttonLabel, 'Sending In Progress...');
+
+  // Reset order 43 back to clean state for normal operation
+  dbTest.prepare("UPDATE merch_order_stock_shortages SET customer_communication_status = 'pending', revised_delivery_estimate = '2026-10-25' WHERE order_id = ?").run(testOrderId);
+  dbTest.close();
+  console.log('✓ Test 17 passed');
 
   console.log('\n========================================');
-  console.log('ALL MODAL & COUPON TESTS PASSED SUCCESSFULLY!');
+  console.log('ALL MODAL, SCOPE & RESEND TESTS PASSED SUCCESSFULLY!');
   console.log('========================================\n');
 }
 

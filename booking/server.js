@@ -11910,8 +11910,11 @@ function validateCouponForUser({ code, userId, appliesTo, productIds = [], produ
   if (appliesToVariant && restrictedVariantSubtotalPaise <= 0) {
     return { error: 'This coupon is only valid when the selected product variant is in the cart.' };
   }
+  const hasProductLineTotals = Boolean(productLineTotals && Object.keys(productLineTotals).length > 0);
   const restrictedProductSubtotalPaise = Boolean(productRestriction || categoryRestriction)
-    ? Math.max(0, Math.round(restrictedProductIds.reduce((sum, id) => sum + Number(productLineTotals?.[id] || 0), 0) || productSubtotalAmountPaise || 0))
+    ? Math.max(0, Math.round(hasProductLineTotals
+        ? restrictedProductIds.reduce((sum, id) => sum + Number(productLineTotals[id] || 0), 0)
+        : (productSubtotalAmountPaise || 0)))
     : 0;
   if (appliesToProduct && restrictedProductSubtotalPaise <= 0) {
     return { error: categoryRestriction ? 'This coupon is only valid when an item from the selected category is in the cart.' : 'This coupon is only valid when the selected product is in the cart.' };
