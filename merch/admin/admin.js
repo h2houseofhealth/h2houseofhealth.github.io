@@ -68,6 +68,7 @@
     delivered: '#b9674b',
     cancelled: '#8f392b',
     returned: '#a9472f',
+    stock_shortage: '#b83220',
   };
   const REVENUE_PERIOD_OPTIONS = [
     { value: 'year', label: '12 Months (Jan-Dec)' },
@@ -215,6 +216,7 @@
     delivered: { label: 'Delivered', color: ORDER_STATUS_COLORS.delivered },
     cancelled: { label: 'Cancelled', color: ORDER_STATUS_COLORS.cancelled },
     returned: { label: 'Returned', color: ORDER_STATUS_COLORS.returned },
+    stock_shortage: { label: 'Stock Shortage', color: ORDER_STATUS_COLORS.stock_shortage },
   };
 
   function normalizeOrderStatus(status) {
@@ -2025,6 +2027,7 @@
     'Influencer Referral': { label: 'INFLUENCER REFERRAL', dotClass: 'admin-activity__dot--info', icon: '&#128994;', className: 'admin-notification__icon--info' },
     'Order Cancelled': { label: 'ORDER CANCELLED', dotClass: 'admin-activity__dot--danger', icon: '&#128308;', className: 'admin-notification__icon--danger' },
     'Order Refunded': { label: 'ORDER REFUNDED', dotClass: 'admin-activity__dot--warning', icon: '&#128992;', className: 'admin-notification__icon--warning' },
+    'Stock Shortage': { label: 'STOCK SHORTAGE', dotClass: 'admin-activity__dot--danger', icon: '&#128308;', className: 'admin-notification__icon--danger' },
   };
 
   // Notifications are supplied by the merch API from current orders, customers, payments, and inventory.
@@ -2140,6 +2143,7 @@
     campaigns: [],
     campaignsLoading: false,
     latestCreatedCampaign: null,
+    editingCampaignId: null,
   };
 
   const els = {
@@ -2208,8 +2212,25 @@
       paid: 'Paid',
       failed: 'Failed',
       refunded: 'Refunded',
+      stock_shortage: 'STOCK SHORTAGE — FULFILMENT PENDING',
     };
     return map[String(status || '').toLowerCase()] || String(status || 'Unknown');
+  }
+
+  function getShortageReviewStatusLabel(status) {
+    const map = {
+      awaiting_review: 'Awaiting Review',
+      reviewed: 'Reviewed',
+      ready_for_communication: 'Ready for Customer Communication',
+    };
+    return map[String(status || '').toLowerCase()] || 'Awaiting Review';
+  }
+
+  function shortageReviewBadgeClass(status) {
+    const s = String(status || '').toLowerCase();
+    if (s === 'ready_for_communication') return 'admin-badge--ready-comm';
+    if (s === 'reviewed') return 'admin-badge--reviewed';
+    return 'admin-badge--awaiting-review';
   }
 
   function toast(title, message, tone = 'default') {
@@ -2299,8 +2320,8 @@
     let stock = item.stock != null ? item.stock : null;
 
     const itemIdStr = String(item.id || '');
-    if (!orderId && (itemIdStr.startsWith('order-') || itemIdStr.startsWith('payment-') || itemIdStr.startsWith('order-status-') || itemIdStr.startsWith('payment-failed-') || itemIdStr.startsWith('referral-'))) {
-      const parsedId = itemIdStr.replace(/^(order-status-|payment-failed-|payment-|order-|referral-)/, '');
+    if (!orderId && (itemIdStr.startsWith('order-') || itemIdStr.startsWith('payment-') || itemIdStr.startsWith('order-status-') || itemIdStr.startsWith('payment-failed-') || itemIdStr.startsWith('referral-') || itemIdStr.startsWith('stock-shortage-order-'))) {
+      const parsedId = itemIdStr.replace(/^(order-status-|payment-failed-|payment-|order-|referral-|stock-shortage-order-)/, '').split('-')[0];
       if (parsedId) orderId = parsedId;
     }
     if (!orderNumber && item.message) {
@@ -2336,8 +2357,8 @@
       }
     }
 
-    if (!productId && itemIdStr.startsWith('stock-')) {
-      productId = itemIdStr.replace('stock-', '');
+    if (!productId && (itemIdStr.startsWith('stock-variant-') || itemIdStr.startsWith('stock-'))) {
+      productId = item.productId || itemIdStr.replace(/^stock-(variant-)?/, '');
     }
     if (!productName && (item.type === 'Sold Out' || item.type === 'Out of Stock' || item.type === 'Low Stock' || item.title === 'SOLD OUT') && item.message) {
       productName = item.message.replace(/ (is sold out|is out of stock|has only.*)\.?/i, '').trim();
@@ -2379,7 +2400,7 @@
       const title = String(item.title || '').toLowerCase();
       const msg = String(item.message || '').toLowerCase();
       if (filter === 'orders') {
-        return type.includes('order') || title.includes('order') || type.includes('referral') || msg.includes('placed by');
+        return type.includes('order') || title.includes('order') || type.includes('referral') || msg.includes('placed by') || type.includes('shortage') || title.includes('shortage');
       }
       if (filter === 'payments') {
         return type.includes('payment') || title.includes('payment') || type.includes('refund') || msg.includes('payment received');
@@ -2388,7 +2409,7 @@
         return type.includes('customer') || title.includes('customer') || msg.includes('merch account');
       }
       if (filter === 'inventory') {
-        return type.includes('stock') || type.includes('sold out') || title.includes('sold out') || title.includes('stock') || msg.includes('stock') || msg.includes('sold out');
+        return type.includes('stock') || type.includes('sold out') || title.includes('sold out') || title.includes('stock') || msg.includes('stock') || msg.includes('sold out') || type.includes('shortage');
       }
       return true;
     });
@@ -2407,11 +2428,12 @@
   function renderNotificationItem(item) {
     const data = resolveNotificationItemData(item);
     const rawType = String(item.type || item.title || '').trim();
-    const isPayment = rawType === 'Payment Received' || (item.id && String(item.id).startsWith('payment-')) || /payment received/i.test(item.message || '');
-    const isCustomer = rawType === 'New Customer' || (item.id && String(item.id).startsWith('customer-')) || /created a new merch account/i.test(item.message || '');
-    const isSoldOut = rawType === 'Sold Out' || rawType === 'Out of Stock' || (item.title && /sold out|out of stock/i.test(item.title)) || (item.message && /is sold out|is out of stock/i.test(item.message));
-    const isLowStock = !isSoldOut && (rawType === 'Low Stock' || (item.title && /low stock/i.test(item.title)) || (item.message && /units remaining/i.test(item.message)));
-    const isNewOrder = !isPayment && !isSoldOut && (rawType === 'New Order' || (item.id && String(item.id).startsWith('order-')));
+    const isStockShortage = rawType === 'Stock Shortage' || (item.id && String(item.id).startsWith('stock-shortage-order-')) || /stock shortage/i.test(item.title || '') || /stock shortage/i.test(rawType);
+    const isPayment = !isStockShortage && (rawType === 'Payment Received' || (item.id && String(item.id).startsWith('payment-')) || /payment received/i.test(item.message || ''));
+    const isCustomer = !isStockShortage && (rawType === 'New Customer' || (item.id && String(item.id).startsWith('customer-')) || /created a new merch account/i.test(item.message || ''));
+    const isSoldOut = !isStockShortage && (rawType === 'Sold Out' || rawType === 'Out of Stock' || (item.title && /sold out|out of stock/i.test(item.title)) || (item.message && /is sold out|is out of stock/i.test(item.message)));
+    const isLowStock = !isStockShortage && !isSoldOut && (rawType === 'Low Stock' || (item.title && /low stock/i.test(item.title)) || (item.message && /units remaining/i.test(item.message)));
+    const isNewOrder = !isStockShortage && !isPayment && !isSoldOut && (rawType === 'New Order' || (item.id && String(item.id).startsWith('order-')));
 
     const meta = NOTIFICATION_META[item.type] || {
       label: String(item.title || item.type || 'NOTIFICATION').toUpperCase(),
@@ -2426,7 +2448,16 @@
     let pillHtml = '';
     let actionBtnHtml = '';
 
-    if (isPayment) {
+    if (isStockShortage) {
+      typeLabel = 'STOCK SHORTAGE';
+      dotClass = 'admin-activity__dot--danger';
+      const orderRef = data.orderNumber || item.orderNumber || (data.orderId ? `Order #${data.orderId}` : '');
+      const custRef = data.customerName || item.customerName || '';
+      headlineHtml = `<div class="admin-activity-card__headline"><strong class="admin-activity-card__amount" style="color:var(--admin-danger);">STOCK SHORTAGE</strong>${orderRef ? ` &middot; ${escapeHtml(orderRef)}` : ''}${custRef ? ` (${escapeHtml(custRef)})` : ''}</div>`;
+      subHtml = `<div class="admin-activity-card__sub">${escapeHtml(item.message || 'Fulfillment is blocked because required stock is unavailable.')}</div>`;
+      pillHtml = `<span class="admin-activity-card__pill admin-activity-card__pill--danger">Fulfilment pending</span>`;
+      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-order-activity" data-order-id="${escapeHtml(data.orderId || item.orderId || '')}" data-order-number="${escapeHtml(data.orderNumber || item.orderNumber || '')}">View order &rarr;</button>`;
+    } else if (isPayment) {
       typeLabel = 'PAYMENT RECEIVED';
       dotClass = 'admin-activity__dot--payment';
       const formattedAmount = data.amount != null ? money(data.amount) : '';
@@ -2446,21 +2477,24 @@
     } else if (isSoldOut) {
       typeLabel = 'SOLD OUT';
       dotClass = 'admin-activity__dot--danger';
-      headlineHtml = `<div class="admin-activity-card__headline"><strong class="admin-activity-card__product-name">${escapeHtml(data.productName || 'Hoodie')}</strong></div>`;
-      if (data.variantLabel) {
-        subHtml = `<div class="admin-activity-card__sub">${escapeHtml(data.variantLabel)}</div>`;
+      headlineHtml = `<div class="admin-activity-card__headline"><strong class="admin-activity-card__product-name">${escapeHtml(data.productName || item.productName || 'Product')}</strong></div>`;
+      const variantInfo = [data.variantLabel || item.variantLabel, item.sku ? `SKU: ${item.sku}` : ''].filter(Boolean).join(' · ');
+      if (variantInfo) {
+        subHtml = `<div class="admin-activity-card__sub">${escapeHtml(variantInfo)}</div>`;
       }
       pillHtml = `<span class="admin-activity-card__pill admin-activity-card__pill--danger">Sold out</span>`;
-      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-product-activity" data-product-id="${escapeHtml(data.productId || '')}" data-product-name="${escapeHtml(data.productName || '')}">View product &rarr;</button>`;
+      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-product-activity" data-product-id="${escapeHtml(data.productId || item.productId || '')}" data-product-name="${escapeHtml(data.productName || item.productName || '')}">View product &rarr;</button>`;
     } else if (isLowStock) {
       typeLabel = 'LOW STOCK';
       dotClass = 'admin-activity__dot--warning';
-      headlineHtml = `<div class="admin-activity-card__headline"><strong class="admin-activity-card__product-name">${escapeHtml(data.productName || 'Product')}</strong></div>`;
-      if (data.variantLabel) {
-        subHtml = `<div class="admin-activity-card__sub">${escapeHtml(data.variantLabel)}</div>`;
+      headlineHtml = `<div class="admin-activity-card__headline"><strong class="admin-activity-card__product-name">${escapeHtml(data.productName || item.productName || 'Product')}</strong></div>`;
+      const variantInfo = [data.variantLabel || item.variantLabel, item.sku ? `SKU: ${item.sku}` : ''].filter(Boolean).join(' · ');
+      if (variantInfo) {
+        subHtml = `<div class="admin-activity-card__sub">${escapeHtml(variantInfo)}</div>`;
       }
-      pillHtml = `<span class="admin-activity-card__pill admin-activity-card__pill--warning">${escapeHtml(data.stock != null ? `${data.stock} units remaining` : 'Low stock')}</span>`;
-      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-product-activity" data-product-id="${escapeHtml(data.productId || '')}" data-product-name="${escapeHtml(data.productName || '')}">View product &rarr;</button>`;
+      const stockCount = item.stock != null ? item.stock : data.stock;
+      pillHtml = `<span class="admin-activity-card__pill admin-activity-card__pill--warning">${escapeHtml(stockCount != null ? `${stockCount} units remaining` : 'Low stock')}</span>`;
+      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-product-activity" data-product-id="${escapeHtml(data.productId || item.productId || '')}" data-product-name="${escapeHtml(data.productName || item.productName || '')}">View product &rarr;</button>`;
     } else if (isNewOrder) {
       typeLabel = 'NEW ORDER';
       dotClass = 'admin-activity__dot--order';
@@ -3352,7 +3386,11 @@
     if (rangeEnd) rangeEnd.setDate(rangeEnd.getDate() + 1);
 
     return [...state.orders].filter((order) => {
-      const matchesStatus = state.ordersStatus === 'all' || order.status === state.ordersStatus;
+      const matchesStatus = state.ordersStatus === 'all'
+        ? true
+        : state.ordersStatus === 'stock_shortage'
+          ? (order.status === 'stock_shortage' || Boolean(order.hasStockShortage))
+          : order.status === state.ordersStatus;
       const matchesQuery =
         !query ||
         [order.orderNumber, order.customerName, hasRealEmail(order.email) ? order.email : '', order.phone]
@@ -3370,17 +3408,128 @@
     if (!order) {
       return `<p class="admin-table__muted">Select an order to inspect details.</p>`;
     }
+    const isShortage = Boolean(order.hasStockShortage || order.status === 'stock_shortage');
+    const displayStatus = isShortage ? 'stock_shortage' : order.status;
     return `
       <div class="admin-list">
         <div class="admin-list__item">
-          <div class="admin-list__item-head">
-            <div>
-              <p class="admin-list__item-title">${escapeHtml(order.orderNumber)}</p>
-              <p class="admin-list__item-sub">${escapeHtml(order.customerName)}${hasRealEmail(order.email) ? ` - ${escapeHtml(order.email)}` : ''}</p>
+          <div class="admin-list__item-head" style="flex-wrap:wrap;gap:8px;">
+            <div style="min-width:0;flex:1 1 140px;">
+              <p class="admin-list__item-title" style="word-break:break-word;">${escapeHtml(order.orderNumber)}</p>
+              <p class="admin-list__item-sub" style="word-break:break-word;">${escapeHtml(order.customerName)}${hasRealEmail(order.email) ? ` - ${escapeHtml(order.email)}` : ''}</p>
             </div>
-            <span class="admin-badge ${statusClass(order.status)}">${escapeHtml(getStatusLabel(order.status))}</span>
+            <span class="admin-badge ${statusClass(displayStatus)}" style="white-space:normal;text-align:center;max-width:100%;">${escapeHtml(getStatusLabel(displayStatus))}</span>
           </div>
         </div>
+        ${isShortage ? `
+          <div class="admin-list__item admin-stock-shortage-card">
+            <div class="admin-stock-shortage-card__head">
+              <div class="admin-stock-shortage-card__title-row">
+                <p class="admin-stock-shortage-card__title">
+                  <span>⚠️ STOCK SHORTAGE — FULFILMENT PENDING</span>
+                </p>
+                <div class="admin-stock-shortage-card__badges">
+                  <span class="admin-badge admin-badge--stock-shortage">STOCK SHORTAGE</span>
+                  ${order.stockShortageReviewStatus ? `
+                    <span class="admin-badge ${shortageReviewBadgeClass(order.stockShortageReviewStatus)}">${escapeHtml(getShortageReviewStatusLabel(order.stockShortageReviewStatus))}</span>
+                  ` : ''}
+                  ${order.stockShortageCommunicationStatus === 'sent' || (Array.isArray(order.stockShortages) && order.stockShortages.length && order.stockShortages.every((s) => s.customerCommunicationStatus === 'sent')) ? `
+                    <span class="admin-badge admin-badge--success" style="font-size:10px;">✉️ Email Sent</span>
+                  ` : order.stockShortageCommunicationStatus === 'failed' || (Array.isArray(order.stockShortages) && order.stockShortages.some((s) => s.customerCommunicationStatus === 'failed')) ? `
+                    <span class="admin-badge admin-badge--danger" style="font-size:10px;">⚠️ Email Failed</span>
+                  ` : ''}
+                </div>
+              </div>
+              <p class="admin-stock-shortage-card__desc">
+                This verified paid order is currently blocked from fulfilment due to insufficient stock.
+              </p>
+            </div>
+
+            <div class="admin-stock-shortage-card__items">
+              ${Array.isArray(order.stockShortages) && order.stockShortages.length ? order.stockShortages.map((s) => `
+                <div class="admin-stock-shortage-item">
+                  <div class="admin-stock-shortage-item__head">
+                    <strong class="admin-stock-shortage-item__name">${escapeHtml(s.productName)}</strong>
+                    <div class="admin-stock-shortage-item__badges">
+                      <span class="admin-badge ${shortageReviewBadgeClass(s.reviewStatus)}" style="font-size:9.5px;">${escapeHtml(getShortageReviewStatusLabel(s.reviewStatus))}</span>
+                      ${s.customerCommunicationStatus === 'sent' ? `<span class="admin-badge admin-badge--success" style="font-size:9.5px;">✉️ Sent</span>` : (s.customerCommunicationStatus === 'failed' ? `<span class="admin-badge admin-badge--danger" style="font-size:9.5px;">⚠️ Failed</span>` : '')}
+                    </div>
+                  </div>
+                  <div class="admin-stock-shortage-item__variant">(${escapeHtml(s.variantLabel || 'Default')})</div>
+                  <div class="admin-stock-shortage-item__meta-row">
+                    <span class="admin-stock-shortage-meta-pill"><span>SKU:</span> <code>${escapeHtml(s.sku || 'N/A')}</code></span>
+                    <span class="admin-stock-shortage-meta-pill"><span>Ordered:</span> <strong>${s.orderedQuantity}</strong></span>
+                    <span class="admin-stock-shortage-meta-pill"><span>Available:</span> <strong style="${(s.currentStock != null ? s.currentStock : s.availableStock) <= 0 ? 'color:#cf1322;' : ''}">${s.currentStock != null ? s.currentStock : s.availableStock}</strong></span>
+                  </div>
+                  <div class="admin-stock-shortage-item__reason">
+                    <strong>Shortage Reason:</strong> ${escapeHtml(s.reason)}
+                  </div>
+                  <div class="admin-stock-shortage-item__delivery-box">
+                    <strong>📅 Customer Estimated Delivery:</strong> ${s.revisedDeliveryEstimate ? `<strong>${escapeHtml(s.revisedDeliveryEstimate)}</strong>` : '<span class="admin-table__muted"><em>Not yet determined</em></span>'}
+                  </div>
+                  ${s.internalDelayNote ? `
+                    <div class="admin-stock-shortage-item__internal-box">
+                      <strong>🔒 Internal Delay Note (Staff Only):</strong>
+                      <div style="margin-top:2px;color:#595959;">${escapeHtml(s.internalDelayNote)}</div>
+                    </div>
+                  ` : ''}
+                  ${s.reviewedBy ? `
+                    <div class="admin-stock-shortage-item__audit">Reviewed by ${escapeHtml(s.reviewedBy)}${s.reviewedAt ? ` on ${escapeHtml(dateLabel(s.reviewedAt))}` : ''}</div>
+                  ` : ''}
+                  ${s.customerCommunicatedAt ? `
+                    <div class="admin-stock-shortage-item__sent-box">
+                      <div>✉️ <strong>Delay notification sent</strong> to <code>${escapeHtml(s.customerCommunicationSentTo || order.email)}</code> on ${escapeHtml(dateLabel(s.customerCommunicatedAt))}</div>
+                      ${s.compensationCouponCode ? `
+                        <div style="margin-top:2px;font-weight:600;">
+                          🎁 Courtesy Coupon: <code style="padding:1px 4px;background:#fff;border:1px solid #52c41a;border-radius:3px;color:#237804;">${escapeHtml(s.compensationCouponCode)}</code> (${escapeHtml(s.compensationCouponBenefit || '')})
+                        </div>
+                      ` : `
+                        <div style="margin-top:2px;color:#595959;">
+                          <em>No coupon was attached (apology notification only)</em>
+                        </div>
+                      `}
+                      ${s.communicationAuthorizedBy ? `
+                        <div style="margin-top:2px;color:#8c8c8c;">
+                          Authorized by: ${escapeHtml(s.communicationAuthorizedBy)}
+                          ${s.resendReason ? ` &middot; Reason: "${escapeHtml(s.resendReason)}"` : ''}
+                        </div>
+                      ` : ''}
+                    </div>
+                  ` : ''}
+                  ${s.customerCommunicationError ? `<div style="font-size:10px;color:#cf1322;word-break:break-word;">⚠️ Email delivery error: ${escapeHtml(s.customerCommunicationError)}</div>` : ''}
+                </div>
+              `).join('') : `
+                <div class="admin-stock-shortage-item">
+                  <div class="admin-stock-shortage-item__reason">
+                    <strong>Shortage Reason:</strong> Required stock is unavailable for fulfillment
+                  </div>
+                </div>
+              `}
+            </div>
+
+            <div class="admin-stock-shortage-card__actions">
+              <button class="admin-btn admin-btn--soft admin-btn--sm" type="button" data-action="open-stock-shortage-review" data-order-id="${order.id}">📝 Review Delay & Delivery Estimate</button>
+              ${order.stockShortageReviewStatus === 'ready_for_communication' || (Array.isArray(order.stockShortages) && order.stockShortages.some((s) => s.reviewStatus === 'ready_for_communication')) ? `
+                ${order.stockShortageCommunicationStatus === 'sent' || (Array.isArray(order.stockShortages) && order.stockShortages.length && order.stockShortages.every((s) => s.customerCommunicationStatus === 'sent')) ? `
+                  <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-action="open-stock-shortage-email-modal" data-order-id="${order.id}">✉️ View Sent Delay Email</button>
+                ` : order.stockShortageCommunicationStatus === 'failed' || (Array.isArray(order.stockShortages) && order.stockShortages.some((s) => s.customerCommunicationStatus === 'failed')) ? `
+                  <button class="admin-btn admin-btn--danger admin-btn--sm" type="button" data-action="open-stock-shortage-email-modal" data-order-id="${order.id}">⚠️ Retry Customer Delay Email</button>
+                ` : `
+                  <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="open-stock-shortage-email-modal" data-order-id="${order.id}">✉️ Send Customer Delay Email</button>
+                `}
+              ` : `
+                <span class="admin-table__muted" style="grid-column: 1 / -1; font-size:10.5px; font-style:italic; text-align:center; padding: 2px 0;">Customer email unlocks once marked 'Ready for Communication'</span>
+              `}
+              <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-action="resolve-stock-shortage" data-order-id="${order.id}">✓ Resolve Stock Shortage</button>
+            </div>
+          </div>
+        ` : `
+          ${order.paymentStatus === 'paid' && !['shipped', 'delivered', 'cancelled', 'returned'].includes(order.status) ? `
+            <div style="margin: 6px 0;">
+              <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-action="flag-stock-shortage" data-order-id="${order.id}">⚠️ Flag Stock Shortage</button>
+            </div>
+          ` : ''}
+        `}
         <div class="admin-list__item">
           <p class="admin-list__item-title">Customer Information</p>
           <p class="admin-list__item-sub">${escapeHtml(order.customerName)}<br>${escapeHtml(displayEmail(order.email))}<br>${escapeHtml(order.phone)}</p>
@@ -3397,11 +3546,14 @@
           <p class="admin-list__item-title">Ordered Products</p>
           <div class="admin-list">
             ${order.items.map((item) => `
-              <div class="admin-list__item" style="padding:10px 12px;">
+              <div class="admin-list__item" style="padding:10px 12px;${item.hasShortage ? 'border-left:3px solid #cf1322;background:rgba(207,19,34,0.03);' : ''}">
                 <div class="admin-list__item-head">
                   <div>
-                    <p class="admin-list__item-title">${escapeHtml(item.name)}</p>
-                    <p class="admin-list__item-sub">Qty ${escapeHtml(item.qty)}</p>
+                    <p class="admin-list__item-title">${escapeHtml(item.name)} ${item.variantLabel ? `(${escapeHtml(item.variantLabel)})` : ''}</p>
+                    <p class="admin-list__item-sub">
+                      SKU: <code>${escapeHtml(item.sku || 'N/A')}</code> &middot; Qty ${escapeHtml(item.qty)}
+                      ${item.hasShortage ? `<br><strong style="color:#cf1322;">⚠️ Shortage: ${escapeHtml(item.shortageReason || 'Stock unavailable')}</strong>` : ''}
+                    </p>
                   </div>
                   <strong>${escapeHtml(money(item.price))}</strong>
                 </div>
@@ -3547,6 +3699,7 @@
     }
 
     const filtered = filteredOrders();
+    const stockShortageCount = state.orders.filter((o) => o.status === 'stock_shortage' || Boolean(o.hasStockShortage)).length;
     const pageSize = 5;
     const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
     if (state.ordersPage > totalPages) state.ordersPage = totalPages;
@@ -3584,6 +3737,7 @@
                 <button class="admin-btn ${state.ordersTodayOnly ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-action="toggle-orders-today">Today</button>
                 <button class="admin-btn ${state.ordersStatus === 'pending' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="pending">Pending</button>
                 <button class="admin-btn ${state.ordersStatus === 'processing' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="processing">Processing</button>
+                <button class="admin-btn ${state.ordersStatus === 'stock_shortage' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="stock_shortage">Stock Shortage${stockShortageCount ? ` (${stockShortageCount})` : ''}</button>
                 <button class="admin-btn ${state.ordersStatus === 'shipped' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="shipped">Shipped</button>
                 <button class="admin-btn ${state.ordersStatus === 'delivered' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="delivered">Delivered</button>
                 <button class="admin-btn ${state.ordersStatus === 'cancelled' ? 'admin-btn--primary' : 'admin-btn--ghost'}" type="button" data-order-filter="cancelled">Cancelled</button>
@@ -3612,7 +3766,10 @@
                     </tr>
                   </thead>
                   <tbody>
-                    ${pageItems.map((order) => `
+                    ${pageItems.map((order) => {
+                      const orderIsShortage = Boolean(order.hasStockShortage || order.status === 'stock_shortage');
+                      const orderDisplayStatus = orderIsShortage ? 'stock_shortage' : order.status;
+                      return `
                       <tr class="${Number(state.selectedOrderId) === Number(order.id) ? 'is-selected' : ''}" data-action="select-order" data-id="${order.id}" style="cursor:pointer;">
                         <td><input type="checkbox" data-action="toggle-order-selection" data-id="${order.id}" ${state.selectedOrderIds.includes(Number(order.id)) ? 'checked' : ''} aria-label="Select ${escapeHtml(order.orderNumber)}" /> <strong>${escapeHtml(order.orderNumber)}</strong><br><span class="admin-table__muted">${escapeHtml(dateLabel(order.createdAt))}</span></td>
                         <td>${escapeHtml(order.customerName)}<br><span class="admin-table__muted">${escapeHtml(displayEmail(order.email))}</span></td>
@@ -3620,18 +3777,25 @@
                         <td>${escapeHtml(order.paymentMethod.toUpperCase())}<br><span class="admin-table__muted">${escapeHtml(getStatusLabel(order.paymentStatus))}</span></td>
                         <td><strong>${escapeHtml(money(order.totalAmount))}</strong></td>
                         <td>
-                          <span class="admin-badge ${statusClass(order.status)}">${escapeHtml(getStatusLabel(order.status))}</span>
+                          <span class="admin-badge ${statusClass(orderDisplayStatus)}">${escapeHtml(getStatusLabel(orderDisplayStatus))}</span>
+                          ${orderIsShortage ? `
+                            <br><span class="admin-badge ${shortageReviewBadgeClass(order.stockShortageReviewStatus || order.stockShortages?.[0]?.reviewStatus)}" style="margin-top:3px;font-size:10px;">${escapeHtml(getShortageReviewStatusLabel(order.stockShortageReviewStatus || order.stockShortages?.[0]?.reviewStatus))}</span>
+                          ` : ''}
                         </td>
                         <td>
                           <div style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;">
-                            ${!order.shiprocketAwbCode && !['cancelled', 'delivered', 'returned'].includes(normalizeOrderStatus(order.status)) ? `
+                            ${orderIsShortage ? `
+                              <button class="admin-btn admin-btn--soft admin-btn--sm" type="button" data-action="open-stock-shortage-review" data-id="${order.id}" style="padding:3px 8px;font-size:11px;font-weight:600;white-space:nowrap;">Review</button>
+                            ` : ''}
+                            ${!order.shiprocketAwbCode && !orderIsShortage && !['cancelled', 'delivered', 'returned'].includes(normalizeOrderStatus(order.status)) ? `
                               <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="shiprocket-fulfill" data-id="${order.id}" style="padding:3px 8px;font-size:11px;font-weight:600;white-space:nowrap;">🚀 Ship</button>
                             ` : ''}
                             <button class="admin-action-link" type="button" data-action="track-admin-order" data-id="${order.id}" style="white-space:nowrap;">Track</button>
                           </div>
                         </td>
                       </tr>
-                    `).join('')}
+                    `;
+                    }).join('')}
                   </tbody>
                 </table>
               </div>
@@ -4127,21 +4291,197 @@
     });
   }
 
+  function closeCampaignVariantDropdown() {
+    const dropdown = document.querySelector('[data-campaign-variant-dropdown].is-open');
+    if (!dropdown) return false;
+    const menu = dropdown.querySelector('[data-campaign-variant-menu]');
+    const toggle = dropdown.querySelector('[data-campaign-variant-toggle]');
+    if (menu) menu.hidden = true;
+    toggle?.setAttribute('aria-expanded', 'false');
+    dropdown.classList.remove('is-open');
+    return true;
+  }
+
+  function toggleCampaignVariantDropdown() {
+    const dropdown = document.querySelector('[data-campaign-variant-dropdown]');
+    if (!dropdown) return;
+    const menu = dropdown.querySelector('[data-campaign-variant-menu]');
+    const toggle = dropdown.querySelector('[data-campaign-variant-toggle]');
+    const isOpen = dropdown.classList.contains('is-open');
+    if (isOpen) {
+      closeCampaignVariantDropdown();
+    } else {
+      closeCouponProductDropdown();
+      dropdown.classList.add('is-open');
+      if (menu) menu.hidden = false;
+      toggle?.setAttribute('aria-expanded', 'true');
+    }
+  }
+
+  function updateCampaignVariantsDropdownState() {
+    const dropdown = document.getElementById('campaignVariantDropdown');
+    if (!dropdown) return;
+    const checkedBoxes = Array.from(dropdown.querySelectorAll('input[name="targetVariantIds"]:checked'));
+    const allBoxes = Array.from(dropdown.querySelectorAll('input[name="targetVariantIds"]'));
+    const trigger = dropdown.querySelector('[data-campaign-variant-toggle]');
+    const countEl = dropdown.querySelector('#campaignVariantsCount');
+    const numEl = dropdown.querySelector('#campaignSelectedVariantsNum');
+
+    if (numEl) numEl.textContent = String(checkedBoxes.length);
+    if (countEl) {
+      countEl.innerHTML = `<span id="campaignSelectedVariantsNum">${checkedBoxes.length}</span> of ${allBoxes.length} selected`;
+    }
+
+    if (trigger) {
+      if (!checkedBoxes.length) {
+        trigger.textContent = 'Select variants...';
+      } else if (checkedBoxes.length === 1) {
+        trigger.textContent = checkedBoxes[0].dataset.name || '1 variant selected';
+      } else if (allBoxes.length > 0 && checkedBoxes.length === allBoxes.length) {
+        trigger.textContent = `All variants selected (${allBoxes.length})`;
+      } else {
+        const names = checkedBoxes.map((b) => b.dataset.name || '').filter(Boolean);
+        const joined = names.join(', ');
+        trigger.textContent = joined.length <= 28 ? joined : `${checkedBoxes.length} variants selected`;
+      }
+    }
+  }
+
+  function updateCampaignVariantsCount() {
+    updateCampaignVariantsDropdownState();
+  }
+
+  function renderCampaignVariantDropdown(productId, selectedIds = []) {
+    const product = (state.products || []).find((p) => Number(p.id) === Number(productId))
+      || (state.products || []).find((p) => String(p.name || '').toLowerCase().includes('bottle') || Number(p.id) === 11);
+
+    let variants = Array.isArray(product?.variants) && product.variants.length
+      ? product.variants.filter((v) => Number(v.isActive ?? 1) === 1 && !v.deletedAt)
+      : [];
+
+    if (!variants.length && (Number(productId) === 11 || !productId)) {
+      variants = [
+        { id: 569, sku: 'HM-BTL-460-SLV', color: 'Silver', size: '460ml', price: 22990, stock: 85 },
+        { id: 570, sku: 'HM-BTL-460-BLK', color: 'Black', size: '460ml', price: 22990, stock: 47 },
+        { id: 571, sku: 'HM-BTL-460-GLD', color: 'Gold', size: '460ml', price: 22990, stock: 50 },
+        { id: 572, sku: 'HM-BTL-460-BLU', color: 'Blue', size: '460ml', price: 22990, stock: 50 },
+      ];
+    }
+
+    if (!variants.length) {
+      return `
+        <div class="admin-campaign-variant-dropdown" id="campaignVariantDropdown" data-campaign-variant-dropdown>
+          <button class="admin-select admin-product-multiselect__trigger" type="button" id="campaignVariantDropdownTrigger" disabled style="opacity:0.6;cursor:not-allowed;">
+            No variants available
+          </button>
+        </div>
+      `;
+    }
+
+    const selectedSet = new Set(
+      selectedIds && selectedIds.length
+        ? selectedIds.map(Number)
+        : [Number(variants[0].id)]
+    );
+
+    const selectedVariants = variants.filter((v) => selectedSet.has(Number(v.id)));
+    let summaryText = 'Select variants...';
+    if (selectedVariants.length === 1) {
+      const v = selectedVariants[0];
+      summaryText = [v.color, v.size].filter(Boolean).join(' ') || v.name || `Variant #${v.id}`;
+    } else if (selectedVariants.length === variants.length) {
+      summaryText = `All variants selected (${variants.length})`;
+    } else if (selectedVariants.length > 1) {
+      const names = selectedVariants.map((v) => [v.color, v.size].filter(Boolean).join(' ') || v.name || `#${v.id}`);
+      const joined = names.join(', ');
+      summaryText = joined.length <= 28 ? joined : `${selectedVariants.length} variants selected`;
+    }
+
+    return `
+      <div class="admin-campaign-variant-dropdown" id="campaignVariantDropdown" data-campaign-variant-dropdown>
+        <button
+          class="admin-select admin-product-multiselect__trigger"
+          type="button"
+          id="campaignVariantDropdownTrigger"
+          data-campaign-variant-toggle
+          aria-expanded="false"
+        >
+          ${escapeHtml(summaryText)}
+        </button>
+        <div class="admin-campaign-variant-dropdown__menu" data-campaign-variant-menu hidden>
+          <div class="admin-campaign-variant-dropdown__header">
+            <span class="admin-campaign-variant-dropdown__count" id="campaignVariantsCount">
+              <span id="campaignSelectedVariantsNum">${selectedVariants.length}</span> of ${variants.length} selected
+            </span>
+            <div class="admin-campaign-variant-dropdown__actions">
+              <button type="button" class="admin-btn admin-btn--soft admin-btn--xs" data-action="campaign-select-all-variants">Select All</button>
+              <button type="button" class="admin-btn admin-btn--ghost admin-btn--xs" data-action="campaign-clear-all-variants">Clear All</button>
+            </div>
+          </div>
+          <div class="admin-campaign-variant-dropdown__options" id="campaignVariantCheckboxes">
+            ${variants.map((v) => {
+              const isChecked = selectedSet.has(Number(v.id));
+              const variantTitle = [v.color, v.size].filter(Boolean).join(' ') || v.name || 'Default Variant';
+              const priceDisplay = catalogPrice(v.price || 22990);
+              return `
+                <label class="admin-campaign-variant-option ${isChecked ? 'is-selected' : ''}" data-variant-id="${v.id}">
+                  <input
+                    type="checkbox"
+                    name="targetVariantIds"
+                    value="${v.id}"
+                    data-name="${escapeHtml(variantTitle)}"
+                    data-sku="${escapeHtml(v.sku || '')}"
+                    data-color="${escapeHtml(v.color || '')}"
+                    data-price="${v.price || 22990}"
+                    ${isChecked ? 'checked' : ''}
+                  />
+                  <div class="admin-campaign-variant-option__info">
+                    <span class="admin-campaign-variant-option__title">${escapeHtml(variantTitle)}</span>
+                    ${v.sku ? `<span class="admin-campaign-variant-option__sku">${escapeHtml(v.sku)}</span>` : ''}
+                  </div>
+                  <span class="admin-campaign-variant-option__price">${escapeHtml(priceDisplay)}</span>
+                </label>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderCampaignVariantCards(productId, selectedIds = []) {
+    return renderCampaignVariantDropdown(productId, selectedIds);
+  }
+
   function renderCampaignCreatorSection(selectedInfluencer) {
     const activeInfluencers = (state.influencers || []).filter((i) => i.active !== 0 && i.active !== false);
-    const selectedInfId = selectedInfluencer ? Number(selectedInfluencer.id) : (activeInfluencers[0] ? Number(activeInfluencers[0].id) : '');
+    const editingCampaign = state.editingCampaignId
+      ? (state.campaigns || []).find((c) => Number(c.id) === Number(state.editingCampaignId))
+      : null;
+    const isEditing = Boolean(editingCampaign);
 
-    // Get candidate coupons: portal === 'merch'
+    const selectedInfId = isEditing
+      ? Number(editingCampaign.influencerId)
+      : (selectedInfluencer ? Number(selectedInfluencer.id) : (state.selectedInfluencerIdForCampaign || ''));
     const candidateCoupons = (state.coupons || []).filter((c) => {
       const portalMatch = !c.portal || c.portal === 'merch';
       return portalMatch;
     });
 
+    const activeProducts = (state.products || []).filter((p) => Number(p.isActive ?? 1) === 1 && !p.deletedAt);
+    const defaultProduct = activeProducts.find((p) => String(p.name || '').toLowerCase().includes('bottle') || Number(p.id) === 11) || activeProducts[0];
+    const selectedProdId = isEditing
+      ? Number(editingCampaign.targetProductId || 11)
+      : (defaultProduct?.id || 11);
+    const selectedCouponCode = isEditing ? String(editingCampaign.couponCode || '').trim() : '';
+    const selectedSlug = isEditing ? String(editingCampaign.slug || '').trim() : '';
+    const selectedVariantIds = isEditing ? (editingCampaign.targetVariantIds || [editingCampaign.targetVariantId]) : [];
+
     return `
       <div class="admin-campaign-creator">
         <div class="admin-campaign-creator__head">
-          <h4 class="admin-campaign-creator__title">CREATE NEW TRACKING LINK</h4>
-          <p class="admin-campaign-creator__desc">Fill in the details below to generate an attributable Instagram Story tracking link (<code>/c/:slug</code>).</p>
+          <h4 class="admin-campaign-creator__title">${isEditing ? `EDIT TRACKING LINK (/c/${escapeHtml(selectedSlug)})` : 'CREATE NEW TRACKING LINK'}</h4>
+          <p class="admin-campaign-creator__desc">${isEditing ? 'Update the influencer, coupon, target product, or variants for this tracking link.' : 'Fill in the details below to generate an attributable Instagram Story tracking link (<code>/c/:slug</code>).'}</p>
         </div>
         
         <form id="campaignCreateForm" class="admin-campaign-form" data-form="campaign-create" onsubmit="return false;">
@@ -4171,8 +4511,9 @@
                 ${candidateCoupons.map((c) => {
                   const isAssigned = selectedInfId && (Number(c.influencerId || c.influencer_id) === Number(selectedInfId));
                   const isAct = Number(c.is_active ?? c.active ?? 1) === 1;
+                  const isSel = isEditing && String(c.code).toLowerCase() === selectedCouponCode.toLowerCase();
                   return `
-                    <option value="${escapeHtml(c.code)}" data-influencer-id="${c.influencerId || c.influencer_id || ''}" data-discount="${escapeHtml(couponDiscountLabel(c))}" data-active="${isAct ? '1' : '0'}">
+                    <option value="${escapeHtml(c.code)}" data-influencer-id="${c.influencerId || c.influencer_id || ''}" data-discount="${escapeHtml(couponDiscountLabel(c))}" data-active="${isAct ? '1' : '0'}" ${isSel ? 'selected' : ''}>
                       ${escapeHtml(c.code)} (${escapeHtml(couponDiscountLabel(c))})${isAssigned ? ' ★ Assigned' : ''}${!isAct ? ' [Inactive]' : ''}
                     </option>
                   `;
@@ -4184,58 +4525,49 @@
             <div class="admin-campaign-field">
               <div class="admin-step-label">
                 <span class="admin-step-pill">Step 3</span>
-                <label for="campaignTargetProductSelect">Target Product</label>
+                <label for="campaignTargetProductSelect">Target Product <span class="admin-required-star">*</span></label>
               </div>
-              <input type="hidden" name="targetProductId" value="${escapeHtml(String((state.products || []).find((p) => String(p.name || '').toLowerCase().includes('bottle'))?.id || 11))}" />
-              <select class="admin-select" id="campaignTargetProductSelect" disabled style="width:100%;background:#ffffff;color:var(--admin-text);opacity:0.95;cursor:default;">
-                <option value="11" selected>${escapeHtml((state.products || []).find((p) => String(p.name || '').toLowerCase().includes('bottle'))?.name || 'H2 Molecular Hydrogen Water Bottle')}</option>
+              <select class="admin-select" name="targetProductId" id="campaignTargetProductSelect" required style="width:100%;">
+                ${activeProducts.map((p) => `
+                  <option value="${p.id}" ${Number(p.id) === Number(selectedProdId) ? 'selected' : ''}>
+                    ${escapeHtml(p.name)}
+                  </option>
+                `).join('')}
               </select>
             </div>
 
             <div class="admin-campaign-field">
               <div class="admin-step-label">
-                <label for="campaignVariantSelect">Variant <span class="admin-required-star">*</span></label>
+                <span class="admin-step-pill">Step 4</span>
+                <label for="campaignVariantDropdownTrigger">Product Variants <span class="admin-required-star">*</span></label>
               </div>
-              <select class="admin-select" name="targetVariantId" id="campaignVariantSelect" required style="width:100%;">
-                ${(() => {
-                  const bProduct = (state.products || []).find((p) => String(p.name || '').toLowerCase().includes('bottle') || Number(p.id) === 11);
-                  const bVariants = Array.isArray(bProduct?.variants) && bProduct.variants.length
-                    ? bProduct.variants.filter((v) => Number(v.isActive ?? 1) === 1 && !v.deletedAt)
-                    : [];
-                  if (bVariants.length) {
-                    return bVariants.map((v, i) => `
-                      <option value="${v.id}" data-sku="${escapeHtml(v.sku || '')}" data-color="${escapeHtml(v.color || '')}" ${i === 0 ? 'selected' : ''}>
-                        ${escapeHtml(v.color || v.size || 'Bottle')} (${escapeHtml(v.sku || '')}) — ₹${(Number(v.price || 2299000) / 100).toLocaleString('en-IN')}${i === 0 ? ' (Default)' : ''}
-                      </option>
-                    `).join('');
-                  }
-                  return `
-                    <option value="569" data-sku="HM-BTL-460-SLV" data-color="Silver" selected>Silver (SKU: HM-BTL-460-SLV) — ₹22,990 (Default)</option>
-                    <option value="570" data-sku="HM-BTL-460-BLK" data-color="Black">Black (SKU: HM-BTL-460-BLK) — ₹22,990</option>
-                    <option value="571" data-sku="HM-BTL-460-GLD" data-color="Gold">Gold (SKU: HM-BTL-460-GLD) — ₹22,990</option>
-                    <option value="572" data-sku="HM-BTL-460-BLU" data-color="Blue">Blue (SKU: HM-BTL-460-BLU) — ₹22,990</option>
-                  `;
-                })()}
-              </select>
+              <div id="campaignVariantDropdownContainer">
+                ${renderCampaignVariantDropdown(selectedProdId, selectedVariantIds)}
+              </div>
             </div>
 
             <div class="admin-campaign-field" style="grid-column: 1 / -1;">
               <div class="admin-step-label">
-                <span class="admin-step-pill">Step 4</span>
+                <span class="admin-step-pill">Step 5</span>
                 <label for="campaignSlugInput">Campaign Slug <span class="admin-required-star">*</span></label>
               </div>
-              <input class="admin-input" name="slug" id="campaignSlugInput" placeholder="e.g. RyanH2" pattern="^[A-Za-z0-9_-]{2,50}$" required style="width:100%;" />
+              <input class="admin-input" name="slug" id="campaignSlugInput" value="${escapeHtml(selectedSlug)}" placeholder="e.g. RyanH2" pattern="^[A-Za-z0-9_-]{2,50}$" required style="width:100%;" />
               <div class="admin-campaign-preview">
                 <span class="admin-campaign-preview__label">Live Link Preview:</span>
-                <span id="campaignSlugLiveUrl" class="admin-campaign-preview__code">${window.location.origin}/c/<span>...</span></span>
+                <span id="campaignSlugLiveUrl" class="admin-campaign-preview__code">${window.location.origin}/c/<span>${escapeHtml(selectedSlug || '...')}</span></span>
               </div>
             </div>
           </div>
 
           <div style="margin-top:6px;display:flex;align-items:center;gap:12px;">
             <button class="admin-btn admin-btn--primary admin-campaign-submit-btn" type="submit" id="btnSubmitCampaign">
-              GENERATE TRACKING LINK
+              ${isEditing ? 'UPDATE TRACKING LINK' : 'GENERATE TRACKING LINK'}
             </button>
+            ${isEditing ? `
+              <button class="admin-btn admin-btn--ghost admin-campaign-submit-btn" type="button" data-action="cancel-edit-campaign">
+                CANCEL
+              </button>
+            ` : ''}
             <span id="campaignFormFeedback" style="font-size:13px;"></span>
           </div>
         </form>
@@ -4332,16 +4664,16 @@
             <tbody>
               ${list.length ? list.map((c) => {
                 const fullUrl = `${window.location.origin}/c/${escapeHtml(c.slug)}`;
-                const variantMeta = {
-                  569: { color: 'Silver', size: '460ml', sku: 'HM-BTL-460-SLV', price: 2299000 },
-                  570: { color: 'Black', size: '460ml', sku: 'HM-BTL-460-BLK', price: 2299000 },
-                  571: { color: 'Gold', size: '460ml', sku: 'HM-BTL-460-GLD', price: 2299000 },
-                  572: { color: 'Blue', size: '460ml', sku: 'HM-BTL-460-BLU', price: 2299000 },
-                }[c.targetVariantId] || {};
-                const variantColor = c.targetVariantColor || variantMeta.color || 'Silver';
-                const variantSize = c.targetVariantSize || variantMeta.size || '460ml';
-                const variantSku = c.targetVariantSku || variantMeta.sku || '';
-                const variantPrice = c.targetVariantPrice || variantMeta.price || 2299000;
+                const targetVariants = Array.isArray(c.targetVariants) && c.targetVariants.length
+                  ? c.targetVariants
+                  : (c.targetVariantColor
+                      ? [{ id: c.targetVariantId, color: c.targetVariantColor, size: c.targetVariantSize, sku: c.targetVariantSku, price: c.targetVariantPrice }]
+                      : [{ id: 569, color: 'Silver', size: '460ml', sku: 'HM-BTL-460-SLV', price: 2299000 }]);
+                const primaryVariant = targetVariants[0] || {};
+                const variantPrice = primaryVariant.price || c.targetVariantPrice || 2299000;
+                const allCount = Number(c.allProductVariantsCount || 4);
+                const isAllColours = allCount > 1 && targetVariants.length >= allCount;
+                const fullVariantList = targetVariants.map((tv) => `${tv.color || ''}${tv.size ? ` (${tv.size})` : ''}`.trim()).filter(Boolean).join(', ');
 
                 return `
                   <tr>
@@ -4359,12 +4691,27 @@
                     <td>
                       <strong style="font-size:13px;color:var(--admin-text);display:block;">${escapeHtml(c.targetProductName || 'H2 Water Bottle')}</strong>
                       <div style="margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                        <span class="admin-badge admin-badge--neutral" style="font-size:11px;font-weight:700;background:rgba(200,101,45,0.08);color:var(--admin-accent-dark,#9f3e1f);border:1px solid rgba(200,101,45,0.2);">
-                          ${escapeHtml(variantColor)} (${escapeHtml(variantSize)})
-                        </span>
+                        ${isAllColours ? `
+                          <span class="admin-badge admin-badge--active" style="font-size:11px;font-weight:700;letter-spacing:0.04em;background:rgba(46,125,50,0.12);color:#1b5e20;border:1px solid rgba(46,125,50,0.3);" title="${escapeHtml(fullVariantList)}">
+                            ALL ${targetVariants.length} COLOURS
+                          </span>
+                        ` : (targetVariants.length === 1 ? `
+                          <span class="admin-badge admin-badge--neutral" style="font-size:11px;font-weight:700;background:rgba(200,101,45,0.08);color:var(--admin-accent-dark,#9f3e1f);border:1px solid rgba(200,101,45,0.2);">
+                            ${escapeHtml((primaryVariant.color || 'Variant') + (primaryVariant.size ? ` (${primaryVariant.size})` : '')).toUpperCase()}
+                          </span>
+                        ` : (targetVariants.length <= 2 ? targetVariants.map((tv) => `
+                          <span class="admin-badge admin-badge--neutral" style="font-size:11px;font-weight:700;background:rgba(200,101,45,0.08);color:var(--admin-accent-dark,#9f3e1f);border:1px solid rgba(200,101,45,0.2);">
+                            ${escapeHtml((tv.color || 'Variant') + (tv.size ? ` (${tv.size})` : '')).toUpperCase()}
+                          </span>
+                        `).join('') : `
+                          <span class="admin-badge admin-badge--neutral" style="font-size:11px;font-weight:700;letter-spacing:0.04em;background:rgba(200,101,45,0.08);color:var(--admin-accent-dark,#9f3e1f);border:1px solid rgba(200,101,45,0.2);" title="${escapeHtml(fullVariantList)}">
+                            ${targetVariants.length} COLOURS
+                          </span>
+                        `))}
                         <strong style="font-size:12px;color:var(--admin-text);">${money(variantPrice)}</strong>
                       </div>
-                      ${variantSku ? `<span class="admin-table__muted" style="font-size:11px;display:block;margin-top:3px;">SKU: ${escapeHtml(variantSku)}</span>` : ''}
+                      ${targetVariants.length === 1 && primaryVariant.sku ? `<span class="admin-table__muted" style="font-size:11px;display:block;margin-top:3px;">SKU: ${escapeHtml(primaryVariant.sku)}</span>` : ''}
+                      ${targetVariants.length > 1 ? `<span class="admin-table__muted" style="font-size:11px;display:block;margin-top:3px;" title="${escapeHtml(fullVariantList)}">${escapeHtml(fullVariantList)}</span>` : ''}
                     </td>
                     <td style="text-align:center;">
                       <span class="admin-badge ${c.isActive ? 'admin-badge--active' : 'admin-badge--inactive'}" style="font-size:11px;font-weight:700;">
@@ -4383,6 +4730,9 @@
                       <div class="admin-campaign-cell-actions" style="display:inline-flex;gap:8px;align-items:center;justify-content:center;">
                         <button class="admin-btn admin-btn--soft admin-campaign-btn" type="button" data-action="copy-campaign-link" data-url="${fullUrl}" title="Copy tracking URL to clipboard">
                           COPY LINK
+                        </button>
+                        <button class="admin-btn admin-btn--soft admin-campaign-btn" type="button" data-action="edit-campaign" data-id="${c.id}" title="Edit this campaign">
+                          Edit
                         </button>
                         <button class="admin-btn ${c.isActive ? 'admin-btn--ghost' : 'admin-btn--soft'} admin-campaign-btn" type="button" data-action="toggle-campaign-active" data-id="${c.id}" data-active="${c.isActive ? 'true' : 'false'}" title="${c.isActive ? 'Deactivate this tracking link' : 'Activate this tracking link'}">
                           ${c.isActive ? 'Deactivate' : 'Activate'}
@@ -4410,18 +4760,22 @@
   }
 
   async function handleCampaignCreateSubmit(form) {
+    const isEditing = Boolean(state.editingCampaignId);
     const influencerId = Number(form.querySelector('[name="influencerId"]')?.value);
     const couponCode = String(form.querySelector('[name="couponCode"]')?.value || '').trim();
     const targetProductId = Number(form.querySelector('[name="targetProductId"]')?.value) || 11;
-    const targetVariantSelect = form.querySelector('[name="targetVariantId"]');
-    const targetVariantId = Number(targetVariantSelect?.value) || 569;
-    const targetVariantSku = targetVariantSelect?.selectedOptions?.[0]?.dataset?.sku || {
-      569: 'HM-BTL-460-SLV',
-      570: 'HM-BTL-460-BLK',
-      571: 'HM-BTL-460-GLD',
-      572: 'HM-BTL-460-BLU',
-    }[targetVariantId] || '';
-    const selectedVariantColor = targetVariantSelect?.selectedOptions?.[0]?.dataset?.color || '';
+    
+    const checkedVariantBoxes = Array.from(form.querySelectorAll('#campaignVariantCheckboxes input[name="targetVariantIds"]:checked'));
+    if (!checkedVariantBoxes.length) {
+      toast('Variant Required', 'Please select at least one product variant for this campaign.', 'warning');
+      return;
+    }
+
+    const targetVariantIds = checkedVariantBoxes.map((cb) => Number(cb.value)).filter(Boolean);
+    const primaryBox = checkedVariantBoxes[0];
+    const targetVariantId = Number(primaryBox.value) || 569;
+    const targetVariantSku = primaryBox.dataset.sku || '';
+    const selectedVariantColor = primaryBox.dataset.color || '';
     const slug = String(form.querySelector('[name="slug"]')?.value || '').trim();
 
     if (!influencerId) {
@@ -4457,7 +4811,7 @@
     }
 
     // Duplicate check
-    const duplicate = (state.campaigns || []).find((c) => String(c.slug).toLowerCase() === slug.toLowerCase());
+    const duplicate = (state.campaigns || []).find((c) => String(c.slug).toLowerCase() === slug.toLowerCase() && (!isEditing || Number(c.id) !== Number(state.editingCampaignId)));
     if (duplicate) {
       toast('Duplicate Slug', `Campaign slug '${slug}' already exists. Please choose a different slug.`, 'danger');
       return;
@@ -4467,14 +4821,18 @@
     if (submitBtn) submitBtn.disabled = true;
 
     try {
-      const res = await apiRequest('/api/merch/admin/campaigns', {
-        method: 'POST',
+      const endpoint = isEditing ? `/api/merch/admin/campaigns/${state.editingCampaignId}` : '/api/merch/admin/campaigns';
+      const method = isEditing ? 'PUT' : 'POST';
+      const res = await apiRequest(endpoint, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          campaignId: state.editingCampaignId || undefined,
           influencerId,
           couponCode,
           targetProductId,
           targetVariantId,
+          targetVariantIds,
           targetVariantSku,
           slug,
           name: `${slug} Instagram Story`,
@@ -4484,18 +4842,20 @@
       if (res?.campaign) {
         const fullUrl = `${window.location.origin}/c/${res.campaign.slug}`;
         const selectedInf = (state.influencers || []).find((i) => Number(i.id) === influencerId);
-        const variantName = selectedVariantColor
-          ? `${selectedVariantColor} (460ml)`
-          : ({ 569: 'Silver (460ml)', 570: 'Black (460ml)', 571: 'Gold (460ml)', 572: 'Blue (460ml)' }[targetVariantId] || 'Silver (460ml)');
+        const variantSummary = targetVariantIds.length > 1
+          ? `${targetVariantIds.length} Variants (${checkedVariantBoxes.map((b) => b.dataset.color || 'Variant').join(', ')})`
+          : (selectedVariantColor ? `${selectedVariantColor} (460ml)` : 'Default Variant');
         state.latestCreatedCampaign = {
           slug: res.campaign.slug,
           fullUrl,
           name: res.campaign.name || `${slug} Instagram Story`,
           influencerName: selectedInf?.name || 'Influencer',
           couponCode,
-          variantName,
+          variantName: variantSummary,
         };
-        toast('Campaign Created', `Tracking link for /c/${slug} generated successfully.`, 'success');
+        const wasEditing = isEditing;
+        state.editingCampaignId = null;
+        toast(wasEditing ? 'Campaign Updated' : 'Campaign Created', `Tracking link for /c/${slug} ${wasEditing ? 'updated' : 'generated'} successfully.`, 'success');
         await loadCampaignData();
         renderInfluencers();
 
@@ -4512,7 +4872,7 @@
         }
       }
     } catch (err) {
-      toast('Campaign Creation Failed', err.message || 'Unable to create tracking campaign.', 'danger');
+      toast(isEditing ? 'Campaign Update Failed' : 'Campaign Creation Failed', err.message || 'Unable to save tracking campaign.', 'danger');
     } finally {
       if (submitBtn) submitBtn.disabled = false;
     }
@@ -5621,6 +5981,7 @@
                   <label class="admin-field"><span>Support Email</span><input class="admin-input" name="supportEmail" value="${escapeHtml(s.supportEmail)}" /></label>
                   <label class="admin-field"><span>Support Phone</span><input class="admin-input" name="supportPhone" value="${escapeHtml(s.supportPhone)}" /></label>
                   <label class="admin-field"><span>Shipping Charges</span><input class="admin-input" name="shippingCharges" value="${escapeHtml(s.shippingCharges)}" /></label>
+                  <label class="admin-field"><span>Low Stock Threshold</span><input type="number" min="0" class="admin-input" name="lowStockThreshold" value="${escapeHtml(s.lowStockThreshold || '15')}" /></label>
                   <label class="admin-field admin-field--wide"><span>Return Policy</span><textarea class="admin-textarea" name="returnPolicy">${escapeHtml(s.returnPolicy)}</textarea></label>
                   <label class="admin-field admin-field--wide"><span>Tax Settings</span><textarea class="admin-textarea" name="taxSettings">${escapeHtml(s.taxSettings)}</textarea></label>
                 </div>
@@ -6712,6 +7073,7 @@
       supportEmail: String(fd.get('supportEmail') || '').trim(),
       supportPhone: String(fd.get('supportPhone') || '').trim(),
       shippingCharges: String(fd.get('shippingCharges') || '').trim(),
+      lowStockThreshold: String(fd.get('lowStockThreshold') || '15').trim(),
       returnPolicy: String(fd.get('returnPolicy') || '').trim(),
       taxSettings: String(fd.get('taxSettings') || '').trim(),
       paymentGateway: String(fd.get('paymentGateway') || '').trim(),
@@ -7372,6 +7734,758 @@
     }
   }
 
+  function openStockShortageReviewModal(order) {
+    if (!order) return;
+    const shortages = Array.isArray(order.stockShortages) ? order.stockShortages : [];
+    const firstShortage = shortages[0] || {};
+    const currentReviewStatus = firstShortage.reviewStatus || 'awaiting_review';
+    const currentEstimate = firstShortage.revisedDeliveryEstimate || '';
+    const currentNote = firstShortage.internalDelayNote || '';
+
+    const bodyHtml = `
+      <form class="admin-form" data-form="stock-shortage-review" data-order-id="${order.id}">
+        <div style="background:#fff1f0;border:1px solid #ffa39e;border-radius:8px;padding:10px 14px;margin-bottom:14px;">
+          <div style="font-weight:700;font-size:12px;color:#cf1322;margin-bottom:4px;">
+            ⚠️ Stock Shortage Case — Delay Review & Preparation
+          </div>
+          <div style="font-size:11px;color:#595959;">
+            Customer: <strong>${escapeHtml(order.customerName)}</strong> (${escapeHtml(displayEmail(order.email))}, ${escapeHtml(order.phone || 'No phone')})<br>
+            Order: <strong>${escapeHtml(order.orderNumber)}</strong> &middot; Payment: <strong>${escapeHtml(order.paymentStatus || 'paid').toUpperCase()}</strong>
+          </div>
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <label class="admin-field">
+            <span>Affected Item(s) in this Shortage</span>
+          </label>
+          <div style="background:#fafafa;border:1px solid #e8e8e8;border-radius:6px;padding:8px 10px;font-size:11px;max-height:140px;overflow-y:auto;">
+            ${shortages.length ? shortages.map((s) => `
+              <div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px dashed #f0f0f0;">
+                <strong>${escapeHtml(s.productName)}</strong> (${escapeHtml(s.variantLabel || 'Default')})<br>
+                <span class="admin-table__muted">SKU:</span> <code>${escapeHtml(s.sku || 'N/A')}</code> &middot;
+                <span class="admin-table__muted">Ordered Qty:</span> <strong>${s.orderedQuantity}</strong> &middot;
+                <span class="admin-table__muted">Warehouse Stock:</span> ${s.currentStock != null ? s.currentStock : s.availableStock}<br>
+                <span style="color:#cf1322;"><strong>Shortage Reason:</strong> ${escapeHtml(s.reason)}</span>
+              </div>
+            `).join('') : `
+              <div>No specific item shortages listed.</div>
+            `}
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <label class="admin-field">
+            <span>Review Status</span>
+            <select class="admin-select" name="reviewStatus">
+              <option value="awaiting_review" ${currentReviewStatus === 'awaiting_review' ? 'selected' : ''}>⏳ Awaiting Review</option>
+              <option value="reviewed" ${currentReviewStatus === 'reviewed' ? 'selected' : ''}>🔍 Reviewed (Internal assessment complete)</option>
+              <option value="ready_for_communication" ${currentReviewStatus === 'ready_for_communication' ? 'selected' : ''}>📢 Ready for Customer Communication</option>
+            </select>
+          </label>
+
+          <label class="admin-field">
+            <span>Revised Delivery Estimate (Optional / When Known)</span>
+            <input class="admin-input" type="text" name="revisedDeliveryEstimate" value="${escapeHtml(currentEstimate)}" placeholder="e.g. 2026-10-25 or Late October (leave blank if unknown)" />
+            <small class="admin-table__muted" style="font-size:10px;margin-top:2px;">Leave blank if supplier timeline is pending or unknown.</small>
+          </label>
+
+          <label class="admin-field admin-field--wide">
+            <span>Internal Delay Note (Warehouse / Supplier Explanation)</span>
+            <textarea class="admin-textarea" name="internalDelayNote" rows="3" placeholder="Add internal notes on why fulfillment is delayed and next restock steps...">${escapeHtml(currentNote)}</textarea>
+          </label>
+
+          <div style="background:#e6f7ff;border:1px solid #91d5ff;border-radius:6px;padding:8px 10px;font-size:11px;color:#0050b3;">
+            ℹ️ <strong>Phase 2 Guardrail:</strong> This is an internal review record. No customer emails, refunds, or compensation coupons are dispatched until Phase 3.
+          </div>
+        </div>
+      </form>
+    `;
+
+    const footerHtml = `
+      <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button>
+      <button class="admin-btn admin-btn--primary" type="button" data-action="save-stock-shortage-review" data-order-id="${order.id}">Save Review</button>
+    `;
+
+    openModal({
+      title: `Review Stock Shortage: ${order.orderNumber}`,
+      subtitle: 'Fulfilment Delay Management',
+      body: bodyHtml,
+      footer: footerHtml,
+      size: 'md',
+    });
+  }
+
+  function getAvailableMerchProducts() {
+    const prods = [];
+    const seen = new Set();
+    const source = Array.isArray(state.products) ? state.products : [];
+    for (const p of source) {
+      const pid = Number(p.parentProductId ?? p.productId ?? p.id);
+      if (!Number.isInteger(pid) || pid <= 0 || seen.has(pid)) continue;
+      if (p.status === 'archived' || p.archived) continue;
+      seen.add(pid);
+      prods.push({
+        id: pid,
+        name: p.productName || p.name || `Product #${pid}`,
+        category: p.category || 'General',
+      });
+    }
+    return prods;
+  }
+
+  async function openStockShortageEmailModal(order) {
+    if (!order) return;
+    openModal({
+      title: `Customer Delay Notification — ${order.orderNumber || `Order #${order.id}`}`,
+      subtitle: 'Fulfilment Delay Management',
+      body: `
+        <div style="text-align:center;padding:32px 16px;">
+          <div class="admin-spinner" style="margin:0 auto 14px;width:32px;height:32px;border:3px solid rgba(184,93,59,0.2);border-top-color:#b85d3b;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+          <p style="font-weight:600;margin:0 0 4px;">Loading email preview...</p>
+          <p class="admin-table__muted" style="font-size:12px;margin:0;">Generating verified customer communication</p>
+        </div>
+      `,
+      footer: '<button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button>',
+      size: 'lg',
+    });
+
+    try {
+      if (!state.productsLoaded || !state.products?.length) {
+        await loadProductData().catch(() => {});
+      }
+      const availableProducts = getAvailableMerchProducts();
+
+      const [preview, couponsData] = await Promise.all([
+        apiRequest(`/api/merch/admin/orders/${encodeURIComponent(order.id)}/stock-shortage/email-preview`),
+        apiRequest(`/api/merch/admin/orders/${encodeURIComponent(order.id)}/compensation-coupons`).catch(() => ({ eligibleCoupons: [], ineligibleCoupons: [] })),
+      ]);
+      const bodyEl = els.adminModalDialog.querySelector('.admin-modal__body');
+      const footEl = els.adminModalDialog.querySelector('.admin-modal__foot');
+      if (!bodyEl || !footEl) return;
+
+      const subEl = els.adminModalDialog.querySelector('.admin-modal__sub');
+      if (subEl) {
+        subEl.textContent = 'Preview apology email, attach courtesy compensation, and confirm customer notification';
+      }
+
+      const requiresResendReason = Boolean(preview.requiresResendReason);
+      const isAlreadySent = Boolean(preview.isAlreadySent);
+      const isFailed = Boolean(preview.isFailed);
+      const isActiveSending = Boolean(preview.isActiveSending);
+      const isStaleSending = Boolean(preview.isStaleSending);
+      const dispatchMode = preview.dispatchMode || (isAlreadySent ? 'resend_authorized' : 'first_time');
+      const buttonLabel = preview.buttonLabel || (isAlreadySent ? 'Resend Delay Email' : (isFailed ? 'Retry Sending Email' : 'Send Customer Delay Email'));
+
+      let eligibleCoupons = Array.isArray(couponsData?.eligibleCoupons) ? [...couponsData.eligibleCoupons] : [];
+      const ineligibleCoupons = Array.isArray(couponsData?.ineligibleCoupons) ? couponsData.ineligibleCoupons : [];
+      const customerEmail = String(preview.recipientEmail || order.customerEmail || order.email || '').trim().toLowerCase();
+
+      bodyEl.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <div style="background:#fff8f0;border:1px solid #f0d5c3;border-radius:8px;padding:12px 16px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:12px;font-weight:700;color:#5a2c1d;">
+                ✉️ Customer Communication Details
+              </span>
+              <span class="admin-badge ${isAlreadySent ? 'admin-badge--success' : (isFailed ? 'admin-badge--danger' : (isActiveSending ? 'admin-badge--warning' : 'admin-badge--ready-comm'))}">
+                ${isAlreadySent ? 'Delivered' : (isFailed ? 'Delivery Failed' : (isActiveSending ? 'Send In Flight' : 'Ready to Send'))}
+              </span>
+            </div>
+            <div style="font-size:12px;color:#595959;line-height:1.6;">
+              <strong>Recipient:</strong> ${escapeHtml(preview.customerName)} &lt;<code>${escapeHtml(preview.recipientEmail)}</code>&gt;<br>
+              <strong>Order:</strong> ${escapeHtml(preview.orderNumber)}<br>
+              <strong>Revised Delivery Estimate:</strong>
+              ${preview.hasEstimate
+                ? `<strong style="color:#262626;">${escapeHtml(preview.revisedDeliveryEstimate)}</strong>`
+                : '<span style="color:#8c8c8c;"><em>Not confirmed yet — timeline is actively being verified with suppliers</em></span>'
+              }
+              <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" id="editDeliveryEstimateInReviewBtn" style="margin-left:8px;padding:1px 8px;font-size:11px;vertical-align:middle;color:#b85d3b;">
+                📝 Edit in Review
+              </button>
+              <span class="admin-table__muted" style="display:block;font-size:10.5px;margin-top:2px;font-style:italic;">
+                Delivery estimate is verified and managed via "Review Delay & Delivery Estimate".
+              </span>
+              ${isAlreadySent ? `<span style="color:#237804;"><strong>Sent At:</strong> ${escapeHtml(dateLabel(preview.communicatedAt) || 'Previously sent')} to ${escapeHtml(preview.communicationSentTo || preview.recipientEmail)}</span><br>` : ''}
+              ${isFailed && preview.communicationError ? `<span style="color:#cf1322;"><strong>Last Error:</strong> ${escapeHtml(preview.communicationError)}</span><br>` : ''}
+            </div>
+          </div>
+
+          <!-- Phase 4: Admin-Controlled Courtesy Compensation -->
+          <div style="background:#f6ffed;border:1px solid #b7eb8f;border-radius:8px;padding:12px 16px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:8px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-size:12px;font-weight:700;color:#135200;">
+                  🎁 Courtesy Compensation (Optional)
+                </span>
+                <span class="admin-badge admin-badge--success" style="font-size:10px;">Admin Controlled</span>
+              </div>
+              <button type="button" id="openCreateCompensationCouponBtn" class="admin-btn admin-btn--sm" style="background:#237804;color:#fff;border:none;font-size:11px;padding:3px 10px;border-radius:4px;cursor:pointer;font-weight:600;">
+                + Create Compensation Coupon
+              </button>
+            </div>
+            <p style="font-size:11px;color:#389e0d;margin:0 0 10px;line-height:1.4;">
+              Select an existing eligible Private Coupon to attach as courtesy compensation, create a new one directly for this customer, or choose to send an apology update only.
+            </p>
+
+            <!-- Inline Create Coupon Form (Hidden by default) -->
+            <div id="stockDelayCreateCouponForm" style="display:none;background:#ffffff;border:1px solid #b7eb8f;border-radius:6px;padding:14px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,0.05);">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;border-bottom:1px solid #f0f0f0;padding-bottom:6px;">
+                <strong style="font-size:12px;color:#135200;">➕ Create Private Courtesy Coupon for Customer</strong>
+                <span style="font-size:11px;color:#8c8c8c;">Private &middot; Backend Enforced</span>
+              </div>
+
+              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:10px;margin-bottom:10px;">
+                <label class="admin-field" style="margin:0;">
+                  <span style="font-size:11px;font-weight:600;">Coupon Code</span>
+                  <div style="display:flex;gap:4px;margin-top:2px;">
+                    <input class="admin-input" id="newCompensationCouponCode" type="text" placeholder="e.g. CARE-4BB077-A9F2" style="font-size:12px;text-transform:uppercase;font-weight:600;font-family:monospace;" />
+                    <button type="button" id="regenerateCouponCodeBtn" class="admin-btn admin-btn--soft admin-btn--sm" title="Generate New Code" style="padding:2px 8px;font-size:11px;">↻</button>
+                  </div>
+                </label>
+
+                <label class="admin-field" style="margin:0;">
+                  <span style="font-size:11px;font-weight:600;">Discount Type</span>
+                  <select class="admin-select" id="newCompensationCouponType" style="margin-top:2px;font-size:12px;">
+                    <option value="percentage">Percentage (%) OFF</option>
+                    <option value="flat">Fixed Amount (₹) OFF</option>
+                  </select>
+                </label>
+
+                <label class="admin-field" style="margin:0;">
+                  <span style="font-size:11px;font-weight:600;">Discount Value</span>
+                  <input class="admin-input" id="newCompensationCouponValue" type="number" min="1" max="100" value="10" placeholder="10" style="margin-top:2px;font-size:12px;" />
+                </label>
+
+                <label class="admin-field" style="margin:0;">
+                  <span style="font-size:11px;font-weight:600;">Expiration Date</span>
+                  <input class="admin-input" id="newCompensationCouponExpiry" type="date" style="margin-top:2px;font-size:12px;" />
+                </label>
+
+                <label class="admin-field" style="margin:0;">
+                  <span style="font-size:11px;font-weight:600;">Usage Limit</span>
+                  <input class="admin-input" id="newCompensationCouponLimit" type="number" min="1" max="10" value="1" placeholder="1" style="margin-top:2px;font-size:12px;" />
+                </label>
+
+                <label class="admin-field" style="margin:0;">
+                  <span style="font-size:11px;font-weight:600;">Eligibility Scope</span>
+                  <select class="admin-select" id="newCompensationCouponScope" style="margin-top:2px;font-size:12px;">
+                    <option value="merch">Entire Merch Store</option>
+                    <option value="selected_products">Selected Products</option>
+                  </select>
+                </label>
+              </div>
+
+              <!-- Multi-select for Selected Products (hidden by default) -->
+              <div id="compensationCouponProductsContainer" style="display:none;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px 12px;margin-bottom:10px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                  <span style="font-size:11px;font-weight:700;color:#374151;">Eligible Products (select at least one):</span>
+                  <div style="display:flex;gap:6px;">
+                    <button type="button" id="selectAllCompensationProductsBtn" class="admin-btn admin-btn--soft admin-btn--sm" style="padding:1px 6px;font-size:10.5px;">Select All</button>
+                    <button type="button" id="clearAllCompensationProductsBtn" class="admin-btn admin-btn--ghost admin-btn--sm" style="padding:1px 6px;font-size:10.5px;">Clear</button>
+                  </div>
+                </div>
+                <div id="compensationProductCheckboxesList" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));gap:6px;max-height:160px;overflow-y:auto;">
+                  ${availableProducts.map((p) => `
+                    <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#374151;cursor:pointer;background:#fff;border:1px solid #e5e7eb;border-radius:4px;padding:4px 8px;">
+                      <input type="checkbox" class="compensation-product-cb" value="${p.id}" data-name="${escapeHtml(p.name)}" style="accent-color:#237804;" />
+                      <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><strong>${escapeHtml(p.name)}</strong></span>
+                    </label>
+                  `).join('')}
+                </div>
+                <div id="compensationCouponProductsError" style="display:none;color:#cf1322;font-size:11px;margin-top:6px;font-weight:600;">
+                  ⚠️ Please select at least one product when restricting to Selected Products.
+                </div>
+              </div>
+
+              <div id="compensationCouponScopeNotice" style="display:none;font-size:11px;color:#237804;background:#f6ffed;border:1px solid #b7eb8f;border-radius:4px;padding:6px 10px;margin-bottom:10px;"></div>
+
+              <div style="background:#f6ffed;border:1px solid #d9f7be;border-radius:4px;padding:8px 10px;font-size:11px;color:#237804;margin-bottom:10px;">
+                <strong>🔒 Customer Restriction:</strong> Exclusively assigned to <code>${escapeHtml(customerEmail || 'affected customer')}</code>. The checkout backend will securely reject redemption attempts by any other account.
+              </div>
+
+              <div id="newCompensationCouponSummaryBox" style="background:#fafafa;border:1px solid #eee;border-radius:4px;padding:8px 10px;font-size:11px;color:#555;margin-bottom:12px;">
+                <!-- Dynamically populated summary -->
+              </div>
+
+              <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button type="button" id="cancelCreateCouponBtn" class="admin-btn admin-btn--ghost admin-btn--sm" style="font-size:11px;">Cancel</button>
+                <button type="button" id="submitCreateCouponBtn" class="admin-btn admin-btn--primary admin-btn--sm" style="font-size:11px;background:#237804;border-color:#237804;">Create Coupon</button>
+              </div>
+            </div>
+
+            <label class="admin-field" style="margin-bottom:6px;">
+              <span style="font-weight:600;font-size:12px;color:#262626;">Courtesy Coupon Selection</span>
+              <select id="stockDelayCompensationCouponSelect" class="admin-select" style="width:100%;font-size:12px;background:#fff;">
+                <option value="">No coupon — send email only</option>
+                ${eligibleCoupons.map((c) => `
+                  <option value="${c.id}">${escapeHtml(c.code)} &middot; ${escapeHtml(c.benefit)} &middot; Exp: ${escapeHtml(c.expiryLabel)} &middot; ${escapeHtml(c.remainingUsagesLabel || 'Available')}</option>
+                `).join('')}
+              </select>
+            </label>
+
+            <div id="stockDelayCouponDetailsCard" style="display:none;background:#fff;border:1px solid #d9f7be;border-radius:6px;padding:10px 12px;margin-top:8px;font-size:11px;color:#333;"></div>
+
+            <div id="noEligibleCouponsNotice" style="${eligibleCoupons.length === 0 ? '' : 'display:none;'}margin-top:6px;font-size:11px;color:#8c8c8c;font-style:italic;">
+              ℹ️ No eligible private coupons attached. Click "+ Create Compensation Coupon" above to create one, or send with apology details only.
+            </div>
+
+            ${ineligibleCoupons.length > 0 ? `
+              <details style="margin-top:8px;font-size:11px;color:#8c8c8c;cursor:pointer;">
+                <summary style="font-weight:600;color:#8c8c8c;">${ineligibleCoupons.length} private coupon(s) unavailable for this order (click to expand)</summary>
+                <ul style="margin:4px 0 0 16px;padding:0;color:#595959;line-height:1.5;">
+                  ${ineligibleCoupons.map((ic) => `<li><code>${escapeHtml(ic.code)}</code>: ${escapeHtml(ic.reason)}</li>`).join('')}
+                </ul>
+              </details>
+            ` : ''}
+          </div>
+
+          <div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+              <label class="admin-field" style="margin:0;">
+                <span style="font-weight:600;font-size:12px;">Apology Message (Editable)</span>
+              </label>
+              <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" id="resetApologyMessageBtn" style="font-size:11px;padding:1px 6px;">Reset to Default</button>
+            </div>
+            <textarea id="stockDelayApologyMessage" class="admin-input" rows="4" style="width:100%;font-size:12px;line-height:1.5;font-family:inherit;resize:vertical;" placeholder="Predefined apology message to customer...">${escapeHtml(preview.effectiveApologyMessage || preview.defaultApologyMessage || '')}</textarea>
+            <div class="admin-table__muted" style="font-size:10.5px;margin-top:3px;">
+              Edits update the live preview below and are included in the customer email.
+            </div>
+          </div>
+
+          <div>
+            <label class="admin-field" style="margin-bottom:6px;">
+              <span style="font-weight:600;font-size:12px;">Subject Line</span>
+            </label>
+            <input class="admin-input" type="text" value="${escapeHtml(preview.subject)}" readonly style="background:#fafafa;font-weight:500;" />
+          </div>
+
+          <div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+              <label class="admin-field" style="margin:0;">
+                <span style="font-weight:600;font-size:12px;">Customer Email Preview</span>
+              </label>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <span id="previewUpdatingSpinner" class="admin-table__muted" style="display:none;font-size:11px;">Updating preview…</span>
+                <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" data-action="toggle-email-preview-mode" data-mode="html" style="font-size:11px;padding:2px 8px;">HTML View</button>
+                <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" data-action="toggle-email-preview-mode" data-mode="text" style="font-size:11px;padding:2px 8px;">Plain Text</button>
+              </div>
+            </div>
+            <div id="stockShortageEmailHtmlView" style="border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;background:#fff;max-height:360px;overflow-y:auto;position:relative;">
+              <iframe style="width:100%;height:340px;border:none;background:#fff;" title="Email HTML Preview"></iframe>
+            </div>
+            <div id="stockShortageEmailTextView" hidden style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;background:#f9f9f9;font-family:monospace;font-size:12px;white-space:pre-wrap;max-height:360px;overflow-y:auto;color:#333;">${escapeHtml(preview.text)}</div>
+          </div>
+
+          <div style="background:#e6f7ff;border:1px solid #91d5ff;border-radius:6px;padding:10px 14px;font-size:11px;color:#0050b3;line-height:1.5;">
+            🔒 <strong>Phase 4 Safety Guardrails:</strong><br>
+            &bull; Internal delay notes and warehouse stock counts are strictly excluded from customer communication.<br>
+            &bull; Courtesy compensation coupons are admin-selected and verified before dispatch.<br>
+            &bull; Email dispatch does NOT consume coupon usage or modify order financial balances.
+          </div>
+
+          ${requiresResendReason ? `
+            <div style="background:#fffbe6;border:1px solid #ffe58f;border-radius:6px;padding:10px 14px;">
+              <label class="admin-field" style="margin:0;">
+                <span style="font-weight:600;font-size:12px;color:#d46b08;">
+                  ${dispatchMode === 'stale_recovery' ? 'Stale Dispatch Recovery Reason (Required)' : 'Resend Authorization Reason (Required)'}
+                </span>
+                <input class="admin-input" id="stockDelayResendReasonInput" type="text" placeholder="${dispatchMode === 'stale_recovery' ? 'e.g. Previous attempt timed out after server restart; customer confirmed non-receipt' : 'e.g. Customer requested copy to new email address'}" style="margin-top:4px;" />
+                <small class="admin-table__muted" style="font-size:10px;margin-top:2px;">Document an administrative reason (at least 5 characters) for audit trail.</small>
+              </label>
+            </div>
+          ` : ''}
+
+          ${isActiveSending ? `
+            <div style="background:#fff7e6;border:1px solid #ffd591;border-radius:6px;padding:10px 14px;color:#d46b08;font-size:12px;">
+              ⏳ <strong>Send in Progress:</strong> A delay notification dispatch is currently in flight for this order. Please wait for provider response before initiating a new dispatch.
+            </div>
+          ` : ''}
+
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;cursor:pointer;margin-top:2px;">
+            <input type="checkbox" id="confirmSendDelayEmailCheck" style="width:16px;height:16px;accent-color:#b85d3b;" />
+            <span>I have verified the recipient email, delivery timeline, and compensation details, and explicitly confirm sending this customer update.</span>
+          </label>
+        </div>
+      `;
+
+      footEl.innerHTML = `
+        <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button>
+        <button class="admin-btn admin-btn--primary" type="button" data-action="confirm-send-stock-delay-email" data-order-id="${order.id}" data-requires-reason="${requiresResendReason ? 'true' : 'false'}" ${isActiveSending ? 'disabled title="Send currently in flight"' : 'disabled'}>
+          ${escapeHtml(buttonLabel)}
+        </button>
+      `;
+
+      // Set initial HTML iframe content directly via srcdoc property
+      const htmlIframe = bodyEl.querySelector('#stockShortageEmailHtmlView iframe');
+      const textEl = bodyEl.querySelector('#stockShortageEmailTextView');
+      if (htmlIframe && preview.html) {
+        htmlIframe.srcdoc = preview.html;
+      }
+      if (textEl && preview.text) {
+        textEl.textContent = preview.text;
+      }
+
+      bodyEl.querySelectorAll('[data-action="toggle-email-preview-mode"]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const mode = btn.dataset.mode;
+          const htmlEl = bodyEl.querySelector('#stockShortageEmailHtmlView');
+          if (mode === 'html') {
+            htmlEl.hidden = false;
+            textEl.hidden = true;
+          } else {
+            htmlEl.hidden = true;
+            textEl.hidden = false;
+          }
+        });
+      });
+
+      const couponSelect = bodyEl.querySelector('#stockDelayCompensationCouponSelect');
+      const couponCard = bodyEl.querySelector('#stockDelayCouponDetailsCard');
+      const apologyTextarea = bodyEl.querySelector('#stockDelayApologyMessage');
+      const resetApologyBtn = bodyEl.querySelector('#resetApologyMessageBtn');
+      const previewSpinner = bodyEl.querySelector('#previewUpdatingSpinner');
+      const noEligibleNotice = bodyEl.querySelector('#noEligibleCouponsNotice');
+
+      function renderCouponCard(coupon) {
+        if (!couponCard) return;
+        if (coupon) {
+          couponCard.style.display = 'block';
+          couponCard.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <span><strong>Selected Code:</strong> <code style="font-weight:700;color:#237804;font-size:12px;">${escapeHtml(coupon.code)}</code></span>
+              <span class="admin-badge admin-badge--success">${escapeHtml(coupon.benefit)}</span>
+            </div>
+            <div style="color:#595959;line-height:1.5;">
+              <strong>Scope:</strong> ${escapeHtml(coupon.scopeLabel || 'All Merch')} &middot;
+              <strong>Valid Until:</strong> ${escapeHtml(coupon.expiryLabel || 'No Expiry')} &middot;
+              <strong>Availability:</strong> ${escapeHtml(coupon.remainingUsagesLabel || '1 remaining')}
+            </div>
+          `;
+        } else {
+          couponCard.style.display = 'none';
+          couponCard.innerHTML = '';
+        }
+      }
+
+      async function refreshEmailPreview() {
+        const selectedId = couponSelect?.value ? Number(couponSelect.value) : null;
+        const chosen = eligibleCoupons.find((c) => c.id === selectedId);
+        renderCouponCard(chosen);
+
+        if (previewSpinner) previewSpinner.style.display = 'inline';
+        try {
+          const params = new URLSearchParams();
+          if (selectedId) params.set('couponId', selectedId);
+          const customMsg = apologyTextarea?.value?.trim();
+          if (customMsg) params.set('customMessage', customMsg);
+
+          const previewUrl = `/api/merch/admin/orders/${encodeURIComponent(order.id)}/stock-shortage/email-preview?${params.toString()}`;
+          const updated = await apiRequest(previewUrl);
+          if (htmlIframe && updated.html) htmlIframe.srcdoc = updated.html;
+          if (textEl && updated.text) textEl.textContent = updated.text;
+        } catch (err) {
+          toast('Preview Update Error', err.message || 'Unable to update email preview.', 'warning');
+        } finally {
+          if (previewSpinner) previewSpinner.style.display = 'none';
+        }
+      }
+
+      couponSelect?.addEventListener('change', refreshEmailPreview);
+
+      let apologyDebounceTimer = null;
+      apologyTextarea?.addEventListener('input', () => {
+        clearTimeout(apologyDebounceTimer);
+        apologyDebounceTimer = setTimeout(refreshEmailPreview, 400);
+      });
+
+      resetApologyBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (apologyTextarea && preview.defaultApologyMessage) {
+          apologyTextarea.value = preview.defaultApologyMessage;
+          refreshEmailPreview();
+        }
+      });
+
+      // ─── Edit Delivery Estimate in Review Workflow ───
+      const editEstimateBtn = bodyEl.querySelector('#editDeliveryEstimateInReviewBtn');
+      editEstimateBtn?.addEventListener('click', () => {
+        state.returnToEmailModalOrderId = order.id;
+        openStockShortageReviewModal(order);
+      });
+
+      // ─── Inline Coupon Creation Workflow ───
+      const openCreateBtn = bodyEl.querySelector('#openCreateCompensationCouponBtn');
+      const createForm = bodyEl.querySelector('#stockDelayCreateCouponForm');
+      const cancelCreateBtn = bodyEl.querySelector('#cancelCreateCouponBtn');
+      const submitCreateBtn = bodyEl.querySelector('#submitCreateCouponBtn');
+      const regenCodeBtn = bodyEl.querySelector('#regenerateCouponCodeBtn');
+      const codeInput = bodyEl.querySelector('#newCompensationCouponCode');
+      const typeSelect = bodyEl.querySelector('#newCompensationCouponType');
+      const valInput = bodyEl.querySelector('#newCompensationCouponValue');
+      const expiryInput = bodyEl.querySelector('#newCompensationCouponExpiry');
+      const limitInput = bodyEl.querySelector('#newCompensationCouponLimit');
+      const scopeSelect = bodyEl.querySelector('#newCompensationCouponScope');
+      const summaryBox = bodyEl.querySelector('#newCompensationCouponSummaryBox');
+      const productsContainer = bodyEl.querySelector('#compensationCouponProductsContainer');
+      const selectAllProdsBtn = bodyEl.querySelector('#selectAllCompensationProductsBtn');
+      const clearAllProdsBtn = bodyEl.querySelector('#clearAllCompensationProductsBtn');
+      const prodsError = bodyEl.querySelector('#compensationCouponProductsError');
+      const scopeNotice = bodyEl.querySelector('#compensationCouponScopeNotice');
+      const productCheckboxes = Array.from(bodyEl.querySelectorAll('.compensation-product-cb'));
+
+      function getSelectedProductDetails() {
+        const selected = [];
+        productCheckboxes.forEach((cb) => {
+          if (cb.checked) {
+            selected.push({ id: Number(cb.value), name: cb.dataset.name || `Product #${cb.value}` });
+          }
+        });
+        return selected;
+      }
+
+      function generateCouponCode() {
+        const cleanOrder = String(order.orderNumber || order.id || 'DELAY').replace(/[^A-Za-z0-9]/g, '').slice(-6).toUpperCase();
+        const rand = Math.random().toString(36).substring(2, 6).toUpperCase();
+        return `CARE-${cleanOrder}-${rand}`;
+      }
+
+      function updateCreateCouponSummary() {
+        if (!summaryBox) return;
+        const cCode = (codeInput?.value || 'CODE').trim().toUpperCase();
+        const cType = typeSelect?.value === 'flat' ? '₹' : '%';
+        const cVal = Number(valInput?.value || 0);
+        const benefitStr = typeSelect?.value === 'flat' ? `₹${cVal} OFF` : `${cVal}% OFF`;
+        const cExpiry = expiryInput?.value || 'No date set';
+        const cLimit = Number(limitInput?.value || 1);
+        const isSelectedProducts = scopeSelect?.value === 'selected_products';
+        let scopeSummaryText = 'Entire Merch Store';
+        if (isSelectedProducts) {
+          const selected = getSelectedProductDetails();
+          if (selected.length === 0) {
+            scopeSummaryText = '<span style="color:#cf1322;font-weight:600;">Selected Products (⚠️ None selected)</span>';
+          } else {
+            scopeSummaryText = `<strong>Selected Products:</strong> ${escapeHtml(selected.map((p) => p.name).join(', '))} (${selected.length} product${selected.length === 1 ? '' : 's'})`;
+          }
+        }
+        summaryBox.innerHTML = `
+          <strong>Preview:</strong> Private coupon <code>${escapeHtml(cCode)}</code> providing <strong>${escapeHtml(benefitStr)}</strong>, valid until <strong>${escapeHtml(cExpiry)}</strong> (${cLimit} redemption) for <code>${escapeHtml(customerEmail)}</code>.<br>
+          <div style="margin-top:4px;font-size:11px;color:#555;"><strong>Eligibility Scope:</strong> ${scopeSummaryText}</div>
+        `;
+      }
+
+      scopeSelect?.addEventListener('change', () => {
+        if (scopeSelect.value === 'selected_products') {
+          if (productsContainer) productsContainer.style.display = 'block';
+          if (scopeNotice) scopeNotice.style.display = 'none';
+        } else {
+          if (productsContainer) productsContainer.style.display = 'none';
+          if (prodsError) prodsError.style.display = 'none';
+          // Discard and clear any existing product selection when switching back to Entire Merch Store
+          let hadSelection = false;
+          productCheckboxes.forEach((cb) => {
+            if (cb.checked) hadSelection = true;
+            cb.checked = false;
+          });
+          if (scopeNotice) {
+            if (hadSelection) {
+              scopeNotice.textContent = 'ℹ️ Previous product selection discarded. Scope reset to Entire Merch Store.';
+              scopeNotice.style.display = 'block';
+            } else {
+              scopeNotice.style.display = 'none';
+            }
+          }
+        }
+        updateCreateCouponSummary();
+      });
+
+      selectAllProdsBtn?.addEventListener('click', () => {
+        productCheckboxes.forEach((cb) => { cb.checked = true; });
+        if (prodsError) prodsError.style.display = 'none';
+        updateCreateCouponSummary();
+      });
+
+      clearAllProdsBtn?.addEventListener('click', () => {
+        productCheckboxes.forEach((cb) => { cb.checked = false; });
+        updateCreateCouponSummary();
+      });
+
+      productCheckboxes.forEach((cb) => {
+        cb.addEventListener('change', () => {
+          if (prodsError) prodsError.style.display = 'none';
+          updateCreateCouponSummary();
+        });
+      });
+
+      openCreateBtn?.addEventListener('click', () => {
+        if (!createForm) return;
+        const isHidden = createForm.style.display === 'none';
+        if (isHidden) {
+          createForm.style.display = 'block';
+          if (codeInput) codeInput.value = generateCouponCode();
+          if (typeSelect) typeSelect.value = 'percentage';
+          if (valInput) {
+            valInput.value = 10;
+            valInput.max = 100;
+          }
+          if (limitInput) limitInput.value = 1;
+          if (scopeSelect) scopeSelect.value = 'merch';
+          if (productsContainer) productsContainer.style.display = 'none';
+          if (prodsError) prodsError.style.display = 'none';
+          if (scopeNotice) scopeNotice.style.display = 'none';
+          productCheckboxes.forEach((cb) => { cb.checked = false; });
+          if (expiryInput) {
+            const d = new Date();
+            d.setDate(d.getDate() + 30);
+            expiryInput.value = d.toISOString().split('T')[0];
+            expiryInput.min = new Date().toISOString().split('T')[0];
+          }
+          updateCreateCouponSummary();
+          codeInput?.focus();
+        } else {
+          createForm.style.display = 'none';
+        }
+      });
+
+      cancelCreateBtn?.addEventListener('click', () => {
+        if (createForm) createForm.style.display = 'none';
+      });
+
+      regenCodeBtn?.addEventListener('click', () => {
+        if (codeInput) {
+          codeInput.value = generateCouponCode();
+          updateCreateCouponSummary();
+        }
+      });
+
+      typeSelect?.addEventListener('change', () => {
+        if (valInput) {
+          if (typeSelect.value === 'percentage') {
+            valInput.max = 100;
+            if (Number(valInput.value) > 100) valInput.value = 10;
+          } else {
+            valInput.removeAttribute('max');
+            if (Number(valInput.value) <= 10) valInput.value = 200;
+          }
+        }
+        updateCreateCouponSummary();
+      });
+
+      [codeInput, valInput, expiryInput, limitInput].forEach((el) => {
+        el?.addEventListener('input', updateCreateCouponSummary);
+        el?.addEventListener('change', updateCreateCouponSummary);
+      });
+
+      submitCreateBtn?.addEventListener('click', async () => {
+        const code = (codeInput?.value || '').trim().toUpperCase();
+        const discountType = typeSelect?.value || 'percentage';
+        const discountValue = Number(valInput?.value || 0);
+        const validTill = expiryInput?.value || '';
+        const maxRedemptions = Number(limitInput?.value || 1);
+        const appliesTo = scopeSelect?.value || 'merch';
+
+        if (!code || code.length < 3) {
+          toast('Invalid Code', 'Coupon code must be at least 3 characters.', 'warning');
+          codeInput?.focus();
+          return;
+        }
+        if (!Number.isFinite(discountValue) || discountValue <= 0) {
+          toast('Invalid Value', 'Discount value must be greater than 0.', 'warning');
+          valInput?.focus();
+          return;
+        }
+        if (discountType === 'percentage' && discountValue > 100) {
+          toast('Invalid Value', 'Percentage discount cannot exceed 100%.', 'warning');
+          valInput?.focus();
+          return;
+        }
+        if (validTill && validTill < new Date().toISOString().split('T')[0]) {
+          toast('Invalid Expiration', 'Expiration date cannot be in the past.', 'warning');
+          expiryInput?.focus();
+          return;
+        }
+
+        let selectedProductIds = [];
+        if (appliesTo === 'selected_products') {
+          selectedProductIds = getSelectedProductDetails().map((p) => p.id);
+          if (selectedProductIds.length === 0) {
+            if (prodsError) prodsError.style.display = 'block';
+            toast('Product Required', 'Please select at least one product when restricting to Selected Products.', 'warning');
+            return;
+          }
+        }
+
+        submitCreateBtn.disabled = true;
+        const originalBtnText = submitCreateBtn.textContent;
+        submitCreateBtn.textContent = 'Creating...';
+
+        try {
+          const res = await apiRequest(`/api/merch/admin/orders/${order.id}/compensation-coupons`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              code,
+              discountType,
+              discountValue,
+              validTill,
+              maxRedemptions,
+              appliesTo: appliesTo === 'selected_products' ? 'selected_products' : 'merch',
+              productIds: appliesTo === 'selected_products' ? selectedProductIds : undefined,
+            }),
+          });
+
+          toast('Coupon Created', res.message || `Coupon ${code} created successfully.`, 'success');
+
+          const newCoupon = res.coupon;
+          eligibleCoupons.unshift(newCoupon);
+
+          // Rebuild select options
+          if (couponSelect) {
+            couponSelect.innerHTML = `
+              <option value="">No coupon — send email only</option>
+              ${eligibleCoupons.map((c) => `
+                <option value="${c.id}" ${c.id === newCoupon.id ? 'selected' : ''}>${escapeHtml(c.code)} &middot; ${escapeHtml(c.benefit)} &middot; Exp: ${escapeHtml(c.expiryLabel)} &middot; ${escapeHtml(c.remainingUsagesLabel || 'Available')}</option>
+              `).join('')}
+            `;
+            couponSelect.value = String(newCoupon.id);
+          }
+
+          if (noEligibleNotice) noEligibleNotice.style.display = 'none';
+          if (createForm) createForm.style.display = 'none';
+
+          // Trigger preview refresh with the newly selected coupon
+          await refreshEmailPreview();
+        } catch (err) {
+          toast('Coupon Creation Failed', err.message || 'Unable to create compensation coupon.', 'danger');
+        } finally {
+          submitCreateBtn.disabled = false;
+          submitCreateBtn.textContent = originalBtnText;
+        }
+      });
+
+      const confirmCheck = bodyEl.querySelector('#confirmSendDelayEmailCheck');
+      const sendBtn = footEl.querySelector('[data-action="confirm-send-stock-delay-email"]');
+      confirmCheck?.addEventListener('change', () => {
+        if (sendBtn) sendBtn.disabled = !confirmCheck.checked;
+      });
+
+    } catch (err) {
+      const bodyEl = els.adminModalDialog.querySelector('.admin-modal__body');
+      if (bodyEl) {
+        bodyEl.innerHTML = `
+          <div style="text-align:center;padding:24px 16px;color:#cf1322;">
+            <p style="font-weight:600;margin:0 0 6px;font-size:14px;">⚠️ Unable to Load Email Preview</p>
+            <p class="admin-table__muted" style="font-size:12px;margin:0 0 16px;">${escapeHtml(err.message || 'Error fetching email preview.')}</p>
+            <button type="button" class="admin-btn admin-btn--soft admin-btn--sm" id="retryLoadDelayEmailPreviewBtn">↻ Retry Loading Preview</button>
+          </div>
+        `;
+        bodyEl.querySelector('#retryLoadDelayEmailPreviewBtn')?.addEventListener('click', () => {
+          openStockShortageEmailModal(order);
+        });
+      }
+    }
+  }
+
   async function openShiprocketFulfillModal(order) {
     if (!order) return;
     openModal({
@@ -7648,6 +8762,24 @@
         }
         return;
       }
+      case 'campaign-select-all-variants': {
+        const boxes = document.querySelectorAll('#campaignVariantCheckboxes input[name="targetVariantIds"]');
+        boxes.forEach((box) => {
+          box.checked = true;
+          box.closest('.admin-campaign-variant-option')?.classList.add('is-selected');
+        });
+        updateCampaignVariantsDropdownState();
+        return;
+      }
+      case 'campaign-clear-all-variants': {
+        const boxes = document.querySelectorAll('#campaignVariantCheckboxes input[name="targetVariantIds"]');
+        boxes.forEach((box) => {
+          box.checked = false;
+          box.closest('.admin-campaign-variant-option')?.classList.remove('is-selected');
+        });
+        updateCampaignVariantsDropdownState();
+        return;
+      }
       case 'dismiss-campaign-success': {
         state.latestCreatedCampaign = null;
         const banner = document.getElementById('campaignGeneratedSuccessBanner');
@@ -7669,6 +8801,157 @@
           renderInfluencers();
         } catch (err) {
           toast('Update Failed', err.message || 'Failed to toggle campaign status', 'danger');
+        }
+        return;
+      }
+      case 'edit-campaign': {
+        const campaignId = Number(target?.dataset?.id);
+        if (!campaignId) return;
+        state.editingCampaignId = campaignId;
+        renderInfluencers();
+        const formEl = document.getElementById('campaignCreateForm');
+        if (formEl) formEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+      case 'cancel-edit-campaign': {
+        state.editingCampaignId = null;
+        renderInfluencers();
+        return;
+      }
+      case 'flag-stock-shortage': {
+        const orderId = Number(target?.dataset?.orderId || id);
+        if (!orderId) return;
+        const currentOrder = state.orders.find((o) => Number(o.id) === orderId) || order;
+        const reason = window.prompt(`Enter stock shortage reason for order ${currentOrder?.orderNumber || orderId}:`, 'Required stock is unavailable for fulfillment');
+        if (reason === null) return;
+        try {
+          const res = await apiRequest(`/api/merch/admin/orders/${orderId}/stock-shortage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: reason.trim() || 'Required stock is unavailable for fulfillment' }),
+          });
+          toast('Stock Shortage Flagged', `Order ${res.order?.orderNumber || orderId} is now flagged for stock shortage.`, 'warning');
+          await loadOrderData();
+          await loadDashboardStats({ silent: true });
+          renderOrders();
+        } catch (err) {
+          toast('Failed to flag shortage', err.message || 'Unable to flag stock shortage.', 'danger');
+        }
+        return;
+      }
+      case 'resolve-stock-shortage': {
+        const orderId = Number(target?.dataset?.orderId || id);
+        if (!orderId) return;
+        const currentOrder = state.orders.find((o) => Number(o.id) === orderId) || order;
+        if (!window.confirm(`Resolve stock shortage for order ${currentOrder?.orderNumber || orderId}? This will return the order to normal processing.`)) return;
+        try {
+          const res = await apiRequest(`/api/merch/admin/orders/${orderId}/resolve-stock-shortage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+          });
+          toast('Stock Shortage Resolved', `Order ${res.order?.orderNumber || orderId} stock shortage has been resolved.`, 'success');
+          await loadOrderData();
+          await loadDashboardStats({ silent: true });
+          renderOrders();
+        } catch (err) {
+          toast('Failed to resolve shortage', err.message || 'Unable to resolve stock shortage.', 'danger');
+        }
+        return;
+      }
+      case 'open-stock-shortage-review': {
+        const orderId = Number(target?.dataset?.orderId || id);
+        if (!orderId) return;
+        const currentOrder = state.orders.find((o) => Number(o.id) === orderId) || order;
+        openStockShortageReviewModal(currentOrder);
+        return;
+      }
+      case 'save-stock-shortage-review': {
+        const orderId = Number(target?.dataset?.orderId || id);
+        if (!orderId) return;
+        const form = els.adminModalDialog.querySelector('[data-form="stock-shortage-review"]');
+        if (!form) return;
+        const fd = new FormData(form);
+        const reviewStatus = String(fd.get('reviewStatus') || 'reviewed').trim();
+        const revisedDeliveryEstimate = String(fd.get('revisedDeliveryEstimate') || '').trim();
+        const internalDelayNote = String(fd.get('internalDelayNote') || '').trim();
+
+        target.disabled = true;
+        try {
+          const res = await apiRequest(`/api/merch/admin/orders/${orderId}/stock-shortage/review`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reviewStatus, revisedDeliveryEstimate, internalDelayNote }),
+          });
+          toast('Delay Review Saved', `Order ${res.order?.orderNumber || orderId} shortage review updated.`, 'success');
+          await loadOrderData();
+          await loadDashboardStats({ silent: true });
+          renderOrders();
+
+          if (state.returnToEmailModalOrderId === orderId) {
+            state.returnToEmailModalOrderId = null;
+            const updatedOrder = state.orders.find((o) => Number(o.id) === orderId) || res.order || order;
+            await openStockShortageEmailModal(updatedOrder);
+          } else {
+            closeModal();
+          }
+        } catch (err) {
+          toast('Failed to save review', err.message || 'Unable to update shortage review.', 'danger');
+          target.disabled = false;
+        }
+        return;
+      }
+      case 'open-stock-shortage-email-modal': {
+        const orderId = Number(target?.dataset?.orderId || id);
+        if (!orderId) return;
+        const currentOrder = state.orders.find((o) => Number(o.id) === orderId) || order;
+        await openStockShortageEmailModal(currentOrder);
+        return;
+      }
+      case 'confirm-send-stock-delay-email': {
+        const orderId = Number(target?.dataset?.orderId || id);
+        if (!orderId) return;
+        const requiresReason = target?.dataset?.requiresReason === 'true';
+        let resendReason = '';
+        if (requiresReason) {
+          const reasonEl = els.adminModalDialog.querySelector('#stockDelayResendReasonInput');
+          resendReason = String(reasonEl?.value || '').trim();
+          if (resendReason.length < 5) {
+            toast('Resend Reason Required', 'Please enter a valid administrative reason (at least 5 characters) for resending.', 'warning');
+            reasonEl?.focus();
+            return;
+          }
+        }
+
+        const couponSelect = els.adminModalDialog.querySelector('#stockDelayCompensationCouponSelect');
+        const couponId = couponSelect && couponSelect.value ? Number(couponSelect.value) : null;
+        const customMessageEl = els.adminModalDialog.querySelector('#stockDelayApologyMessage');
+        const customMessage = customMessageEl ? String(customMessageEl.value || '').trim() : '';
+
+        target.disabled = true;
+        const originalText = target.textContent;
+        target.textContent = 'Sending...';
+
+        try {
+          const res = await apiRequest(`/api/merch/admin/orders/${orderId}/stock-shortage/send-email`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              couponId: couponId || null,
+              confirmResend: requiresReason,
+              resendReason: requiresReason ? resendReason : undefined,
+              customMessage: customMessage || undefined,
+            }),
+          });
+          toast('Delay Email Sent', res.message || `Customer email delivered to ${res.sentTo}.`, 'success');
+          closeModal();
+          await loadOrderData();
+          await loadDashboardStats({ silent: true });
+          renderOrders();
+        } catch (err) {
+          toast('Email Delivery Failed', err.message || 'Unable to deliver delay notification.', 'danger');
+          target.disabled = false;
+          target.textContent = originalText;
         }
         return;
       }
@@ -7895,9 +9178,17 @@
         }
         return;
       }
-      case 'close-modal':
+      case 'close-modal': {
+        const returnOrderId = state.returnToEmailModalOrderId;
+        state.returnToEmailModalOrderId = null;
+        if (returnOrderId) {
+          const returnOrder = state.orders.find((o) => Number(o.id) === returnOrderId) || { id: returnOrderId };
+          await openStockShortageEmailModal(returnOrder);
+          return;
+        }
         closeModal();
         return;
+      }
       case 'logout':
   closeModal();
 
@@ -9250,6 +10541,18 @@
         closeCouponProductDropdown();
       }
 
+      const openVariantDropdown = document.querySelector('[data-campaign-variant-dropdown].is-open');
+      if (openVariantDropdown && !target.closest('[data-campaign-variant-dropdown]')) {
+        closeCampaignVariantDropdown();
+      }
+
+      const variantToggle = target.closest('[data-campaign-variant-toggle]');
+      if (variantToggle) {
+        event.preventDefault();
+        toggleCampaignVariantDropdown();
+        return;
+      }
+
       if (els.profileDropdown && !els.profileDropdown.hidden && !target.closest('[data-profile-menu], [data-action="open-profile"]')) {
         closeProfileDropdown();
       }
@@ -9319,6 +10622,21 @@
           }
         }
       }
+      if (target.matches('#campaignTargetProductSelect')) {
+        const prodId = Number(target.value);
+        const container = document.getElementById('campaignVariantDropdownContainer') || document.getElementById('campaignVariantCardsContainer');
+        if (container) {
+          container.innerHTML = renderCampaignVariantDropdown(prodId);
+          updateCampaignVariantsDropdownState();
+        }
+      }
+      if (target.matches('#campaignVariantCheckboxes input[name="targetVariantIds"]')) {
+        const opt = target.closest('.admin-campaign-variant-option') || target.closest('.admin-campaign-variant-card');
+        if (opt) {
+          opt.classList.toggle('is-selected', target.checked);
+        }
+        updateCampaignVariantsDropdownState();
+      }
       if (target.matches('[data-hype-label-select]')) {
         const customWrap = target.closest('.admin-hype-row')?.querySelector('[data-hype-custom-wrap]');
         if (customWrap) customWrap.hidden = target.value !== 'Custom Label';
@@ -9370,6 +10688,10 @@
           return;
         }
         if (closeCouponProductDropdown()) {
+          event.preventDefault();
+          return;
+        }
+        if (closeCampaignVariantDropdown()) {
           event.preventDefault();
           return;
         }
