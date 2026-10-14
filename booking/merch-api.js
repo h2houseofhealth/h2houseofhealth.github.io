@@ -95,7 +95,97 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       answer TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS merch_inventory_alerts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      variant_id INTEGER NOT NULL UNIQUE REFERENCES merch_variants(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES merch_products(id) ON DELETE CASCADE,
+      last_alert_type TEXT NOT NULL,
+      threshold INTEGER NOT NULL,
+      stock_at_alert INTEGER NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS merch_order_stock_shortages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL REFERENCES merch_orders(id) ON DELETE CASCADE,
+      order_item_id INTEGER,
+      variant_id INTEGER,
+      sku TEXT,
+      product_name TEXT,
+      variant_label TEXT,
+      ordered_quantity INTEGER NOT NULL DEFAULT 1,
+      available_stock INTEGER NOT NULL DEFAULT 0,
+      reason TEXT NOT NULL,
+      review_status TEXT NOT NULL DEFAULT 'awaiting_review',
+      revised_delivery_estimate TEXT,
+      internal_delay_note TEXT,
+      reviewed_by TEXT,
+      reviewed_at TEXT,
+      customer_communication_status TEXT NOT NULL DEFAULT 'pending',
+      compensation_coupon_id INTEGER REFERENCES coupons(id),
+      compensation_coupon_code TEXT,
+      compensation_coupon_benefit TEXT,
+      communication_authorized_by TEXT,
+      resend_reason TEXT,
+      is_resolved INTEGER NOT NULL DEFAULT 0,
+      resolved_at TEXT,
+      resolved_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_order_stock_shortage_active
+      ON merch_order_stock_shortages(order_id, COALESCE(variant_id, order_item_id, 0)) WHERE is_resolved = 0;
   `);
+
+  if (!hasColumn('merch_order_stock_shortages', 'review_status')) {
+    db.exec("ALTER TABLE merch_order_stock_shortages ADD COLUMN review_status TEXT NOT NULL DEFAULT 'awaiting_review'");
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'revised_delivery_estimate')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN revised_delivery_estimate TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'internal_delay_note')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN internal_delay_note TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'reviewed_by')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN reviewed_by TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'reviewed_at')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN reviewed_at TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'customer_communication_status')) {
+    db.exec("ALTER TABLE merch_order_stock_shortages ADD COLUMN customer_communication_status TEXT NOT NULL DEFAULT 'pending'");
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'customer_communicated_at')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN customer_communicated_at TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'customer_communication_sent_to')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN customer_communication_sent_to TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'customer_communication_error')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN customer_communication_error TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'customer_communication_attempts')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN customer_communication_attempts INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'compensation_coupon_id')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN compensation_coupon_id INTEGER REFERENCES coupons(id)');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'compensation_coupon_code')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN compensation_coupon_code TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'compensation_coupon_benefit')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN compensation_coupon_benefit TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'communication_authorized_by')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN communication_authorized_by TEXT');
+  }
+  if (!hasColumn('merch_order_stock_shortages', 'resend_reason')) {
+    db.exec('ALTER TABLE merch_order_stock_shortages ADD COLUMN resend_reason TEXT');
+  }
 
   // Product specifications are optional so existing databases continue to work.
   if (!hasColumn('merch_products', 'specifications_json')) {
@@ -828,6 +918,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       coupon_code TEXT NOT NULL,
       target_product_id INTEGER NOT NULL DEFAULT 11,
       target_variant_id INTEGER NOT NULL DEFAULT 569,
+      target_variant_ids TEXT,
       is_active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -852,6 +943,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     CREATE INDEX IF NOT EXISTS idx_merch_campaign_clicks_campaign
       ON merch_campaign_clicks(campaign_id, datetime(created_at) DESC);
   `);
+
+  if (!hasColumn('merch_campaigns', 'target_variant_ids')) {
+    db.exec('ALTER TABLE merch_campaigns ADD COLUMN target_variant_ids TEXT');
+  }
 
   if (!hasColumn('merch_orders', 'campaign_id')) {
     db.exec('ALTER TABLE merch_orders ADD COLUMN campaign_id INTEGER REFERENCES merch_campaigns(id)');
@@ -892,6 +987,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         VALUES ('RYANH2', 'Ryan influencer discount (₹1,150 off per eligible bottle)', 'merch', 'flat', 1150, 'category:bottles', 1, 1, 'public', ?, datetime('now'))
       `).run(ryanId);
     }
+    // Ensure RyanH2 campaign persists all 4 bottle variant IDs [569, 570, 571, 572]
+    try {
+      const ryanH2Campaign = db.prepare("SELECT id, target_variant_ids FROM merch_campaigns WHERE LOWER(slug) = 'ryanh2'").get();
+      if (ryanH2Campaign && !ryanH2Campaign.target_variant_ids) {
+        db.prepare("UPDATE merch_campaigns SET target_variant_ids = ? WHERE id = ?").run(
+          JSON.stringify([569, 570, 571, 572]),
+          ryanH2Campaign.id
+        );
+      }
+    } catch (_) {}
   } catch (seedErr) {
     console.warn('[Seed Ryan Influencer Error]:', seedErr?.message || seedErr);
   }
@@ -1021,6 +1126,155 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
 
   const LOW_STOCK_THRESHOLD = 15;
+
+  function getMerchStoreSettings() {
+    try {
+      const row = db.prepare('SELECT settings_json AS settingsJson FROM merch_store_settings WHERE id = 1').get();
+      if (!row?.settingsJson) return {};
+      const parsed = JSON.parse(row.settingsJson);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function getVariantLowStockThreshold(variant, product = null) {
+    const settings = getMerchStoreSettings();
+    if (variant && settings.variantThresholds && settings.variantThresholds[variant.id] != null) {
+      const vt = Number(settings.variantThresholds[variant.id]);
+      if (Number.isFinite(vt) && vt >= 0) return vt;
+    }
+    if (product && settings.productThresholds && settings.productThresholds[product.id] != null) {
+      const pt = Number(settings.productThresholds[product.id]);
+      if (Number.isFinite(pt) && pt >= 0) return pt;
+    }
+    if (settings.lowStockThreshold != null) {
+      const st = Number(settings.lowStockThreshold);
+      if (Number.isFinite(st) && st >= 0) return st;
+    }
+    return LOW_STOCK_THRESHOLD;
+  }
+
+  function syncInventoryAlerts() {
+    const products = loadMerchProductCatalog({ includeInactive: false });
+
+    for (const product of products) {
+      for (const variant of (product.variants || [])) {
+        if (variant.isDeleted || Number(variant.isActive ?? variant.is_active ?? 1) === 0) continue;
+        const threshold = getVariantLowStockThreshold(variant, product);
+        const stock = Number(variant.stock || 0);
+
+        const existingAlert = db.prepare(`
+          SELECT * FROM merch_inventory_alerts WHERE variant_id = ?
+        `).get(variant.id);
+
+        if (stock > threshold) {
+          // Stock recovered above threshold -> Re-arm alert
+          if (existingAlert && existingAlert.is_active === 1) {
+            db.prepare(`
+              UPDATE merch_inventory_alerts
+              SET is_active = 0, updated_at = datetime('now')
+              WHERE variant_id = ?
+            `).run(variant.id);
+          }
+        } else if (stock <= 0) {
+          // Sold out
+          if (!existingAlert) {
+            db.prepare(`
+              INSERT INTO merch_inventory_alerts (variant_id, product_id, last_alert_type, threshold, stock_at_alert, is_active, created_at, updated_at)
+              VALUES (?, ?, 'sold_out', ?, 0, 1, datetime('now'), datetime('now'))
+            `).run(variant.id, product.id, threshold);
+          } else if (existingAlert.is_active === 0 || existingAlert.last_alert_type !== 'sold_out') {
+            db.prepare(`
+              UPDATE merch_inventory_alerts
+              SET last_alert_type = 'sold_out', threshold = ?, stock_at_alert = 0, is_active = 1, updated_at = datetime('now')
+              WHERE variant_id = ?
+            `).run(threshold, variant.id);
+          }
+        } else {
+          // Low stock (0 < stock <= threshold)
+          if (!existingAlert) {
+            db.prepare(`
+              INSERT INTO merch_inventory_alerts (variant_id, product_id, last_alert_type, threshold, stock_at_alert, is_active, created_at, updated_at)
+              VALUES (?, ?, 'low_stock', ?, ?, 1, datetime('now'), datetime('now'))
+            `).run(variant.id, product.id, threshold, stock);
+          } else if (existingAlert.is_active === 0 || existingAlert.last_alert_type !== 'low_stock') {
+            db.prepare(`
+              UPDATE merch_inventory_alerts
+              SET last_alert_type = 'low_stock', threshold = ?, stock_at_alert = ?, is_active = 1, updated_at = datetime('now')
+              WHERE variant_id = ?
+            `).run(threshold, stock, variant.id);
+          }
+        }
+      }
+    }
+
+    return db.prepare(`
+      SELECT a.*, v.sku, v.color, v.size, v.stock AS current_stock, p.name AS product_name
+      FROM merch_inventory_alerts a
+      JOIN merch_variants v ON v.id = a.variant_id
+      JOIN merch_products p ON p.id = a.product_id
+      WHERE a.is_active = 1 AND v.deleted_at IS NULL AND p.deleted_at IS NULL
+      ORDER BY a.stock_at_alert ASC, datetime(a.updated_at) DESC
+    `).all();
+  }
+
+  function getActiveMerchOrderStockShortages() {
+    return db.prepare(`
+      SELECT
+        s.id AS shortage_id,
+        s.order_id,
+        s.order_item_id,
+        s.variant_id,
+        s.ordered_quantity,
+        s.available_stock,
+        s.reason,
+        s.review_status,
+        s.revised_delivery_estimate,
+        s.internal_delay_note,
+        s.reviewed_by,
+        s.reviewed_at,
+        s.customer_communication_status,
+        s.customer_communicated_at,
+        s.customer_communication_sent_to,
+        s.customer_communication_error,
+        s.customer_communication_attempts,
+        s.compensation_coupon_id,
+        s.compensation_coupon_code,
+        s.compensation_coupon_benefit,
+        s.communication_authorized_by,
+        s.resend_reason,
+        s.created_at AS shortage_created_at,
+        o.order_number,
+        o.customer_name,
+        o.customer_email,
+        o.guest_email,
+        o.customer_phone,
+        o.payment_status,
+        o.status AS order_status,
+        o.tracking_number,
+        o.shiprocket_awb_code,
+        o.delivered_at,
+        o.created_at AS order_created_at,
+        COALESCE(s.sku, v.sku, '') AS sku,
+        COALESCE(v.color, '') AS color,
+        COALESCE(v.size, '') AS size,
+        COALESCE(s.variant_label, '') AS shortage_variant_label,
+        COALESCE(v.stock, s.available_stock, 0) AS current_variant_stock,
+        COALESCE(s.product_name, p.name, 'Product') AS product_name
+      FROM merch_order_stock_shortages s
+      JOIN merch_orders o ON o.id = s.order_id
+      LEFT JOIN merch_variants v ON v.id = s.variant_id
+      LEFT JOIN merch_products p ON p.id = v.product_id
+      WHERE s.is_resolved = 0
+        AND o.payment_status = 'paid'
+        AND o.status NOT IN ('shipped', 'delivered', 'cancelled', 'returned')
+      ORDER BY datetime(s.created_at) DESC, s.id DESC
+    `).all().map((s) => ({
+      ...s,
+      variant_label: s.shortage_variant_label || [s.color, s.size].filter(Boolean).join(' · ') || 'Default',
+    }));
+  }
 
   function normalizeInfluencerPayload(body = {}) {
     const commissionPerOrderPaise = Number(body.commissionPerOrderPaise ?? body.commission_per_order_paise ?? 0);
@@ -2743,7 +2997,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       },
       campaigns: db.prepare(`
         SELECT c.id, c.slug, c.name, c.coupon_code AS couponCode, c.target_product_id AS targetProductId,
-               c.target_variant_id AS targetVariantId, c.is_active AS isActive, c.created_at AS createdAt,
+               c.target_variant_id AS targetVariantId, c.target_variant_ids AS targetVariantIds, c.is_active AS isActive, c.created_at AS createdAt,
                (SELECT COUNT(*) FROM merch_campaign_clicks WHERE campaign_id = c.id) AS clicksCount,
                (SELECT COUNT(*) FROM merch_orders WHERE campaign_id = c.id AND payment_status IN ('paid', 'cod_pending')) AS ordersCount,
                (SELECT COALESCE(SUM(total_amount), 0) FROM merch_orders WHERE campaign_id = c.id AND payment_status IN ('paid', 'cod_pending')) AS revenuePaise
@@ -3392,18 +3646,86 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       createdAt: order.createdAt || order.created_at || null,
       updatedAt: order.updatedAt || order.updated_at || null,
       deliveredAt: order.deliveredAt || order.delivered_at || (String(order.status || '').toLowerCase() === 'delivered' ? order.updatedAt || order.updated_at || null : null),
-      items: items.map((item) => ({
-        id: Number(item.id),
-        name: String(item.productName || item.product_name || item.name || ''),
-        productName: String(item.productName || item.product_name || item.name || ''),
-        qty: Number(item.quantity || item.qty || 0),
-        quantity: Number(item.quantity || item.qty || 0),
-        price: Number(item.unitPrice || item.unit_price || item.price || 0),
-        variantLabel: String(item.variantLabel || item.variant_label || ''),
-        sku: String(item.sku || ''),
-        imageUrl: item.imageUrl || item.image_url || '',
-        lineTotal: Number(item.lineTotal || item.line_total || 0),
+      hasStockShortage: Boolean(
+        String(order.status || '').toLowerCase() === 'stock_shortage' ||
+        db.prepare('SELECT 1 FROM merch_order_stock_shortages WHERE order_id = ? AND is_resolved = 0 LIMIT 1').get(Number(order.id))
+      ),
+      stockShortages: db.prepare(`
+        SELECT s.*,
+               COALESCE(s.sku, v.sku, '') AS item_sku,
+               COALESCE(v.stock, s.available_stock, 0) AS current_variant_stock,
+               COALESCE(s.product_name, p.name, 'Product') AS item_product_name,
+               COALESCE(s.variant_label, '') AS shortage_variant_label,
+               COALESCE(v.color, '') AS v_color,
+               COALESCE(v.size, '') AS v_size
+        FROM merch_order_stock_shortages s
+        LEFT JOIN merch_variants v ON v.id = s.variant_id
+        LEFT JOIN merch_products p ON p.id = v.product_id
+        WHERE s.order_id = ? AND s.is_resolved = 0
+      `).all(Number(order.id)).map((s) => ({
+        id: s.id,
+        orderItemId: s.order_item_id,
+        variantId: s.variant_id,
+        orderedQuantity: s.ordered_quantity,
+        availableStock: s.available_stock,
+        currentStock: s.current_variant_stock,
+        sku: s.item_sku,
+        productName: s.item_product_name,
+        variantLabel: s.shortage_variant_label || [s.v_color, s.v_size].filter(Boolean).join(' · ') || 'Default',
+        reason: s.reason,
+        reviewStatus: s.review_status || 'awaiting_review',
+        revisedDeliveryEstimate: s.revised_delivery_estimate || null,
+        internalDelayNote: s.internal_delay_note || null,
+        reviewedBy: s.reviewed_by || null,
+        reviewedAt: s.reviewed_at || null,
+        customerCommunicationStatus: s.customer_communication_status || 'pending',
+        customerCommunicatedAt: s.customer_communicated_at || null,
+        customerCommunicationSentTo: s.customer_communication_sent_to || null,
+        customerCommunicationError: s.customer_communication_error || null,
+        customerCommunicationAttempts: Number(s.customer_communication_attempts || 0),
+        compensationCouponId: s.compensation_coupon_id || null,
+        compensationCouponCode: s.compensation_coupon_code || null,
+        compensationCouponBenefit: s.compensation_coupon_benefit || null,
+        communicationAuthorizedBy: s.communication_authorized_by || null,
+        resendReason: s.resend_reason || null,
+        createdAt: s.created_at,
       })),
+      stockShortageReviewStatus: (() => {
+        const activeShortages = db.prepare('SELECT review_status FROM merch_order_stock_shortages WHERE order_id = ? AND is_resolved = 0').all(Number(order.id));
+        if (!activeShortages.length) return null;
+        if (activeShortages.some((s) => s.review_status === 'awaiting_review')) return 'awaiting_review';
+        if (activeShortages.every((s) => s.review_status === 'ready_for_communication')) return 'ready_for_communication';
+        return 'reviewed';
+      })(),
+      stockShortageCommunicationStatus: (() => {
+        const activeShortages = db.prepare('SELECT customer_communication_status FROM merch_order_stock_shortages WHERE order_id = ? AND is_resolved = 0').all(Number(order.id));
+        if (!activeShortages.length) return null;
+        if (activeShortages.every((s) => s.customer_communication_status === 'sent')) return 'sent';
+        if (activeShortages.some((s) => s.customer_communication_status === 'sending')) return 'sending';
+        if (activeShortages.some((s) => s.customer_communication_status === 'failed')) return 'failed';
+        return 'pending';
+      })(),
+      items: items.map((item) => {
+        const itemShortage = db.prepare(`
+          SELECT reason FROM merch_order_stock_shortages
+          WHERE order_id = ? AND (variant_id = ? OR order_item_id = ? OR (sku IS NOT NULL AND sku = ?)) AND is_resolved = 0 LIMIT 1
+        `).get(Number(order.id), Number(item.variant_id || item.variantId || 0), Number(item.id || 0), String(item.sku || ''));
+        return {
+          id: Number(item.id),
+          name: String(item.productName || item.product_name || item.name || ''),
+          productName: String(item.productName || item.product_name || item.name || ''),
+          qty: Number(item.quantity || item.qty || 0),
+          quantity: Number(item.quantity || item.qty || 0),
+          price: Number(item.unitPrice || item.unit_price || item.price || 0),
+          variantLabel: String(item.variantLabel || item.variant_label || ''),
+          variantId: Number(item.variant_id || item.variantId || 0),
+          sku: String(item.sku || ''),
+          imageUrl: item.imageUrl || item.image_url || '',
+          lineTotal: Number(item.lineTotal || item.line_total || 0),
+          hasShortage: Boolean(itemShortage),
+          shortageReason: itemShortage ? itemShortage.reason : null,
+        };
+      }),
       timeline: buildMerchOrderTimeline({
         orderNumber: order.orderNumber || order.order_number,
         status: order.status,
@@ -3686,29 +4008,42 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       notifications.push({ id: String(id), type, title, message, time, read, ...extra });
     };
 
-    for (const product of products
-      .filter((item) => !item.archived && Number(item.stock || 0) <= LOW_STOCK_THRESHOLD)
-      .sort((left, right) => Number(left.stock || 0) - Number(right.stock || 0))) {
-      const isZero = Number(product.stock || 0) === 0;
-      let variantLabel = '';
-      if (Array.isArray(product.variants) && product.variants.length) {
-        const soldOutVariant = product.variants.find((v) => Number(v.stock || 0) === 0) || product.variants[0];
-        if (soldOutVariant) {
-          variantLabel = [soldOutVariant.color, soldOutVariant.size].filter(Boolean).join(' · ');
-        }
-      }
+    const activeInventoryAlerts = syncInventoryAlerts();
+    for (const alert of activeInventoryAlerts) {
+      const isZero = alert.last_alert_type === 'sold_out' || Number(alert.current_stock || 0) <= 0;
+      const variantLabel = [alert.color, alert.size].filter(Boolean).join(' · ');
       pushNotification({
-        id: `stock-${product.id}`,
+        id: `stock-variant-${alert.variant_id}`,
         type: isZero ? 'Sold Out' : 'Low Stock',
         title: isZero ? 'SOLD OUT' : 'Low Stock',
         message: isZero
-          ? `${product.name} is sold out.`
-          : `${product.name} has only ${Number(product.stock || 0)} units remaining.`,
-        time: product.updatedAt || product.createdAt || new Date().toISOString(),
-        productId: product.id,
-        productName: product.name,
-        variantLabel: variantLabel || product.variantLabel || '',
-        stock: Number(product.stock || 0),
+          ? `${alert.product_name} (${variantLabel || 'Default'}, SKU: ${alert.sku}) is sold out.`
+          : `${alert.product_name} (${variantLabel || 'Default'}, SKU: ${alert.sku}) has only ${Number(alert.current_stock || 0)} units remaining.`,
+        time: alert.updated_at || alert.created_at || new Date().toISOString(),
+        productId: alert.product_id,
+        variantId: alert.variant_id,
+        productName: alert.product_name,
+        variantLabel: variantLabel,
+        sku: alert.sku,
+        stock: Number(alert.current_stock || 0),
+        threshold: Number(alert.threshold || 0),
+      });
+    }
+
+    const activeShortages = getActiveMerchOrderStockShortages();
+    for (const shortage of activeShortages) {
+      const variantLabel = [shortage.color, shortage.size].filter(Boolean).join(' · ');
+      pushNotification({
+        id: `stock-shortage-order-${shortage.order_id}-${shortage.variant_id}`,
+        type: 'Stock Shortage',
+        title: 'STOCK SHORTAGE',
+        message: `Order ${shortage.order_number} for ${shortage.customer_name} is blocked: ${shortage.product_name} (${variantLabel}, SKU: ${shortage.sku}) unavailable. Reason: ${shortage.reason}`,
+        time: shortage.shortage_created_at,
+        orderId: shortage.order_id,
+        orderNumber: shortage.order_number,
+        customerName: shortage.customer_name,
+        sku: shortage.sku,
+        reason: shortage.reason,
       });
     }
 
@@ -5419,6 +5754,65 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return String(code || '').trim().toUpperCase().replace(/\s+/g, '');
   }
 
+  function parseCampaignVariantIds(campaign) {
+    if (!campaign) return [];
+    const raw = campaign.target_variant_ids ?? campaign.targetVariantIds;
+    if (raw) {
+      if (Array.isArray(raw)) {
+        const ids = raw.map(Number).filter((n) => Number.isInteger(n) && n > 0);
+        if (ids.length > 0) return ids;
+      } else if (typeof raw === 'string' && raw.trim()) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            const ids = parsed.map(Number).filter((n) => Number.isInteger(n) && n > 0);
+            if (ids.length > 0) return ids;
+          }
+        } catch (_) {
+          const parts = raw.split(',').map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0);
+          if (parts.length > 0) return parts;
+        }
+      }
+    }
+    const fallbackId = Number(campaign.target_variant_id ?? campaign.targetVariantId ?? 0);
+    return fallbackId > 0 ? [fallbackId] : [];
+  }
+
+  function formatVariantScopeMessage(targetVariants = [], allProductVariantsCount = 0, productName = 'bottle') {
+    if (!targetVariants || targetVariants.length === 0) return '';
+    const isAll = allProductVariantsCount > 1 && targetVariants.length >= allProductVariantsCount;
+    const colors = targetVariants.map((v) => v.color).filter(Boolean);
+    const size = targetVariants[0]?.size || '';
+    const itemNoun = /bottle/i.test(productName) ? 'bottle' : 'item';
+
+    const joinList = (arr) => {
+      if (!arr || !arr.length) return '';
+      if (arr.length === 1) return arr[0];
+      if (arr.length === 2) return `${arr[0]} and ${arr[1]}`;
+      return `${arr.slice(0, -1).join(', ')}, and ${arr[arr.length - 1]}`;
+    };
+
+    if (isAll) {
+      if (colors.length > 1) {
+        return `Valid on ${joinList(colors)}${size ? ` ${size}` : ''} ${itemNoun}s.`;
+      }
+      return `Valid on all colours of this ${itemNoun}.`;
+    }
+
+    if (targetVariants.length === 1) {
+      const v = targetVariants[0];
+      const desc = [v.color, v.size].filter(Boolean).join(' ');
+      return `Valid on ${desc ? `${desc} ` : ''}${itemNoun}.`;
+    }
+
+    if (colors.length === targetVariants.length) {
+      return `Valid on ${joinList(colors)}${size ? ` ${size}` : ''} ${itemNoun}s.`;
+    }
+
+    const titles = targetVariants.map((v) => [v.color, v.size].filter(Boolean).join(' ')).filter(Boolean);
+    return `Valid on ${joinList(titles)} ${itemNoun}s.`;
+  }
+
   function isRyanAttribution({ coupon, influencerId, campaignId, campaignSlug } = {}) {
     const infId = Number(influencerId || coupon?.influencerId || coupon?.influencer_id || 0);
     const code = String(coupon?.code || coupon?.couponCode || '').trim().toUpperCase();
@@ -5503,7 +5897,20 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       items.forEach(it => {
         const pid = Number(it.productId || it.product_id);
         if (pid) {
-          productLineTotals[pid] = (productLineTotals[pid] || 0) + Number(it.lineTotal || (Number(it.unitPrice || 0) * Number(it.quantity || 1)) || 0);
+          const itemPricePaise = Number(it.lineTotal || (Number(it.unitPrice || it.price || 0) * (Number(it.unitPrice || it.price || 0) < 100000 ? 100 : 1) * Number(it.quantity || 1)) || 0);
+          productLineTotals[pid] = (productLineTotals[pid] || 0) + itemPricePaise;
+        }
+      });
+    }
+    const variantLineTotals = args.variantLineTotals && Object.keys(args.variantLineTotals).length > 0
+      ? { ...args.variantLineTotals }
+      : {};
+    if (Object.keys(variantLineTotals).length === 0 && items.length > 0) {
+      items.forEach(it => {
+        const vid = Number(it.variantId || it.variant_id);
+        if (vid) {
+          const itemPricePaise = Number(it.lineTotal || (Number(it.unitPrice || it.price || 0) * (Number(it.unitPrice || it.price || 0) < 100000 ? 100 : 1) * Number(it.quantity || 1)) || 0);
+          variantLineTotals[vid] = (variantLineTotals[vid] || 0) + itemPricePaise;
         }
       });
     }
@@ -5511,16 +5918,83 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       ...args,
       productIds,
       productLineTotals,
+      variantLineTotals,
     };
     const result = validateCouponForUser({ ...enrichedArgs, appliesTo: 'merch', portal: 'merch' });
     if (result?.error || !result?.coupon) return result;
 
     if (result.coupon.influencerId) {
-      const influencer = db.prepare('SELECT active FROM merch_influencers WHERE id = ?').get(Number(result.coupon.influencerId));
+      const influencer = db.prepare('SELECT active, name FROM merch_influencers WHERE id = ?').get(Number(result.coupon.influencerId));
       if (!influencer || Number(influencer.active) !== 1) {
         return { error: 'This influencer coupon is no longer active.' };
       }
+      if (influencer.name && !result.coupon.influencerName) {
+        result.coupon.influencerName = influencer.name;
+      }
     }
+
+    // Resolve campaign linked to this coupon or provided in args
+    let campaign = null;
+    const isInfluencerCoupon = Boolean(Number(result.coupon?.influencerId || 0) > 0 || String(result.coupon?.couponType || '').toLowerCase() === 'influencer');
+    const couponCode = normalizeMerchCouponCode(result.coupon?.code);
+    const couponId = Number(result.coupon?.id || 0);
+
+    // Only match campaigns that belong specifically to the coupon being validated
+    if (couponId > 0 || couponCode) {
+      if (args.campaignId) {
+        campaign = db.prepare(`
+          SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
+                 c.target_variant_ids AS targetVariantIds,
+                 v.color AS variantColor, v.size AS variantSize, p.name AS productName,
+                 i.name AS influencerName
+          FROM merch_campaigns c
+          LEFT JOIN merch_influencers i ON i.id = c.influencer_id
+          LEFT JOIN merch_variants v ON v.id = c.target_variant_id
+          LEFT JOIN merch_products p ON p.id = c.target_product_id
+          WHERE c.id = ? AND c.is_active = 1 AND (c.coupon_id = ? OR LOWER(TRIM(c.coupon_code)) = LOWER(TRIM(?)))
+        `).get(Number(args.campaignId), couponId, couponCode);
+      }
+      if (!campaign && args.campaignSlug) {
+        campaign = db.prepare(`
+          SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
+                 c.target_variant_ids AS targetVariantIds,
+                 v.color AS variantColor, v.size AS variantSize, p.name AS productName,
+                 i.name AS influencerName
+          FROM merch_campaigns c
+          LEFT JOIN merch_influencers i ON i.id = c.influencer_id
+          LEFT JOIN merch_variants v ON v.id = c.target_variant_id
+          LEFT JOIN merch_products p ON p.id = c.target_product_id
+          WHERE LOWER(c.slug) = LOWER(?) AND c.is_active = 1
+        `).get(String(args.campaignSlug).trim());
+      }
+      if (!campaign && isInfluencerCoupon) {
+        campaign = db.prepare(`
+          SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
+                 c.target_variant_ids AS targetVariantIds,
+                 v.color AS variantColor, v.size AS variantSize, p.name AS productName,
+                 i.name AS influencerName
+          FROM merch_campaigns c
+          LEFT JOIN merch_influencers i ON i.id = c.influencer_id
+          LEFT JOIN merch_variants v ON v.id = c.target_variant_id
+          LEFT JOIN merch_products p ON p.id = c.target_product_id
+          WHERE (c.coupon_id = ? OR LOWER(TRIM(c.coupon_code)) = LOWER(TRIM(?)) OR c.influencer_id = ?) AND c.is_active = 1
+          ORDER BY c.id DESC
+          LIMIT 1
+        `).get(couponId, couponCode, Number(result.coupon?.influencerId || 0));
+      }
+    }
+
+    const campaignVariantIds = campaign ? parseCampaignVariantIds(campaign) : [];
+    let targetVariants = [];
+    let allProductVariants = [];
+    if (campaign && campaign.targetProductId) {
+      allProductVariants = db.prepare('SELECT id, sku, color, size, price FROM merch_variants WHERE product_id = ? AND is_active = 1').all(campaign.targetProductId);
+      const varMap = new Map(allProductVariants.map((v) => [v.id, v]));
+      targetVariants = campaignVariantIds.map((id) => varMap.get(id)).filter(Boolean);
+    }
+    const variantScopeMessage = campaign
+      ? formatVariantScopeMessage(targetVariants, allProductVariants.length, campaign.productName || 'bottle')
+      : '';
 
     const isRyan = isRyanAttribution({
       coupon: result.coupon,
@@ -5530,10 +6004,32 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     });
 
     if (isRyan) {
-      const { totalBottles, totalMists } = countMerchBottlesAndMists(args.items, args);
-      if (totalBottles === 0) {
-        return { error: 'This coupon is only valid for the Hydrogen Water Bottle.' };
+      let totalBottles = 0;
+      let totalMists = 0;
+      for (const item of items) {
+        const vid = Number(item.variantId || item.id);
+        const pid = Number(item.productId || item.product_id);
+        const qty = Math.max(0, Number(item.quantity || 0));
+        const isEligibleBottle = campaignVariantIds.length > 0
+          ? campaignVariantIds.includes(vid)
+          : (pid === 11 || /bottle/i.test(String(item.productName || item.name || '')));
+        if (isEligibleBottle) totalBottles += qty;
+        const isMist = pid === 12 || /(mist|spray)/i.test(String(item.productName || item.name || ''));
+        if (isMist) totalMists += qty;
       }
+
+      if (totalBottles === 0) {
+        let variantLabel = [campaign?.variantColor, campaign?.variantSize].filter(Boolean).join(' ');
+        if (targetVariants.length > 1) {
+          variantLabel = targetVariants.map((v) => [v.color, v.size].filter(Boolean).join(' ')).join(' / ');
+        }
+        return {
+          error: variantLabel
+            ? `This coupon is only valid for the ${variantLabel} variant(s) of Hydrogen Water Bottle.`
+            : 'This coupon is only valid for the Hydrogen Water Bottle.',
+        };
+      }
+
       const bundleCount = Math.min(totalBottles, totalMists);
       const individualBottleCount = Math.max(0, totalBottles - bundleCount);
       const ryanDiscountPaise = individualBottleCount * 115000; // ₹1,150 per individual bottle
@@ -5546,87 +6042,63 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       result.totalBottles = totalBottles;
       result.bundleCount = bundleCount;
       result.individualBottleCount = individualBottleCount;
+
+      if (result.coupon) {
+        result.coupon.influencerName = campaign?.influencerName || result.coupon.influencerName || 'Ryan';
+        result.coupon.campaignSlug = campaign?.slug || args.campaignSlug || '';
+        result.coupon.targetVariantIds = campaignVariantIds;
+        result.coupon.targetVariants = targetVariants;
+        result.coupon.allProductVariantsCount = allProductVariants.length;
+        result.coupon.variantScopeMessage = variantScopeMessage;
+        result.coupon.targetProductName = campaign?.productName || 'H2 Water Bottle';
+      }
       return result;
-    }
-
-    // Check if this coupon is linked to a campaign with a specific target variant
-    let campaign = null;
-    const isInfluencerCoupon = Boolean(Number(result.coupon?.influencerId || 0) > 0 || String(result.coupon?.couponType || '').toLowerCase() === 'influencer');
-    const couponCode = normalizeMerchCouponCode(result.coupon?.code);
-    const couponId = Number(result.coupon?.id || 0);
-
-    // Only match campaigns that belong specifically to the coupon being validated
-    if (couponId > 0 || couponCode) {
-      if (args.campaignId) {
-        campaign = db.prepare(`
-          SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
-                 v.color AS variantColor, v.size AS variantSize, p.name AS productName
-          FROM merch_campaigns c
-          LEFT JOIN merch_variants v ON v.id = c.target_variant_id
-          LEFT JOIN merch_products p ON p.id = c.target_product_id
-          WHERE c.id = ? AND c.is_active = 1 AND (c.coupon_id = ? OR LOWER(TRIM(c.coupon_code)) = LOWER(TRIM(?)))
-        `).get(Number(args.campaignId), couponId, couponCode);
-      }
-      if (!campaign && args.campaignSlug) {
-        campaign = db.prepare(`
-          SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
-                 v.color AS variantColor, v.size AS variantSize, p.name AS productName
-          FROM merch_campaigns c
-          LEFT JOIN merch_variants v ON v.id = c.target_variant_id
-          LEFT JOIN merch_products p ON p.id = c.target_product_id
-          WHERE LOWER(c.slug) = LOWER(?) AND c.is_active = 1 AND (c.coupon_id = ? OR LOWER(TRIM(c.coupon_code)) = LOWER(TRIM(?)))
-        `).get(String(args.campaignSlug).trim(), couponId, couponCode);
-      }
-      if (!campaign && isInfluencerCoupon) {
-        campaign = db.prepare(`
-          SELECT c.id, c.slug, c.name, c.target_product_id AS targetProductId, c.target_variant_id AS targetVariantId,
-                 v.color AS variantColor, v.size AS variantSize, p.name AS productName
-          FROM merch_campaigns c
-          LEFT JOIN merch_variants v ON v.id = c.target_variant_id
-          LEFT JOIN merch_products p ON p.id = c.target_product_id
-          WHERE (c.coupon_id = ? OR LOWER(TRIM(c.coupon_code)) = LOWER(TRIM(?))) AND c.is_active = 1
-          ORDER BY c.id DESC
-          LIMIT 1
-        `).get(couponId, couponCode);
-      }
     }
 
     const couponAppliesTo = String(result?.coupon?.appliesTo || '').trim().toLowerCase();
     const isGeneralMerchCoupon = !isInfluencerCoupon && ['all', 'merch'].includes(couponAppliesTo);
     const hasCategoryOrProductScope = couponAppliesTo.startsWith('category:') || couponAppliesTo.startsWith('product:') || couponAppliesTo.startsWith('variant:');
 
-    if (!isGeneralMerchCoupon && campaign && campaign.targetVariantId && !hasCategoryOrProductScope) {
-      const targetVariantId = Number(campaign.targetVariantId);
+    if (!isGeneralMerchCoupon && campaign && campaignVariantIds.length > 0 && !hasCategoryOrProductScope) {
       const cartVariantIds = (Array.isArray(args.variantIds) ? args.variantIds : []).map((id) => Number(id));
-      const hasTargetVariant = cartVariantIds.includes(targetVariantId);
-      const variantLabel = [campaign.variantColor, campaign.variantSize].filter(Boolean).join(' ') || 'selected';
+      const matchingVariantIds = campaignVariantIds.filter((id) => cartVariantIds.includes(id));
 
-      if (!hasTargetVariant) {
+      if (matchingVariantIds.length === 0) {
+        let variantLabel = [campaign.variantColor, campaign.variantSize].filter(Boolean).join(' ');
+        if (targetVariants.length > 1) {
+          variantLabel = targetVariants.map((v) => [v.color, v.size].filter(Boolean).join(' ')).join(' / ');
+        }
         return {
-          error: `This coupon is only valid for the ${variantLabel} variant of ${campaign.productName || 'the product'}.`,
+          error: `This coupon is only valid for the ${variantLabel || 'selected'} variant(s) of ${campaign.productName || 'the product'}.`,
         };
       }
 
-      // If the target variant is in the cart, calculate discount ONLY on the target variant's line total
-      const targetVariantSubtotalPaise = Number(args.variantLineTotals?.[targetVariantId] || 0);
-      if (targetVariantSubtotalPaise > 0) {
+      // If matching variants are in the cart, calculate discount ONLY on matching variants' line total
+      const matchingVariantsSubtotalPaise = matchingVariantIds.reduce((sum, vid) => sum + Number(args.variantLineTotals?.[vid] || 0), 0);
+      if (matchingVariantsSubtotalPaise > 0) {
         let recalculatedDiscountPaise = 0;
         const discountType = String(result.coupon.discountType || '').trim().toLowerCase();
         const discountValue = Number(result.coupon.discountValue || 0);
 
         if (discountType === 'percentage') {
-          recalculatedDiscountPaise = Math.round(targetVariantSubtotalPaise * (discountValue / 100));
+          recalculatedDiscountPaise = Math.round(matchingVariantsSubtotalPaise * (discountValue / 100));
         } else if (discountType === 'flat' || discountType === 'fixed') {
-          recalculatedDiscountPaise = Math.min(targetVariantSubtotalPaise, Math.round(discountValue * 100));
+          recalculatedDiscountPaise = Math.min(matchingVariantsSubtotalPaise, Math.round(discountValue * 100));
         } else {
-          recalculatedDiscountPaise = Math.min(targetVariantSubtotalPaise, Number(result.discountAmountPaise || 0));
+          recalculatedDiscountPaise = Math.min(matchingVariantsSubtotalPaise, Number(result.discountAmountPaise || 0));
         }
 
         result.discountAmountPaise = recalculatedDiscountPaise;
         result.finalAmountPaise = Math.max(0, Number(args.subtotalAmountPaise || 0) - recalculatedDiscountPaise);
         if (result.coupon) {
-          result.coupon.targetVariantId = targetVariantId;
-          result.coupon.targetVariantName = variantLabel;
+          result.coupon.targetVariantIds = campaignVariantIds;
+          result.coupon.targetVariants = targetVariants;
+          result.coupon.allProductVariantsCount = allProductVariants.length;
+          result.coupon.targetVariantId = matchingVariantIds[0] || campaignVariantIds[0];
+          result.coupon.targetVariantName = campaign.variantColor || 'selected';
+          result.coupon.influencerName = campaign.influencerName || result.coupon.influencerName || '';
+          result.coupon.variantScopeMessage = variantScopeMessage;
+          result.coupon.targetProductName = campaign.productName || '';
         }
       }
     }
@@ -5722,6 +6194,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       influencerId: result?.coupon?.influencerId || null,
       influencerName: result?.coupon?.influencerName || '',
       influencerHandle: result?.coupon?.influencerHandle || '',
+      targetVariantIds: result?.coupon?.targetVariantIds || [],
+      targetVariants: result?.coupon?.targetVariants || [],
+      allProductVariantsCount: result?.coupon?.allProductVariantsCount || null,
+      variantScopeMessage: result?.coupon?.variantScopeMessage || '',
+      targetProductName: result?.coupon?.targetProductName || '',
       bundleDiscountInr: Math.round(Number(result?.bundleDiscountPaise || 0) / 100),
       commissionAmountInr: Math.round(Number(result?.ryanCommissionPaise || 0) / 100),
       totalBottles: result?.totalBottles ?? null,
@@ -5739,7 +6216,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const campaign = db.prepare(`
       SELECT c.id, c.slug, c.name, c.influencer_id AS influencerId, c.coupon_id AS couponId,
              c.coupon_code AS couponCode, c.target_product_id AS targetProductId,
-             c.target_variant_id AS targetVariantId, c.is_active AS isActive,
+             c.target_variant_id AS targetVariantId, c.target_variant_ids AS targetVariantIds, c.is_active AS isActive,
              i.name AS influencerName, i.active AS influencerActive,
              cp.is_active AS couponActive, cp.expires_at AS couponExpiresAt, cp.valid_till AS couponValidTill
       FROM merch_campaigns c
@@ -5770,13 +6247,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       console.warn('[Campaign Click Error]:', clickErr?.message || clickErr);
     }
 
+    const parsedVariantIds = parseCampaignVariantIds(campaign);
     const attribution = {
       campaignId: campaign.id,
       slug: campaign.slug,
       influencerId: campaign.influencerId,
+      influencerName: campaign.influencerName || '',
       couponCode: campaign.couponCode,
       targetProductId: campaign.targetProductId || 11,
-      targetVariantId: campaign.targetVariantId || 569,
+      targetVariantId: campaign.targetVariantId || parsedVariantIds[0] || 569,
+      targetVariantIds: parsedVariantIds,
       timestamp: Date.now(),
     };
     res.cookie('h2_campaign_attribution', JSON.stringify(attribution), {
@@ -5795,7 +6275,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const campaign = db.prepare(`
       SELECT c.id, c.slug, c.name, c.influencer_id AS influencerId, c.coupon_id AS couponId,
              c.coupon_code AS couponCode, c.target_product_id AS targetProductId,
-             c.target_variant_id AS targetVariantId, c.is_active AS isActive,
+             c.target_variant_id AS targetVariantId, c.target_variant_ids AS targetVariantIds, c.is_active AS isActive,
              i.name AS influencerName
       FROM merch_campaigns c
       JOIN merch_influencers i ON i.id = c.influencer_id
@@ -5807,6 +6287,18 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found or inactive' });
     }
+    const parsedVariantIds = parseCampaignVariantIds(campaign);
+    const allProductVariants = db.prepare('SELECT id, sku, color, size, price FROM merch_variants WHERE product_id = ? AND is_active = 1').all(campaign.targetProductId || 11);
+    const varMap = new Map(allProductVariants.map((v) => [v.id, v]));
+    const targetVariants = parsedVariantIds.map((id) => varMap.get(id)).filter(Boolean);
+    const prodRow = db.prepare('SELECT name FROM merch_products WHERE id = ?').get(campaign.targetProductId || 11);
+
+    campaign.targetVariantIds = parsedVariantIds;
+    campaign.targetVariants = targetVariants;
+    campaign.allProductVariantsCount = allProductVariants.length;
+    campaign.targetProductName = prodRow?.name || 'H2 Water Bottle';
+    campaign.variantScopeMessage = formatVariantScopeMessage(targetVariants, allProductVariants.length, prodRow?.name || 'bottle');
+
     res.json({ campaign });
   });
 
@@ -5871,6 +6363,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const result = db.prepare('UPDATE merch_variants SET stock = stock - ? WHERE id = ? AND stock >= ?')
       .run(quantity, Number(variantId), quantity);
     if (!result.changes) throw new Error(`Stock changed while confirming ${purchase.variant.product_name}.`);
+    try { syncInventoryAlerts(); } catch (err) { console.error('[Merch] Alert sync error:', err?.message); }
   }
 
   // Put the inventory reserved by an order back when that order is cancelled
@@ -5887,6 +6380,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     for (const item of items) {
       increment.run(Number(item.quantity || 0), Number(item.variantId));
     }
+    try { syncInventoryAlerts(); } catch (err) { console.error('[Merch] Alert sync error:', err?.message); }
   }
 
   // ─── PUBLIC: Create Razorpay order for checkout ───
@@ -5985,6 +6479,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const couponResult = validateMerchCouponForUser({
       code: couponCode,
       userId: authUser?.id ?? null,
+      userEmail: req.body?.customerEmail || authUser?.email || null,
       productIds: req.body?.productIds || [],
       productLineTotals: req.body?.productLineTotals || {},
       variantIds: req.body?.variantIds || [],
@@ -6192,6 +6687,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       ? validateMerchCouponForUser({
           code: effectiveCouponCode,
           userId: authUser?.id,
+          userEmail: authUser?.email || incomingCustomerEmail,
           productIds: validatedItems.map((item) => item.productId),
           productLineTotals: validatedItems.reduce((totals, item) => ({ ...totals, [item.productId]: Number(totals[item.productId] || 0) + item.lineTotal }), {}),
           variantIds: validatedItems.map((item) => Number(item.variantId)),
@@ -7934,7 +8430,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const rows = db.prepare(`
         SELECT c.id, c.slug, c.name, c.influencer_id AS influencerId, c.coupon_id AS couponId,
                c.coupon_code AS couponCode, c.target_product_id AS targetProductId,
-               c.target_variant_id AS targetVariantId, c.is_active AS isActive, c.created_at AS createdAt,
+               c.target_variant_id AS targetVariantId, c.target_variant_ids AS targetVariantIds,
+               c.is_active AS isActive, c.created_at AS createdAt,
                i.name AS influencerName, i.handle AS influencerHandle,
                p.name AS targetProductName,
                v.sku AS targetVariantSku,
@@ -7951,11 +8448,25 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         ORDER BY datetime(c.created_at) DESC, c.id DESC
       `).all();
 
+      const allVariants = db.prepare('SELECT id, product_id, sku, color, size, price, is_active FROM merch_variants').all();
+      const variantMap = new Map(allVariants.map((v) => [v.id, v]));
+
       const campaigns = rows.map((row) => {
         const clicks = Number(row.clicksCount || 0);
         const orders = Number(row.ordersCount || 0);
         const revenue = Number(row.revenuePaise || 0);
         const conversionRate = clicks > 0 ? Math.round((orders / clicks) * 1000) / 10 : 0;
+        const parsedVariantIds = parseCampaignVariantIds(row);
+        const targetVariants = parsedVariantIds.map((id) => variantMap.get(id)).filter(Boolean).map((v) => ({
+          id: v.id,
+          sku: v.sku,
+          color: v.color,
+          size: v.size,
+          price: Number(v.price || 0),
+        }));
+        const productVariants = allVariants.filter((v) => Number(v.product_id) === Number(row.targetProductId) && Number(v.is_active ?? 1) === 1);
+        const allProductVariantsCount = productVariants.length || 4;
+
         return {
           id: row.id,
           slug: row.slug,
@@ -7968,6 +8479,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           targetProductId: row.targetProductId,
           targetProductName: row.targetProductName || 'H2 Water Bottle',
           targetVariantId: row.targetVariantId,
+          targetVariantIds: parsedVariantIds,
+          targetVariants,
+          allProductVariantsCount,
           targetVariantSku: row.targetVariantSku || '',
           targetVariantColor: row.targetVariantColor || '',
           targetVariantSize: row.targetVariantSize || '',
@@ -7989,7 +8503,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
   });
 
-  app.post('/api/merch/admin/campaigns', requireAdmin, (req, res) => {
+  function handleSaveCampaign(req, res, overrideCampaignId = null) {
     try {
       const influencerId = Number(req.body?.influencerId);
       const rawCouponCode = String(req.body?.couponCode || '').trim();
@@ -7997,6 +8511,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const campaignName = String(req.body?.name || '').trim() || `${rawSlug} Campaign`;
       let targetProductId = Number(req.body?.targetProductId) || 11;
       let targetVariantId = Number(req.body?.targetVariantId) || 569;
+      const updateCampaignId = overrideCampaignId || Number(req.body?.campaignId);
 
       if (!influencerId || influencerId <= 0) {
         return res.status(400).json({ error: 'Influencer is required' });
@@ -8031,36 +8546,126 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       if (!rawSlug || !/^[A-Za-z0-9_-]{2,50}$/.test(rawSlug)) {
         return res.status(400).json({ error: 'Slug must be 2-50 alphanumeric characters (letters, numbers, hyphens, underscores)' });
       }
+
+      // Check for update mode vs create mode
+      if (updateCampaignId && updateCampaignId > 0) {
+        const existingCampaign = db.prepare('SELECT id FROM merch_campaigns WHERE id = ?').get(updateCampaignId);
+        if (!existingCampaign) {
+          return res.status(404).json({ error: 'Campaign to update was not found' });
+        }
+        const conflict = db.prepare('SELECT id FROM merch_campaigns WHERE LOWER(slug) = LOWER(?) AND id != ?').get(rawSlug, updateCampaignId);
+        if (conflict) {
+          return res.status(409).json({ error: `Campaign slug '${rawSlug}' is already in use by another campaign.` });
+        }
+
+        // Parse target variants
+        let incomingVariantIds = req.body?.targetVariantIds;
+        if (!Array.isArray(incomingVariantIds) && req.body?.targetVariantId) incomingVariantIds = [req.body.targetVariantId];
+        if (typeof incomingVariantIds === 'string') {
+          try { incomingVariantIds = JSON.parse(incomingVariantIds); } catch (_) { incomingVariantIds = incomingVariantIds.split(',').map((s) => s.trim()); }
+        }
+        let validVariantIds = [];
+        let validVariants = [];
+        if (Array.isArray(incomingVariantIds) && incomingVariantIds.length > 0) {
+          const cleanedIds = incomingVariantIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0);
+          if (cleanedIds.length > 0) {
+            validVariants = db.prepare(`SELECT id, product_id, sku, color, size, price FROM merch_variants WHERE id IN (${cleanedIds.map(() => '?').join(',')}) AND is_active = 1`).all(...cleanedIds);
+            validVariantIds = validVariants.map((v) => v.id);
+          }
+        }
+        if (validVariants.length === 0) {
+          validVariants = db.prepare('SELECT id, product_id, sku, color, size, price FROM merch_variants WHERE product_id = ? AND is_active = 1').all(targetProductId);
+          validVariantIds = validVariants.map((v) => v.id);
+        }
+        targetVariantId = validVariantIds[0] || 569;
+        targetProductId = validVariants[0]?.product_id || targetProductId;
+        const targetVariantIdsJson = JSON.stringify(validVariantIds);
+
+        db.prepare(`
+          UPDATE merch_campaigns
+          SET slug = ?, name = ?, influencer_id = ?, coupon_id = ?, coupon_code = ?,
+              target_product_id = ?, target_variant_id = ?, target_variant_ids = ?, updated_at = datetime('now')
+          WHERE id = ?
+        `).run(rawSlug, campaignName, influencerId, coupon.id, coupon.code, targetProductId, targetVariantId, targetVariantIdsJson, updateCampaignId);
+
+        return res.json({
+          campaign: {
+            id: updateCampaignId,
+            slug: rawSlug,
+            name: campaignName,
+            influencerId,
+            influencerName: influencer.name,
+            couponId: coupon.id,
+            couponCode: coupon.code,
+            targetProductId,
+            targetVariantId,
+            targetVariantIds: validVariantIds,
+            isActive: true,
+            url: `/c/${rawSlug}`,
+          }
+        });
+      }
+
       const existingSlug = db.prepare('SELECT id, slug FROM merch_campaigns WHERE LOWER(slug) = LOWER(?) LIMIT 1').get(rawSlug);
       if (existingSlug) {
-        return res.status(409).json({ error: `Campaign slug '${rawSlug}' already exists. Please choose a different slug.` });
+        return res.status(409).json({ error: `Campaign slug '${rawSlug}' already exists. Please choose a different slug or edit the existing campaign.` });
       }
 
-      // Verify product & variant (lookup by SKU first to handle cross-environment DB ID differences, then fallback to ID)
-      const rawSku = String(req.body?.targetVariantSku || '').trim();
-      let variant = null;
-      if (rawSku) {
-        variant = db.prepare('SELECT id, product_id, sku FROM merch_variants WHERE sku = ? LIMIT 1').get(rawSku);
+      // Check target variants: support targetVariantIds (array) or targetVariantId (single)
+      let incomingVariantIds = req.body?.targetVariantIds;
+      if (!Array.isArray(incomingVariantIds) && (req.body?.targetVariantId || req.body?.targetVariantSku)) {
+        if (req.body?.targetVariantId) {
+          incomingVariantIds = [req.body.targetVariantId];
+        }
       }
-      if (!variant) {
-        variant = db.prepare('SELECT id, product_id, sku FROM merch_variants WHERE id = ?').get(targetVariantId);
+      if (typeof incomingVariantIds === 'string') {
+        try { incomingVariantIds = JSON.parse(incomingVariantIds); } catch (_) { incomingVariantIds = incomingVariantIds.split(',').map((s) => s.trim()); }
       }
-      if (!variant) {
-        variant = db.prepare('SELECT id, product_id, sku FROM merch_variants WHERE product_id = ? AND is_active = 1 LIMIT 1').get(targetProductId)
-          || db.prepare("SELECT id, product_id, sku FROM merch_variants WHERE sku LIKE '%BTL%' AND is_active = 1 LIMIT 1").get()
-          || db.prepare('SELECT id, product_id, sku FROM merch_variants WHERE is_active = 1 LIMIT 1').get();
+
+      let validVariantIds = [];
+      let validVariants = [];
+
+      if (Array.isArray(incomingVariantIds) && incomingVariantIds.length > 0) {
+        const cleanedIds = incomingVariantIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0);
+        if (cleanedIds.length > 0) {
+          validVariants = db.prepare(`SELECT id, product_id, sku, color, size, price FROM merch_variants WHERE id IN (${cleanedIds.map(() => '?').join(',')}) AND is_active = 1`).all(...cleanedIds);
+          validVariantIds = validVariants.map((v) => v.id);
+        }
       }
-      if (variant) {
-        targetVariantId = variant.id;
-        targetProductId = variant.product_id;
-      } else {
-        return res.status(400).json({ error: 'Target variant not found' });
+
+      // Fallback verification by SKU or single targetVariantId if no array was provided or found
+      if (validVariants.length === 0) {
+        const rawSku = String(req.body?.targetVariantSku || '').trim();
+        let fallbackVariant = null;
+        if (rawSku) {
+          fallbackVariant = db.prepare('SELECT id, product_id, sku, color, size, price FROM merch_variants WHERE sku = ? LIMIT 1').get(rawSku);
+        }
+        if (!fallbackVariant && targetVariantId) {
+          fallbackVariant = db.prepare('SELECT id, product_id, sku, color, size, price FROM merch_variants WHERE id = ?').get(targetVariantId);
+        }
+        if (!fallbackVariant) {
+          fallbackVariant = db.prepare('SELECT id, product_id, sku, color, size, price FROM merch_variants WHERE product_id = ? AND is_active = 1 LIMIT 1').get(targetProductId)
+            || db.prepare("SELECT id, product_id, sku, color, size, price FROM merch_variants WHERE sku LIKE '%BTL%' AND is_active = 1 LIMIT 1").get()
+            || db.prepare('SELECT id, product_id, sku, color, size, price FROM merch_variants WHERE is_active = 1 LIMIT 1').get();
+        }
+        if (fallbackVariant) {
+          validVariants = [fallbackVariant];
+          validVariantIds = [fallbackVariant.id];
+        }
       }
+
+      if (validVariants.length === 0) {
+        return res.status(400).json({ error: 'At least one valid target variant must be selected' });
+      }
+
+      targetVariantId = validVariantIds[0];
+      targetProductId = validVariants[0].product_id || targetProductId;
+      const targetVariantIdsJson = JSON.stringify(validVariantIds);
 
       const insertResult = db.prepare(`
-        INSERT INTO merch_campaigns (slug, name, influencer_id, coupon_id, coupon_code, target_product_id, target_variant_id, is_active, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))
-      `).run(rawSlug, campaignName, influencerId, coupon.id, coupon.code, targetProductId, targetVariantId);
+        INSERT INTO merch_campaigns (slug, name, influencer_id, coupon_id, coupon_code, target_product_id, target_variant_id, target_variant_ids, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))
+      `).run(rawSlug, campaignName, influencerId, coupon.id, coupon.code, targetProductId, targetVariantId, targetVariantIdsJson);
 
       const campaignId = insertResult.lastInsertRowid;
 
@@ -8080,15 +8685,19 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           couponCode: coupon.code,
           targetProductId,
           targetVariantId,
+          targetVariantIds: validVariantIds,
           isActive: true,
           url: `/c/${rawSlug}`,
         }
       });
     } catch (err) {
-      console.error('[Create Campaign Error]:', err);
-      res.status(500).json({ error: err?.message || 'Failed to create campaign' });
+      console.error('[Save Campaign Error]:', err);
+      res.status(500).json({ error: err?.message || 'Failed to save campaign' });
     }
-  });
+  }
+
+  app.post('/api/merch/admin/campaigns', requireAdmin, (req, res) => handleSaveCampaign(req, res));
+  app.put('/api/merch/admin/campaigns/:id', requireAdmin, (req, res) => handleSaveCampaign(req, res, Number(req.params.id)));
 
   app.patch('/api/merch/admin/campaigns/:id/active', requireAdmin, (req, res) => {
     const id = Number(req.params.id);
@@ -8755,6 +9364,58 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     });
   });
 
+  // ─── ADMIN: Stock Shortage Management ───
+  app.get('/api/merch/admin/orders/stock-shortages', requireAdmin, (req, res) => {
+    try {
+      const shortages = getActiveMerchOrderStockShortages().map((s) => ({
+        shortageId: s.shortage_id,
+        orderId: s.order_id,
+        orderNumber: s.order_number,
+        customerName: s.customer_name,
+        customerEmail: hasRealEmail(s.customer_email) ? s.customer_email : (hasRealEmail(s.guest_email) ? s.guest_email : ''),
+        displayEmail: hasRealEmail(s.customer_email) ? s.customer_email : (hasRealEmail(s.guest_email) ? s.guest_email : 'Email not provided'),
+        productName: s.product_name,
+        variantColor: s.color || '',
+        variantSize: s.size || '',
+        variantLabel: [s.color, s.size].filter(Boolean).join(' · ') || 'Default',
+        sku: s.sku,
+        orderedQuantity: s.ordered_quantity,
+        availableStock: s.available_stock,
+        currentStock: s.current_variant_stock,
+        paymentStatus: s.payment_status,
+        orderStatus: s.order_status,
+        statusLabel: 'STOCK SHORTAGE — FULFILMENT PENDING',
+        createdAt: s.order_created_at,
+        shortageCreatedAt: s.shortage_created_at,
+        reason: s.reason,
+        reviewStatus: s.review_status || 'awaiting_review',
+        revisedDeliveryEstimate: s.revised_delivery_estimate || null,
+        internalDelayNote: s.internal_delay_note || null,
+        reviewedBy: s.reviewed_by || null,
+        reviewedAt: s.reviewed_at || null,
+        customerCommunicationStatus: s.customer_communication_status || 'pending',
+        customerCommunicatedAt: s.customer_communicated_at || null,
+        customerCommunicationSentTo: s.customer_communication_sent_to || null,
+        customerCommunicationError: s.customer_communication_error || null,
+        customerCommunicationAttempts: Number(s.customer_communication_attempts || 0),
+        shipped: Boolean(s.tracking_number || s.shiprocket_awb_code || s.order_status === 'shipped'),
+        delivered: Boolean(s.delivered_at || s.order_status === 'delivered'),
+      }));
+      const filterReviewStatus = req.query?.reviewStatus ? String(req.query.reviewStatus).trim().toLowerCase() : null;
+      const filterCommStatus = req.query?.communicationStatus ? String(req.query.communicationStatus).trim().toLowerCase() : null;
+      let resultShortages = shortages;
+      if (filterReviewStatus && filterReviewStatus !== 'all') {
+        resultShortages = resultShortages.filter((s) => s.reviewStatus.toLowerCase() === filterReviewStatus);
+      }
+      if (filterCommStatus && filterCommStatus !== 'all') {
+        resultShortages = resultShortages.filter((s) => s.customerCommunicationStatus.toLowerCase() === filterCommStatus);
+      }
+      res.json({ success: true, count: resultShortages.length, shortages: resultShortages });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ─── ADMIN: Get order detail ───
   app.get('/api/merch/admin/orders/:id', requireAdmin, (req, res) => {
     const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
@@ -8763,7 +9424,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
     if (!order) return res.status(404).json({ error: 'Order not found' });
     const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
-    res.json({ order, items });
+    res.json({ order: buildMerchOrderRecord(order, items), items });
   });
 
   // ─── ADMIN: Update order status ───
@@ -8828,6 +9489,1270 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
     const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
     res.json({ success: true, order: buildMerchOrderRecord(order, items) });
+  });
+
+  // ─── ADMIN: Stock Shortage Actions ───
+
+  app.post('/api/merch/admin/orders/:id/stock-shortage', requireAdmin, (req, res) => {
+    try {
+      const orderId = Number(req.params.id);
+      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+      if (String(order.payment_status).toLowerCase() !== 'paid') {
+        return res.status(400).json({ error: 'Only paid orders can be flagged for stock shortage.' });
+      }
+      if (['shipped', 'delivered', 'cancelled', 'returned'].includes(String(order.status).toLowerCase())) {
+        return res.status(400).json({ error: `Cannot flag order with status '${order.status}' for stock shortage.` });
+      }
+
+      const reason = String(req.body?.reason || 'Required stock is unavailable for fulfillment').trim();
+      const variantId = req.body?.variantId ? Number(req.body.variantId) : null;
+
+      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
+      const targetItems = variantId ? items.filter(i => Number(i.variant_id) === variantId) : items;
+
+      if (!targetItems.length) {
+        return res.status(400).json({ error: 'No matching order items found for this order.' });
+      }
+
+      db.transaction(() => {
+        for (const item of targetItems) {
+          const variant = item.variant_id ? db.prepare('SELECT stock FROM merch_variants WHERE id = ?').get(item.variant_id) : (item.sku ? db.prepare('SELECT stock FROM merch_variants WHERE sku = ?').get(item.sku) : null);
+          const currentStock = Number(variant?.stock || 0);
+          const existing = db.prepare(`
+            SELECT id FROM merch_order_stock_shortages
+            WHERE order_id = ? AND (variant_id = ? OR order_item_id = ? OR (sku IS NOT NULL AND sku = ?)) AND is_resolved = 0
+          `).get(orderId, Number(item.variant_id || 0), Number(item.id || 0), String(item.sku || ''));
+          if (!existing) {
+            db.prepare(`
+              INSERT INTO merch_order_stock_shortages (
+                order_id, order_item_id, variant_id, sku, product_name, variant_label,
+                ordered_quantity, available_stock, reason, is_resolved, created_at, updated_at
+              )
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'), datetime('now'))
+            `).run(
+              orderId,
+              item.id,
+              item.variant_id || null,
+              item.sku || null,
+              item.product_name || item.productName || item.name || '',
+              item.variant_label || item.variantLabel || '',
+              Number(item.quantity || item.qty || 1),
+              currentStock,
+              reason
+            );
+          }
+        }
+        db.prepare(`UPDATE merch_orders SET status = 'stock_shortage', updated_at = datetime('now') WHERE id = ?`).run(orderId);
+      })();
+
+      const updated = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
+      res.json({ success: true, order: buildMerchOrderRecord(updated, items) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/merch/admin/orders/:id/resolve-stock-shortage', requireAdmin, (req, res) => {
+    try {
+      const orderId = Number(req.params.id);
+      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+
+      const variantId = req.body?.variantId ? Number(req.body.variantId) : null;
+      const orderItemId = req.body?.orderItemId ? Number(req.body.orderItemId) : null;
+      const adminUser = getMerchAuthUser(req);
+      const resolvedBy = adminUser?.email || 'admin';
+
+      db.transaction(() => {
+        if (orderItemId) {
+          db.prepare(`
+            UPDATE merch_order_stock_shortages
+            SET is_resolved = 1, resolved_at = datetime('now'), resolved_by = ?
+            WHERE order_id = ? AND order_item_id = ? AND is_resolved = 0
+          `).run(resolvedBy, orderId, orderItemId);
+        } else if (variantId) {
+          db.prepare(`
+            UPDATE merch_order_stock_shortages
+            SET is_resolved = 1, resolved_at = datetime('now'), resolved_by = ?
+            WHERE order_id = ? AND variant_id = ? AND is_resolved = 0
+          `).run(resolvedBy, orderId, variantId);
+        } else {
+          db.prepare(`
+            UPDATE merch_order_stock_shortages
+            SET is_resolved = 1, resolved_at = datetime('now'), resolved_by = ?
+            WHERE order_id = ? AND is_resolved = 0
+          `).run(resolvedBy, orderId);
+        }
+
+        const remainingActive = db.prepare('SELECT COUNT(*) AS count FROM merch_order_stock_shortages WHERE order_id = ? AND is_resolved = 0').get(orderId).count;
+        if (remainingActive === 0 && order.status === 'stock_shortage') {
+          if (String(order.payment_status).toLowerCase() === 'paid' && !['cancelled', 'refunded', 'returned'].includes(String(order.status).toLowerCase())) {
+            db.prepare(`UPDATE merch_orders SET status = 'processing', updated_at = datetime('now') WHERE id = ?`).run(orderId);
+          }
+        }
+      })();
+
+      const updated = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
+      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
+      res.json({ success: true, order: buildMerchOrderRecord(updated, items) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/merch/admin/orders/:id/stock-shortage/review', requireAdmin, (req, res) => {
+    try {
+      const orderId = Number(req.params.id);
+      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+
+      const activeShortages = db.prepare('SELECT * FROM merch_order_stock_shortages WHERE order_id = ? AND is_resolved = 0').all(orderId);
+      if (!activeShortages.length) {
+        return res.status(400).json({ error: 'No active stock shortages found for this order.' });
+      }
+
+      const rawReviewStatus = String(req.body?.reviewStatus || 'reviewed').trim().toLowerCase();
+      const validStatuses = ['awaiting_review', 'reviewed', 'ready_for_communication'];
+      if (!validStatuses.includes(rawReviewStatus)) {
+        return res.status(400).json({ error: `Invalid review status. Allowed values: ${validStatuses.join(', ')}` });
+      }
+
+      const revisedDeliveryEstimate = req.body?.revisedDeliveryEstimate != null && String(req.body.revisedDeliveryEstimate).trim() !== ''
+        ? String(req.body.revisedDeliveryEstimate).trim()
+        : null;
+      const internalDelayNote = req.body?.internalDelayNote != null && String(req.body.internalDelayNote).trim() !== ''
+        ? String(req.body.internalDelayNote).trim()
+        : null;
+      const shortageId = req.body?.shortageId ? Number(req.body.shortageId) : null;
+      const orderItemId = req.body?.orderItemId ? Number(req.body.orderItemId) : null;
+
+      const adminUser = getMerchAuthUser(req);
+      const reviewedBy = adminUser?.email || 'admin';
+
+      db.transaction(() => {
+        if (shortageId) {
+          db.prepare(`
+            UPDATE merch_order_stock_shortages
+            SET review_status = ?,
+                revised_delivery_estimate = ?,
+                internal_delay_note = ?,
+                reviewed_by = ?,
+                reviewed_at = datetime('now'),
+                updated_at = datetime('now')
+            WHERE id = ? AND order_id = ? AND is_resolved = 0
+          `).run(rawReviewStatus, revisedDeliveryEstimate, internalDelayNote, reviewedBy, shortageId, orderId);
+        } else if (orderItemId) {
+          db.prepare(`
+            UPDATE merch_order_stock_shortages
+            SET review_status = ?,
+                revised_delivery_estimate = ?,
+                internal_delay_note = ?,
+                reviewed_by = ?,
+                reviewed_at = datetime('now'),
+                updated_at = datetime('now')
+            WHERE order_item_id = ? AND order_id = ? AND is_resolved = 0
+          `).run(rawReviewStatus, revisedDeliveryEstimate, internalDelayNote, reviewedBy, orderItemId, orderId);
+        } else {
+          db.prepare(`
+            UPDATE merch_order_stock_shortages
+            SET review_status = ?,
+                revised_delivery_estimate = ?,
+                internal_delay_note = ?,
+                reviewed_by = ?,
+                reviewed_at = datetime('now'),
+                updated_at = datetime('now')
+            WHERE order_id = ? AND is_resolved = 0
+          `).run(rawReviewStatus, revisedDeliveryEstimate, internalDelayNote, reviewedBy, orderId);
+        }
+      })();
+
+      const updated = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
+      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
+      res.json({
+        success: true,
+        message: 'Stock shortage review updated successfully.',
+        order: buildMerchOrderRecord(updated, items),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── ADMIN: Customer Stock Delay Communication (Phase 3) ───
+
+  function sanitizeErrorMessage(msg) {
+    if (!msg) return 'Unknown delivery error';
+    return String(msg)
+      .replace(/(?:key|pass|password|token|secret|auth)[=:\s]+[^\s,;]+/gi, '[REDACTED]')
+      .replace(/smtp:\/\/[^@]+@/gi, 'smtp://[REDACTED]@')
+      .replace(/bearer\s+[a-z0-9_\-\.]+/gi, 'Bearer [REDACTED]')
+      .slice(0, 500);
+  }
+
+  function parseSqliteUtcDate(val) {
+    if (!val) return 0;
+    const str = String(val).trim();
+    if (!str) return 0;
+    if (str.endsWith('Z')) return new Date(str).getTime();
+    return new Date(str.replace(' ', 'T') + 'Z').getTime();
+  }
+
+  function parseCouponUsedBy(value) {
+    if (!value) return [];
+    try {
+      const parsed = JSON.parse(String(value));
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .map((entry) => String(entry || '').trim().toLowerCase())
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  function evaluateCompensationCouponEligibility(couponRow, order, items = []) {
+    if (!couponRow) {
+      return { eligible: false, reason: 'Coupon not found.' };
+    }
+
+    // 1. Must be a Private Coupon (or assigned exclusively to a recipient)
+    const couponType = String(couponRow.coupon_type || couponRow.couponType || '').trim().toLowerCase();
+    const isPrivate = couponType === 'private' || Boolean(couponRow.assigned_user_email || couponRow.recipient_email);
+    if (!isPrivate) {
+      return { eligible: false, reason: 'Only private courtesy coupons can be selected as compensation.' };
+    }
+
+    // 2. Portal must be merch (or all/null)
+    const portal = String(couponRow.portal || 'merch').trim().toLowerCase();
+    if (portal !== 'merch' && portal !== 'all') {
+      return { eligible: false, reason: 'Coupon is not valid for merch purchases.' };
+    }
+
+    // 3. Active status
+    const isActive = Number(couponRow.active) === 1 && (couponRow.is_active == null || Number(couponRow.is_active) === 1);
+    if (!isActive) {
+      return { eligible: false, reason: 'Coupon is currently inactive or disabled.' };
+    }
+
+    // 4. Date validity: valid_from
+    const now = Date.now();
+    if (couponRow.valid_from) {
+      const validFromTime = new Date(couponRow.valid_from).getTime();
+      if (!isNaN(validFromTime) && validFromTime > now) {
+        return { eligible: false, reason: `Coupon is not active yet (valid from ${String(couponRow.valid_from).split('T')[0]}).` };
+      }
+    }
+
+    // 5. Date validity: valid_till / expires_at
+    const expiryRaw = couponRow.valid_till || couponRow.expires_at;
+    let expiryLabel = 'No expiration date';
+    if (expiryRaw) {
+      const expiryTime = new Date(expiryRaw).getTime();
+      if (!isNaN(expiryTime)) {
+        if (expiryTime <= now) {
+          return { eligible: false, reason: `Coupon expired on ${String(expiryRaw).split('T')[0]}.` };
+        }
+        expiryLabel = String(expiryRaw).split('T')[0];
+      }
+    }
+
+    // 6. Usage caps: max_redemptions
+    const maxRedemptions = couponRow.max_redemptions != null ? Number(couponRow.max_redemptions) : null;
+    const redemptionCount = db.prepare('SELECT COUNT(*) AS c FROM coupon_redemptions WHERE coupon_id = ?').get(couponRow.id)?.c || 0;
+    const orderRedemptionCount = db.prepare(`
+      SELECT COUNT(*) AS c FROM merch_orders
+      WHERE coupon_id = ? AND discount_amount > 0
+        AND (payment_status IN ('paid', 'cod_pending', 'refunded') OR status IN ('processing', 'shipped', 'delivered', 'cancelled', 'returned'))
+    `).get(couponRow.id)?.c || 0;
+    const totalUsage = Math.max(redemptionCount, orderRedemptionCount);
+    if (maxRedemptions !== null && maxRedemptions > 0 && totalUsage >= maxRedemptions) {
+      return { eligible: false, reason: `Coupon has reached its maximum usage limit (${maxRedemptions}/${maxRedemptions} used).` };
+    }
+    const remainingUsages = maxRedemptions !== null && maxRedemptions > 0 ? Math.max(0, maxRedemptions - totalUsage) : null;
+
+    // 7. Assigned user email check
+    const customerEmail = String(order?.customer_email || order?.customerEmail || order?.guest_email || order?.guestEmail || '').trim().toLowerCase();
+    const assignedEmail = String(couponRow.assigned_user_email || couponRow.recipient_email || '').trim().toLowerCase();
+    if (assignedEmail && customerEmail && assignedEmail !== customerEmail) {
+      return { eligible: false, reason: `Coupon is assigned exclusively to another recipient (${assignedEmail}).` };
+    }
+
+    // 8. Customer already used check (used_by array)
+    const usedBy = parseCouponUsedBy(couponRow.used_by);
+    if (customerEmail && usedBy.includes(customerEmail)) {
+      return { eligible: false, reason: 'Customer has already redeemed this coupon.' };
+    }
+
+    // 9. Applies to / product / variant / category restrictions
+    const appliesTo = String(couponRow.applies_to || 'merch').trim().toLowerCase();
+    let scopeLabel = 'All Merch';
+
+    if (appliesTo.startsWith('product:')) {
+      const rawIds = appliesTo.replace('product:', '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0);
+      if (!rawIds.length) {
+        return { eligible: false, reason: 'Coupon has an invalid product restriction.' };
+      }
+      try {
+        const placeholders = rawIds.map(() => '?').join(',');
+        const prodRows = db.prepare(`SELECT id, name FROM merch_products WHERE id IN (${placeholders})`).all(...rawIds);
+        const prodNames = prodRows.map((p) => p.name);
+        scopeLabel = prodNames.length ? `Selected Products (${prodNames.join(', ')})` : `Selected Products (#${rawIds.join(', #')})`;
+      } catch {
+        scopeLabel = `Selected Products (#${rawIds.join(', #')})`;
+      }
+    } else if (appliesTo.startsWith('variant:')) {
+      scopeLabel = 'Specific Variants';
+      const rawIds = appliesTo.replace('variant:', '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0);
+      if (!rawIds.length) {
+        return { eligible: false, reason: 'Coupon only applies to specific variants not included in this order.' };
+      }
+    } else if (appliesTo.startsWith('category:')) {
+      scopeLabel = `Category (${appliesTo.replace('category:', '')})`;
+      const rawCategories = appliesTo.replace('category:', '').split(',').map((c) => c.trim().toLowerCase());
+      const targetCategories = new Set();
+      for (const c of rawCategories) {
+        targetCategories.add(c);
+        if (c === 'bottle' || c.includes('bottle')) targetCategories.add('bottles');
+        if (c === 'spray' || c.includes('spray') || c.includes('mist')) targetCategories.add('sprays');
+        if (c === 'hoodie' || c.includes('hoodie')) targetCategories.add('hoodies');
+        if (c === 'tshirt' || c.includes('t-shirt') || c.includes('tshirt')) targetCategories.add('t-shirt');
+      }
+      const orderProductIds = (items || []).map((it) => Number(it.product_id || it.productId)).filter(Boolean);
+      if (!orderProductIds.length) {
+        return { eligible: false, reason: 'Coupon only applies to specific categories not included in this order.' };
+      }
+      const placeholders = orderProductIds.map(() => '?').join(',');
+      const productRows = db.prepare(`SELECT LOWER(category) AS cat FROM merch_products WHERE id IN (${placeholders})`).all(...orderProductIds);
+      const matches = productRows.some((r) => targetCategories.has(r.cat));
+      if (!matches) {
+        return { eligible: false, reason: 'Coupon only applies to specific categories not included in this order.' };
+      }
+    } else if (['booking', 'services'].includes(appliesTo)) {
+      return { eligible: false, reason: 'Coupon is restricted to bookings, not merchandise.' };
+    }
+
+    // 10. Format benefit text
+    const discountType = String(couponRow.discount_type || 'flat').toLowerCase();
+    const discountVal = Number(couponRow.discount_value || 0);
+    const benefit = (discountType === 'percentage' || discountType === '%')
+      ? `${discountVal}% OFF`
+      : `₹${discountVal} OFF`;
+
+    return {
+      eligible: true,
+      benefit,
+      expiryLabel,
+      scopeLabel,
+      remainingUsages,
+      maxRedemptions,
+      totalUsage,
+    };
+  }
+
+  function buildCustomerStockDelayEmail({ order, shortages = [], items = [], coupon = null, customApologyMessage = null }) {
+    const customerName = String(order.customerName || order.customer_name || 'Valued Customer').trim();
+    const orderNumber = String(order.orderNumber || order.order_number || `Order #${order.id}`).trim();
+
+    // Determine delivery estimate from shortages
+    const firstWithEstimate = shortages.find((s) => s.revisedDeliveryEstimate || s.revised_delivery_estimate);
+    const rawEstimate = firstWithEstimate
+      ? String(firstWithEstimate.revisedDeliveryEstimate || firstWithEstimate.revised_delivery_estimate).trim()
+      : '';
+    const hasEstimate = Boolean(rawEstimate);
+
+    // Dynamic delivery update wording (strictly no invented dates)
+    const deliveryEstimateLine = hasEstimate
+      ? `Your revised estimated delivery date is ${rawEstimate}.`
+      : "If we haven't confirmed a date yet, we'll share an update as soon as we have a verified timeline.";
+
+    // Affected items list (never expose internal notes or stock counts)
+    const affectedItemsList = shortages.length
+      ? shortages.map((s) => ({
+          name: s.productName || s.product_name || 'Product',
+          variant: s.variantLabel || s.variant_label || 'Default',
+          quantity: s.orderedQuantity || s.ordered_quantity || 1,
+        }))
+      : (Array.isArray(items) && items.length
+          ? items.map((i) => ({
+              name: i.productName || i.name || 'Product',
+              variant: i.variantLabel || 'Default',
+              quantity: i.quantity || i.qty || 1,
+            }))
+          : []);
+
+    const itemsTextList = affectedItemsList.length
+      ? `Affected item(s):\n` + affectedItemsList.map((i) => `• ${i.name} (${i.variant}) × ${i.quantity}`).join('\n')
+      : '';
+
+    const itemsHtmlList = affectedItemsList.length
+      ? `<div style="margin: 16px 0; background: #fafafa; border: 1px solid #ebebeb; border-radius: 6px; padding: 12px 16px;">
+           <p style="margin: 0 0 8px; font-weight: 600; font-size: 13px; color: #444;">Affected item(s):</p>
+           <ul style="margin: 0; padding-left: 18px; font-size: 13px; color: #555;">
+             ${affectedItemsList.map((i) => `<li style="margin-bottom: 4px;"><strong>${escapeHtml(i.name)}</strong> (${escapeHtml(i.variant)}) &times; ${i.quantity}</li>`).join('')}
+           </ul>
+         </div>`
+      : '';
+
+    const deliveryUpdateHtml = hasEstimate
+      ? `<div style="background: #fff8f0; border-left: 4px solid #b85d3b; border-radius: 4px; padding: 12px 16px; margin: 16px 0;">
+           <p style="margin: 0; font-size: 14px; color: #5a2c1d; font-weight: 600;">
+             📦 Revised Estimated Delivery Date: <span style="color: #b85d3b;">${escapeHtml(rawEstimate)}</span>
+           </p>
+         </div>`
+      : `<div style="background: #f7f9fa; border-left: 4px solid #8c9ba5; border-radius: 4px; padding: 12px 16px; margin: 16px 0;">
+           <p style="margin: 0; font-size: 14px; color: #43515c;">
+             📦 <strong>Delivery Timeline Update:</strong> Our team is actively confirming the revised timeline with our supply partners. We will share an update as soon as we have a verified timeline.
+           </p>
+         </div>`;
+
+    // Courtesy Compensation block (Phase 4): strictly rendered only when approved coupon is provided
+    let couponTextClause = '';
+    let compensationHtml = '';
+    let couponSummary = null;
+
+    if (coupon && coupon.code) {
+      const code = String(coupon.code).trim().toUpperCase();
+      const benefit = String(coupon.benefit || '').trim();
+      const expiry = String(coupon.expiryLabel || (coupon.validTill ? String(coupon.validTill).split('T')[0] : 'No expiration date')).trim();
+      const scope = String(coupon.scopeLabel || (coupon.appliesTo && coupon.appliesTo !== 'merch' ? coupon.appliesTo : 'Entire Merch Store')).trim();
+      couponSummary = { code, benefit, expiry, scope };
+
+      const scopeText = scope.toLowerCase().includes('entire') || scope.toLowerCase() === 'all merch'
+        ? 'across the entire store'
+        : `on ${scope}`;
+
+      couponTextClause = `As a courtesy, we've included your coupon ${code}, which provides ${benefit}. It is valid until ${expiry} ${scopeText} and can be redeemed under the applicable terms.`;
+
+      compensationHtml = `
+        <div style="background: #f6ffed; border: 1px solid #b7eb8f; border-radius: 8px; padding: 20px 24px; margin: 20px 0; text-align: center;">
+          <p style="margin: 0 0 6px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #389e0d;">
+            🎁 Courtesy Compensation
+          </p>
+          <p style="margin: 0 0 14px; font-size: 14px; color: #237804; line-height: 1.5;">
+            To thank you for your patience, please accept this exclusive courtesy coupon for your next purchase:
+          </p>
+          <div style="display: inline-block; background: #ffffff; border: 2px dashed #52c41a; border-radius: 6px; padding: 10px 24px; margin-bottom: 12px;">
+            <span style="font-family: monospace; font-size: 22px; font-weight: 700; color: #237804; letter-spacing: 2px;">${escapeHtml(code)}</span>
+          </div>
+          <p style="margin: 0 0 6px; font-size: 15px; font-weight: 700; color: #135200;">
+            Courtesy Benefit: ${escapeHtml(benefit)}
+          </p>
+          <p style="margin: 0 0 6px; font-size: 13px; color: #389e0d;">
+            Applies To: <strong>${escapeHtml(scope)}</strong>
+          </p>
+          <p style="margin: 0 0 12px; font-size: 13px; color: #52c41a;">
+            Valid Until: <strong>${escapeHtml(expiry)}</strong>
+          </p>
+          <p style="margin: 0; font-size: 12px; color: #595959; line-height: 1.4;">
+            To redeem, enter coupon code <strong style="color: #237804;">${escapeHtml(code)}</strong> at checkout on the H2 House of Health merch store.
+          </p>
+        </div>`;
+    }
+
+    // Default predefined apology message
+    const defaultApologyMessage = [
+      `We're sorry, but your H2 House of Health order ${orderNumber} has been delayed because an item in your order is temporarily unavailable.`,
+      '',
+      `Our team is working to resolve this. ${deliveryEstimateLine}`,
+      '',
+      `We sincerely apologize for the inconvenience and appreciate your patience.`,
+    ].join('\n');
+
+    const effectiveApologyMessage = (customApologyMessage && typeof customApologyMessage === 'string' && customApologyMessage.trim())
+      ? customApologyMessage.trim()
+      : defaultApologyMessage;
+
+    const subject = `An update about your H2 House of Health order ${orderNumber}`;
+
+    const textParts = [
+      `Hi ${customerName},`,
+      '',
+      effectiveApologyMessage,
+    ];
+    if (itemsTextList) {
+      textParts.push('', itemsTextList);
+    }
+    if (couponTextClause) {
+      textParts.push('', couponTextClause);
+    }
+    textParts.push(
+      '',
+      `Regards,`,
+      `H2 House of Health Team`
+    );
+    const text = textParts.join('\n');
+
+    const apologyParagraphs = effectiveApologyMessage
+      .split(/\n\s*\n/)
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .map((p) => `<p style="margin: 0 0 16px; font-size: 14px; line-height: 1.6; color: #333333;">${escapeHtml(p)}</p>`)
+      .join('\n');
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f6f6f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #333333;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f6f6f6; padding: 24px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 580px; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.06);">
+          <tr>
+            <td style="background-color: #b85d3b; padding: 24px 32px; text-align: center;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 20px; font-weight: 600; letter-spacing: 0.5px;">H2 House of Health</h1>
+              <p style="margin: 4px 0 0; color: rgba(255,255,255,0.85); font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Order Delay Update</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px 32px 24px;">
+              <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.5; color: #333333;">Hi <strong>${escapeHtml(customerName)}</strong>,</p>
+              ${apologyParagraphs}
+              ${itemsHtmlList}
+              ${deliveryUpdateHtml}
+              ${compensationHtml}
+              <p style="margin: 16px 0 0; font-size: 14px; line-height: 1.5; color: #333333;">
+                Regards,<br>
+                <strong>H2 House of Health Team</strong>
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #fbfbfb; border-top: 1px solid #eeeeee; padding: 20px 32px; text-align: center; font-size: 12px; color: #8c8c8c;">
+              <p style="margin: 0 0 4px;">H2 House of Health &middot; Order #${escapeHtml(orderNumber)}</p>
+              <p style="margin: 0;">Need assistance? Email us at <a href="mailto:support@h2houseofhealth.com" style="color: #b85d3b; text-decoration: none;">support@h2houseofhealth.com</a></p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+    return {
+      subject,
+      text,
+      html,
+      customerName,
+      orderNumber,
+      hasEstimate,
+      revisedDeliveryEstimate: rawEstimate || null,
+      affectedItems: affectedItemsList,
+      compensationCoupon: couponSummary,
+      defaultApologyMessage,
+      effectiveApologyMessage,
+    };
+  }
+
+  // ─── ADMIN: Compensation Coupons for Order (Phase 4) ───
+  app.get('/api/merch/admin/orders/:id/compensation-coupons', requireAdmin, (req, res) => {
+    try {
+      const orderId = Number(req.params.id);
+      if (!Number.isInteger(orderId) || orderId <= 0) {
+        return res.status(400).json({ error: 'Invalid order ID.' });
+      }
+
+      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+
+      const activeShortages = db.prepare('SELECT * FROM merch_order_stock_shortages WHERE order_id = ? AND is_resolved = 0').all(orderId);
+      if (!activeShortages.length) {
+        return res.status(400).json({ error: 'No active stock shortages found for this order.' });
+      }
+
+      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
+      const customerEmail = String(order.customer_email || order.guest_email || '').trim().toLowerCase();
+
+      // Query candidate Private Coupons (or coupons assigned to users) for merch
+      const couponRows = db.prepare(`
+        SELECT *
+        FROM coupons
+        WHERE (LOWER(COALESCE(coupon_type, '')) = 'private' OR assigned_user_email IS NOT NULL OR recipient_email IS NOT NULL)
+          AND (portal IS NULL OR LOWER(portal) IN ('merch', 'all'))
+        ORDER BY active DESC, datetime(created_at) DESC, id DESC
+      `).all();
+
+      const eligibleCoupons = [];
+      const ineligibleCoupons = [];
+
+      for (const c of couponRows) {
+        const evalResult = evaluateCompensationCouponEligibility(c, order, items);
+        const couponSummary = {
+          id: c.id,
+          code: c.code,
+          description: c.description || '',
+          discountType: c.discount_type || 'flat',
+          discountValue: Number(c.discount_value || 0),
+          benefit: evalResult.benefit,
+          validTill: c.valid_till || c.expires_at || null,
+          expiryLabel: evalResult.expiryLabel,
+          maxRedemptions: c.max_redemptions != null ? Number(c.max_redemptions) : null,
+          remainingUsages: evalResult.remainingUsages,
+          remainingUsagesLabel: evalResult.remainingUsages !== null ? `${evalResult.remainingUsages} remaining` : 'Unlimited',
+          appliesTo: c.applies_to || 'merch',
+          scopeLabel: evalResult.scopeLabel,
+          assignedUserEmail: c.assigned_user_email || c.recipient_email || null,
+        };
+
+        if (evalResult.eligible) {
+          eligibleCoupons.push(couponSummary);
+        } else {
+          ineligibleCoupons.push({
+            ...couponSummary,
+            reason: evalResult.reason,
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        orderId: order.id,
+        orderNumber: order.order_number,
+        customerEmail,
+        eligibleCoupons,
+        ineligibleCoupons,
+      });
+    } catch (err) {
+      console.error('[Merch Compensation Coupons] Error:', err);
+      res.status(500).json({ error: sanitizeErrorMessage(err.message) });
+    }
+  });
+
+  // ─── ADMIN: Create Courtesy Compensation Coupon for Order ───
+  app.post('/api/merch/admin/orders/:id/compensation-coupons', requireAdmin, (req, res) => {
+    try {
+      const orderId = Number(req.params.id);
+      if (!Number.isInteger(orderId) || orderId <= 0) {
+        return res.status(400).json({ error: 'Invalid order ID.' });
+      }
+
+      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+
+      const activeShortages = db.prepare('SELECT * FROM merch_order_stock_shortages WHERE order_id = ? AND is_resolved = 0').all(orderId);
+      if (!activeShortages.length) {
+        return res.status(400).json({ error: 'No active stock shortages found for this order.' });
+      }
+
+      const customerEmail = String(order.customer_email || order.guest_email || '').trim().toLowerCase();
+      if (!customerEmail || !isValidMerchEmail(customerEmail)) {
+        return res.status(400).json({ error: 'Order does not have a valid customer email on file for compensation coupon assignment.' });
+      }
+
+      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
+
+      let code = normalizeMerchCouponCode(req.body?.code);
+      if (!code) {
+        return res.status(400).json({ error: 'Coupon code is required.' });
+      }
+      if (code.length < 3 || code.length > 30) {
+        return res.status(400).json({ error: 'Coupon code must be between 3 and 30 characters.' });
+      }
+      if (!/^[A-Z0-9_\-]+$/.test(code)) {
+        return res.status(400).json({ error: 'Coupon code may only contain uppercase letters, numbers, hyphens, and underscores.' });
+      }
+
+      const existingCoupon = db.prepare('SELECT id, portal FROM coupons WHERE LOWER(code) = LOWER(?)').get(code);
+      if (existingCoupon) {
+        return res.status(409).json({ error: `Coupon code '${code}' is already taken. Please choose a different code.` });
+      }
+
+      const discountTypeRaw = String(req.body?.discountType || 'percentage').trim().toLowerCase();
+      const discountType = ['percentage', '%'].includes(discountTypeRaw) ? 'percentage' : 'flat';
+      const discountValue = Number(req.body?.discountValue || 0);
+
+      if (!Number.isFinite(discountValue) || discountValue <= 0) {
+        return res.status(400).json({ error: 'Discount value must be greater than 0.' });
+      }
+      if (discountType === 'percentage' && discountValue > 100) {
+        return res.status(400).json({ error: 'Percentage discount cannot exceed 100%.' });
+      }
+      if (discountType === 'flat' && discountValue > 10000000) {
+        return res.status(400).json({ error: 'Discount value is too large.' });
+      }
+
+      const validTillRaw = String(req.body?.validTill || req.body?.expiresAt || '').trim();
+      let validTill = null;
+      if (validTillRaw) {
+        const parsedExpiry = new Date(validTillRaw);
+        if (Number.isNaN(parsedExpiry.getTime())) {
+          return res.status(400).json({ error: 'Invalid expiration date format.' });
+        }
+        const todayDateStr = new Date().toISOString().split('T')[0];
+        const expiryDateStr = validTillRaw.split('T')[0];
+        if (expiryDateStr < todayDateStr) {
+          return res.status(400).json({ error: 'Expiration date cannot be in the past.' });
+        }
+        validTill = expiryDateStr;
+      } else {
+        const d = new Date();
+        d.setDate(d.getDate() + 30);
+        validTill = d.toISOString().split('T')[0];
+      }
+
+      const maxRedemptionsRaw = req.body?.maxRedemptions;
+      let maxRedemptions = (maxRedemptionsRaw === '' || maxRedemptionsRaw == null) ? 1 : Number(maxRedemptionsRaw);
+      if (!Number.isInteger(maxRedemptions) || maxRedemptions <= 0) {
+        return res.status(400).json({ error: 'Usage limit must be a positive integer.' });
+      }
+
+      const appliesToRaw = String(req.body?.appliesTo || 'merch').trim().toLowerCase();
+      let appliesTo = 'merch';
+      if (appliesToRaw === 'selected_products' || appliesToRaw.startsWith('product:') || (Array.isArray(req.body?.productIds) && req.body.productIds.length > 0)) {
+        let productIds = Array.isArray(req.body?.productIds)
+          ? req.body.productIds.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+          : (appliesToRaw.startsWith('product:') ? appliesToRaw.replace('product:', '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0) : []);
+        productIds = [...new Set(productIds)];
+        if (productIds.length === 0) {
+          return res.status(400).json({ error: 'At least one product must be selected when restricting to Selected Products.' });
+        }
+        const placeholders = productIds.map(() => '?').join(',');
+        const validProds = db.prepare(`SELECT id, name FROM merch_products WHERE id IN (${placeholders})`).all(...productIds);
+        if (validProds.length === 0) {
+          return res.status(400).json({ error: 'None of the selected products exist in the store catalog.' });
+        }
+        const validIds = validProds.map((p) => p.id);
+        appliesTo = `product:${validIds.join(',')}`;
+      }
+      const description = String(req.body?.description || `Courtesy delay compensation for order ${order.order_number}`).trim();
+
+      const insertResult = db.prepare(`
+        INSERT INTO coupons (
+          code, description, discount_type, discount_value, applies_to, max_redemptions, per_user_limit,
+          expires_at, active, coupon_type, assigned_user_email, used_by, is_active, valid_from, valid_till,
+          recipient_email, recipient_name, email_status, portal, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, 1, 'private', ?, '[]', 1, datetime('now'), ?, ?, ?, 'draft', 'merch', datetime('now'))
+      `).run(
+        code,
+        description,
+        discountType,
+        discountValue,
+        appliesTo,
+        maxRedemptions,
+        validTill,
+        customerEmail,
+        validTill,
+        customerEmail,
+        order.customer_name || ''
+      );
+
+      const createdCouponRow = db.prepare('SELECT * FROM coupons WHERE id = ?').get(insertResult.lastInsertRowid);
+      const evalResult = evaluateCompensationCouponEligibility(createdCouponRow, order, items);
+
+      res.status(201).json({
+        success: true,
+        message: `Courtesy compensation coupon ${code} created successfully for ${customerEmail}.`,
+        coupon: {
+          id: createdCouponRow.id,
+          code: createdCouponRow.code,
+          description: createdCouponRow.description || '',
+          discountType: createdCouponRow.discount_type,
+          discountValue: Number(createdCouponRow.discount_value),
+          benefit: evalResult.benefit,
+          validTill: createdCouponRow.valid_till,
+          expiryLabel: evalResult.expiryLabel,
+          maxRedemptions: createdCouponRow.max_redemptions,
+          remainingUsages: evalResult.remainingUsages,
+          remainingUsagesLabel: `${evalResult.remainingUsages ?? 1} remaining`,
+          appliesTo: createdCouponRow.applies_to,
+          scopeLabel: evalResult.scopeLabel,
+          assignedUserEmail: createdCouponRow.assigned_user_email,
+        },
+      });
+    } catch (err) {
+      console.error('[Create Compensation Coupon] Error:', err);
+      res.status(500).json({ error: sanitizeErrorMessage(err.message) });
+    }
+  });
+
+  app.get('/api/merch/admin/orders/:id/stock-shortage/email-preview', requireAdmin, (req, res) => {
+    try {
+      const orderId = Number(req.params.id);
+      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+
+      const activeShortages = db.prepare('SELECT * FROM merch_order_stock_shortages WHERE order_id = ? AND is_resolved = 0').all(orderId);
+      if (!activeShortages.length) {
+        return res.status(400).json({ error: 'No active stock shortages found for this order.' });
+      }
+
+      // Must be reviewed and marked ready_for_communication
+      if (activeShortages.some((s) => s.review_status !== 'ready_for_communication')) {
+        return res.status(400).json({
+          error: "Order shortage must be reviewed and marked 'ready_for_communication' before generating a customer email preview.",
+          reviewStatus: activeShortages[0].review_status,
+        });
+      }
+
+      const recipientEmail = hasRealEmail(order.customer_email)
+        ? order.customer_email
+        : (hasRealEmail(order.guest_email) ? order.guest_email : null);
+
+      if (!recipientEmail) {
+        return res.status(400).json({ error: 'Customer has no valid contact email address on file.' });
+      }
+
+      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
+
+      // Handle optional coupon selection (Phase 4)
+      let selectedCoupon = null;
+      const rawCouponId = req.query.couponId ? Number(req.query.couponId) : null;
+      if (rawCouponId && Number.isInteger(rawCouponId) && rawCouponId > 0) {
+        const couponRow = db.prepare('SELECT * FROM coupons WHERE id = ?').get(rawCouponId);
+        if (!couponRow) {
+          return res.status(400).json({ error: 'Selected coupon not found.' });
+        }
+        const evalResult = evaluateCompensationCouponEligibility(couponRow, order, items);
+        if (!evalResult.eligible) {
+          return res.status(400).json({
+            error: `Selected coupon is ineligible: ${evalResult.reason}`,
+            reason: evalResult.reason,
+          });
+        }
+        selectedCoupon = {
+          id: couponRow.id,
+          code: couponRow.code,
+          description: couponRow.description || '',
+          discountType: couponRow.discount_type || 'flat',
+          discountValue: Number(couponRow.discount_value || 0),
+          benefit: evalResult.benefit,
+          validTill: couponRow.valid_till || couponRow.expires_at || null,
+          expiryLabel: evalResult.expiryLabel,
+          maxRedemptions: couponRow.max_redemptions != null ? Number(couponRow.max_redemptions) : null,
+          remainingUsages: evalResult.remainingUsages,
+          remainingUsagesLabel: evalResult.remainingUsages !== null ? `${evalResult.remainingUsages} remaining` : 'Unlimited',
+          appliesTo: couponRow.applies_to || 'merch',
+          scopeLabel: evalResult.scopeLabel,
+        };
+      }
+
+      const customApologyMessage = typeof req.query.customMessage === 'string' ? req.query.customMessage : null;
+
+      const emailContent = buildCustomerStockDelayEmail({
+        order,
+        shortages: activeShortages,
+        items,
+        coupon: selectedCoupon,
+        customApologyMessage,
+      });
+
+      // Evaluate dispatch status accurately
+      const now = Date.now();
+      const activeSending = activeShortages.find((s) => {
+        if (s.customer_communication_status !== 'sending') return false;
+        const updatedTime = parseSqliteUtcDate(s.updated_at || s.created_at);
+        return (now - updatedTime) < 300000;
+      });
+      const isStaleSending = activeShortages.some((s) => {
+        if (s.customer_communication_status !== 'sending') return false;
+        const updatedTime = parseSqliteUtcDate(s.updated_at || s.created_at);
+        return (now - updatedTime) >= 300000;
+      });
+      const allAlreadySent = activeShortages.length > 0 && activeShortages.every((s) => s.customer_communication_status === 'sent');
+      const isFailed = activeShortages.some((s) => s.customer_communication_status === 'failed');
+
+      let dispatchMode = 'first_time';
+      let requiresResendReason = false;
+      let buttonLabel = 'Send Customer Delay Email';
+
+      if (activeSending) {
+        dispatchMode = 'in_flight';
+        requiresResendReason = false;
+        buttonLabel = 'Sending In Progress...';
+      } else if (isStaleSending) {
+        dispatchMode = 'stale_recovery';
+        requiresResendReason = true;
+        buttonLabel = 'Authorize Resend (Recover Interrupted Dispatch)';
+      } else if (allAlreadySent) {
+        dispatchMode = 'resend_authorized';
+        requiresResendReason = true;
+        buttonLabel = 'Resend Delay Email';
+      } else if (isFailed) {
+        dispatchMode = 'retry_failed';
+        requiresResendReason = false;
+        buttonLabel = 'Retry Sending Customer Delay Email';
+      } else {
+        dispatchMode = 'first_time';
+        requiresResendReason = false;
+        buttonLabel = 'Send Customer Delay Email';
+      }
+
+      res.json({
+        success: true,
+        orderId: order.id,
+        orderNumber: order.order_number,
+        customerName: emailContent.customerName,
+        recipientEmail,
+        subject: emailContent.subject,
+        text: emailContent.text,
+        html: emailContent.html,
+        hasEstimate: emailContent.hasEstimate,
+        revisedDeliveryEstimate: emailContent.revisedDeliveryEstimate,
+        affectedItems: emailContent.affectedItems,
+        selectedCoupon,
+        defaultApologyMessage: emailContent.defaultApologyMessage,
+        effectiveApologyMessage: emailContent.effectiveApologyMessage,
+        communicationStatus: activeShortages[0].customer_communication_status || 'pending',
+        communicatedAt: activeShortages[0].customer_communicated_at || null,
+        communicationSentTo: activeShortages[0].customer_communication_sent_to || null,
+        communicationError: activeShortages[0].customer_communication_error || null,
+        compensationCouponId: activeShortages[0].compensation_coupon_id || null,
+        compensationCouponCode: activeShortages[0].compensation_coupon_code || null,
+        compensationCouponBenefit: activeShortages[0].compensation_coupon_benefit || null,
+        communicationAuthorizedBy: activeShortages[0].communication_authorized_by || null,
+        dispatchMode,
+        requiresResendReason,
+        buttonLabel,
+        isAlreadySent: allAlreadySent,
+        isStaleSending,
+        isActiveSending: Boolean(activeSending),
+        isFailed,
+      });
+    } catch (err) {
+      res.status(500).json({ error: sanitizeErrorMessage(err.message) });
+    }
+  });
+
+  app.post('/api/merch/admin/orders/:id/stock-shortage/send-email', requireAdmin, async (req, res) => {
+    try {
+      const orderId = Number(req.params.id);
+      if (!Number.isInteger(orderId) || orderId <= 0) {
+        return res.status(400).json({ error: 'Invalid order ID.' });
+      }
+
+      // Force-retry / resend authorization audit:
+      // A client-supplied boolean alone is NOT trusted as authorization.
+      // Resending a previously delivered notification requires:
+      // 1. Explicit admin authentication (verified via requireAdmin)
+      // 2. confirmResend: true (or legacy forceRetry)
+      // 3. resendReason: non-empty string (>= 5 chars) documenting the administrative rationale
+      const confirmResend = Boolean(req.body?.confirmResend || req.body?.forceRetry);
+      const resendReason = String(req.body?.resendReason || '').trim();
+      const rawCouponId = req.body?.couponId ? Number(req.body.couponId) : null;
+      const adminUser = getMerchAuthUser(req);
+      const authorizedBy = adminUser?.email || 'admin';
+
+      // Execute atomic pre-check, coupon re-validation, and claim transaction
+      const claimResult = db.transaction(() => {
+        const order = db.prepare(`
+          SELECT id, order_number, customer_name, customer_email, guest_email, payment_status, status
+          FROM merch_orders
+          WHERE id = ?
+        `).get(orderId);
+
+        if (!order) {
+          return { error: 'Order not found', status: 404 };
+        }
+
+        if (String(order.payment_status).toLowerCase() !== 'paid') {
+          return { error: 'Delay notifications can only be sent for paid orders.', status: 400 };
+        }
+
+        if (['shipped', 'delivered', 'cancelled', 'returned'].includes(String(order.status).toLowerCase())) {
+          return { error: `Cannot send delay notification for order with status '${order.status}'.`, status: 400 };
+        }
+
+        const activeShortages = db.prepare(`
+          SELECT * FROM merch_order_stock_shortages WHERE order_id = ? AND is_resolved = 0
+        `).all(orderId);
+
+        if (!activeShortages.length) {
+          return { error: 'No active stock shortages found for this order.', status: 400 };
+        }
+
+        // Must be reviewed and marked ready_for_communication
+        if (activeShortages.some((s) => s.review_status !== 'ready_for_communication')) {
+          return {
+            error: "Order shortage must be reviewed and marked 'ready_for_communication' before sending a customer email.",
+            reviewStatus: activeShortages[0].review_status,
+            status: 400,
+          };
+        }
+
+        const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
+
+        // Immediate coupon re-validation immediately before dispatch (Phase 4)
+        let validatedCoupon = null;
+        if (rawCouponId && Number.isInteger(rawCouponId) && rawCouponId > 0) {
+          const couponRow = db.prepare('SELECT * FROM coupons WHERE id = ?').get(rawCouponId);
+          if (!couponRow) {
+            return { error: 'Selected coupon not found.', status: 400 };
+          }
+          const evalResult = evaluateCompensationCouponEligibility(couponRow, order, items);
+          if (!evalResult.eligible) {
+            return {
+              error: `Selected coupon is ineligible: ${evalResult.reason}`,
+              status: 400,
+            };
+          }
+          validatedCoupon = {
+            id: couponRow.id,
+            code: couponRow.code,
+            benefit: evalResult.benefit,
+            validTill: couponRow.valid_till || couponRow.expires_at || null,
+            expiryLabel: evalResult.expiryLabel,
+            scopeLabel: evalResult.scopeLabel,
+          };
+        }
+
+        // Check if an active non-stale sending request is currently in progress (< 5 minutes old)
+        const now = Date.now();
+        const activeSending = activeShortages.find((s) => {
+          if (s.customer_communication_status !== 'sending') return false;
+          const updatedTime = parseSqliteUtcDate(s.updated_at || s.created_at);
+          // Stale threshold is 5 minutes (300,000 ms)
+          return (now - updatedTime) < 300000;
+        });
+
+        if (activeSending) {
+          return {
+            error: 'A communication request is currently in progress for this order. Please wait.',
+            status: 409,
+          };
+        }
+
+        // Uncertain-outcome / Stale 'sending' check:
+        // If a request was left in 'sending' for >= 5 minutes (e.g. previous server crash after provider handover),
+        // we cannot guarantee whether the provider delivered it or dropped it without external verification.
+        // Therefore, to prevent accidental duplicate delivery, retrying requires explicit confirmation and reason.
+        const isStaleSending = activeShortages.some((s) => {
+          if (s.customer_communication_status !== 'sending') return false;
+          const updatedTime = parseSqliteUtcDate(s.updated_at || s.created_at);
+          return (now - updatedTime) >= 300000;
+        });
+
+        if (isStaleSending && (!confirmResend || resendReason.length < 5)) {
+          return {
+            error: "A previous email dispatch attempt was interrupted or timed out. To prevent accidental duplicates if the provider previously accepted the email, retrying requires explicit confirmation ('confirmResend: true') and an administrative reason ('resendReason' >= 5 chars).",
+            status: 409,
+            staleRecovery: true,
+            requiresReason: true,
+          };
+        }
+
+        // Check if already sent
+        const allAlreadySent = activeShortages.every((s) => s.customer_communication_status === 'sent');
+        let isAuthorizedResend = false;
+
+        if (allAlreadySent) {
+          if (!confirmResend || resendReason.length < 5) {
+            return {
+              error: "Delay notification email has already been sent for this order. Resending requires explicit confirmation ('confirmResend: true') and a documented administrative reason ('resendReason' >= 5 chars).",
+              communicatedAt: activeShortages[0].customer_communicated_at,
+              sentTo: activeShortages[0].customer_communication_sent_to,
+              status: 409,
+              requiresReason: true,
+            };
+          }
+
+          // Safety cooldown: prevent rapid resends within 60 seconds
+          const lastSentTime = parseSqliteUtcDate(activeShortages[0].customer_communicated_at);
+          if (lastSentTime && (now - lastSentTime) < 60000) {
+            return {
+              error: 'A notification was recently sent to this customer. Please wait at least 60 seconds before initiating a resend.',
+              status: 429,
+            };
+          }
+
+          isAuthorizedResend = true;
+        }
+
+        // Documented rationale check for both already-sent resends and stale sending recovery
+        const documentedReason = (isAuthorizedResend || isStaleSending) && confirmResend && resendReason.length >= 5 ? resendReason : null;
+
+        // Atomically claim the active shortage records by setting to 'sending'.
+        // Stale 'sending' rows (>5m old) can be safely claimed with authorized confirmation.
+        // Already 'sent' rows can only be claimed if isAuthorizedResend === true.
+        const claimLock = db.prepare(`
+          UPDATE merch_order_stock_shortages
+          SET customer_communication_status = 'sending',
+              customer_communication_attempts = customer_communication_attempts + 1,
+              compensation_coupon_id = ?,
+              compensation_coupon_code = ?,
+              compensation_coupon_benefit = ?,
+              communication_authorized_by = ?,
+              resend_reason = CASE WHEN ? = 1 THEN ? ELSE resend_reason END,
+              updated_at = datetime('now')
+          WHERE order_id = ?
+            AND is_resolved = 0
+            AND review_status = 'ready_for_communication'
+            AND (
+              customer_communication_status IN ('pending', 'failed')
+              OR (customer_communication_status = 'sending' AND updated_at < datetime('now', '-5 minutes') AND (? = 1 OR ? = 1))
+              OR (? = 1 AND customer_communication_status = 'sent')
+            )
+        `).run(
+          validatedCoupon ? validatedCoupon.id : null,
+          validatedCoupon ? validatedCoupon.code : null,
+          validatedCoupon ? validatedCoupon.benefit : null,
+          authorizedBy,
+          documentedReason ? 1 : 0,
+          documentedReason,
+          orderId,
+          isAuthorizedResend ? 1 : 0,
+          isStaleSending ? 1 : 0,
+          isAuthorizedResend ? 1 : 0
+        );
+
+        if (!claimLock.changes) {
+          return {
+            error: 'Unable to claim shortage record for communication (it may be currently dispatching or modified).',
+            status: 409,
+          };
+        }
+
+        return {
+          claimed: true,
+          order,
+          shortages: activeShortages,
+          items,
+          validatedCoupon,
+          isAuthorizedResend,
+          resendReason: documentedReason,
+        };
+      })();
+
+      if (!claimResult.claimed) {
+        return res.status(claimResult.status || 400).json({
+          error: claimResult.error,
+          ...(claimResult.communicatedAt ? { communicatedAt: claimResult.communicatedAt } : {}),
+          ...(claimResult.sentTo ? { sentTo: claimResult.sentTo } : {}),
+          ...(claimResult.requiresReason ? { requiresReason: true } : {}),
+          ...(claimResult.staleRecovery ? { staleRecovery: true } : {}),
+          ...(claimResult.reviewStatus ? { reviewStatus: claimResult.reviewStatus } : {}),
+        });
+      }
+
+      const { order, shortages, items, validatedCoupon } = claimResult;
+
+      const recipientEmail = hasRealEmail(order.customer_email)
+        ? order.customer_email
+        : (hasRealEmail(order.guest_email) ? order.guest_email : null);
+
+      if (!recipientEmail || !isValidMerchEmail(recipientEmail)) {
+        // Rollback sending state to failed
+        db.prepare(`
+          UPDATE merch_order_stock_shortages
+          SET customer_communication_status = 'failed',
+              customer_communication_error = 'Customer has no valid contact email address on file.',
+              updated_at = datetime('now')
+          WHERE order_id = ? AND is_resolved = 0
+        `).run(orderId);
+        return res.status(400).json({ error: 'Customer has no valid contact email address on file.' });
+      }
+
+      const emailContent = buildCustomerStockDelayEmail({
+        order,
+        shortages,
+        items,
+        coupon: validatedCoupon,
+        customApologyMessage: typeof req.body?.customMessage === 'string' ? req.body.customMessage : null,
+      });
+
+      let sendSuccess = false;
+      let sendError = null;
+
+      try {
+        if (req.headers['x-test-simulate-email-failure'] === 'true') {
+          throw new Error('Simulated mail provider gateway timeout');
+        }
+        if (req.headers['x-test-mock-email-success'] === 'true') {
+          // Strictly mocked for automated verification without sending real emails
+          sendSuccess = true;
+        } else if (typeof sendMerchEmail === 'function') {
+          await sendMerchEmail({
+            to: recipientEmail,
+            subject: emailContent.subject,
+            text: emailContent.text,
+            html: emailContent.html,
+          });
+          sendSuccess = true;
+        } else {
+          throw new Error('Email service is not configured');
+        }
+      } catch (err) {
+        sendError = err?.message || String(err);
+        console.error(`[Merch Delay Email] Error dispatching email for Order ${orderId}:`, sendError);
+      }
+
+      if (sendSuccess) {
+        db.prepare(`
+          UPDATE merch_order_stock_shortages
+          SET customer_communication_status = 'sent',
+              customer_communicated_at = datetime('now'),
+              customer_communication_sent_to = ?,
+              customer_communication_error = NULL,
+              compensation_coupon_id = ?,
+              compensation_coupon_code = ?,
+              compensation_coupon_benefit = ?,
+              communication_authorized_by = ?,
+              resend_reason = COALESCE(?, resend_reason),
+              updated_at = datetime('now')
+          WHERE order_id = ? AND is_resolved = 0
+        `).run(
+          recipientEmail,
+          validatedCoupon ? validatedCoupon.id : null,
+          validatedCoupon ? validatedCoupon.code : null,
+          validatedCoupon ? validatedCoupon.benefit : null,
+          authorizedBy,
+          claimResult.resendReason,
+          orderId
+        );
+
+        const updated = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
+        return res.json({
+          success: true,
+          message: validatedCoupon
+            ? `Delay notification email with courtesy coupon ${validatedCoupon.code} sent successfully to ${recipientEmail}.`
+            : `Delay notification email sent successfully to ${recipientEmail}.`,
+          sentTo: recipientEmail,
+          deliveryConfirmedByProvider: true,
+          compensationCoupon: validatedCoupon ? {
+            id: validatedCoupon.id,
+            code: validatedCoupon.code,
+            benefit: validatedCoupon.benefit,
+          } : null,
+          authorizedBy,
+          order: buildMerchOrderRecord(updated, items),
+        });
+      } else {
+        const sanitizedErr = sanitizeErrorMessage(sendError);
+        db.prepare(`
+          UPDATE merch_order_stock_shortages
+          SET customer_communication_status = 'failed',
+              customer_communication_error = ?,
+              compensation_coupon_id = ?,
+              compensation_coupon_code = ?,
+              compensation_coupon_benefit = ?,
+              communication_authorized_by = ?,
+              resend_reason = COALESCE(?, resend_reason),
+              updated_at = datetime('now')
+          WHERE order_id = ? AND is_resolved = 0
+        `).run(
+          sanitizedErr,
+          validatedCoupon ? validatedCoupon.id : null,
+          validatedCoupon ? validatedCoupon.code : null,
+          validatedCoupon ? validatedCoupon.benefit : null,
+          authorizedBy,
+          claimResult.resendReason,
+          orderId
+        );
+
+        return res.status(502).json({
+          error: `Failed to deliver delay notification email: ${sanitizedErr}`,
+          retryAllowed: true,
+          recipientEmail,
+        });
+      }
+    } catch (err) {
+      console.error('[Merch Delay Email] Unhandled exception in send-email:', err);
+      res.status(500).json({ error: sanitizeErrorMessage(err.message) });
+    }
   });
 
   // ─── ADMIN: Shiprocket Fulfillment Routes ───
