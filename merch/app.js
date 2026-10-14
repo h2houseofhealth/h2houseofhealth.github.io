@@ -197,16 +197,16 @@
   // Presentation-only fallbacks for the storefront card redesign. These are
   // not product/API fields and should be replaced with real catalog metadata.
   const PRODUCT_CARD_PRESENTATION = {
-    bottles: { badge: 'BESTSELLER', stars: '★★★★☆', reviews: 128, annotation: 'Molecular Hydrogen on the go' },
+    bottles: { badge: 'BESTSELLER', stars: '★★★★★', reviews: 128, annotation: 'Molecular Hydrogen on the go' },
     sprays: { badge: 'NEW ARRIVAL', stars: '★★★★★', reviews: 96, annotation: 'Refresh & rejuvenate anywhere' },
-    hoodies: { badge: 'LIMITED DROP', stars: '★★★★☆', reviews: 74, annotation: 'Wear the wellness lifestyle' },
+    hoodies: { badge: 'LIMITED DROP', stars: '★★★★★', reviews: 74, annotation: 'Wear the wellness lifestyle' },
   };
 
   function getProductCardPresentation(product) {
     const category = String(product?.category || '').trim().toLowerCase();
     return PRODUCT_CARD_PRESENTATION[category] || {
       badge: 'NEW ARRIVAL',
-      stars: '★★★★☆',
+      stars: '★★★★★',
       reviews: 0,
       annotation: 'Made for your everyday ritual',
     };
@@ -288,7 +288,7 @@
   // Keep the primary configured image first so a variant's gallery can never
   // replace it with another colour or an unrelated product image.
   function getVariantImageSources(variant, product = null) {
-    const primary = normalizeProductImageUrl(variant?.imageUrl || variant?.image_url || '');
+    const primary = normalizeProductImageUrl(variant?.imageUrl || variant?.image_url || variant?.image || '');
     const gallery = (Array.isArray(variant?.images) ? variant.images : [])
       .map(normalizeProductImageUrl)
       .filter(Boolean);
@@ -852,6 +852,14 @@
     return [variant?.size, variant?.color].filter(Boolean).join(' / ') || 'Default variant';
   }
 
+  function formatVariantDropdownLabel(variant) {
+    if (!variant) return 'Default';
+    const color = (variant.color || '').trim();
+    const size = (variant.size || '').trim();
+    if (color && size) return `${color} ${size}`;
+    return color || size || variant.name || `Variant #${variant.id}`;
+  }
+
   function isHoodieProduct(product) {
     const category = String(product?.category || '').toLowerCase();
     const name = String(product?.name || '').toLowerCase();
@@ -878,14 +886,14 @@
 
     if (stock <= LOW_STOCK_THRESHOLD) {
       return {
-        label: `Low stock (${stock} left)`,
+        label: 'Low stock',
         className: 'low-stock',
         detail: `${label} is running low. Restock soon.`,
       };
     }
 
     return {
-      label: `In stock (${stock} available)`,
+      label: 'In stock',
       className: 'in-stock',
       detail: `${label} is available for purchase.`,
     };
@@ -2064,10 +2072,17 @@ function getWishlistProductPrice(item) {
       });
     }
     if (!preserveCoupon) {
-      clearMerchCoupon();
+      if (state.campaignAttribution?.couponCode) {
+        state.merchCouponCode = state.campaignAttribution.couponCode;
+      } else {
+        clearMerchCoupon();
+      }
     }
     saveCart();
     loadMerchCoupons();
+    if (state.campaignAttribution?.couponCode || state.merchCouponCode) {
+      applyMerchCouponFromCart({ silent: true }).catch(() => {});
+    }
     if (openDrawerAfterAdd) {
       openCart();
     }
@@ -2113,11 +2128,18 @@ function getWishlistProductPrice(item) {
       state.cart = state.cart.filter(item => Number(item.variantId) !== Number(variantId));
     }
     if (!preserveCoupon) {
-      clearMerchCoupon();
+      if (state.campaignAttribution?.couponCode) {
+        state.merchCouponCode = state.campaignAttribution.couponCode;
+      } else {
+        clearMerchCoupon();
+      }
     }
     getMerchBundleDiscountAmount();
     saveCart();
     loadMerchCoupons();
+    if (state.cart.length > 0 && (state.campaignAttribution?.couponCode || state.merchCouponCode)) {
+      applyMerchCouponFromCart({ silent: true }).catch(() => {});
+    }
     renderCart();
   }
 
@@ -2199,6 +2221,94 @@ function getWishlistProductPrice(item) {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
+  }
+
+  function formatDiscountAmount(amountInr) {
+    if (state.currency === 'USD') {
+      const rate = state.currencyConfig?.inrPerUsd || 85;
+      const usd = Math.round((Number(amountInr || 0) / rate) * 100) / 100;
+      return '$' + usd.toLocaleString('en-US', {
+        minimumFractionDigits: Number.isInteger(usd) ? 0 : 2,
+        maximumFractionDigits: 2,
+      });
+    }
+    const num = Number(amountInr || 0);
+    return '₹' + num.toLocaleString('en-IN', {
+      minimumFractionDigits: Number.isInteger(num) ? 0 : 2,
+      maximumFractionDigits: 2,
+    });
+  }
+
+  function formatVariantScopeMessage(targetVariants = [], allProductVariantsCount = 0, productName = 'bottle') {
+    if (!targetVariants || targetVariants.length === 0) return '';
+    const isAll = allProductVariantsCount > 1 && targetVariants.length >= allProductVariantsCount;
+    const colors = targetVariants.map((v) => v.color).filter(Boolean);
+    const size = targetVariants[0]?.size || '';
+    const itemNoun = /bottle/i.test(productName) ? 'bottle' : 'item';
+
+    const joinList = (arr) => {
+      if (!arr || !arr.length) return '';
+      if (arr.length === 1) return arr[0];
+      if (arr.length === 2) return `${arr[0]} and ${arr[1]}`;
+      return `${arr.slice(0, -1).join(', ')}, and ${arr[arr.length - 1]}`;
+    };
+
+    if (isAll) {
+      if (colors.length > 1) {
+        return `Valid on ${joinList(colors)}${size ? ` ${size}` : ''} ${itemNoun}s.`;
+      }
+      return `Valid on all colours of this ${itemNoun}.`;
+    }
+
+    if (targetVariants.length === 1) {
+      const v = targetVariants[0];
+      const desc = [v.color, v.size].filter(Boolean).join(' ');
+      return `Valid on ${desc ? `${desc} ` : ''}${itemNoun}.`;
+    }
+
+    if (colors.length === targetVariants.length) {
+      return `Valid on ${joinList(colors)}${size ? ` ${size}` : ''} ${itemNoun}s.`;
+    }
+
+    const titles = targetVariants.map((v) => [v.color, v.size].filter(Boolean).join(' ')).filter(Boolean);
+    return `Valid on ${joinList(titles)} ${itemNoun}s.`;
+  }
+
+  function isInfluencerAttribution() {
+    if (isRyanAttribution()) return true;
+    if (state.merchCouponPreview && (state.merchCouponPreview.influencerName || Number(state.merchCouponPreview.influencerId || 0) > 0 || (Array.isArray(state.merchCouponPreview.targetVariantIds) && state.merchCouponPreview.targetVariantIds.length > 0))) return true;
+    if (state.campaignAttribution && (state.campaignAttribution.influencerId || state.campaignAttribution.slug)) return true;
+    return false;
+  }
+
+  function getInfluencerCouponDisplayData(totals) {
+    const preview = state.merchCouponPreview || {};
+    const attribution = state.campaignAttribution || {};
+
+    const influencerName = preview.influencerName || attribution.influencerName || (isRyanAttribution() ? 'Ryan' : '');
+    const title = influencerName ? `${influencerName} Influencer Discount Applied` : 'Influencer Discount Applied';
+
+    let scopeMessage = preview.variantScopeMessage || attribution.variantScopeMessage || '';
+    if (!scopeMessage) {
+      const targetVariants = (Array.isArray(preview.targetVariants) && preview.targetVariants.length)
+        ? preview.targetVariants
+        : ((Array.isArray(attribution.targetVariants) && attribution.targetVariants.length) ? attribution.targetVariants : []);
+      const allCount = preview.allProductVariantsCount || attribution.allProductVariantsCount || 4;
+      const prodName = preview.targetProductName || attribution.targetProductName || 'bottle';
+      if (targetVariants.length > 0) {
+        scopeMessage = formatVariantScopeMessage(targetVariants, allCount, prodName);
+      }
+    }
+
+    const discountStr = formatDiscountAmount(totals.couponDiscount);
+    const description = `${discountStr} discount applied.${scopeMessage ? ` ${scopeMessage}` : ''}`;
+
+    return {
+      title,
+      description,
+      influencerName,
+      scopeMessage,
+    };
   }
 
   function getCheckoutDiscountAmount() {
@@ -2302,19 +2412,21 @@ function getWishlistProductPrice(item) {
 
     const totals = getCheckoutTotals();
     const isRyan = isRyanAttribution();
+    const isInfluencer = isInfluencerAttribution();
     const indBottles = getCartIndividualBottleCount();
 
-    if (isRyan) {
+    if (isInfluencer) {
       if (totals.couponDiscount > 0) {
+        const infDisplay = getInfluencerCouponDisplayData(totals);
         els.cartCouponPreview.hidden = false;
         els.cartCouponPreview.innerHTML = `
           <div class="cart-coupon__savings-text" style="color:#0f766e;">
-            <strong style="display:block;margin-bottom:2px;">Ryan Discount Applied</strong>
-            <div>${formatCheckoutMoney(totals.couponDiscount)} ${totals.bundleDiscount > 0 ? `discount applied to ${indBottles} standalone bottle${indBottles === 1 ? '' : 's'}` : `Ryan discount applied to ${indBottles} bottle${indBottles === 1 ? '' : 's'}`}.</div>
+            <strong style="display:block;margin-bottom:2px;">${escapeHtml(infDisplay.title)}</strong>
+            <div>${escapeHtml(infDisplay.description)}</div>
           </div>
         `;
       } else {
-        // When Ryan customer discount is 0: do not show Ryan discount/coupon applied
+        // When customer discount is 0: do not show discount/coupon applied
         els.cartCouponPreview.hidden = true;
         els.cartCouponPreview.innerHTML = '';
       }
@@ -2553,7 +2665,12 @@ function getWishlistProductPrice(item) {
         const indBottles = getCartIndividualBottleCount();
         const labelEl = document.getElementById('cartCouponDiscountLabel');
         const valEl = document.getElementById('cartCouponDiscountVal');
-        if (labelEl) labelEl.textContent = isRyanAttribution() ? `Ryan discount (${indBottles} ${totals.bundleDiscount > 0 ? 'standalone ' : ''}bottle${indBottles === 1 ? '' : 's'})` : 'Coupon discount';
+        if (labelEl) {
+          const infName = state.merchCouponPreview?.influencerName || state.campaignAttribution?.influencerName || (isRyanAttribution() ? 'Ryan' : '');
+          labelEl.textContent = infName
+            ? `${infName} discount (${indBottles} ${totals.bundleDiscount > 0 ? 'standalone ' : ''}bottle${indBottles === 1 ? '' : 's'})`
+            : 'Coupon discount';
+        }
         if (valEl) valEl.textContent = `- ${formatPrice(totals.couponDiscount)}`;
       } else {
         couponDiscountRow.hidden = true;
@@ -5145,6 +5262,43 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     return products;
   }
 
+  function getProductStockMessaging(product, displayVariant) {
+    const stock = Number(displayVariant?.stock || 0);
+    const isHoodie = isHoodieProduct(product);
+    if (!displayVariant || stock <= 0) {
+      return {
+        label: isHoodie ? 'Sold out' : 'Out of stock',
+        className: 'out-of-stock',
+      };
+    }
+
+    const normalizedCategory = String(product?.category || '').toLowerCase();
+    const normalizedName = String(product?.name || '').toLowerCase();
+    const isMist = normalizedCategory.includes('mist') || normalizedCategory === 'sprays'
+      || normalizedName.includes('mist') || normalizedName.includes('spray');
+    const isLowStock = stock <= LOW_STOCK_THRESHOLD;
+
+    if (isMist) {
+      return {
+        label: 'Selling fast · Grab yours now',
+        className: 'low-stock',
+      };
+    }
+
+    const hasSalesVelocity = Number(product?.sales || 0) > 0 || Number(product?.orderCount || 0) > 0;
+    if (isLowStock && hasSalesVelocity) {
+      return {
+        label: 'Selling fast',
+        className: 'low-stock',
+      };
+    }
+
+    return {
+      label: 'In stock',
+      className: 'in-stock',
+    };
+  }
+
   function renderProductCard(product, hypeLabel = '') {
       const displayVariant = product.displayVariant || getDefaultPurchasableVariant(product);
       const isSoldOut = !displayVariant || Number(displayVariant.stock || 0) <= 0;
@@ -5169,11 +5323,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       const cardSpecifications = Object.entries(getProductSpecifications(product, displayVariant))
         .filter(([label, value]) => String(label).trim() && String(value).trim())
         .slice(0, 2);
-      const stockLabel = isSoldOut
-        ? (isHoodie ? 'Sold out' : 'Out of stock')
-        : Number(displayVariant?.stock || 0) <= LOW_STOCK_THRESHOLD
-          ? `Low stock · ${Number(displayVariant.stock)} left`
-          : `In stock · ${Number(displayVariant.stock)} available`;
+      const stockInfo = getProductStockMessaging(product, displayVariant);
+      const stockLabel = stockInfo.label;
+      const stockClass = stockInfo.className;
       const cardClasses = [
         isHoodie ? 'product-card--hoodie' : '',
         isMist ? 'product-card--mist' : '',
@@ -5202,9 +5354,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           <h3 class="product-card__name">${escapeHtml(product.name)}</h3>
           ${(cardSizes.length || cardColors.length) ? `<p class="product-card__variant">${cardSizes.length ? `Size: ${cardSizes.join(', ')}` : ''}${cardSizes.length && cardColors.length ? ' · ' : ''}${cardColors.length ? `Color: ${cardColors.join(', ')}` : ''}</p>` : ''}
           ${cardSpecifications.length ? `<div class="product-card__specs">${cardSpecifications.map(([label, value]) => `<span><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</span>`).join('')}</div>` : ''}
-          <p class="product-card__stock ${isSoldOut ? 'out-of-stock' : Number(displayVariant?.stock || 0) <= LOW_STOCK_THRESHOLD ? 'low-stock' : 'in-stock'}">${escapeHtml(stockLabel)}</p>
-          <div class="product-card__rating" aria-label="${escapeHtml(`${presentation.stars} (${presentation.reviews} reviews)`) }">
-            <span class="product-card__stars" aria-hidden="true">${presentation.stars}</span>
+          <p class="product-card__stock ${stockClass}">${escapeHtml(stockLabel)}</p>
+          <div class="product-card__rating" aria-label="${escapeHtml(`${presentation.stars || '★★★★★'} (${presentation.reviews} reviews)`)}">
+            <span class="product-card__stars" aria-hidden="true">${presentation.stars || '★★★★★'}</span>
             <span>(${presentation.reviews})</span>
           </div>
           <p class="product-card__price">
@@ -5499,10 +5651,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             ${sizes.map(size => {
               const v = product.variants.find(x => x.size === size && x.color === (variant.color || colors[0]));
               const isSelected = variant.size === size;
-              const isDisabled = v && v.stock <= 0;
+              const isSoldOut = v && Number(v.stock || 0) <= 0;
               const hasOffer = v && getVariantOfferDetails(v, product) !== null;
-              return `<button class="variant-option ${isSelected ? 'is-selected' : ''} ${isDisabled ? 'is-disabled' : ''} ${hasOffer ? 'has-offer' : ''}" 
-                data-size="${escapeHtml(size)}" type="button" ${isDisabled ? 'disabled' : ''}>${escapeHtml(size)}${hasOffer ? ' <span class="variant-offer-dot" title="Special offer">•</span>' : ''}</button>`;
+              return `<button class="variant-option ${isSelected ? 'is-selected' : ''} ${isSoldOut ? 'is-disabled' : ''} ${hasOffer ? 'has-offer' : ''}" 
+                data-size="${escapeHtml(size)}" type="button" ${!v ? 'disabled' : ''}>${escapeHtml(size)}${hasOffer ? ' <span class="variant-offer-dot" title="Special offer">•</span>' : ''}</button>`;
             }).join('')}
           </div>
         </div>
@@ -5515,10 +5667,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             ${colors.map(color => {
               const v = product.variants.find(x => x.color === color && x.size === (variant.size || sizes[0]));
               const isSelected = variant.color === color;
-              const isDisabled = v && v.stock <= 0;
+              const isSoldOut = v && Number(v.stock || 0) <= 0;
               const hasOffer = v && getVariantOfferDetails(v, product) !== null;
-              return `<button class="variant-option ${isSelected ? 'is-selected' : ''} ${isDisabled ? 'is-disabled' : ''} ${hasOffer ? 'has-offer' : ''}"
-                data-color="${escapeHtml(color)}" type="button" ${isDisabled ? 'disabled' : ''}>${escapeHtml(color)}${hasOffer ? ' <span class="variant-offer-dot" title="Special offer">•</span>' : ''}</button>`;
+              return `<button class="variant-option ${isSelected ? 'is-selected' : ''} ${isSoldOut ? 'is-disabled' : ''} ${hasOffer ? 'has-offer' : ''}"
+                data-color="${escapeHtml(color)}" type="button" ${!v ? 'disabled' : ''}>${escapeHtml(color)}${hasOffer ? ' <span class="variant-offer-dot" title="Special offer">•</span>' : ''}</button>`;
             }).join('')}
           </div>
         </div>
@@ -6549,7 +6701,26 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
     const nonBundleItems = state.cart.filter((item) => !item.isBundle);
 
-    const individualItemsHtml = nonBundleItems.map((item) => `
+    const individualItemsHtml = nonBundleItems.map((item) => {
+      const product = (state.products || []).find((p) => Number(p.id) === Number(item.productId))
+        || (state.products || []).find((p) => (p.variants || []).some((v) => Number(v.id) === Number(item.variantId)));
+      const variants = (product?.variants || []).filter((v) => Number(v.isActive ?? v.is_active ?? 1) === 1 && !v.deletedAt);
+      const hasMultipleVariants = variants.length > 1;
+
+      let variantSelectorHtml = '';
+      if (hasMultipleVariants) {
+        variantSelectorHtml = `
+          <select class="shopify-summary-product__variant-select" data-checkout-change-variant="${item.variantId}" aria-label="Select variant for ${escapeHtml(item.productName)}">
+            ${variants.map((v) => {
+              const label = formatVariantDropdownLabel(v);
+              const isSelected = Number(v.id) === Number(item.variantId);
+              return `<option value="${v.id}" ${isSelected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+            }).join('')}
+          </select>
+        `;
+      }
+
+      return `
       <div class="shopify-summary-product">
         <div class="shopify-summary-product__image">
           <img src="${escapeHtml(item.image || FALLBACK_PRODUCT_IMAGE)}" alt="${escapeHtml(item.productName)}" />
@@ -6559,10 +6730,13 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           <strong>${escapeHtml(item.productName)}</strong>
           <small>${escapeHtml(item.variantLabel || 'Default')}</small>
           <small class="shopify-summary-product__qty-label">${escapeHtml(`${item.quantity} Piece${item.quantity === 1 ? '' : 's'}`)}</small>
-          <div class="shopify-summary-product__stepper" role="group" aria-label="Quantity for ${escapeHtml(item.productName)}">
-            <button type="button" class="shopify-summary-product__step-btn" data-checkout-step-variant="${item.variantId}" data-checkout-step-dir="down" aria-label="Decrease quantity" ${item.quantity <= 1 ? 'title="Remove item"' : ''}>−</button>
-            <span class="shopify-summary-product__step-qty">${item.quantity}</span>
-            <button type="button" class="shopify-summary-product__step-btn" data-checkout-step-variant="${item.variantId}" data-checkout-step-dir="up" aria-label="Increase quantity">+</button>
+          <div class="shopify-summary-product__controls">
+            <div class="shopify-summary-product__stepper" role="group" aria-label="Quantity for ${escapeHtml(item.productName)}">
+              <button type="button" class="shopify-summary-product__step-btn" data-checkout-step-variant="${item.variantId}" data-checkout-step-dir="down" aria-label="Decrease quantity" ${item.quantity <= 1 ? 'title="Remove item"' : ''}>−</button>
+              <span class="shopify-summary-product__step-qty">${item.quantity}</span>
+              <button type="button" class="shopify-summary-product__step-btn" data-checkout-step-variant="${item.variantId}" data-checkout-step-dir="up" aria-label="Increase quantity">+</button>
+            </div>
+            ${variantSelectorHtml}
           </div>
         </div>
         <div class="shopify-summary-product__right">
@@ -6570,7 +6744,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           <button type="button" class="shopify-summary-product__remove" data-checkout-remove-variant="${item.variantId}" title="Remove item" aria-label="Remove ${escapeHtml(item.productName)}">✕</button>
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
 
     return `
       <aside class="shopify-summary" aria-label="Order summary">
@@ -6602,16 +6777,18 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           </div>
           ${(() => {
             if (state.merchCouponError) return '';
-            if (isRyan) {
+            const isInfluencer = isInfluencerAttribution();
+            if (isInfluencer) {
               if (totals.couponDiscount > 0) {
+                const infDisplay = getInfluencerCouponDisplayData(totals);
                 return `
                   <div class="shopify-coupon__savings-text" style="color:#0f766e;font-size:13px;line-height:1.4;margin-top:6px;">
-                    <strong style="display:block;color:#0f766e;margin-bottom:2px;">Ryan Discount Applied</strong>
-                    <span>${formatCheckoutMoney(totals.couponDiscount)} ${totals.bundleDiscount > 0 ? `discount applied to ${indBottles} standalone bottle${indBottles === 1 ? '' : 's'}` : `Ryan discount applied to ${indBottles} bottle${indBottles === 1 ? '' : 's'}`}.</span>
+                    <strong style="display:block;color:#0f766e;margin-bottom:2px;">${escapeHtml(infDisplay.title)}</strong>
+                    <span>${escapeHtml(infDisplay.description)}</span>
                   </div>
                 `;
               }
-              // When Ryan customer discount is 0: do not show Ryan discount/coupon applied
+              // When customer discount is 0: do not show discount/coupon applied
               return '';
             }
             if (totals.couponDiscount > 0 && state.merchCouponPreview) {
@@ -6673,7 +6850,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           ` : ''}
           ${totals.couponDiscount > 0 ? `
             <div class="shopify-price-row shopify-price-row--discount">
-              <span>${isRyan ? `Ryan Discount (${indBottles} ${totals.bundleDiscount > 0 ? 'standalone ' : ''}bottle${indBottles === 1 ? '' : 's'})` : `Coupon (${escapeHtml(state.merchCouponCode || '')})`}</span>
+              <span>${(() => {
+                const isInfluencer = isInfluencerAttribution();
+                if (isInfluencer) {
+                  const infName = state.merchCouponPreview?.influencerName || state.campaignAttribution?.influencerName || (isRyan ? 'Ryan' : '');
+                  return `${infName ? `${infName} ` : ''}Discount (${indBottles} ${totals.bundleDiscount > 0 ? 'standalone ' : ''}bottle${indBottles === 1 ? '' : 's'})`;
+                }
+                return `Coupon (${escapeHtml(state.merchCouponCode || '')})`;
+              })()}</span>
               <strong>- ${formatCheckoutMoney(totals.couponDiscount)}</strong>
             </div>
           ` : ''}
@@ -6696,17 +6880,19 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             `;
           }
           let couponLine = '';
-          if (isRyan && totals.couponDiscount > 0) {
+          const isInfluencer = isInfluencerAttribution();
+          if (isInfluencer && totals.couponDiscount > 0) {
+            const infName = state.merchCouponPreview?.influencerName || state.campaignAttribution?.influencerName || (isRyan ? 'Ryan' : '');
             couponLine = `
               <div class="shopify-savings-breakdown__row">
                 <div>
-                  <strong>Ryan Discount</strong>
+                  <strong>${escapeHtml(infName ? `${infName} Influencer Discount` : 'Influencer Discount')}</strong>
                   <small>Applied to ${indBottles} eligible ${totals.bundleDiscount > 0 ? 'standalone ' : ''}bottle${indBottles === 1 ? '' : 's'}</small>
                 </div>
                 <strong class="shopify-savings-breakdown__amt">${formatCheckoutMoney(totals.couponDiscount)}</strong>
               </div>
             `;
-          } else if (!isRyan && totals.couponDiscount > 0) {
+          } else if (!isInfluencer && totals.couponDiscount > 0) {
             couponLine = `
               <div class="shopify-savings-breakdown__row">
                 <div>
@@ -7059,6 +7245,85 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           }
           renderCheckoutPage();
         }
+      });
+    });
+
+    els.checkoutPage?.querySelectorAll('[data-checkout-change-variant]').forEach((select) => {
+      select.addEventListener('change', async () => {
+        const form = els.checkoutPage?.querySelector('#shopifyCheckoutForm');
+        if (form) state.checkoutDraft = getCheckoutDraftFromForm(form);
+        const currentVariantId = Number(select.dataset.checkoutChangeVariant);
+        const newVariantId = Number(select.value);
+        if (!newVariantId || currentVariantId === newVariantId) return;
+
+        const item = state.cart.find((it) => Number(it.variantId) === currentVariantId && !it.isBundle);
+        if (!item) return;
+
+        const product = (state.products || []).find((p) => Number(p.id) === Number(item.productId))
+          || (state.products || []).find((p) => (p.variants || []).some((v) => Number(v.id) === currentVariantId));
+        const newVariant = (product?.variants || []).find((v) => Number(v.id) === newVariantId);
+        if (!product || !newVariant) {
+          showCheckoutNotice('Variant unavailable', 'The selected variant is no longer available.', { variant: 'error' });
+          renderCheckoutPage();
+          return;
+        }
+
+        const maxStock = Number(newVariant.stock ?? 99);
+        const newVariantLabel = formatVariantDropdownLabel(newVariant);
+
+        if (maxStock <= 0) {
+          showCheckoutNotice('Out of stock', `${newVariantLabel} is currently out of stock.`, { variant: 'error' });
+          renderCheckoutPage();
+          return;
+        }
+
+        let targetQty = Number(item.quantity || 1);
+        if (targetQty > maxStock) {
+          showCheckoutNotice('Stock limit reached', `Only ${maxStock} unit${maxStock === 1 ? '' : 's'} available for ${newVariantLabel}. Quantity adjusted to ${maxStock}.`, { variant: 'warning' });
+          targetQty = maxStock;
+        }
+
+        const existingItem = state.cart.find((it) => it !== item && Number(it.variantId) === newVariantId && !it.isBundle);
+        if (existingItem) {
+          const combinedQty = Number(existingItem.quantity || 1) + targetQty;
+          if (combinedQty > maxStock) {
+            showCheckoutNotice('Stock limit reached', `Total quantity for ${newVariantLabel} capped at available stock (${maxStock}).`, { variant: 'warning' });
+            existingItem.quantity = maxStock;
+          } else {
+            existingItem.quantity = combinedQty;
+          }
+          state.cart = state.cart.filter((it) => it !== item);
+        } else {
+          const offerInfo = getVariantOfferDetails(newVariant, product);
+          const effectivePrice = offerInfo ? offerInfo.offerPrice : newVariant.price;
+
+          item.variantId = Number(newVariant.id);
+          item.id = Number(newVariant.id);
+          item.variantLabel = [newVariant.size, newVariant.color].filter(Boolean).join(' / ') || getVariantLabel(newVariant);
+          item.sku = newVariant.sku;
+          item.image = getVariantImageUrl(newVariant, product);
+          item.price = effectivePrice;
+          item.originalPrice = offerInfo ? offerInfo.originalPrice : null;
+          item.discountLabel = offerInfo ? offerInfo.discountLabel : null;
+          item.offerName = offerInfo ? offerInfo.name : null;
+          item.quantity = targetQty;
+        }
+
+        saveCart();
+
+        const hadCoupon = Boolean(state.merchCouponCode || state.campaignAttribution?.couponCode);
+        if (state.campaignAttribution?.couponCode && !state.merchCouponCode) {
+          state.merchCouponCode = state.campaignAttribution.couponCode;
+        }
+        if (state.merchCouponCode) {
+          await applyMerchCouponFromCart({ silent: true });
+        }
+
+        if (hadCoupon && !state.merchCouponCode && state.merchCouponError) {
+          showCheckoutNotice('Coupon removed', state.merchCouponError, { variant: 'warning' });
+        }
+
+        renderCheckoutPage();
       });
     });
     els.checkoutPage?.querySelectorAll('[data-checkout-add-bundle]').forEach((button) => {
@@ -7847,13 +8112,22 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       try {
         const res = await api(`/api/merch/campaigns/resolve?slug=${encodeURIComponent(paramSlug)}`);
         if (res?.campaign) {
+          const parsedVariantIds = Array.isArray(res.campaign.targetVariantIds) && res.campaign.targetVariantIds.length
+            ? res.campaign.targetVariantIds.map(Number)
+            : [Number(res.campaign.targetVariantId || 569)];
           attribution = {
             campaignId: res.campaign.id,
             slug: res.campaign.slug,
             influencerId: res.campaign.influencerId,
+            influencerName: res.campaign.influencerName || '',
             couponCode: res.campaign.couponCode,
             targetProductId: Number(res.campaign.targetProductId || 11),
-            targetVariantId: Number(res.campaign.targetVariantId || 569),
+            targetProductName: res.campaign.targetProductName || '',
+            targetVariantId: Number(res.campaign.targetVariantId || parsedVariantIds[0] || 569),
+            targetVariantIds: parsedVariantIds,
+            targetVariants: res.campaign.targetVariants || [],
+            allProductVariantsCount: res.campaign.allProductVariantsCount || null,
+            variantScopeMessage: res.campaign.variantScopeMessage || '',
             timestamp: Date.now(),
           };
           document.cookie = `h2_campaign_attribution=${encodeURIComponent(JSON.stringify(attribution))}; max-age=${30 * 24 * 60 * 60}; path=/; SameSite=Lax`;
@@ -7886,8 +8160,11 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
           if (bottleIndex >= 0) {
             const currentItem = state.cart[bottleIndex];
-            // If user arrived via campaign link and current bottle variant is different, swap to the campaign variant
-            if (Number(currentItem.variantId) !== Number(targetVariant.id)) {
+            const allowedVariantIds = Array.isArray(attribution.targetVariantIds) && attribution.targetVariantIds.length
+              ? attribution.targetVariantIds.map(Number)
+              : [Number(attribution.targetVariantId || targetVariant.id)];
+            // If user arrived via campaign link and current bottle variant is not one of the campaign variants, swap to the primary campaign variant
+            if (!allowedVariantIds.includes(Number(currentItem.variantId))) {
               state.cart.splice(bottleIndex, 1);
               addToCart(targetVariant.id, currentItem.quantity || 1, bottleProduct, { openDrawerAfterAdd: false, preserveCoupon: true });
             }
