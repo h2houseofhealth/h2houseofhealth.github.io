@@ -4339,18 +4339,25 @@ module.exports = function mountMerchApi(app, {
 
     const activeShortages = getActiveMerchOrderStockShortages();
     for (const shortage of activeShortages) {
-      const variantLabel = [shortage.color, shortage.size].filter(Boolean).join(' · ');
+      const variantLabel = shortage.shortage_variant_label || [shortage.color, shortage.size].filter(Boolean).join(' · ') || 'Default';
+      const missingQuantity = Math.max(0, Number(shortage.ordered_quantity || 1) - Number(shortage.available_stock || 0));
       pushNotification({
         id: `stock-shortage-order-${shortage.order_id}-${shortage.variant_id}`,
         type: 'Stock Shortage',
         title: 'STOCK SHORTAGE',
-        message: `Order ${shortage.order_number} for ${shortage.customer_name} is blocked: ${shortage.product_name} (${variantLabel}, SKU: ${shortage.sku}) unavailable. Reason: ${shortage.reason}`,
+        message: `Order ${shortage.order_number} for ${shortage.customer_name || 'Customer'} is blocked: ${shortage.product_name} (${variantLabel}, SKU: ${shortage.sku}) unavailable (ordered: ${shortage.ordered_quantity}, available: ${shortage.available_stock}, deficit: ${missingQuantity}). Reason: ${shortage.reason}`,
         time: shortage.shortage_created_at,
         orderId: shortage.order_id,
         orderNumber: shortage.order_number,
         customerName: shortage.customer_name,
         sku: shortage.sku,
         reason: shortage.reason,
+        productName: shortage.product_name,
+        variantLabel,
+        orderedQuantity: Number(shortage.ordered_quantity || 1),
+        availableStock: Number(shortage.available_stock || 0),
+        missingQuantity,
+        deficitQuantity: missingQuantity,
       });
     }
 
@@ -7404,75 +7411,213 @@ module.exports = function mountMerchApi(app, {
       return res.status(400).json({ error: 'Invalid payment signature' });
     }
 
-    // Update order
-    const order = db.prepare('SELECT id, status, customer_user_id AS customerUserId, coupon_id AS couponId, coupon_code AS couponCode, discount_amount AS discountAmount FROM merch_orders WHERE razorpay_order_id = ?').get(razorpay_order_id);
+    // Update order atomically within transaction
+    let order = db.prepare('SELECT id, order_number, status, payment_status, stock_deducted, customer_user_id AS customerUserId, coupon_id AS couponId, coupon_code AS couponCode, discount_amount AS discountAmount FROM merch_orders WHERE razorpay_order_id = ?').get(razorpay_order_id);
     if (!order) {
       return res.status(404).json({ error: 'Order not found' });
     }
-    if (order.status !== 'pending') {
-      return res.status(409).json({ error: 'Order already processed' });
-    }
 
-    // Verify physical stock availability before executing transaction
-    const items = db.prepare('SELECT oi.*, v.sku AS variant_sku, v.stock AS current_variant_stock FROM merch_order_items oi LEFT JOIN merch_variants v ON v.id = oi.variant_id WHERE oi.order_id = ?').all(order.id);
-    let allItemsInStock = true;
-    for (const item of items) {
-      const v = db.prepare('SELECT stock FROM merch_variants WHERE id = ?').get(item.variant_id);
-      if (!v || Number(v.stock || 0) < Number(item.quantity || 0)) {
-        allItemsInStock = false;
-        break;
-      }
+    // Idempotency: if order is already processed and paid with this razorpay payment reference
+    if (order.status !== 'pending') {
+      const isShortage = order.status === 'stock_shortage';
+      return res.json({
+        success: true,
+        stockShortage: isShortage,
+        message: isShortage
+          ? 'Payment verified. Due to high demand, your item(s) are currently on priority backorder for fulfillment.'
+          : 'Payment verified, order confirmed',
+        orderId: order.id,
+        idempotent: true,
+      });
     }
 
     let isShortageOutcome = false;
-    if (allItemsInStock) {
-      // Normal path: Mark as paid, set stock_deducted = 1, and decrement stock
-      db.transaction(() => {
-        db.prepare(`
-          UPDATE merch_orders SET status = 'processing', payment_status = 'paid', stock_deducted = 1, razorpay_payment_id = ?, updated_at = datetime('now')
-          WHERE id = ? AND status = 'pending'
-        `).run(razorpay_payment_id, order.id);
-        for (const item of items) {
-          decrementMerchPurchaseVariant(item.variant_id, Number(item.quantity || 0));
+
+    const executePaymentVerification = () => {
+      return db.transaction(() => {
+        // Re-read order inside transaction with exclusive write lock
+        const currentOrder = db.prepare('SELECT id, order_number, status, payment_status, stock_deducted, customer_user_id AS customerUserId, coupon_id AS couponId, coupon_code AS couponCode, discount_amount AS discountAmount FROM merch_orders WHERE razorpay_order_id = ?').get(razorpay_order_id);
+        if (!currentOrder) {
+          throw new Error('ORDER_NOT_FOUND');
         }
-      })();
-    } else {
-      // Race condition recovery path: Payment captured by Razorpay, but inventory depleted concurrently.
-      // Do NOT throw 500, do NOT deduct negative stock, preserve razorpay_payment_id and mark as stock_shortage.
-      isShortageOutcome = true;
-      console.warn(`[Merch] Concurrency race condition on order ${order.id}: Payment captured (${razorpay_payment_id}) but stock unavailable. Routing to stock shortage.`);
-      db.transaction(() => {
-        db.prepare(`
-          UPDATE merch_orders SET status = 'stock_shortage', payment_status = 'paid', stock_deducted = 0, razorpay_payment_id = ?, updated_at = datetime('now')
-          WHERE id = ? AND status = 'pending'
-        `).run(razorpay_payment_id, order.id);
+        if (currentOrder.status !== 'pending') {
+          return {
+            idempotent: true,
+            isShortage: currentOrder.status === 'stock_shortage',
+          };
+        }
+
+        const items = db.prepare('SELECT oi.*, v.sku AS variant_sku, v.stock AS current_variant_stock FROM merch_order_items oi LEFT JOIN merch_variants v ON v.id = oi.variant_id WHERE oi.order_id = ?').all(currentOrder.id);
+        let allItemsInStock = true;
+        const shortagesToRecord = [];
 
         for (const item of items) {
           const v = db.prepare('SELECT stock, sku FROM merch_variants WHERE id = ?').get(item.variant_id);
-          const currentStock = Number(v?.stock || 0);
-          const itemQty = Number(item.quantity || 1);
-          if (currentStock < itemQty) {
-            db.prepare(`
-              INSERT INTO merch_order_stock_shortages (
-                order_id, order_item_id, variant_id, sku, product_name, variant_label,
-                ordered_quantity, available_stock, reason, is_resolved, review_status,
-                customer_communication_status, created_at, updated_at
-              )
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'awaiting_review', 'pending', datetime('now'), datetime('now'))
-            `).run(
-              order.id,
-              item.id,
-              item.variant_id,
-              item.sku || v?.sku || '',
-              item.product_name || '',
-              item.variant_label || '',
-              itemQty,
-              currentStock,
-              'Payment captured successfully but stock was depleted prior to payment verification (checkout race condition)'
-            );
+          const currentStock = Math.max(0, Number(v?.stock || 0));
+          const itemQty = Math.max(1, Math.floor(Number(item.quantity || 1)));
+
+          if (!v || currentStock < itemQty) {
+            allItemsInStock = false;
+            shortagesToRecord.push({
+              orderItemId: item.id,
+              variantId: item.variant_id,
+              sku: item.sku || v?.sku || '',
+              productName: item.product_name || '',
+              variantLabel: item.variant_label || '',
+              orderedQuantity: itemQty,
+              availableStock: currentStock,
+              missingQuantity: Math.max(0, itemQty - currentStock),
+            });
           }
         }
+
+        if (allItemsInStock) {
+          // Normal path: Mark as paid, set stock_deducted = 1, and decrement stock
+          db.prepare(`
+            UPDATE merch_orders SET status = 'processing', payment_status = 'paid', stock_deducted = 1, razorpay_payment_id = ?, updated_at = datetime('now')
+            WHERE id = ? AND status = 'pending'
+          `).run(razorpay_payment_id, currentOrder.id);
+
+          for (const item of items) {
+            const itemQty = Math.max(1, Math.floor(Number(item.quantity || 1)));
+            const resultDec = db.prepare('UPDATE merch_variants SET stock = stock - ? WHERE id = ? AND stock >= ?')
+              .run(itemQty, Number(item.variant_id), itemQty);
+            if (!resultDec.changes) {
+              throw new Error(`CONCURRENCY_STOCK_DEPLETED:${item.variant_id}`);
+            }
+          }
+          try { syncInventoryAlerts(); } catch (err) { console.error('[Merch] Alert sync error:', err?.message); }
+          return { idempotent: false, isShortage: false };
+        } else {
+          // Race condition recovery path: Payment captured by Razorpay, but inventory depleted concurrently.
+          // Do NOT throw 500, do NOT deduct negative stock, preserve razorpay_payment_id and mark as stock_shortage.
+          console.warn(`[Merch] Concurrency race condition on order ${currentOrder.id} (${currentOrder.order_number}): Payment captured (${razorpay_payment_id}) but stock unavailable. Routing to stock shortage.`);
+          db.prepare(`
+            UPDATE merch_orders SET status = 'stock_shortage', payment_status = 'paid', stock_deducted = 0, razorpay_payment_id = ?, updated_at = datetime('now')
+            WHERE id = ? AND status = 'pending'
+          `).run(razorpay_payment_id, currentOrder.id);
+
+          for (const shortage of shortagesToRecord) {
+            const existing = db.prepare(`
+              SELECT id FROM merch_order_stock_shortages
+              WHERE order_id = ? AND (order_item_id = ? OR (variant_id = ? AND order_item_id IS NULL)) AND is_resolved = 0
+              LIMIT 1
+            `).get(currentOrder.id, shortage.orderItemId, shortage.variantId);
+
+            if (existing) {
+              db.prepare(`
+                UPDATE merch_order_stock_shortages
+                SET ordered_quantity = ?,
+                    available_stock = ?,
+                    sku = ?,
+                    product_name = ?,
+                    variant_label = ?,
+                    updated_at = datetime('now')
+                WHERE id = ?
+              `).run(
+                shortage.orderedQuantity,
+                shortage.availableStock,
+                shortage.sku,
+                shortage.productName,
+                shortage.variantLabel,
+                existing.id
+              );
+            } else {
+              db.prepare(`
+                INSERT INTO merch_order_stock_shortages (
+                  order_id, order_item_id, variant_id, sku, product_name, variant_label,
+                  ordered_quantity, available_stock, reason, is_resolved, review_status,
+                  customer_communication_status, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'ready_for_communication', 'pending', datetime('now'), datetime('now'))
+              `).run(
+                currentOrder.id,
+                shortage.orderItemId,
+                shortage.variantId,
+                shortage.sku,
+                shortage.productName,
+                shortage.variantLabel,
+                shortage.orderedQuantity,
+                shortage.availableStock,
+                'Payment captured successfully but stock was depleted prior to payment verification (checkout race condition)'
+              );
+            }
+          }
+          try { syncInventoryAlerts(); } catch (err) { console.error('[Merch] Alert sync error:', err?.message); }
+          return { idempotent: false, isShortage: true };
+        }
       })();
+    };
+
+    try {
+      const outcome = executePaymentVerification();
+      isShortageOutcome = outcome.isShortage;
+      if (outcome.idempotent) {
+        return res.json({
+          success: true,
+          stockShortage: outcome.isShortage,
+          message: outcome.isShortage
+            ? 'Payment verified. Due to high demand, your item(s) are currently on priority backorder for fulfillment.'
+            : 'Payment verified, order confirmed',
+          orderId: order.id,
+          idempotent: true,
+        });
+      }
+    } catch (err) {
+      if (err.message && err.message.startsWith('CONCURRENCY_STOCK_DEPLETED')) {
+        // Fallback for near-simultaneous race: route to stock shortage cleanly
+        db.transaction(() => {
+          db.prepare(`
+            UPDATE merch_orders SET status = 'stock_shortage', payment_status = 'paid', stock_deducted = 0, razorpay_payment_id = ?, updated_at = datetime('now')
+            WHERE id = ?
+          `).run(razorpay_payment_id, order.id);
+
+          const items = db.prepare('SELECT oi.*, v.sku AS variant_sku FROM merch_order_items oi LEFT JOIN merch_variants v ON v.id = oi.variant_id WHERE oi.order_id = ?').all(order.id);
+          for (const item of items) {
+            const v = db.prepare('SELECT stock, sku FROM merch_variants WHERE id = ?').get(item.variant_id);
+            const currentStock = Math.max(0, Number(v?.stock || 0));
+            const itemQty = Math.max(1, Math.floor(Number(item.quantity || 1)));
+            if (currentStock < itemQty) {
+              const existing = db.prepare(`
+                SELECT id FROM merch_order_stock_shortages
+                WHERE order_id = ? AND (order_item_id = ? OR (variant_id = ? AND order_item_id IS NULL)) AND is_resolved = 0
+                LIMIT 1
+              `).get(order.id, item.id, item.variant_id);
+
+              if (existing) {
+                db.prepare(`
+                  UPDATE merch_order_stock_shortages
+                  SET ordered_quantity = ?, available_stock = ?, updated_at = datetime('now')
+                  WHERE id = ?
+                `).run(itemQty, currentStock, existing.id);
+              } else {
+                db.prepare(`
+                  INSERT INTO merch_order_stock_shortages (
+                    order_id, order_item_id, variant_id, sku, product_name, variant_label,
+                    ordered_quantity, available_stock, reason, is_resolved, review_status,
+                    customer_communication_status, created_at, updated_at
+                  )
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'ready_for_communication', 'pending', datetime('now'), datetime('now'))
+                `).run(
+                  order.id,
+                  item.id,
+                  item.variant_id,
+                  item.sku || v?.sku || '',
+                  item.product_name || '',
+                  item.variant_label || '',
+                  itemQty,
+                  currentStock,
+                  'Payment captured successfully but stock was depleted prior to payment verification (checkout race condition)'
+                );
+              }
+            }
+          }
+          try { syncInventoryAlerts(); } catch (_) {}
+        })();
+        isShortageOutcome = true;
+      } else {
+        throw err;
+      }
     }
 
     if (Number(order.couponId || 0) > 0 && Number(order.discountAmount || 0) > 0 && Number(order.customerUserId || 0) > 0) {
@@ -8438,8 +8583,15 @@ module.exports = function mountMerchApi(app, {
             updated_at = datetime('now')
         WHERE id = ? AND status NOT IN ('delivered', 'returned', 'cancelled')
       `).run(order.id);
-      if (result.changes && ['paid', 'cod_pending'].includes(String(order.payment_status || '').toLowerCase())) {
-        restoreMerchOrderStock(order.id);
+      if (result.changes) {
+        db.prepare(`
+          UPDATE merch_order_stock_shortages
+          SET is_resolved = 1, resolved_at = datetime('now'), resolved_by = 'cancelled_by_customer'
+          WHERE order_id = ? AND is_resolved = 0
+        `).run(order.id);
+        if (['paid', 'cod_pending'].includes(String(order.payment_status || '').toLowerCase())) {
+          restoreMerchOrderStock(order.id);
+        }
       }
     });
     cancel();
@@ -10008,9 +10160,15 @@ module.exports = function mountMerchApi(app, {
 
     const save = db.transaction(() => {
       const result = db.prepare(`UPDATE merch_orders SET ${updates.join(', ')} WHERE id = ?`).run(...params);
-      if (result.changes && String(status).toLowerCase() === 'cancelled' && existingStatus !== 'cancelled'
-        && ['paid', 'cod_pending'].includes(String(existingOrder.payment_status || '').toLowerCase())) {
-        restoreMerchOrderStock(existingOrder.id);
+      if (result.changes && String(status).toLowerCase() === 'cancelled' && existingStatus !== 'cancelled') {
+        db.prepare(`
+          UPDATE merch_order_stock_shortages
+          SET is_resolved = 1, resolved_at = datetime('now'), resolved_by = 'cancelled_by_admin'
+          WHERE order_id = ? AND is_resolved = 0
+        `).run(existingOrder.id);
+        if (['paid', 'cod_pending'].includes(String(existingOrder.payment_status || '').toLowerCase())) {
+          restoreMerchOrderStock(existingOrder.id);
+        }
       }
       if (result.changes && String(status).toLowerCase() === 'returned' && existingStatus !== 'returned'
         && req.body?.restock_inventory === true) {
@@ -12321,6 +12479,7 @@ module.exports = function mountMerchApi(app, {
         db.prepare(`UPDATE merch_variants SET ${variantUpdates.join(', ')} WHERE id = ? AND product_id = ?`).run(...variantParams);
       }
     })();
+    try { syncInventoryAlerts(); } catch (err) { console.error('[Merch] Alert sync error:', err?.message); }
     const updated = loadMerchProductCatalog({ includeInactive: true }).find((item) => Number(item.id) === productId);
     return res.json(updated || { id: productId });
   });

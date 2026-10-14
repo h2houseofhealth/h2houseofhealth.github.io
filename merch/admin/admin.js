@@ -2323,6 +2323,14 @@
     });
   }
 
+  function updateNotificationBadge() {
+    const unreadNotificationCount = (Array.isArray(state.notifications) ? state.notifications : [])
+      .filter((item) => !item.read && !item.dismissedAt).length;
+    if (els.notificationBadgeCount) {
+      els.notificationBadgeCount.textContent = String(unreadNotificationCount);
+    }
+  }
+
   function setSidebarOpen(isOpen) {
     state.sidebarOpen = Boolean(isOpen);
     document.body.classList.toggle('admin-sidebar-open', state.sidebarOpen);
@@ -2484,7 +2492,7 @@
       headlineHtml = `<div class="admin-activity-card__headline"><strong class="admin-activity-card__amount" style="color:var(--admin-danger);">STOCK SHORTAGE</strong>${orderRef ? ` &middot; ${escapeHtml(orderRef)}` : ''}${custRef ? ` (${escapeHtml(custRef)})` : ''}</div>`;
       subHtml = `<div class="admin-activity-card__sub">${escapeHtml(item.message || 'Fulfillment is blocked because required stock is unavailable.')}</div>`;
       pillHtml = `<span class="admin-activity-card__pill admin-activity-card__pill--danger">Fulfilment pending</span>`;
-      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-order-activity" data-order-id="${escapeHtml(data.orderId || item.orderId || '')}" data-order-number="${escapeHtml(data.orderNumber || item.orderNumber || '')}">View order &rarr;</button>`;
+      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-order-activity" data-order-id="${escapeHtml(data.orderId || item.orderId || '')}" data-order-number="${escapeHtml(data.orderNumber || item.orderNumber || '')}" data-notification-id="${escapeHtml(item.id || '')}">View order &rarr;</button>`;
     } else if (isPayment) {
       typeLabel = 'PAYMENT RECEIVED';
       dotClass = 'admin-activity__dot--payment';
@@ -2496,7 +2504,7 @@
         subHtml = `<div class="admin-activity-card__sub">Order ${escapeHtml(data.orderNumber)}</div>`;
       }
       pillHtml = `<span class="admin-activity-card__pill admin-activity-card__pill--success">Payment successful</span>`;
-      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-order-activity" data-order-id="${escapeHtml(data.orderId || '')}" data-order-number="${escapeHtml(data.orderNumber || '')}">View order &rarr;</button>`;
+      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-order-activity" data-order-id="${escapeHtml(data.orderId || '')}" data-order-number="${escapeHtml(data.orderNumber || '')}" data-notification-id="${escapeHtml(item.id || '')}">View order &rarr;</button>`;
     } else if (isCustomer) {
       typeLabel = 'NEW CUSTOMER';
       dotClass = 'admin-activity__dot--customer';
@@ -2532,11 +2540,11 @@
         subHtml = `<div class="admin-activity-card__sub">Order ${escapeHtml(data.orderNumber)}</div>`;
       }
       pillHtml = `<span class="admin-activity-card__pill admin-activity-card__pill--info">Order placed</span>`;
-      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-order-activity" data-order-id="${escapeHtml(data.orderId || '')}" data-order-number="${escapeHtml(data.orderNumber || '')}">View order &rarr;</button>`;
+      actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-order-activity" data-order-id="${escapeHtml(data.orderId || '')}" data-order-number="${escapeHtml(data.orderNumber || '')}" data-notification-id="${escapeHtml(item.id || '')}">View order &rarr;</button>`;
     } else {
       headlineHtml = `<div class="admin-activity-card__headline">${escapeHtml(item.message || item.title || 'Notification')}</div>`;
       if (data.orderId || data.orderNumber) {
-        actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-order-activity" data-order-id="${escapeHtml(data.orderId || '')}" data-order-number="${escapeHtml(data.orderNumber || '')}">View order &rarr;</button>`;
+        actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-order-activity" data-order-id="${escapeHtml(data.orderId || '')}" data-order-number="${escapeHtml(data.orderNumber || '')}" data-notification-id="${escapeHtml(item.id || '')}">View order &rarr;</button>`;
       } else if (data.customerId) {
         actionBtnHtml = `<button class="admin-activity-card__action-btn" type="button" data-action="view-customer-activity" data-customer-id="${escapeHtml(data.customerId || '')}" data-customer-name="${escapeHtml(data.customerName || '')}">View customer &rarr;</button>`;
       } else if (data.productId) {
@@ -2872,7 +2880,7 @@
     const filteredNotifications = filterActivityNotifications(activeNotifications, currentFilter);
     const visibleNotifications = state.notificationsExpanded ? filteredNotifications : filteredNotifications.slice(0, 5);
     const unreadNotificationCount = state.notifications.filter((item) => !item.read && !item.dismissedAt).length;
-    if (els.notificationBadgeCount) els.notificationBadgeCount.textContent = String(unreadNotificationCount);
+    updateNotificationBadge();
 
     els.dashboardView.innerHTML = `
       <section class="admin-section" id="liveActivitySection">
@@ -7190,13 +7198,16 @@
       const result = await apiRequest('/api/merch/admin/stats');
       state.dashboardStats = result || null;
       state.notifications = mergeNotificationState(result?.notifications);
+      updateNotificationBadge();
     } catch (error) {
       if (!silent) {
         state.dashboardStats = null;
         state.notifications = [];
+        updateNotificationBadge();
       }
     } finally {
       state.dashboardStatsLoading = false;
+      updateNotificationBadge();
       if (state.view === 'dashboard') renderDashboard();
       if (state.view === 'reports') renderReports();
     }
@@ -9088,6 +9099,15 @@
       case 'view-order-activity': {
         const orderId = target?.dataset?.orderId || target?.dataset?.id;
         const orderNumber = target?.dataset?.orderNumber;
+        const notificationId = target?.dataset?.notificationId;
+        if (notificationId) {
+          const notification = (state.notifications || []).find((item) => String(item.id) === String(notificationId));
+          if (notification && !notification.read) {
+            notification.read = true;
+            rememberNotificationState(notification);
+            updateNotificationBadge();
+          }
+        }
         let foundOrder = null;
         if (orderId) {
           foundOrder = (state.orders || []).find((o) => String(o.id) === String(orderId));
@@ -9167,6 +9187,7 @@
         notification.read = true;
         notification.dismissedAt = new Date().toISOString();
         rememberNotificationState(notification);
+        updateNotificationBadge();
         renderDashboard();
         return;
       }
