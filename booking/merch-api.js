@@ -6650,6 +6650,7 @@ module.exports = function mountMerchApi(app, {
     const couponResult = validateMerchCouponForUser({
       code: couponCode,
       userId: authUser?.id ?? null,
+      userEmail: req.body?.customerEmail || authUser?.email || null,
       productIds: req.body?.productIds || [],
       productLineTotals: req.body?.productLineTotals || {},
       variantIds: req.body?.variantIds || [],
@@ -6861,6 +6862,7 @@ module.exports = function mountMerchApi(app, {
       ? validateMerchCouponForUser({
           code: effectiveCouponCode,
           userId: authUser?.id,
+          userEmail: authUser?.email || incomingCustomerEmail,
           productIds: validatedItems.map((item) => item.productId),
           productLineTotals: validatedItems.reduce((totals, item) => ({ ...totals, [item.productId]: Number(totals[item.productId] || 0) + item.lineTotal }), {}),
           variantIds: validatedItems.map((item) => Number(item.variantId)),
@@ -10047,7 +10049,7 @@ module.exports = function mountMerchApi(app, {
     };
   }
 
-  function buildCustomerStockDelayEmail({ order, shortages = [], items = [], coupon = null }) {
+  function buildCustomerStockDelayEmail({ order, shortages = [], items = [], coupon = null, customApologyMessage = null }) {
     const customerName = String(order.customerName || order.customer_name || 'Valued Customer').trim();
     const orderNumber = String(order.orderNumber || order.order_number || `Order #${order.id}`).trim();
 
@@ -10059,21 +10061,9 @@ module.exports = function mountMerchApi(app, {
     const hasEstimate = Boolean(rawEstimate);
 
     // Dynamic delivery update wording (strictly no invented dates)
-    const deliveryUpdateText = hasEstimate
-      ? `Your revised estimated delivery timeframe is: ${rawEstimate}.`
-      : 'Our supply team is actively working to confirm the revised delivery timeline, and we will share the updated date as soon as verified.';
-
-    const deliveryUpdateHtml = hasEstimate
-      ? `<div style="background: #fff8f0; border-left: 4px solid #b85d3b; border-radius: 4px; padding: 12px 16px; margin: 16px 0;">
-           <p style="margin: 0; font-size: 14px; color: #5a2c1d; font-weight: 600;">
-             📦 Revised Estimated Delivery: <span style="color: #b85d3b;">${escapeHtml(rawEstimate)}</span>
-           </p>
-         </div>`
-      : `<div style="background: #f7f9fa; border-left: 4px solid #8c9ba5; border-radius: 4px; padding: 12px 16px; margin: 16px 0;">
-           <p style="margin: 0; font-size: 14px; color: #43515c;">
-             📦 <strong>Delivery Timeline Update:</strong> Our team is actively confirming the revised timeline with our supply partners. We will share the confirmed date with you as soon as verified.
-           </p>
-         </div>`;
+    const deliveryEstimateLine = hasEstimate
+      ? `Your revised estimated delivery date is ${rawEstimate}.`
+      : "If we haven't confirmed a date yet, we'll share an update as soon as we have a verified timeline.";
 
     // Affected items list (never expose internal notes or stock counts)
     const affectedItemsList = shortages.length
@@ -10091,7 +10081,7 @@ module.exports = function mountMerchApi(app, {
           : []);
 
     const itemsTextList = affectedItemsList.length
-      ? `\nAffected item(s):\n` + affectedItemsList.map((i) => `- ${i.name} (${i.variant}) × ${i.quantity}`).join('\n') + `\n`
+      ? `Affected item(s):\n` + affectedItemsList.map((i) => `• ${i.name} (${i.variant}) × ${i.quantity}`).join('\n')
       : '';
 
     const itemsHtmlList = affectedItemsList.length
@@ -10103,8 +10093,20 @@ module.exports = function mountMerchApi(app, {
          </div>`
       : '';
 
+    const deliveryUpdateHtml = hasEstimate
+      ? `<div style="background: #fff8f0; border-left: 4px solid #b85d3b; border-radius: 4px; padding: 12px 16px; margin: 16px 0;">
+           <p style="margin: 0; font-size: 14px; color: #5a2c1d; font-weight: 600;">
+             📦 Revised Estimated Delivery Date: <span style="color: #b85d3b;">${escapeHtml(rawEstimate)}</span>
+           </p>
+         </div>`
+      : `<div style="background: #f7f9fa; border-left: 4px solid #8c9ba5; border-radius: 4px; padding: 12px 16px; margin: 16px 0;">
+           <p style="margin: 0; font-size: 14px; color: #43515c;">
+             📦 <strong>Delivery Timeline Update:</strong> Our team is actively confirming the revised timeline with our supply partners. We will share an update as soon as we have a verified timeline.
+           </p>
+         </div>`;
+
     // Courtesy Compensation block (Phase 4): strictly rendered only when approved coupon is provided
-    let compensationText = '';
+    let couponTextClause = '';
     let compensationHtml = '';
     let couponSummary = null;
 
@@ -10114,15 +10116,7 @@ module.exports = function mountMerchApi(app, {
       const expiry = String(coupon.expiryLabel || (coupon.validTill ? String(coupon.validTill).split('T')[0] : 'No expiration date')).trim();
       couponSummary = { code, benefit, expiry };
 
-      compensationText = [
-        '',
-        'As a gesture of our appreciation for your patience, we have prepared a private compensation discount for your next order:',
-        `• Coupon Code: ${code}`,
-        `• Courtesy Benefit: ${benefit}`,
-        `• Valid Until: ${expiry}`,
-        `• How to redeem: Enter coupon code ${code} at checkout on the H2 House of Health merch store.`,
-        '',
-      ].join('\n');
+      couponTextClause = `As a courtesy, we've included your coupon ${code}, which provides ${benefit}. It is valid until ${expiry} and can be redeemed under the applicable terms.`;
 
       compensationHtml = `
         <div style="background: #f6ffed; border: 1px solid #b7eb8f; border-radius: 8px; padding: 20px 24px; margin: 20px 0; text-align: center;">
@@ -10130,7 +10124,7 @@ module.exports = function mountMerchApi(app, {
             🎁 Courtesy Compensation
           </p>
           <p style="margin: 0 0 14px; font-size: 14px; color: #237804; line-height: 1.5;">
-            To thank you for your patience, please accept this exclusive discount code for your next purchase:
+            To thank you for your patience, please accept this exclusive courtesy coupon for your next purchase:
           </p>
           <div style="display: inline-block; background: #ffffff; border: 2px dashed #52c41a; border-radius: 6px; padding: 10px 24px; margin-bottom: 12px;">
             <span style="font-family: monospace; font-size: 22px; font-weight: 700; color: #237804; letter-spacing: 2px;">${escapeHtml(code)}</span>
@@ -10147,27 +10141,45 @@ module.exports = function mountMerchApi(app, {
         </div>`;
     }
 
+    // Default predefined apology message
+    const defaultApologyMessage = [
+      `We're sorry, but your H2 House of Health order ${orderNumber} has been delayed because an item in your order is temporarily unavailable.`,
+      '',
+      `Our team is working to resolve this. ${deliveryEstimateLine}`,
+      '',
+      `We sincerely apologize for the inconvenience and appreciate your patience.`,
+    ].join('\n');
+
+    const effectiveApologyMessage = (customApologyMessage && typeof customApologyMessage === 'string' && customApologyMessage.trim())
+      ? customApologyMessage.trim()
+      : defaultApologyMessage;
+
     const subject = `An update about your H2 House of Health order ${orderNumber}`;
 
-    const text = [
+    const textParts = [
       `Hi ${customerName},`,
       '',
-      `We're sorry, but an unexpected stock shortage has affected your order ${orderNumber}.`,
+      effectiveApologyMessage,
+    ];
+    if (itemsTextList) {
+      textParts.push('', itemsTextList);
+    }
+    if (couponTextClause) {
+      textParts.push('', couponTextClause);
+    }
+    textParts.push(
       '',
-      `We understand that you were expecting your order on time, and we sincerely apologize for the inconvenience. Our team is working to resolve the issue and get your order to you as soon as possible.`,
-      '',
-      itemsTextList ? itemsTextList.trim() + '\n' : '',
-      deliveryUpdateText,
-      compensationText,
-      `We will keep you informed as soon as we have a confirmed update.`,
-      '',
-      `If the revised delivery timeline does not work for you, please contact our support team at support@h2houseofhealth.com to discuss the available options under our order policy.`,
-      '',
-      `Thank you for your patience and for choosing H2 House of Health.`,
-      '',
-      `Warm regards,`,
-      `H2 House of Health Team`,
-    ].filter((line) => line !== null && line !== undefined).join('\n');
+      `Regards,`,
+      `H2 House of Health Team`
+    );
+    const text = textParts.join('\n');
+
+    const apologyParagraphs = effectiveApologyMessage
+      .split(/\n\s*\n/)
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .map((p) => `<p style="margin: 0 0 16px; font-size: 14px; line-height: 1.6; color: #333333;">${escapeHtml(p)}</p>`)
+      .join('\n');
 
     const html = `<!DOCTYPE html>
 <html>
@@ -10184,30 +10196,18 @@ module.exports = function mountMerchApi(app, {
           <tr>
             <td style="background-color: #b85d3b; padding: 24px 32px; text-align: center;">
               <h1 style="margin: 0; color: #ffffff; font-size: 20px; font-weight: 600; letter-spacing: 0.5px;">H2 House of Health</h1>
-              <p style="margin: 4px 0 0; color: rgba(255,255,255,0.85); font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Order Update</p>
+              <p style="margin: 4px 0 0; color: rgba(255,255,255,0.85); font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Order Delay Update</p>
             </td>
           </tr>
           <tr>
             <td style="padding: 32px 32px 24px;">
               <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.5; color: #333333;">Hi <strong>${escapeHtml(customerName)}</strong>,</p>
-              <p style="margin: 0 0 16px; font-size: 14px; line-height: 1.6; color: #333333;">
-                We're sorry, but an unexpected stock shortage has affected your order <strong>${escapeHtml(orderNumber)}</strong>.
-              </p>
-              <p style="margin: 0 0 16px; font-size: 14px; line-height: 1.6; color: #555555;">
-                We understand that you were expecting your order on time, and we sincerely apologize for the inconvenience. Our team is working to resolve the issue and get your order to you as soon as possible.
-              </p>
+              ${apologyParagraphs}
               ${itemsHtmlList}
               ${deliveryUpdateHtml}
               ${compensationHtml}
-              <p style="margin: 0 0 16px; font-size: 14px; line-height: 1.6; color: #555555;">
-                We will keep you informed as soon as we have a confirmed update.
-              </p>
-              <p style="margin: 0 0 24px; font-size: 14px; line-height: 1.6; color: #555555;">
-                If the revised delivery timeline does not work for you, please contact our support team at <a href="mailto:support@h2houseofhealth.com" style="color: #b85d3b; text-decoration: underline;">support@h2houseofhealth.com</a> to discuss the available options under our order policy.
-              </p>
-              <p style="margin: 0 0 8px; font-size: 14px; line-height: 1.5; color: #333333;">Thank you for your patience and for choosing H2 House of Health.</p>
               <p style="margin: 16px 0 0; font-size: 14px; line-height: 1.5; color: #333333;">
-                Warm regards,<br>
+                Regards,<br>
                 <strong>H2 House of Health Team</strong>
               </p>
             </td>
@@ -10235,6 +10235,8 @@ module.exports = function mountMerchApi(app, {
       revisedDeliveryEstimate: rawEstimate || null,
       affectedItems: affectedItemsList,
       compensationCoupon: couponSummary,
+      defaultApologyMessage,
+      effectiveApologyMessage,
     };
   }
 
@@ -10312,6 +10314,137 @@ module.exports = function mountMerchApi(app, {
     }
   });
 
+  // ─── ADMIN: Create Courtesy Compensation Coupon for Order ───
+  app.post('/api/merch/admin/orders/:id/compensation-coupons', requireAdmin, (req, res) => {
+    try {
+      const orderId = Number(req.params.id);
+      if (!Number.isInteger(orderId) || orderId <= 0) {
+        return res.status(400).json({ error: 'Invalid order ID.' });
+      }
+
+      const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+
+      const activeShortages = db.prepare('SELECT * FROM merch_order_stock_shortages WHERE order_id = ? AND is_resolved = 0').all(orderId);
+      if (!activeShortages.length) {
+        return res.status(400).json({ error: 'No active stock shortages found for this order.' });
+      }
+
+      const customerEmail = String(order.customer_email || order.guest_email || '').trim().toLowerCase();
+      if (!customerEmail || !isValidMerchEmail(customerEmail)) {
+        return res.status(400).json({ error: 'Order does not have a valid customer email on file for compensation coupon assignment.' });
+      }
+
+      const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
+
+      let code = normalizeMerchCouponCode(req.body?.code);
+      if (!code) {
+        return res.status(400).json({ error: 'Coupon code is required.' });
+      }
+      if (code.length < 3 || code.length > 30) {
+        return res.status(400).json({ error: 'Coupon code must be between 3 and 30 characters.' });
+      }
+      if (!/^[A-Z0-9_\-]+$/.test(code)) {
+        return res.status(400).json({ error: 'Coupon code may only contain uppercase letters, numbers, hyphens, and underscores.' });
+      }
+
+      const existingCoupon = db.prepare('SELECT id, portal FROM coupons WHERE LOWER(code) = LOWER(?)').get(code);
+      if (existingCoupon) {
+        return res.status(409).json({ error: `Coupon code '${code}' is already taken. Please choose a different code.` });
+      }
+
+      const discountTypeRaw = String(req.body?.discountType || 'percentage').trim().toLowerCase();
+      const discountType = ['percentage', '%'].includes(discountTypeRaw) ? 'percentage' : 'flat';
+      const discountValue = Number(req.body?.discountValue || 0);
+
+      if (!Number.isFinite(discountValue) || discountValue <= 0) {
+        return res.status(400).json({ error: 'Discount value must be greater than 0.' });
+      }
+      if (discountType === 'percentage' && discountValue > 100) {
+        return res.status(400).json({ error: 'Percentage discount cannot exceed 100%.' });
+      }
+      if (discountType === 'flat' && discountValue > 10000000) {
+        return res.status(400).json({ error: 'Discount value is too large.' });
+      }
+
+      const validTillRaw = String(req.body?.validTill || req.body?.expiresAt || '').trim();
+      let validTill = null;
+      if (validTillRaw) {
+        const parsedExpiry = new Date(validTillRaw);
+        if (Number.isNaN(parsedExpiry.getTime())) {
+          return res.status(400).json({ error: 'Invalid expiration date format.' });
+        }
+        const todayDateStr = new Date().toISOString().split('T')[0];
+        const expiryDateStr = validTillRaw.split('T')[0];
+        if (expiryDateStr < todayDateStr) {
+          return res.status(400).json({ error: 'Expiration date cannot be in the past.' });
+        }
+        validTill = expiryDateStr;
+      } else {
+        const d = new Date();
+        d.setDate(d.getDate() + 30);
+        validTill = d.toISOString().split('T')[0];
+      }
+
+      const maxRedemptionsRaw = req.body?.maxRedemptions;
+      let maxRedemptions = (maxRedemptionsRaw === '' || maxRedemptionsRaw == null) ? 1 : Number(maxRedemptionsRaw);
+      if (!Number.isInteger(maxRedemptions) || maxRedemptions <= 0) {
+        return res.status(400).json({ error: 'Usage limit must be a positive integer.' });
+      }
+
+      const appliesToRaw = String(req.body?.appliesTo || 'merch').trim().toLowerCase();
+      const appliesTo = appliesToRaw.startsWith('product:') ? appliesToRaw : 'merch';
+      const description = String(req.body?.description || `Courtesy delay compensation for order ${order.order_number}`).trim();
+
+      const insertResult = db.prepare(`
+        INSERT INTO coupons (
+          code, description, discount_type, discount_value, applies_to, max_redemptions, per_user_limit,
+          expires_at, active, coupon_type, assigned_user_email, used_by, is_active, valid_from, valid_till,
+          recipient_email, recipient_name, email_status, portal, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, 1, 'private', ?, '[]', 1, datetime('now'), ?, ?, ?, 'draft', 'merch', datetime('now'))
+      `).run(
+        code,
+        description,
+        discountType,
+        discountValue,
+        appliesTo,
+        maxRedemptions,
+        validTill,
+        customerEmail,
+        validTill,
+        customerEmail,
+        order.customer_name || ''
+      );
+
+      const createdCouponRow = db.prepare('SELECT * FROM coupons WHERE id = ?').get(insertResult.lastInsertRowid);
+      const evalResult = evaluateCompensationCouponEligibility(createdCouponRow, order, items);
+
+      res.status(201).json({
+        success: true,
+        message: `Courtesy compensation coupon ${code} created successfully for ${customerEmail}.`,
+        coupon: {
+          id: createdCouponRow.id,
+          code: createdCouponRow.code,
+          description: createdCouponRow.description || '',
+          discountType: createdCouponRow.discount_type,
+          discountValue: Number(createdCouponRow.discount_value),
+          benefit: evalResult.benefit,
+          validTill: createdCouponRow.valid_till,
+          expiryLabel: evalResult.expiryLabel,
+          maxRedemptions: createdCouponRow.max_redemptions,
+          remainingUsages: evalResult.remainingUsages,
+          remainingUsagesLabel: `${evalResult.remainingUsages ?? 1} remaining`,
+          appliesTo: createdCouponRow.applies_to,
+          scopeLabel: evalResult.scopeLabel,
+          assignedUserEmail: createdCouponRow.assigned_user_email,
+        },
+      });
+    } catch (err) {
+      console.error('[Create Compensation Coupon] Error:', err);
+      res.status(500).json({ error: sanitizeErrorMessage(err.message) });
+    }
+  });
+
   app.get('/api/merch/admin/orders/:id/stock-shortage/email-preview', requireAdmin, (req, res) => {
     try {
       const orderId = Number(req.params.id);
@@ -10367,16 +10500,20 @@ module.exports = function mountMerchApi(app, {
           expiryLabel: evalResult.expiryLabel,
           maxRedemptions: couponRow.max_redemptions != null ? Number(couponRow.max_redemptions) : null,
           remainingUsages: evalResult.remainingUsages,
+          remainingUsagesLabel: evalResult.remainingUsages !== null ? `${evalResult.remainingUsages} remaining` : 'Unlimited',
           appliesTo: couponRow.applies_to || 'merch',
           scopeLabel: evalResult.scopeLabel,
         };
       }
+
+      const customApologyMessage = typeof req.query.customMessage === 'string' ? req.query.customMessage : null;
 
       const emailContent = buildCustomerStockDelayEmail({
         order,
         shortages: activeShortages,
         items,
         coupon: selectedCoupon,
+        customApologyMessage,
       });
 
       res.json({
@@ -10392,6 +10529,8 @@ module.exports = function mountMerchApi(app, {
         revisedDeliveryEstimate: emailContent.revisedDeliveryEstimate,
         affectedItems: emailContent.affectedItems,
         selectedCoupon,
+        defaultApologyMessage: emailContent.defaultApologyMessage,
+        effectiveApologyMessage: emailContent.effectiveApologyMessage,
         communicationStatus: activeShortages[0].customer_communication_status || 'pending',
         communicatedAt: activeShortages[0].customer_communicated_at || null,
         communicationSentTo: activeShortages[0].customer_communication_sent_to || null,
@@ -10639,6 +10778,7 @@ module.exports = function mountMerchApi(app, {
         shortages,
         items,
         coupon: validatedCoupon,
+        customApologyMessage: typeof req.body?.customMessage === 'string' ? req.body.customMessage : null,
       });
 
       let sendSuccess = false;
