@@ -3413,84 +3413,101 @@
     return `
       <div class="admin-list">
         <div class="admin-list__item">
-          <div class="admin-list__item-head">
-            <div>
-              <p class="admin-list__item-title">${escapeHtml(order.orderNumber)}</p>
-              <p class="admin-list__item-sub">${escapeHtml(order.customerName)}${hasRealEmail(order.email) ? ` - ${escapeHtml(order.email)}` : ''}</p>
+          <div class="admin-list__item-head" style="flex-wrap:wrap;gap:8px;">
+            <div style="min-width:0;flex:1 1 140px;">
+              <p class="admin-list__item-title" style="word-break:break-word;">${escapeHtml(order.orderNumber)}</p>
+              <p class="admin-list__item-sub" style="word-break:break-word;">${escapeHtml(order.customerName)}${hasRealEmail(order.email) ? ` - ${escapeHtml(order.email)}` : ''}</p>
             </div>
-            <span class="admin-badge ${statusClass(displayStatus)}">${escapeHtml(getStatusLabel(displayStatus))}</span>
+            <span class="admin-badge ${statusClass(displayStatus)}" style="white-space:normal;text-align:center;max-width:100%;">${escapeHtml(getStatusLabel(displayStatus))}</span>
           </div>
         </div>
         ${isShortage ? `
-          <div class="admin-list__item admin-stock-shortage-card" style="background:#fff1f0;border:1px solid #ffa39e;border-radius:10px;padding:12px 14px;margin:8px 0;">
-            <div class="admin-list__item-head" style="margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
-              <p class="admin-list__item-title" style="margin:0;font-size:12px;font-weight:700;color:#cf1322;display:flex;align-items:center;gap:6px;">
-                <span>⚠️ STOCK SHORTAGE — FULFILMENT PENDING</span>
-              </p>
-              <div style="display:flex;gap:6px;align-items:center;">
-                <span class="admin-badge admin-badge--stock-shortage">STOCK SHORTAGE</span>
-                ${order.stockShortageReviewStatus ? `
-                  <span class="admin-badge ${shortageReviewBadgeClass(order.stockShortageReviewStatus)}">${escapeHtml(getShortageReviewStatusLabel(order.stockShortageReviewStatus))}</span>
-                ` : ''}
-                ${order.stockShortageCommunicationStatus === 'sent' || (Array.isArray(order.stockShortages) && order.stockShortages.length && order.stockShortages.every((s) => s.customerCommunicationStatus === 'sent')) ? `
-                  <span class="admin-badge admin-badge--success" style="font-size:10px;">✉️ Email Sent</span>
-                ` : order.stockShortageCommunicationStatus === 'failed' || (Array.isArray(order.stockShortages) && order.stockShortages.some((s) => s.customerCommunicationStatus === 'failed')) ? `
-                  <span class="admin-badge admin-badge--danger" style="font-size:10px;">⚠️ Email Failed</span>
-                ` : ''}
+          <div class="admin-list__item admin-stock-shortage-card">
+            <div class="admin-stock-shortage-card__head">
+              <div class="admin-stock-shortage-card__title-row">
+                <p class="admin-stock-shortage-card__title">
+                  <span>⚠️ STOCK SHORTAGE — FULFILMENT PENDING</span>
+                </p>
+                <div class="admin-stock-shortage-card__badges">
+                  <span class="admin-badge admin-badge--stock-shortage">STOCK SHORTAGE</span>
+                  ${order.stockShortageReviewStatus ? `
+                    <span class="admin-badge ${shortageReviewBadgeClass(order.stockShortageReviewStatus)}">${escapeHtml(getShortageReviewStatusLabel(order.stockShortageReviewStatus))}</span>
+                  ` : ''}
+                  ${order.stockShortageCommunicationStatus === 'sent' || (Array.isArray(order.stockShortages) && order.stockShortages.length && order.stockShortages.every((s) => s.customerCommunicationStatus === 'sent')) ? `
+                    <span class="admin-badge admin-badge--success" style="font-size:10px;">✉️ Email Sent</span>
+                  ` : order.stockShortageCommunicationStatus === 'failed' || (Array.isArray(order.stockShortages) && order.stockShortages.some((s) => s.customerCommunicationStatus === 'failed')) ? `
+                    <span class="admin-badge admin-badge--danger" style="font-size:10px;">⚠️ Email Failed</span>
+                  ` : ''}
+                </div>
               </div>
+              <p class="admin-stock-shortage-card__desc">
+                This verified paid order is currently blocked from fulfilment due to insufficient stock.
+              </p>
             </div>
-            <p class="admin-list__item-sub" style="font-size:11px;color:#595959;margin-bottom:8px;">
-              This verified paid order is currently blocked from fulfilment due to insufficient stock.
-            </p>
-            <div style="background:#fff;border:1px solid #ffd8d6;border-radius:6px;padding:8px 10px;font-size:11px;margin-bottom:8px;">
+
+            <div class="admin-stock-shortage-card__items">
               ${Array.isArray(order.stockShortages) && order.stockShortages.length ? order.stockShortages.map((s) => `
-                <div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px dashed #f0f0f0;">
-                  <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
-                    <strong>${escapeHtml(s.productName)}</strong>
-                    <div style="display:flex;gap:4px;align-items:center;">
-                      <span class="admin-badge ${shortageReviewBadgeClass(s.reviewStatus)}" style="font-size:10px;">${escapeHtml(getShortageReviewStatusLabel(s.reviewStatus))}</span>
-                      ${s.customerCommunicationStatus === 'sent' ? `<span class="admin-badge admin-badge--success" style="font-size:10px;">✉️ Sent</span>` : (s.customerCommunicationStatus === 'failed' ? `<span class="admin-badge admin-badge--danger" style="font-size:10px;">⚠️ Failed</span>` : '')}
+                <div class="admin-stock-shortage-item">
+                  <div class="admin-stock-shortage-item__head">
+                    <strong class="admin-stock-shortage-item__name">${escapeHtml(s.productName)}</strong>
+                    <div class="admin-stock-shortage-item__badges">
+                      <span class="admin-badge ${shortageReviewBadgeClass(s.reviewStatus)}" style="font-size:9.5px;">${escapeHtml(getShortageReviewStatusLabel(s.reviewStatus))}</span>
+                      ${s.customerCommunicationStatus === 'sent' ? `<span class="admin-badge admin-badge--success" style="font-size:9.5px;">✉️ Sent</span>` : (s.customerCommunicationStatus === 'failed' ? `<span class="admin-badge admin-badge--danger" style="font-size:9.5px;">⚠️ Failed</span>` : '')}
                     </div>
                   </div>
-                  <div>(${escapeHtml(s.variantLabel || 'Default')})</div>
-                  <div style="margin-top:2px;">
-                    <span class="admin-table__muted">SKU:</span> <code>${escapeHtml(s.sku || 'N/A')}</code> &middot;
-                    <span class="admin-table__muted">Ordered:</span> <strong>${s.orderedQuantity}</strong> &middot;
-                    <span class="admin-table__muted">Available:</span> ${s.currentStock != null ? s.currentStock : s.availableStock}
+                  <div class="admin-stock-shortage-item__variant">(${escapeHtml(s.variantLabel || 'Default')})</div>
+                  <div class="admin-stock-shortage-item__meta-row">
+                    <span class="admin-stock-shortage-meta-pill"><span>SKU:</span> <code>${escapeHtml(s.sku || 'N/A')}</code></span>
+                    <span class="admin-stock-shortage-meta-pill"><span>Ordered:</span> <strong>${s.orderedQuantity}</strong></span>
+                    <span class="admin-stock-shortage-meta-pill"><span>Available:</span> <strong style="${(s.currentStock != null ? s.currentStock : s.availableStock) <= 0 ? 'color:#cf1322;' : ''}">${s.currentStock != null ? s.currentStock : s.availableStock}</strong></span>
                   </div>
-                  <div style="color:#cf1322;margin-top:2px;"><strong>Shortage Reason:</strong> ${escapeHtml(s.reason)}</div>
-                  <div style="margin-top:4px;padding:4px 8px;background:#fafafa;border:1px solid #eee;border-radius:4px;">
-                    <div><strong>Estimated Delivery:</strong> ${s.revisedDeliveryEstimate ? `<strong>${escapeHtml(s.revisedDeliveryEstimate)}</strong>` : '<span class="admin-table__muted"><em>Not yet determined</em></span>'}</div>
-                    ${s.internalDelayNote ? `<div style="margin-top:2px;color:#434343;"><strong>Delay Note:</strong> ${escapeHtml(s.internalDelayNote)}</div>` : ''}
-                    ${s.reviewedBy ? `<div class="admin-table__muted" style="margin-top:2px;font-size:10px;">Reviewed by ${escapeHtml(s.reviewedBy)}${s.reviewedAt ? ` on ${escapeHtml(dateLabel(s.reviewedAt))}` : ''}</div>` : ''}
-                    ${s.customerCommunicatedAt ? `
-                      <div style="margin-top:4px;padding:4px 8px;background:#f6ffed;border:1px solid #b7eb8f;border-radius:4px;font-size:10px;color:#135200;">
-                        <div>✉️ <strong>Delay notification sent</strong> to <code>${escapeHtml(s.customerCommunicationSentTo || order.email)}</code> on ${escapeHtml(dateLabel(s.customerCommunicatedAt))}</div>
-                        ${s.compensationCouponCode ? `
-                          <div style="margin-top:2px;font-weight:600;">
-                            🎁 Courtesy Coupon: <code style="padding:1px 4px;background:#fff;border:1px solid #52c41a;border-radius:3px;color:#237804;">${escapeHtml(s.compensationCouponCode)}</code> (${escapeHtml(s.compensationCouponBenefit || '')})
-                          </div>
-                        ` : `
-                          <div style="margin-top:2px;color:#595959;">
-                            <em>No coupon was attached (apology notification only)</em>
-                          </div>
-                        `}
-                        ${s.communicationAuthorizedBy ? `
-                          <div style="margin-top:2px;color:#8c8c8c;">
-                            Authorized by: ${escapeHtml(s.communicationAuthorizedBy)}
-                            ${s.resendReason ? ` &middot; Reason: "${escapeHtml(s.resendReason)}"` : ''}
-                          </div>
-                        ` : ''}
-                      </div>
-                    ` : ''}
-                    ${s.customerCommunicationError ? `<div style="margin-top:4px;font-size:10px;color:#cf1322;">⚠️ Email delivery error: ${escapeHtml(s.customerCommunicationError)}</div>` : ''}
+                  <div class="admin-stock-shortage-item__reason">
+                    <strong>Shortage Reason:</strong> ${escapeHtml(s.reason)}
                   </div>
+                  <div class="admin-stock-shortage-item__delivery-box">
+                    <strong>📅 Customer Estimated Delivery:</strong> ${s.revisedDeliveryEstimate ? `<strong>${escapeHtml(s.revisedDeliveryEstimate)}</strong>` : '<span class="admin-table__muted"><em>Not yet determined</em></span>'}
+                  </div>
+                  ${s.internalDelayNote ? `
+                    <div class="admin-stock-shortage-item__internal-box">
+                      <strong>🔒 Internal Delay Note (Staff Only):</strong>
+                      <div style="margin-top:2px;color:#595959;">${escapeHtml(s.internalDelayNote)}</div>
+                    </div>
+                  ` : ''}
+                  ${s.reviewedBy ? `
+                    <div class="admin-stock-shortage-item__audit">Reviewed by ${escapeHtml(s.reviewedBy)}${s.reviewedAt ? ` on ${escapeHtml(dateLabel(s.reviewedAt))}` : ''}</div>
+                  ` : ''}
+                  ${s.customerCommunicatedAt ? `
+                    <div class="admin-stock-shortage-item__sent-box">
+                      <div>✉️ <strong>Delay notification sent</strong> to <code>${escapeHtml(s.customerCommunicationSentTo || order.email)}</code> on ${escapeHtml(dateLabel(s.customerCommunicatedAt))}</div>
+                      ${s.compensationCouponCode ? `
+                        <div style="margin-top:2px;font-weight:600;">
+                          🎁 Courtesy Coupon: <code style="padding:1px 4px;background:#fff;border:1px solid #52c41a;border-radius:3px;color:#237804;">${escapeHtml(s.compensationCouponCode)}</code> (${escapeHtml(s.compensationCouponBenefit || '')})
+                        </div>
+                      ` : `
+                        <div style="margin-top:2px;color:#595959;">
+                          <em>No coupon was attached (apology notification only)</em>
+                        </div>
+                      `}
+                      ${s.communicationAuthorizedBy ? `
+                        <div style="margin-top:2px;color:#8c8c8c;">
+                          Authorized by: ${escapeHtml(s.communicationAuthorizedBy)}
+                          ${s.resendReason ? ` &middot; Reason: "${escapeHtml(s.resendReason)}"` : ''}
+                        </div>
+                      ` : ''}
+                    </div>
+                  ` : ''}
+                  ${s.customerCommunicationError ? `<div style="font-size:10px;color:#cf1322;word-break:break-word;">⚠️ Email delivery error: ${escapeHtml(s.customerCommunicationError)}</div>` : ''}
                 </div>
               `).join('') : `
-                <span style="color:#cf1322;"><strong>Reason:</strong> Required stock is unavailable for fulfillment</span>
+                <div class="admin-stock-shortage-item">
+                  <div class="admin-stock-shortage-item__reason">
+                    <strong>Shortage Reason:</strong> Required stock is unavailable for fulfillment
+                  </div>
+                </div>
               `}
             </div>
-            <div class="admin-actions" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+
+            <div class="admin-stock-shortage-card__actions">
               <button class="admin-btn admin-btn--soft admin-btn--sm" type="button" data-action="open-stock-shortage-review" data-order-id="${order.id}">📝 Review Delay & Delivery Estimate</button>
               ${order.stockShortageReviewStatus === 'ready_for_communication' || (Array.isArray(order.stockShortages) && order.stockShortages.some((s) => s.reviewStatus === 'ready_for_communication')) ? `
                 ${order.stockShortageCommunicationStatus === 'sent' || (Array.isArray(order.stockShortages) && order.stockShortages.length && order.stockShortages.every((s) => s.customerCommunicationStatus === 'sent')) ? `
@@ -3501,7 +3518,7 @@
                   <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="open-stock-shortage-email-modal" data-order-id="${order.id}">✉️ Send Customer Delay Email</button>
                 `}
               ` : `
-                <span class="admin-table__muted" style="font-size:11px;font-style:italic;">Customer email unlocks once marked 'Ready for Communication'</span>
+                <span class="admin-table__muted" style="grid-column: 1 / -1; font-size:10.5px; font-style:italic; text-align:center; padding: 2px 0;">Customer email unlocks once marked 'Ready for Communication'</span>
               `}
               <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-action="resolve-stock-shortage" data-order-id="${order.id}">✓ Resolve Stock Shortage</button>
             </div>
