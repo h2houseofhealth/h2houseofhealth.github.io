@@ -1991,21 +1991,26 @@
       const variants = Array.isArray(product.variants) && product.variants.length
         ? product.variants
         : [{ id: product.id, size: '', color: '', price: product.price, stock: product.stock, sku: product.primarySku || product.sku }];
-      return variants.map((variant) => ({
-        ...product,
-        ...variant,
-        variantCount: variants.length,
-        hasMultipleVariants: variants.length > 1,
-        id: variant.id,
-        productId: product.id,
-        parentProductId: product.id,
-        variantId: variant.id,
-        sku: variant.sku || product.primarySku || product.sku,
-        price: Number(variant.price || product.price || 0),
-        priceLabel: catalogPrice(Number(variant.price || product.price || 0)),
-        stock: Number(variant.stock || 0),
-        variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '),
-      }));
+      return variants.map((variant) => {
+        const variantImage = variant.imageUrl || variant.image || product.imageUrl || product.image || '';
+        return {
+          ...product,
+          ...variant,
+          image: variantImage,
+          imageUrl: variantImage,
+          variantCount: variants.length,
+          hasMultipleVariants: variants.length > 1,
+          id: variant.id,
+          productId: product.id,
+          parentProductId: product.id,
+          variantId: variant.id,
+          sku: variant.sku || product.primarySku || product.sku,
+          price: Number(variant.price || product.price || 0),
+          priceLabel: catalogPrice(Number(variant.price || product.price || 0)),
+          stock: Number(variant.stock || 0),
+          variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '),
+        };
+      });
     });
   }
 
@@ -3244,7 +3249,7 @@
                 ${pageItems.map((product) => `
                   <tr>
                     <td><input type="checkbox" data-action="toggle-product-selection" data-id="${product.id}" ${state.selectedProductIds.includes(product.id) ? 'checked' : ''} /></td>
-                    <td><img class="admin-thumb" src="${escapeHtml(product.image || getProductFallbackImage(product))}" alt="${escapeHtml(product.name)}" onerror="this.onerror=null;this.src='${escapeHtml(getProductFallbackImage(product))}';" /></td>
+                    <td><img class="admin-thumb" src="${escapeHtml(product.imageUrl || product.image || getProductFallbackImage(product))}" alt="${escapeHtml(product.name)}" onerror="this.onerror=null;this.src='${escapeHtml(getProductFallbackImage(product))}';" /></td>
                     <td><strong>${escapeHtml(product.name)}</strong><br><span class="admin-table__muted">${escapeHtml(product.description)}</span></td>
                     <td>${escapeHtml(product.variantLabel || 'Default variant')}</td>
                     <td>${escapeHtml(product.sku)}</td>
@@ -7267,7 +7272,8 @@
             ...variant,
             price: Number(variant.price || 0) / 100,
             stock: Number(variant.stock || 0),
-            imageUrl: variant.imageUrl || '',
+            imageUrl: variant.imageUrl || variant.image || '',
+            image: variant.imageUrl || variant.image || '',
             images: Array.isArray(variant.images) ? variant.images.filter(Boolean) : [],
           })),
         };

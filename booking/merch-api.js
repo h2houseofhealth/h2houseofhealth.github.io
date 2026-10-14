@@ -385,22 +385,17 @@ module.exports = function mountMerchApi(app, {
     {
       name: 'Hoodie',
       slug: 'hoodie',
-      description: 'Premium pullover hoodie with Sand and Black colour variants.',
+      description: 'Premium pullover hoodie with Sand colour variant.',
       category: 'hoodies',
       basePrice: 349900,
       image: '/cdn/shop/files/hero/h2-hoodie-transparent-source.png',
       weight: 650,
       variants: [
-        ['HM-HOD-BLK-S', 'S', 'Black', 349900, 0],
-        ['HM-HOD-BLK-M', 'M', 'Black', 349900, 0],
-        ['HM-HOD-BLK-L', 'L', 'Black', 349900, 0],
-        ['HM-HOD-BLK-XL', 'XL', 'Black', 349900, 0],
-        ['HM-HOD-BLK-XXL', 'XXL', 'Black', 349900, 0],
-        ['HM-HOD-SND-S', 'S', 'Sand', 349900, 0],
-        ['HM-HOD-SND-M', 'M', 'Sand', 349900, 0],
-        ['HM-HOD-SND-L', 'L', 'Sand', 349900, 0],
-        ['HM-HOD-SND-XL', 'XL', 'Sand', 349900, 0],
-        ['HM-HOD-SND-XXL', 'XXL', 'Sand', 349900, 0],
+        ['HM-HOD-SND-S', 'S', 'Sand', 349900, 0, '/cdn/shop/files/hero/h2-hoodie-transparent-source.png'],
+        ['HM-HOD-SND-M', 'M', 'Sand', 349900, 0, '/cdn/shop/files/hero/h2-hoodie-transparent-source.png'],
+        ['HM-HOD-SND-L', 'L', 'Sand', 349900, 0, '/cdn/shop/files/hero/h2-hoodie-transparent-source.png'],
+        ['HM-HOD-SND-XL', 'XL', 'Sand', 349900, 0, '/cdn/shop/files/hero/h2-hoodie-transparent-source.png'],
+        ['HM-HOD-SND-XXL', 'XXL', 'Sand', 349900, 0, '/cdn/shop/files/hero/h2-hoodie-transparent-source.png'],
       ],
     },
     {
@@ -444,13 +439,13 @@ module.exports = function mountMerchApi(app, {
       `).run(product.name, product.slug, product.description, product.category, product.basePrice, product.image, product.weight);
       row = { id: Number(result.lastInsertRowid) };
     } else {
-      db.prepare("UPDATE merch_products SET is_active = 1, updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL").run(row.id);
+      db.prepare("UPDATE merch_products SET is_active = 1, description = ?, image_url = ?, updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL").run(product.description, product.image, row.id);
     }
     const insertVariant = db.prepare('INSERT OR IGNORE INTO merch_variants (product_id, sku, size, color, price, stock, image_url, images_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-    const activateVariant = db.prepare('UPDATE merch_variants SET is_active = 1 WHERE product_id = ? AND sku = ?');
+    const activateVariant = db.prepare('UPDATE merch_variants SET is_active = 1, image_url = COALESCE(?, image_url) WHERE product_id = ? AND sku = ?');
     product.variants.forEach(([sku, size, color, price, stock, imageUrl, images]) => {
       insertVariant.run(row.id, sku, size, color, price, stock, imageUrl || null, JSON.stringify(images || []));
-      activateVariant.run(row.id, sku);
+      activateVariant.run(imageUrl || null, row.id, sku);
     });
   });
   bundledProductRestores.forEach(restoreProduct);
@@ -466,6 +461,23 @@ module.exports = function mountMerchApi(app, {
       db.prepare("UPDATE merch_products SET name = 'Hoodie (legacy record)', is_active = 0, deleted_at = COALESCE(deleted_at, datetime('now')), deletion_reason = 'Merged into the canonical Hoodie product', updated_at = datetime('now') WHERE id = ?").run(legacyHoodie.id);
     }
     db.prepare("UPDATE merch_variants SET stock = 0 WHERE product_id = ?").run(canonicalHoodie.id);
+    // Deactivate and hide Black hoodie variants from active catalog while preserving order references
+    db.prepare(`
+      UPDATE merch_variants
+      SET is_active = 0,
+          deleted_at = COALESCE(deleted_at, datetime('now')),
+          deletion_reason = 'Discontinued color variant'
+      WHERE product_id = ? AND sku LIKE 'HM-HOD-BLK-%'
+    `).run(canonicalHoodie.id);
+    // Ensure all Sand hoodie variants have the correct Sand hoodie image
+    db.prepare(`
+      UPDATE merch_variants
+      SET is_active = 1,
+          deleted_at = NULL,
+          deletion_reason = NULL,
+          image_url = '/cdn/shop/files/hero/h2-hoodie-transparent-source.png'
+      WHERE product_id = ? AND sku LIKE 'HM-HOD-SND-%'
+    `).run(canonicalHoodie.id);
   }
 
   // Correct the existing bottle and mist catalog without deleting historical
@@ -554,12 +566,12 @@ module.exports = function mountMerchApi(app, {
       db.prepare('UPDATE merch_products SET description = COALESCE(?, description), base_price = ?, specifications_json = ?, updated_at = datetime(\'now\') WHERE id = ?')
         .run(correction.description || null, correction.price, JSON.stringify(correction.specifications), product.id);
       const oldPlaceholders = correction.oldSkus.map(() => '?').join(', ');
-      db.prepare(`UPDATE merch_variants SET is_active = 0 WHERE product_id = ? AND sku IN (${oldPlaceholders})`)
+      db.prepare(`UPDATE merch_variants SET is_active = 0, deleted_at = COALESCE(deleted_at, datetime('now')), deletion_reason = 'Discontinued size variant' WHERE product_id = ? AND sku IN (${oldPlaceholders})`)
         .run(product.id, ...correction.oldSkus);
       const insert = db.prepare('INSERT OR IGNORE INTO merch_variants (product_id, sku, size, color, price, stock, image_url, images_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
       const update = db.prepare(`
         UPDATE merch_variants
-        SET size = ?, color = ?, price = ?, image_url = ?, images_json = ?, is_active = 1
+        SET size = ?, color = ?, price = ?, image_url = ?, images_json = ?, is_active = 1, deleted_at = NULL, deletion_reason = NULL
             ${placeholderStockMigrationApplied ? '' : ', stock = 50'}
         WHERE product_id = ? AND sku = ?
       `);
@@ -3692,6 +3704,7 @@ module.exports = function mountMerchApi(app, {
           netAvailableStock: vNet,
           blockedOrdersCount: vBlocked,
           unallocatedDemand: vUnalloc,
+          image: String(variant.imageUrl || ''),
           imageUrl: String(variant.imageUrl || ''),
           images: parseMerchImages(variant.imagesJson),
           isActive: Number(variant.isActive ?? 1),
