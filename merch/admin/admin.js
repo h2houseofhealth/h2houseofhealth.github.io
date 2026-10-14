@@ -2058,6 +2058,7 @@
     selectedProductId: 101,
     selectedOrderId: null,
     selectedOrderIds: [],
+    orderDetailsClosed: false,
     selectedCustomerId: null,
     selectedCouponId: null,
     selectedInfluencerId: null,
@@ -3717,7 +3718,7 @@
           </div>
           <div class="admin-actions" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
             ${!order.shiprocketAwbCode ? `
-              ${order.isFulfillmentBlocked || isShortage || ['stock_shortage', 'partially_available', 'needs_review'].includes(order.fulfillmentStatus) ? `
+              ${order.isFulfillmentBlocked || isShortageActionRequired || isAwaitingRestock || ['stock_shortage', 'partially_available', 'needs_review'].includes(order.fulfillmentStatus) ? `
                 <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" disabled title="🚫 Shipping blocked: Order has stock shortage or unallocated items" style="opacity:0.5;cursor:not-allowed;">🚫 Ship Blocked (Stock Shortage)</button>
               ` : `
                 <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="shiprocket-fulfill" data-id="${order.id}">🚀 Ship with Shiprocket</button>
@@ -3842,7 +3843,7 @@
     const selectedOrder = state.selectedOrderId == null
       ? null
       : filtered.find((order) => Number(order.id) === Number(state.selectedOrderId)) || null;
-    const showOrderDetails = Boolean(selectedOrder);
+    const showOrderDetails = Boolean(selectedOrder && !state.orderDetailsClosed);
 
     els.ordersView.innerHTML = `
       <section class="admin-section">
@@ -3954,9 +3955,12 @@
             ${showOrderDetails ? `
               <section class="admin-side-panel">
                 <article class="admin-card">
-                  <div class="admin-card__head">
-                    <h3 class="admin-card__title">Order Details</h3>
-                    <p class="admin-card__sub">Customer, shipping, timeline, and payment info</p>
+                  <div class="admin-card__head admin-card__head--with-close">
+                    <div>
+                      <h3 class="admin-card__title">Order Details</h3>
+                      <p class="admin-card__sub">Customer, shipping, timeline, and payment info</p>
+                    </div>
+                    <button class="admin-card__close" type="button" data-action="close-order-details" aria-label="Close order details" title="Close order details">&times;</button>
                   </div>
                   <div class="admin-card__body">
                     ${renderOrderDetail(selectedOrder)}
@@ -9750,14 +9754,24 @@
         return;
       case 'select-order':
         if (order) {
-          state.selectedOrderId = Number(state.selectedOrderId) === Number(order.id) ? null : order.id;
+          if (Number(state.selectedOrderId) === Number(order.id)) {
+            state.orderDetailsClosed = !state.orderDetailsClosed;
+          } else {
+            state.selectedOrderId = order.id;
+            state.orderDetailsClosed = false;
+          }
           renderOrders();
         }
+        return;
+      case 'close-order-details':
+        state.orderDetailsClosed = true;
+        renderOrders();
         return;
       case 'toggle-order-selection':
         if (target.checked) {
           if (!state.selectedOrderIds.includes(id)) state.selectedOrderIds.push(id);
           state.selectedOrderId = id;
+          state.orderDetailsClosed = false;
         } else {
           state.selectedOrderIds = state.selectedOrderIds.filter((orderId) => orderId !== id);
           if (Number(state.selectedOrderId) === id) {
@@ -10886,6 +10900,12 @@
           return;
         }
         if (closeCampaignVariantDropdown()) {
+          event.preventDefault();
+          return;
+        }
+        if (!state.modalOpen && state.view === 'orders' && !state.orderDetailsClosed && state.selectedOrderId != null) {
+          state.orderDetailsClosed = true;
+          renderOrders();
           event.preventDefault();
           return;
         }
