@@ -288,7 +288,7 @@
   // Keep the primary configured image first so a variant's gallery can never
   // replace it with another colour or an unrelated product image.
   function getVariantImageSources(variant, product = null) {
-    const primary = normalizeProductImageUrl(variant?.imageUrl || variant?.image_url || '');
+    const primary = normalizeProductImageUrl(variant?.imageUrl || variant?.image_url || variant?.image || '');
     const gallery = (Array.isArray(variant?.images) ? variant.images : [])
       .map(normalizeProductImageUrl)
       .filter(Boolean);
@@ -5651,10 +5651,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             ${sizes.map(size => {
               const v = product.variants.find(x => x.size === size && x.color === (variant.color || colors[0]));
               const isSelected = variant.size === size;
-              const isDisabled = v && v.stock <= 0;
+              const isSoldOut = v && Number(v.stock || 0) <= 0;
               const hasOffer = v && getVariantOfferDetails(v, product) !== null;
-              return `<button class="variant-option ${isSelected ? 'is-selected' : ''} ${isDisabled ? 'is-disabled' : ''} ${hasOffer ? 'has-offer' : ''}" 
-                data-size="${escapeHtml(size)}" type="button" ${isDisabled ? 'disabled' : ''}>${escapeHtml(size)}${hasOffer ? ' <span class="variant-offer-dot" title="Special offer">•</span>' : ''}</button>`;
+              return `<button class="variant-option ${isSelected ? 'is-selected' : ''} ${isSoldOut ? 'is-disabled' : ''} ${hasOffer ? 'has-offer' : ''}" 
+                data-size="${escapeHtml(size)}" type="button" ${!v ? 'disabled' : ''}>${escapeHtml(size)}${hasOffer ? ' <span class="variant-offer-dot" title="Special offer">•</span>' : ''}</button>`;
             }).join('')}
           </div>
         </div>
@@ -5667,10 +5667,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             ${colors.map(color => {
               const v = product.variants.find(x => x.color === color && x.size === (variant.size || sizes[0]));
               const isSelected = variant.color === color;
-              const isDisabled = v && v.stock <= 0;
+              const isSoldOut = v && Number(v.stock || 0) <= 0;
               const hasOffer = v && getVariantOfferDetails(v, product) !== null;
-              return `<button class="variant-option ${isSelected ? 'is-selected' : ''} ${isDisabled ? 'is-disabled' : ''} ${hasOffer ? 'has-offer' : ''}"
-                data-color="${escapeHtml(color)}" type="button" ${isDisabled ? 'disabled' : ''}>${escapeHtml(color)}${hasOffer ? ' <span class="variant-offer-dot" title="Special offer">•</span>' : ''}</button>`;
+              return `<button class="variant-option ${isSelected ? 'is-selected' : ''} ${isSoldOut ? 'is-disabled' : ''} ${hasOffer ? 'has-offer' : ''}"
+                data-color="${escapeHtml(color)}" type="button" ${!v ? 'disabled' : ''}>${escapeHtml(color)}${hasOffer ? ' <span class="variant-offer-dot" title="Special offer">•</span>' : ''}</button>`;
             }).join('')}
           </div>
         </div>
