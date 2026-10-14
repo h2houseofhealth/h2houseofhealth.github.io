@@ -2238,8 +2238,64 @@
     return 'admin-badge--awaiting-review';
   }
 
-  function getFulfillmentStatusLabel(status) {
+  function isOrderStockShortageActionRequired(order) {
+    if (!order) return false;
+    const norm = String(order.status || '').toLowerCase();
+    if (['cancelled', 'delivered', 'returned'].includes(norm)) return false;
+
+    // Check if order has an active shortage deficit
+    const hasShortage = Boolean(
+      order.hasStockShortage ||
+      norm === 'stock_shortage' ||
+      order.fulfillmentStatus === 'stock_shortage' ||
+      order.fulfillmentStatus === 'partially_available' ||
+      order.fulfillmentStatus === 'awaiting_restock' ||
+      (Array.isArray(order.stockShortages) && order.stockShortages.some((s) => !s.isResolved))
+    );
+    if (!hasShortage) return false;
+
+    // If customer was already successfully notified, delay communication has been completed
+    const commStatus = String(order.stockShortageCommunicationStatus || '').toLowerCase();
+    if (commStatus === 'sent') return false;
+
+    if (Array.isArray(order.stockShortages) && order.stockShortages.length > 0) {
+      const allSent = order.stockShortages.every((s) => String(s.customerCommunicationStatus || '').toLowerCase() === 'sent');
+      if (allSent) return false;
+    }
+
+    return true;
+  }
+
+  function isOrderAwaitingRestock(order) {
+    if (!order) return false;
+    const norm = String(order.status || '').toLowerCase();
+    if (['cancelled', 'delivered', 'returned'].includes(norm)) return false;
+    if (isOrderStockShortageActionRequired(order)) return false;
+
+    const hasShortage = Boolean(
+      order.hasStockShortage ||
+      norm === 'stock_shortage' ||
+      order.fulfillmentStatus === 'stock_shortage' ||
+      order.fulfillmentStatus === 'partially_available' ||
+      order.fulfillmentStatus === 'awaiting_restock' ||
+      (Array.isArray(order.stockShortages) && order.stockShortages.some((s) => !s.isResolved))
+    );
+    if (!hasShortage) return false;
+
+    const commStatus = String(order.stockShortageCommunicationStatus || '').toLowerCase();
+    const hasSentComm = commStatus === 'sent' || (Array.isArray(order.stockShortages) && order.stockShortages.length > 0 && order.stockShortages.every((s) => String(s.customerCommunicationStatus || '').toLowerCase() === 'sent'));
+    if (!hasSentComm) return false;
+
+    const isBlocked = Boolean(order.isFulfillmentBlocked || ['stock_shortage', 'partially_available', 'awaiting_restock'].includes(order.fulfillmentStatus));
+    return isBlocked;
+  }
+
+  function getFulfillmentStatusLabel(status, order) {
+    if (order && isOrderAwaitingRestock(order)) {
+      return 'Customer Notified — Awaiting Restock';
+    }
     const map = {
+      awaiting_restock: 'Customer Notified — Awaiting Restock',
       ready_to_fulfill: 'Ready to Fulfill',
       partially_available: 'Partially Available',
       stock_shortage: 'Stock Shortage',
@@ -2252,8 +2308,12 @@
     return map[String(status || '').toLowerCase()] || String(status || '');
   }
 
-  function getFulfillmentBadgeClass(status) {
+  function getFulfillmentBadgeClass(status, order) {
+    if (order && isOrderAwaitingRestock(order)) {
+      return 'admin-badge--awaiting-restock';
+    }
     const s = String(status || '').toLowerCase();
+    if (s === 'awaiting_restock') return 'admin-badge--awaiting-restock';
     if (s === 'ready_to_fulfill' || s === 'fulfilled') return 'admin-badge--ready-to-fulfill';
     if (s === 'partially_available') return 'admin-badge--partially-available';
     if (s === 'stock_shortage') return 'admin-badge--stock-shortage';
@@ -3430,11 +3490,17 @@
 
     return [...state.orders].filter((order) => {
       const isTodayFilter = state.ordersStatus === 'today' || Boolean(state.ordersTodayOnly);
-      const matchesStatus = (state.ordersStatus === 'all' || isTodayFilter)
-        ? true
-        : state.ordersStatus === 'stock_shortage'
-          ? (order.status === 'stock_shortage' || Boolean(order.hasStockShortage))
-          : order.status === state.ordersStatus;
+      let matchesStatus = false;
+      if (state.ordersStatus === 'all' || isTodayFilter) {
+        matchesStatus = true;
+      } else if (state.ordersStatus === 'stock_shortage') {
+        matchesStatus = isOrderStockShortageActionRequired(order);
+      } else if (state.ordersStatus === 'processing') {
+        const norm = String(order.status || '').toLowerCase();
+        matchesStatus = !isOrderStockShortageActionRequired(order) && (norm === 'processing' || isOrderAwaitingRestock(order));
+      } else {
+        matchesStatus = String(order.status || '').toLowerCase() === String(state.ordersStatus || '').toLowerCase();
+      }
       const matchesQuery =
         !query ||
         [order.orderNumber, order.customerName, hasRealEmail(order.email) ? order.email : '', order.phone]
@@ -3452,8 +3518,13 @@
     if (!order) {
       return `<p class="admin-table__muted">Select an order to inspect details.</p>`;
     }
-    const isShortage = Boolean(order.hasStockShortage || order.status === 'stock_shortage');
-    const displayStatus = isShortage ? 'stock_shortage' : order.status;
+    const isShortageActionRequired = isOrderStockShortageActionRequired(order);
+    const isAwaitingRestock = isOrderAwaitingRestock(order);
+    const hasHistoricalShortage = Boolean(order.hasStockShortage || order.status === 'stock_shortage' || (Array.isArray(order.stockShortages) && order.stockShortages.length > 0));
+    const isShortageCardVisible = isShortageActionRequired || isAwaitingRestock || (hasHistoricalShortage && order.fulfillmentStatus === 'ready_to_fulfill' && !order.isFulfillmentBlocked);
+    const displayStatus = isShortageActionRequired ? 'stock_shortage' : order.status;
+    const fulfillmentLabel = getFulfillmentStatusLabel(order.fulfillmentStatus, order);
+    const fulfillmentClass = getFulfillmentBadgeClass(order.fulfillmentStatus, order);
     return `
       <div class="admin-list">
         <div class="admin-list__item">
@@ -3464,33 +3535,45 @@
             </div>
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
               <span class="admin-badge ${statusClass(displayStatus)}" style="white-space:normal;text-align:center;max-width:100%;">${escapeHtml(getStatusLabel(displayStatus))}</span>
-              ${order.fulfillmentStatus ? `
-                <span class="admin-badge ${getFulfillmentBadgeClass(order.fulfillmentStatus)}" style="font-size:10px;">${escapeHtml(getFulfillmentStatusLabel(order.fulfillmentStatus))}</span>
+              ${order.fulfillmentStatus || isAwaitingRestock ? `
+                <span class="admin-badge ${fulfillmentClass}" style="font-size:10px;">${escapeHtml(fulfillmentLabel)}</span>
               ` : ''}
             </div>
           </div>
         </div>
-        ${isShortage ? `
-          <div class="admin-list__item admin-stock-shortage-card">
+        ${isShortageCardVisible ? `
+          <div class="admin-list__item admin-stock-shortage-card" style="${isAwaitingRestock ? 'border-left-color:#d97706;background:rgba(217,119,6,0.04);' : (order.fulfillmentStatus === 'ready_to_fulfill' ? 'border-left-color:#10b981;background:rgba(16,185,129,0.04);' : '')}">
             <div class="admin-stock-shortage-card__head">
               <div class="admin-stock-shortage-card__title-row">
-                <p class="admin-stock-shortage-card__title">
-                  <span>⚠️ STOCK SHORTAGE — FULFILMENT PENDING</span>
+                <p class="admin-stock-shortage-card__title" style="${isAwaitingRestock ? 'color:#b45309;' : (order.fulfillmentStatus === 'ready_to_fulfill' ? 'color:#047857;' : '')}">
+                  <span>${isAwaitingRestock ? '⏳ CUSTOMER NOTIFIED — AWAITING RESTOCK' : (order.fulfillmentStatus === 'ready_to_fulfill' ? '✓ STOCK ALLOCATED — READY TO FULFILL' : '⚠️ STOCK SHORTAGE — FULFILMENT PENDING')}</span>
                 </p>
                 <div class="admin-stock-shortage-card__badges">
-                  <span class="admin-badge admin-badge--stock-shortage">STOCK SHORTAGE</span>
+                  ${isShortageActionRequired ? `
+                    <span class="admin-badge admin-badge--stock-shortage">ACTION REQUIRED</span>
+                  ` : isAwaitingRestock ? `
+                    <span class="admin-badge admin-badge--awaiting-restock">Awaiting Restock</span>
+                  ` : `
+                    <span class="admin-badge admin-badge--ready-to-fulfill">Ready to Fulfill</span>
+                  `}
                   ${order.stockShortageReviewStatus ? `
                     <span class="admin-badge ${shortageReviewBadgeClass(order.stockShortageReviewStatus)}">${escapeHtml(getShortageReviewStatusLabel(order.stockShortageReviewStatus))}</span>
                   ` : ''}
                   ${order.stockShortageCommunicationStatus === 'sent' || (Array.isArray(order.stockShortages) && order.stockShortages.length && order.stockShortages.every((s) => s.customerCommunicationStatus === 'sent')) ? `
-                    <span class="admin-badge admin-badge--success" style="font-size:10px;">✉️ Email Sent</span>
+                    <span class="admin-badge admin-badge--success" style="font-size:10px;">✉️ Customer Notified</span>
                   ` : order.stockShortageCommunicationStatus === 'failed' || (Array.isArray(order.stockShortages) && order.stockShortages.some((s) => s.customerCommunicationStatus === 'failed')) ? `
                     <span class="admin-badge admin-badge--danger" style="font-size:10px;">⚠️ Email Failed</span>
-                  ` : ''}
+                  ` : `
+                    <span class="admin-badge admin-badge--pending" style="font-size:10px;">⏳ Email Pending</span>
+                  `}
                 </div>
               </div>
               <p class="admin-stock-shortage-card__desc">
-                This verified paid order is currently blocked from fulfilment due to insufficient stock.
+                ${isAwaitingRestock
+                  ? 'Customer was notified of fulfillment delay. Fulfillment is paused until physical stock is replenished and allocated.'
+                  : (order.fulfillmentStatus === 'ready_to_fulfill'
+                    ? 'Physical stock has been replenished and allocated to this order in FIFO order. The order is now ready for dispatch.'
+                    : 'This verified paid order is currently blocked from fulfilment due to insufficient stock. Please review and send customer delay notification.')}
               </p>
             </div>
 
@@ -3750,7 +3833,7 @@
     }
 
     const filtered = filteredOrders();
-    const stockShortageCount = state.orders.filter((o) => o.status === 'stock_shortage' || Boolean(o.hasStockShortage)).length;
+    const stockShortageCount = state.orders.filter(isOrderStockShortageActionRequired).length;
     const pageSize = 5;
     const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
     if (state.ordersPage > totalPages) state.ordersPage = totalPages;
@@ -3818,8 +3901,12 @@
                   </thead>
                   <tbody>
                     ${pageItems.map((order) => {
-                      const orderIsShortage = Boolean(order.hasStockShortage || order.status === 'stock_shortage');
-                      const orderDisplayStatus = orderIsShortage ? 'stock_shortage' : order.status;
+                      const orderIsActionRequired = isOrderStockShortageActionRequired(order);
+                      const orderIsAwaitingRestock = isOrderAwaitingRestock(order);
+                      const orderDisplayStatus = orderIsActionRequired ? 'stock_shortage' : order.status;
+                      const fulfillmentLabel = getFulfillmentStatusLabel(order.fulfillmentStatus, order);
+                      const fulfillmentClass = getFulfillmentBadgeClass(order.fulfillmentStatus, order);
+                      const canShip = !order.shiprocketAwbCode && !orderIsActionRequired && !orderIsAwaitingRestock && !order.isFulfillmentBlocked && order.fulfillmentStatus === 'ready_to_fulfill' && !['cancelled', 'delivered', 'returned'].includes(normalizeOrderStatus(order.status));
                       return `
                       <tr class="${Number(state.selectedOrderId) === Number(order.id) ? 'is-selected' : ''}" data-action="select-order" data-id="${order.id}" style="cursor:pointer;">
                         <td><input type="checkbox" data-action="toggle-order-selection" data-id="${order.id}" ${state.selectedOrderIds.includes(Number(order.id)) ? 'checked' : ''} aria-label="Select ${escapeHtml(order.orderNumber)}" /> <strong>${escapeHtml(order.orderNumber)}</strong><br><span class="admin-table__muted">${escapeHtml(dateLabel(order.createdAt))}</span></td>
@@ -3829,19 +3916,19 @@
                         <td><strong>${escapeHtml(money(order.totalAmount))}</strong></td>
                         <td>
                           <span class="admin-badge ${statusClass(orderDisplayStatus)}">${escapeHtml(getStatusLabel(orderDisplayStatus))}</span>
-                          ${order.fulfillmentStatus ? `
-                            <br><span class="admin-badge ${getFulfillmentBadgeClass(order.fulfillmentStatus)}" style="margin-top:3px;font-size:10px;">${escapeHtml(getFulfillmentStatusLabel(order.fulfillmentStatus))}</span>
+                          ${order.fulfillmentStatus || orderIsAwaitingRestock ? `
+                            <br><span class="admin-badge ${fulfillmentClass}" style="margin-top:3px;font-size:10px;">${escapeHtml(fulfillmentLabel)}</span>
                           ` : ''}
-                          ${orderIsShortage ? `
+                          ${orderIsActionRequired ? `
                             <br><span class="admin-badge ${shortageReviewBadgeClass(order.stockShortageReviewStatus || order.stockShortages?.[0]?.reviewStatus)}" style="margin-top:3px;font-size:10px;">${escapeHtml(getShortageReviewStatusLabel(order.stockShortageReviewStatus || order.stockShortages?.[0]?.reviewStatus))}</span>
                           ` : ''}
                         </td>
                         <td>
                           <div style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;">
-                            ${orderIsShortage ? `
-                              <button class="admin-btn admin-btn--soft admin-btn--sm" type="button" data-action="open-stock-shortage-email-modal" data-id="${order.id}" style="padding:3px 8px;font-size:11px;font-weight:600;white-space:nowrap;">Manage Delay</button>
+                            ${orderIsActionRequired || orderIsAwaitingRestock ? `
+                              <button class="admin-btn admin-btn--soft admin-btn--sm" type="button" data-action="open-stock-shortage-email-modal" data-id="${order.id}" style="padding:3px 8px;font-size:11px;font-weight:600;white-space:nowrap;">${orderIsAwaitingRestock ? 'Delay Details' : 'Manage Delay'}</button>
                             ` : ''}
-                            ${!order.shiprocketAwbCode && !orderIsShortage && !order.isFulfillmentBlocked && order.fulfillmentStatus === 'ready_to_fulfill' && !['cancelled', 'delivered', 'returned'].includes(normalizeOrderStatus(order.status)) ? `
+                            ${canShip ? `
                               <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="shiprocket-fulfill" data-id="${order.id}" style="padding:3px 8px;font-size:11px;font-weight:600;white-space:nowrap;">🚀 Ship</button>
                             ` : ''}
                             <button class="admin-action-link" type="button" data-action="track-admin-order" data-id="${order.id}" style="white-space:nowrap;">Track</button>
