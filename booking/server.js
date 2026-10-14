@@ -11834,7 +11834,7 @@ function calculateCouponDiscountPaise(coupon, subtotalAmountPaise) {
   return Math.min(discountPaise, Math.max(0, subtotal - 100));
 }
 
-function validateCouponForUser({ code, userId, appliesTo, productIds = [], productLineTotals = {}, variantIds = [], variantLineTotals = {}, productSubtotalAmountPaise, subtotalAmountPaise, singleBookingAmountPaise, portal }) {
+function validateCouponForUser({ code, userId, appliesTo, productIds = [], productLineTotals = {}, variantIds = [], variantLineTotals = {}, productSubtotalAmountPaise, subtotalAmountPaise, singleBookingAmountPaise, portal, userEmail: rawUserEmail, customerEmail: rawCustomerEmail }) {
   const normalizedCode = normalizeCouponCode(code);
   if (!normalizedCode) {
     return {
@@ -11910,23 +11910,24 @@ function validateCouponForUser({ code, userId, appliesTo, productIds = [], produ
   if (appliesToVariant && restrictedVariantSubtotalPaise <= 0) {
     return { error: 'This coupon is only valid when the selected product variant is in the cart.' };
   }
+  const hasProductLineTotals = Boolean(productLineTotals && Object.keys(productLineTotals).length > 0);
   const restrictedProductSubtotalPaise = Boolean(productRestriction || categoryRestriction)
-    ? Math.max(0, Math.round(restrictedProductIds.reduce((sum, id) => sum + Number(productLineTotals?.[id] || 0), 0) || productSubtotalAmountPaise || 0))
+    ? Math.max(0, Math.round(hasProductLineTotals
+        ? restrictedProductIds.reduce((sum, id) => sum + Number(productLineTotals[id] || 0), 0)
+        : (productSubtotalAmountPaise || 0)))
     : 0;
   if (appliesToProduct && restrictedProductSubtotalPaise <= 0) {
     return { error: categoryRestriction ? 'This coupon is only valid when an item from the selected category is in the cart.' : 'This coupon is only valid when the selected product is in the cart.' };
   }
+
+  const user = getUserById(userId);
+  const userEmail = String(rawUserEmail || rawCustomerEmail || user?.email || '').trim().toLowerCase();
   const assignedEmail = String(coupon.assignedUserEmail || coupon.recipientEmail || '').trim().toLowerCase();
   if (coupon.couponType === 'private' || assignedEmail) {
-    const user = getUserById(userId);
-    const userEmail = String(user?.email || '').trim().toLowerCase();
     if (!userEmail || userEmail !== assignedEmail) {
       return { error: 'This coupon is assigned to another user.' };
     }
   }
-
-  const user = getUserById(userId);
-  const userEmail = String(user?.email || '').trim().toLowerCase();
 
   const stats = getCouponRedemptionStats(coupon.id, userId);
   if (
