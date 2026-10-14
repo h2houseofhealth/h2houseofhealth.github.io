@@ -10213,7 +10213,7 @@ module.exports = function mountMerchApi(app, {
         return res.status(400).json({ error: 'No active stock shortages found for this order.' });
       }
 
-      const rawReviewStatus = String(req.body?.reviewStatus || 'reviewed').trim().toLowerCase();
+      const rawReviewStatus = String(req.body?.reviewStatus || 'ready_for_communication').trim().toLowerCase();
       const validStatuses = ['awaiting_review', 'reviewed', 'ready_for_communication'];
       if (!validStatuses.includes(rawReviewStatus)) {
         return res.status(400).json({ error: `Invalid review status. Allowed values: ${validStatuses.join(', ')}` });
@@ -10881,15 +10881,6 @@ module.exports = function mountMerchApi(app, {
       if (!activeShortages.length) {
         return res.status(400).json({ error: 'No active stock shortages found for this order.' });
       }
-
-      // Must be reviewed and marked ready_for_communication
-      if (activeShortages.some((s) => s.review_status !== 'ready_for_communication')) {
-        return res.status(400).json({
-          error: "Order shortage must be reviewed and marked 'ready_for_communication' before generating a customer email preview.",
-          reviewStatus: activeShortages[0].review_status,
-        });
-      }
-
       const recipientEmail = hasRealEmail(order.customer_email)
         ? order.customer_email
         : (hasRealEmail(order.guest_email) ? order.guest_email : null);
@@ -10993,7 +10984,22 @@ module.exports = function mountMerchApi(app, {
         text: emailContent.text,
         html: emailContent.html,
         hasEstimate: emailContent.hasEstimate,
-        revisedDeliveryEstimate: emailContent.revisedDeliveryEstimate,
+        revisedDeliveryEstimate: emailContent.revisedDeliveryEstimate || activeShortages[0]?.revised_delivery_estimate || null,
+        internalDelayNote: activeShortages[0]?.internal_delay_note || null,
+        shortageItems: activeShortages.map((s) => ({
+          id: s.id,
+          orderItemId: s.order_item_id,
+          variantId: s.variant_id,
+          productName: s.product_name,
+          variantLabel: s.variant_label,
+          sku: s.sku,
+          orderedQuantity: Number(s.ordered_quantity || 1),
+          availableStock: Number(s.available_stock || 0),
+          missingQuantity: Math.max(0, Number(s.ordered_quantity || 1) - Number(s.available_stock || 0)),
+          reason: s.reason,
+          revisedDeliveryEstimate: s.revised_delivery_estimate || '',
+          internalDelayNote: s.internal_delay_note || '',
+        })),
         affectedItems: emailContent.affectedItems,
         selectedCoupon,
         defaultApologyMessage: emailContent.defaultApologyMessage,
@@ -11064,15 +11070,6 @@ module.exports = function mountMerchApi(app, {
 
         if (!activeShortages.length) {
           return { error: 'No active stock shortages found for this order.', status: 400 };
-        }
-
-        // Must be reviewed and marked ready_for_communication
-        if (activeShortages.some((s) => s.review_status !== 'ready_for_communication')) {
-          return {
-            error: "Order shortage must be reviewed and marked 'ready_for_communication' before sending a customer email.",
-            reviewStatus: activeShortages[0].review_status,
-            status: 400,
-          };
         }
 
         const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
@@ -11163,8 +11160,30 @@ module.exports = function mountMerchApi(app, {
           isAuthorizedResend = true;
         }
 
-        // Documented rationale check for both already-sent resends and stale sending recovery
-        const documentedReason = (isAuthorizedResend || isStaleSending) && confirmResend && resendReason.length >= 5 ? resendReason : null;
+        // If revised delivery estimate or internal note are provided in the dispatch body, persist them
+        if (req.body?.revisedDeliveryEstimate !== undefined || req.body?.internalDelayNote !== undefined) {
+          const newEst = req.body?.revisedDeliveryEstimate != null && String(req.body.revisedDeliveryEstimate).trim() !== ''
+            ? String(req.body.revisedDeliveryEstimate).trim()
+            : (req.body?.revisedDeliveryEstimate === null || req.body?.revisedDeliveryEstimate === '' ? null : undefined);
+          const newNote = req.body?.internalDelayNote != null && String(req.body.internalDelayNote).trim() !== ''
+            ? String(req.body.internalDelayNote).trim()
+            : (req.body?.internalDelayNote === null || req.body?.internalDelayNote === '' ? null : undefined);
+
+          if (newEst !== undefined || newNote !== undefined) {
+            db.prepare(`
+              UPDATE merch_order_stock_shortages
+              SET revised_delivery_estimate = CASE WHEN ? = 1 THEN ? ELSE revised_delivery_estimate END,
+                  internal_delay_note = CASE WHEN ? = 1 THEN ? ELSE internal_delay_note END,
+                  updated_at = datetime('now')
+              WHERE order_id = ? AND is_resolved = 0
+            `).run(newEst !== undefined ? 1 : 0, newEst || null, newNote !== undefined ? 1 : 0, newNote || null, orderId);
+
+            for (const s of activeShortages) {
+              if (newEst !== undefined) s.revised_delivery_estimate = newEst || null;
+              if (newNote !== undefined) s.internal_delay_note = newNote || null;
+            }
+          }
+        }
 
         // Atomically claim the active shortage records by setting to 'sending'.
         // Stale 'sending' rows (>5m old) can be safely claimed with authorized confirmation.
@@ -11178,10 +11197,10 @@ module.exports = function mountMerchApi(app, {
               compensation_coupon_benefit = ?,
               communication_authorized_by = ?,
               resend_reason = CASE WHEN ? = 1 THEN ? ELSE resend_reason END,
+              review_status = 'ready_for_communication',
               updated_at = datetime('now')
           WHERE order_id = ?
             AND is_resolved = 0
-            AND review_status = 'ready_for_communication'
             AND (
               customer_communication_status IN ('pending', 'failed')
               OR (customer_communication_status = 'sending' AND updated_at < datetime('now', '-5 minutes') AND (? = 1 OR ? = 1))
@@ -11192,8 +11211,8 @@ module.exports = function mountMerchApi(app, {
           validatedCoupon ? validatedCoupon.code : null,
           validatedCoupon ? validatedCoupon.benefit : null,
           authorizedBy,
-          documentedReason ? 1 : 0,
-          documentedReason,
+          resendReason ? 1 : 0,
+          resendReason || null,
           orderId,
           isAuthorizedResend ? 1 : 0,
           isStaleSending ? 1 : 0,
@@ -11214,7 +11233,7 @@ module.exports = function mountMerchApi(app, {
           items,
           validatedCoupon,
           isAuthorizedResend,
-          resendReason: documentedReason,
+          resendReason: resendReason || null,
         };
       })();
 

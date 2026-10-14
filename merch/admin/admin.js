@@ -3549,17 +3549,12 @@
             </div>
 
             <div class="admin-stock-shortage-card__actions">
-              <button class="admin-btn admin-btn--soft admin-btn--sm" type="button" data-action="open-stock-shortage-review" data-order-id="${order.id}">📝 Review Delay & Delivery Estimate</button>
-              ${order.stockShortageReviewStatus === 'ready_for_communication' || (Array.isArray(order.stockShortages) && order.stockShortages.some((s) => s.reviewStatus === 'ready_for_communication')) ? `
-                ${order.stockShortageCommunicationStatus === 'sent' || (Array.isArray(order.stockShortages) && order.stockShortages.length && order.stockShortages.every((s) => s.customerCommunicationStatus === 'sent')) ? `
-                  <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-action="open-stock-shortage-email-modal" data-order-id="${order.id}">✉️ View Sent Delay Email</button>
-                ` : order.stockShortageCommunicationStatus === 'failed' || (Array.isArray(order.stockShortages) && order.stockShortages.some((s) => s.customerCommunicationStatus === 'failed')) ? `
-                  <button class="admin-btn admin-btn--danger admin-btn--sm" type="button" data-action="open-stock-shortage-email-modal" data-order-id="${order.id}">⚠️ Retry Customer Delay Email</button>
-                ` : `
-                  <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="open-stock-shortage-email-modal" data-order-id="${order.id}">✉️ Send Customer Delay Email</button>
-                `}
+              ${order.stockShortageCommunicationStatus === 'sent' || (Array.isArray(order.stockShortages) && order.stockShortages.length && order.stockShortages.every((s) => s.customerCommunicationStatus === 'sent')) ? `
+                <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-action="open-stock-shortage-email-modal" data-order-id="${order.id}">✉️ View Sent Delay Email & Manage Delay</button>
+              ` : order.stockShortageCommunicationStatus === 'failed' || (Array.isArray(order.stockShortages) && order.stockShortages.some((s) => s.customerCommunicationStatus === 'failed')) ? `
+                <button class="admin-btn admin-btn--danger admin-btn--sm" type="button" data-action="open-stock-shortage-email-modal" data-order-id="${order.id}">⚠️ Retry Customer Delay Email & Manage Delay</button>
               ` : `
-                <span class="admin-table__muted" style="grid-column: 1 / -1; font-size:10.5px; font-style:italic; text-align:center; padding: 2px 0;">Customer email unlocks once marked 'Ready for Communication'</span>
+                <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="open-stock-shortage-email-modal" data-order-id="${order.id}">✉️ Manage Delay & Customer Communication</button>
               `}
               <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-action="resolve-stock-shortage" data-order-id="${order.id}">✓ Resolve Stock Shortage</button>
             </div>
@@ -3836,7 +3831,7 @@
                         <td>
                           <div style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;">
                             ${orderIsShortage ? `
-                              <button class="admin-btn admin-btn--soft admin-btn--sm" type="button" data-action="open-stock-shortage-review" data-id="${order.id}" style="padding:3px 8px;font-size:11px;font-weight:600;white-space:nowrap;">Review</button>
+                              <button class="admin-btn admin-btn--soft admin-btn--sm" type="button" data-action="open-stock-shortage-email-modal" data-id="${order.id}" style="padding:3px 8px;font-size:11px;font-weight:600;white-space:nowrap;">Manage Delay</button>
                             ` : ''}
                             ${!order.shiprocketAwbCode && !orderIsShortage && !order.isFulfillmentBlocked && order.fulfillmentStatus === 'ready_to_fulfill' && !['cancelled', 'delivered', 'returned'].includes(normalizeOrderStatus(order.status)) ? `
                               <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="shiprocket-fulfill" data-id="${order.id}" style="padding:3px 8px;font-size:11px;font-weight:600;white-space:nowrap;">🚀 Ship</button>
@@ -7792,86 +7787,7 @@
     }
   }
 
-  function openStockShortageReviewModal(order) {
-    if (!order) return;
-    const shortages = Array.isArray(order.stockShortages) ? order.stockShortages : [];
-    const firstShortage = shortages[0] || {};
-    const currentReviewStatus = firstShortage.reviewStatus || 'awaiting_review';
-    const currentEstimate = firstShortage.revisedDeliveryEstimate || '';
-    const currentNote = firstShortage.internalDelayNote || '';
 
-    const bodyHtml = `
-      <form class="admin-form" data-form="stock-shortage-review" data-order-id="${order.id}">
-        <div style="background:#fff1f0;border:1px solid #ffa39e;border-radius:8px;padding:10px 14px;margin-bottom:14px;">
-          <div style="font-weight:700;font-size:12px;color:#cf1322;margin-bottom:4px;">
-            ⚠️ Stock Shortage Case — Delay Review & Preparation
-          </div>
-          <div style="font-size:11px;color:#595959;">
-            Customer: <strong>${escapeHtml(order.customerName)}</strong> (${escapeHtml(displayEmail(order.email))}, ${escapeHtml(order.phone || 'No phone')})<br>
-            Order: <strong>${escapeHtml(order.orderNumber)}</strong> &middot; Payment: <strong>${escapeHtml(order.paymentStatus || 'paid').toUpperCase()}</strong>
-          </div>
-        </div>
-
-        <div style="margin-bottom:14px;">
-          <label class="admin-field">
-            <span>Affected Item(s) in this Shortage</span>
-          </label>
-          <div style="background:#fafafa;border:1px solid #e8e8e8;border-radius:6px;padding:8px 10px;font-size:11px;max-height:140px;overflow-y:auto;">
-            ${shortages.length ? shortages.map((s) => `
-              <div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px dashed #f0f0f0;">
-                <strong>${escapeHtml(s.productName)}</strong> (${escapeHtml(s.variantLabel || 'Default')})<br>
-                <span class="admin-table__muted">SKU:</span> <code>${escapeHtml(s.sku || 'N/A')}</code> &middot;
-                <span class="admin-table__muted">Ordered Qty:</span> <strong>${s.orderedQuantity}</strong> &middot;
-                <span class="admin-table__muted">Warehouse Stock:</span> ${s.currentStock != null ? s.currentStock : s.availableStock}<br>
-                <span style="color:#cf1322;"><strong>Shortage Reason:</strong> ${escapeHtml(s.reason)}</span>
-              </div>
-            `).join('') : `
-              <div>No specific item shortages listed.</div>
-            `}
-          </div>
-        </div>
-
-        <div style="display:flex;flex-direction:column;gap:12px;">
-          <label class="admin-field">
-            <span>Review Status</span>
-            <select class="admin-select" name="reviewStatus">
-              <option value="awaiting_review" ${currentReviewStatus === 'awaiting_review' ? 'selected' : ''}>⏳ Awaiting Review</option>
-              <option value="reviewed" ${currentReviewStatus === 'reviewed' ? 'selected' : ''}>🔍 Reviewed (Internal assessment complete)</option>
-              <option value="ready_for_communication" ${currentReviewStatus === 'ready_for_communication' ? 'selected' : ''}>📢 Ready for Customer Communication</option>
-            </select>
-          </label>
-
-          <label class="admin-field">
-            <span>Revised Delivery Estimate (Optional / When Known)</span>
-            <input class="admin-input" type="text" name="revisedDeliveryEstimate" value="${escapeHtml(currentEstimate)}" placeholder="e.g. 2026-10-25 or Late October (leave blank if unknown)" />
-            <small class="admin-table__muted" style="font-size:10px;margin-top:2px;">Leave blank if supplier timeline is pending or unknown.</small>
-          </label>
-
-          <label class="admin-field admin-field--wide">
-            <span>Internal Delay Note (Warehouse / Supplier Explanation)</span>
-            <textarea class="admin-textarea" name="internalDelayNote" rows="3" placeholder="Add internal notes on why fulfillment is delayed and next restock steps...">${escapeHtml(currentNote)}</textarea>
-          </label>
-
-          <div style="background:#e6f7ff;border:1px solid #91d5ff;border-radius:6px;padding:8px 10px;font-size:11px;color:#0050b3;">
-            ℹ️ <strong>Phase 2 Guardrail:</strong> This is an internal review record. No customer emails, refunds, or compensation coupons are dispatched until Phase 3.
-          </div>
-        </div>
-      </form>
-    `;
-
-    const footerHtml = `
-      <button class="admin-btn admin-btn--ghost" type="button" data-action="close-modal">Cancel</button>
-      <button class="admin-btn admin-btn--primary" type="button" data-action="save-stock-shortage-review" data-order-id="${order.id}">Save Review</button>
-    `;
-
-    openModal({
-      title: `Review Stock Shortage: ${order.orderNumber}`,
-      subtitle: 'Fulfilment Delay Management',
-      body: bodyHtml,
-      footer: footerHtml,
-      size: 'md',
-    });
-  }
 
   function getAvailableMerchProducts() {
     const prods = [];
@@ -7938,12 +7854,27 @@
       const ineligibleCoupons = Array.isArray(couponsData?.ineligibleCoupons) ? couponsData.ineligibleCoupons : [];
       const customerEmail = String(preview.recipientEmail || order.customerEmail || order.email || '').trim().toLowerCase();
 
+      const shortageItems = Array.isArray(preview.shortageItems) && preview.shortageItems.length
+        ? preview.shortageItems
+        : (Array.isArray(order.stockShortages) ? order.stockShortages.map((s) => ({
+            id: s.id,
+            productName: s.productName || s.product_name || 'Product',
+            variantLabel: s.variantLabel || s.variant_label || 'Default',
+            sku: s.sku || 'N/A',
+            orderedQuantity: Number(s.orderedQuantity || s.ordered_quantity || 1),
+            availableStock: Number(s.currentStock != null ? s.currentStock : (s.availableStock || 0)),
+            missingQuantity: Math.max(0, Number(s.orderedQuantity || s.ordered_quantity || 1) - Number(s.currentStock != null ? s.currentStock : (s.availableStock || 0))),
+            reason: s.reason || 'Required stock is unavailable',
+            revisedDeliveryEstimate: s.revisedDeliveryEstimate || '',
+            internalDelayNote: s.internalDelayNote || '',
+          })) : []);
+
       bodyEl.innerHTML = `
         <div style="display:flex;flex-direction:column;gap:14px;">
           <div style="background:#fff8f0;border:1px solid #f0d5c3;border-radius:8px;padding:12px 16px;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
               <span style="font-size:12px;font-weight:700;color:#5a2c1d;">
-                ✉️ Customer Communication Details
+                ✉️ Customer Communication & Order Details
               </span>
               <span class="admin-badge ${isAlreadySent ? 'admin-badge--success' : (isFailed ? 'admin-badge--danger' : (isActiveSending ? 'admin-badge--warning' : 'admin-badge--ready-comm'))}">
                 ${isAlreadySent ? 'Delivered' : (isFailed ? 'Delivery Failed' : (isActiveSending ? 'Send In Flight' : 'Ready to Send'))}
@@ -7951,20 +7882,62 @@
             </div>
             <div style="font-size:12px;color:#595959;line-height:1.6;">
               <strong>Recipient:</strong> ${escapeHtml(preview.customerName)} &lt;<code>${escapeHtml(preview.recipientEmail)}</code>&gt;<br>
-              <strong>Order:</strong> ${escapeHtml(preview.orderNumber)}<br>
-              <strong>Revised Delivery Estimate:</strong>
-              ${preview.hasEstimate
-                ? `<strong style="color:#262626;">${escapeHtml(preview.revisedDeliveryEstimate)}</strong>`
-                : '<span style="color:#8c8c8c;"><em>Not confirmed yet — timeline is actively being verified with suppliers</em></span>'
-              }
-              <button type="button" class="admin-btn admin-btn--ghost admin-btn--sm" id="editDeliveryEstimateInReviewBtn" style="margin-left:8px;padding:1px 8px;font-size:11px;vertical-align:middle;color:#b85d3b;">
-                📝 Edit in Review
-              </button>
-              <span class="admin-table__muted" style="display:block;font-size:10.5px;margin-top:2px;font-style:italic;">
-                Delivery estimate is verified and managed via "Review Delay & Delivery Estimate".
-              </span>
+              <strong>Order:</strong> ${escapeHtml(preview.orderNumber)} &middot; <strong>Payment:</strong> ${escapeHtml(order.paymentStatus || 'paid').toUpperCase()}<br>
               ${isAlreadySent ? `<span style="color:#237804;"><strong>Sent At:</strong> ${escapeHtml(dateLabel(preview.communicatedAt) || 'Previously sent')} to ${escapeHtml(preview.communicationSentTo || preview.recipientEmail)}</span><br>` : ''}
               ${isFailed && preview.communicationError ? `<span style="color:#cf1322;"><strong>Last Error:</strong> ${escapeHtml(preview.communicationError)}</span><br>` : ''}
+            </div>
+          </div>
+
+          <!-- Consolidated Stock Shortage Summary -->
+          <div style="background:#fafafa;border:1px solid #e8e8e8;border-radius:8px;padding:12px 16px;">
+            <div style="font-size:12px;font-weight:700;color:#262626;margin-bottom:8px;">
+              📦 Affected Item(s) & Shortage Summary
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              ${shortageItems.length ? shortageItems.map((item) => `
+                <div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid #eee;border-radius:6px;padding:8px 12px;font-size:11.5px;flex-wrap:wrap;gap:8px;">
+                  <div>
+                    <strong>${escapeHtml(item.productName)}</strong> (${escapeHtml(item.variantLabel || 'Default')})<br>
+                    <span class="admin-table__muted">SKU:</span> <code>${escapeHtml(item.sku || 'N/A')}</code>
+                    ${item.reason ? `<span style="margin-left:8px;color:#cf1322;"><strong>Reason:</strong> ${escapeHtml(item.reason)}</span>` : ''}
+                  </div>
+                  <div style="display:flex;gap:14px;align-items:center;font-size:11.5px;">
+                    <span>Ordered: <strong>${item.orderedQuantity}</strong></span>
+                    <span>Available Stock: <strong style="color:${item.availableStock > 0 ? '#237804' : '#8c8c8c'};">${item.availableStock}</strong></span>
+                    <span style="color:#cf1322;font-weight:700;">Missing: ${item.missingQuantity}</span>
+                  </div>
+                </div>
+              `).join('') : `
+                <div style="font-size:11.5px;color:#8c8c8c;font-style:italic;">No specific shortage items listed.</div>
+              `}
+            </div>
+          </div>
+
+          <!-- Consolidated Delivery Management (Estimate & Internal Note) -->
+          <div style="background:#fff8f0;border:1px solid #f0d5c3;border-radius:8px;padding:12px 16px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:12px;font-weight:700;color:#5a2c1d;">
+                🗓️ Fulfillment Delay Management
+              </span>
+              <span class="admin-table__muted" style="font-size:10.5px;">Optional</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr;gap:10px;">
+              <label class="admin-field" style="margin:0;">
+                <span style="font-size:11.5px;font-weight:600;">Revised Delivery Estimate (Optional / When Known)</span>
+                <input class="admin-input" id="consolidatedDeliveryEstimateInput" type="text" value="${escapeHtml(preview.revisedDeliveryEstimate || '')}" placeholder="e.g. 2026-10-25 or Late October (leave blank if unknown)" style="margin-top:2px;font-size:12px;" />
+                <small class="admin-table__muted" style="font-size:10px;margin-top:2px;">Leave blank if supplier timeline is pending or unknown. When provided, this date is included in the customer email preview and sent notification.</small>
+              </label>
+
+              <label class="admin-field" style="margin:0;">
+                <span style="font-size:11.5px;font-weight:600;">Internal Delay Note (Warehouse / Supplier Explanation — Staff Only)</span>
+                <textarea class="admin-textarea" id="consolidatedInternalDelayNote" rows="2" placeholder="Internal notes on restock progress, supplier updates, or tracking (staff only — never shared with customer)..." style="margin-top:2px;font-size:12px;">${escapeHtml(preview.internalDelayNote || '')}</textarea>
+              </label>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:8px;border-top:1px dashed #f0d5c3;">
+              <span id="delayDetailsSavedIndicator" style="font-size:11px;color:#237804;font-weight:600;display:none;">✓ Delivery estimate and internal note saved</span>
+              <button type="button" id="saveConsolidatedDelayDetailsBtn" class="admin-btn admin-btn--soft admin-btn--sm" style="margin-left:auto;font-size:11px;">
+                💾 Save Delay Details (No Email Sent)
+              </button>
             </div>
           </div>
 
@@ -8265,11 +8238,50 @@
         }
       });
 
-      // ─── Edit Delivery Estimate in Review Workflow ───
-      const editEstimateBtn = bodyEl.querySelector('#editDeliveryEstimateInReviewBtn');
-      editEstimateBtn?.addEventListener('click', () => {
-        state.returnToEmailModalOrderId = order.id;
-        openStockShortageReviewModal(order);
+      // ─── Consolidated Delivery Details & Estimate Workflow ───
+      const saveDelayBtn = bodyEl.querySelector('#saveConsolidatedDelayDetailsBtn');
+      const deliveryEstimateInput = bodyEl.querySelector('#consolidatedDeliveryEstimateInput');
+      const internalDelayNoteInput = bodyEl.querySelector('#consolidatedInternalDelayNote');
+      const savedIndicator = bodyEl.querySelector('#delayDetailsSavedIndicator');
+
+      async function saveDelayDetails(silent = false) {
+        const revisedDeliveryEstimate = String(deliveryEstimateInput?.value || '').trim();
+        const internalDelayNote = String(internalDelayNoteInput?.value || '').trim();
+        if (saveDelayBtn) saveDelayBtn.disabled = true;
+        try {
+          await apiRequest(`/api/merch/admin/orders/${order.id}/stock-shortage/review`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ revisedDeliveryEstimate, internalDelayNote }),
+          });
+          if (!silent) {
+            toast('Delay Details Saved', 'Revised delivery estimate and internal note updated.', 'success');
+            if (savedIndicator) {
+              savedIndicator.style.display = 'inline-block';
+              setTimeout(() => { if (savedIndicator) savedIndicator.style.display = 'none'; }, 4000);
+            }
+          }
+          await refreshEmailPreview();
+          await loadOrderData();
+          return true;
+        } catch (err) {
+          if (!silent) {
+            toast('Failed to save details', err.message || 'Unable to save delivery estimate.', 'danger');
+          }
+          return false;
+        } finally {
+          if (saveDelayBtn) saveDelayBtn.disabled = false;
+        }
+      }
+
+      saveDelayBtn?.addEventListener('click', () => saveDelayDetails(false));
+
+      let estimateInputTimer = null;
+      deliveryEstimateInput?.addEventListener('input', () => {
+        clearTimeout(estimateInputTimer);
+        estimateInputTimer = setTimeout(async () => {
+          await saveDelayDetails(true);
+        }, 700);
       });
 
       // ─── Inline Coupon Creation Workflow ───
@@ -8917,44 +8929,38 @@
         }
         return;
       }
-      case 'open-stock-shortage-review': {
+      case 'open-stock-shortage-review':
+      case 'open-stock-shortage-email-modal': {
         const orderId = Number(target?.dataset?.orderId || id);
         if (!orderId) return;
         const currentOrder = state.orders.find((o) => Number(o.id) === orderId) || order;
-        openStockShortageReviewModal(currentOrder);
+        openStockShortageEmailModal(currentOrder);
         return;
       }
       case 'save-stock-shortage-review': {
         const orderId = Number(target?.dataset?.orderId || id);
         if (!orderId) return;
         const form = els.adminModalDialog.querySelector('[data-form="stock-shortage-review"]');
-        if (!form) return;
-        const fd = new FormData(form);
-        const reviewStatus = String(fd.get('reviewStatus') || 'reviewed').trim();
-        const revisedDeliveryEstimate = String(fd.get('revisedDeliveryEstimate') || '').trim();
-        const internalDelayNote = String(fd.get('internalDelayNote') || '').trim();
+        const estimateEl = els.adminModalDialog.querySelector('#consolidatedDeliveryEstimateInput');
+        const noteEl = els.adminModalDialog.querySelector('#consolidatedInternalDelayNote');
+        const fd = form ? new FormData(form) : null;
+        const revisedDeliveryEstimate = String(fd?.get('revisedDeliveryEstimate') || estimateEl?.value || '').trim();
+        const internalDelayNote = String(fd?.get('internalDelayNote') || noteEl?.value || '').trim();
 
         target.disabled = true;
         try {
           const res = await apiRequest(`/api/merch/admin/orders/${orderId}/stock-shortage/review`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reviewStatus, revisedDeliveryEstimate, internalDelayNote }),
+            body: JSON.stringify({ revisedDeliveryEstimate, internalDelayNote }),
           });
-          toast('Delay Review Saved', `Order ${res.order?.orderNumber || orderId} shortage review updated.`, 'success');
+          toast('Delay Details Saved', `Order ${res.order?.orderNumber || orderId} shortage details updated.`, 'success');
           await loadOrderData();
           await loadDashboardStats({ silent: true });
           renderOrders();
-
-          if (state.returnToEmailModalOrderId === orderId) {
-            state.returnToEmailModalOrderId = null;
-            const updatedOrder = state.orders.find((o) => Number(o.id) === orderId) || res.order || order;
-            await openStockShortageEmailModal(updatedOrder);
-          } else {
-            closeModal();
-          }
+          closeModal();
         } catch (err) {
-          toast('Failed to save review', err.message || 'Unable to update shortage review.', 'danger');
+          toast('Failed to save details', err.message || 'Unable to update shortage details.', 'danger');
           target.disabled = false;
         }
         return;
@@ -8985,6 +8991,10 @@
         const couponId = couponSelect && couponSelect.value ? Number(couponSelect.value) : null;
         const customMessageEl = els.adminModalDialog.querySelector('#stockDelayApologyMessage');
         const customMessage = customMessageEl ? String(customMessageEl.value || '').trim() : '';
+        const estimateEl = els.adminModalDialog.querySelector('#consolidatedDeliveryEstimateInput');
+        const noteEl = els.adminModalDialog.querySelector('#consolidatedInternalDelayNote');
+        const revisedDeliveryEstimate = estimateEl ? String(estimateEl.value || '').trim() : undefined;
+        const internalDelayNote = noteEl ? String(noteEl.value || '').trim() : undefined;
 
         target.disabled = true;
         const originalText = target.textContent;
@@ -8999,6 +9009,8 @@
               confirmResend: requiresReason,
               resendReason: requiresReason ? resendReason : undefined,
               customMessage: customMessage || undefined,
+              revisedDeliveryEstimate,
+              internalDelayNote,
             }),
           });
           toast('Delay Email Sent', res.message || `Customer email delivered to ${res.sentTo}.`, 'success');
