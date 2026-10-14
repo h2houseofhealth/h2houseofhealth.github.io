@@ -2233,6 +2233,29 @@
     return 'admin-badge--awaiting-review';
   }
 
+  function getFulfillmentStatusLabel(status) {
+    const map = {
+      ready_to_fulfill: 'Ready to Fulfill',
+      partially_available: 'Partially Available',
+      stock_shortage: 'Stock Shortage',
+      needs_review: 'Needs Review',
+      pending_payment: 'Pending Payment',
+      cancelled: 'Cancelled',
+      returned: 'Returned',
+      fulfilled: 'Fulfilled',
+    };
+    return map[String(status || '').toLowerCase()] || String(status || '');
+  }
+
+  function getFulfillmentBadgeClass(status) {
+    const s = String(status || '').toLowerCase();
+    if (s === 'ready_to_fulfill' || s === 'fulfilled') return 'admin-badge--ready-to-fulfill';
+    if (s === 'partially_available') return 'admin-badge--partially-available';
+    if (s === 'stock_shortage') return 'admin-badge--stock-shortage';
+    if (s === 'needs_review') return 'admin-badge--needs-review';
+    return 'admin-badge--ghost';
+  }
+
   function toast(title, message, tone = 'default') {
     const node = document.createElement('div');
     node.className = `admin-toast${tone ? ` admin-toast--${tone}` : ''}`;
@@ -3166,7 +3189,7 @@
           <div class="admin-grid admin-grid--stats admin-product-kpis" style="margin-bottom:18px;">
             ${[
               { label: 'Products in view', value: filtered.length, note: 'Matching current filters', trend: '+8%', up: true },
-              { label: 'Low stock', value: lowStockCount, note: `At or below ${LOW_STOCK_THRESHOLD} units remaining`, trend: '-2%', up: false },
+              { label: 'Low stock', value: lowStockCount, note: filtered.some((p) => Number(p.blockedOrdersCount || 0) > 0) ? `${filtered.reduce((sum, p) => sum + Number(p.blockedOrdersCount || 0), 0)} order(s) blocked` : `At or below ${LOW_STOCK_THRESHOLD} units remaining`, trend: '-2%', up: false },
               { label: 'Archived', value: state.products.filter((product) => product.archived).length, note: 'Hidden from storefront', trend: '+1%', up: true },
               { label: 'Combo products', value: new Set(state.products.filter((product) => product.isCombo).map((product) => Number(product.parentProductId || product.productId || product.id))).size, note: 'Published combo cards', trend: '+1%', up: true },
             ].map((item) => `
@@ -3227,7 +3250,14 @@
                     <td>${escapeHtml(product.sku)}</td>
                     <td>${escapeHtml(product.category)}</td>
                     <td><strong>${escapeHtml(product.priceLabel || catalogPrice(product.price))}</strong></td>
-                    <td><strong class="${getStockClass(product)}">${formatCount(product.stock)}</strong></td>
+                    <td>
+                      <strong class="${getStockClass(product)}">${formatCount(product.stock)}</strong>
+                      ${Number(product.blockedOrdersCount || 0) > 0 ? `
+                        <br><span class="admin-badge admin-badge--danger" style="font-size:9.5px;padding:1px 4px;margin-top:2px;display:inline-block;" title="${product.blockedOrdersCount} order(s) blocked by stock shortage">⚠️ ${product.blockedOrdersCount} blocked</span>
+                      ` : (product.netAvailableStock != null && product.netAvailableStock < product.stock) ? `
+                        <br><span class="admin-table__muted" style="font-size:9.5px;" title="Net stock available for new orders">${formatCount(product.netAvailableStock)} avail</span>
+                      ` : ''}
+                    </td>
                     <td><span class="admin-badge ${statusClass(product.status)}">${escapeHtml(getStatusLabel(product.status))}</span></td>
                     <td>${escapeHtml(dateLabel(product.createdAt))}</td>
                   </tr>
@@ -3418,7 +3448,12 @@
               <p class="admin-list__item-title" style="word-break:break-word;">${escapeHtml(order.orderNumber)}</p>
               <p class="admin-list__item-sub" style="word-break:break-word;">${escapeHtml(order.customerName)}${hasRealEmail(order.email) ? ` - ${escapeHtml(order.email)}` : ''}</p>
             </div>
-            <span class="admin-badge ${statusClass(displayStatus)}" style="white-space:normal;text-align:center;max-width:100%;">${escapeHtml(getStatusLabel(displayStatus))}</span>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+              <span class="admin-badge ${statusClass(displayStatus)}" style="white-space:normal;text-align:center;max-width:100%;">${escapeHtml(getStatusLabel(displayStatus))}</span>
+              ${order.fulfillmentStatus ? `
+                <span class="admin-badge ${getFulfillmentBadgeClass(order.fulfillmentStatus)}" style="font-size:10px;">${escapeHtml(getFulfillmentStatusLabel(order.fulfillmentStatus))}</span>
+              ` : ''}
+            </div>
           </div>
         </div>
         ${isShortage ? `
@@ -3524,7 +3559,7 @@
             </div>
           </div>
         ` : `
-          ${order.paymentStatus === 'paid' && !['shipped', 'delivered', 'cancelled', 'returned'].includes(order.status) ? `
+          ${(order.paymentStatus === 'paid' || (order.paymentMethod && order.paymentMethod.toLowerCase() === 'cod')) && !['shipped', 'delivered', 'cancelled', 'returned'].includes(order.status) ? `
             <div style="margin: 6px 0;">
               <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-action="flag-stock-shortage" data-order-id="${order.id}">⚠️ Flag Stock Shortage</button>
             </div>
@@ -3546,13 +3581,16 @@
           <p class="admin-list__item-title">Ordered Products</p>
           <div class="admin-list">
             ${order.items.map((item) => `
-              <div class="admin-list__item" style="padding:10px 12px;${item.hasShortage ? 'border-left:3px solid #cf1322;background:rgba(207,19,34,0.03);' : ''}">
+              <div class="admin-list__item" style="padding:10px 12px;${item.hasShortage || (item.deficitQuantity && item.deficitQuantity > 0) ? 'border-left:3px solid #cf1322;background:rgba(207,19,34,0.03);' : ''}">
                 <div class="admin-list__item-head">
                   <div>
                     <p class="admin-list__item-title">${escapeHtml(item.name)} ${item.variantLabel ? `(${escapeHtml(item.variantLabel)})` : ''}</p>
                     <p class="admin-list__item-sub">
                       SKU: <code>${escapeHtml(item.sku || 'N/A')}</code> &middot; Qty ${escapeHtml(item.qty)}
-                      ${item.hasShortage ? `<br><strong style="color:#cf1322;">⚠️ Shortage: ${escapeHtml(item.shortageReason || 'Stock unavailable')}</strong>` : ''}
+                      ${item.allocatedQuantity != null ? ` &middot; Allocated: <strong>${escapeHtml(item.allocatedQuantity)}/${escapeHtml(item.qty)}</strong>` : ''}
+                      ${item.availableStock != null ? ` &middot; On hand: <strong>${escapeHtml(item.availableStock)}</strong>` : ''}
+                      ${item.deficitQuantity && item.deficitQuantity > 0 ? `<br><strong style="color:#cf1322;">⚠️ Shortage Deficit: ${escapeHtml(item.deficitQuantity)} unit(s)</strong>` : ''}
+                      ${item.hasShortage && (!item.deficitQuantity || item.deficitQuantity <= 0) ? `<br><strong style="color:#cf1322;">⚠️ Shortage: ${escapeHtml(item.shortageReason || 'Stock unavailable')}</strong>` : ''}
                     </p>
                   </div>
                   <strong>${escapeHtml(money(item.price))}</strong>
@@ -3587,7 +3625,11 @@
           </div>
           <div class="admin-actions" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
             ${!order.shiprocketAwbCode ? `
-              <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="shiprocket-fulfill" data-id="${order.id}">🚀 Ship with Shiprocket</button>
+              ${order.isFulfillmentBlocked || isShortage || ['stock_shortage', 'partially_available', 'needs_review'].includes(order.fulfillmentStatus) ? `
+                <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" disabled title="🚫 Shipping blocked: Order has stock shortage or unallocated items" style="opacity:0.5;cursor:not-allowed;">🚫 Ship Blocked (Stock Shortage)</button>
+              ` : `
+                <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="shiprocket-fulfill" data-id="${order.id}">🚀 Ship with Shiprocket</button>
+              `}
             ` : `
               ${order.shiprocketLabelUrl ? `
                 <a class="admin-btn admin-btn--soft admin-btn--sm" href="${escapeHtml(order.shiprocketLabelUrl)}" target="_blank" rel="noopener">📄 Print Shipping Label</a>
@@ -3778,6 +3820,9 @@
                         <td><strong>${escapeHtml(money(order.totalAmount))}</strong></td>
                         <td>
                           <span class="admin-badge ${statusClass(orderDisplayStatus)}">${escapeHtml(getStatusLabel(orderDisplayStatus))}</span>
+                          ${order.fulfillmentStatus ? `
+                            <br><span class="admin-badge ${getFulfillmentBadgeClass(order.fulfillmentStatus)}" style="margin-top:3px;font-size:10px;">${escapeHtml(getFulfillmentStatusLabel(order.fulfillmentStatus))}</span>
+                          ` : ''}
                           ${orderIsShortage ? `
                             <br><span class="admin-badge ${shortageReviewBadgeClass(order.stockShortageReviewStatus || order.stockShortages?.[0]?.reviewStatus)}" style="margin-top:3px;font-size:10px;">${escapeHtml(getShortageReviewStatusLabel(order.stockShortageReviewStatus || order.stockShortages?.[0]?.reviewStatus))}</span>
                           ` : ''}
@@ -3787,7 +3832,7 @@
                             ${orderIsShortage ? `
                               <button class="admin-btn admin-btn--soft admin-btn--sm" type="button" data-action="open-stock-shortage-review" data-id="${order.id}" style="padding:3px 8px;font-size:11px;font-weight:600;white-space:nowrap;">Review</button>
                             ` : ''}
-                            ${!order.shiprocketAwbCode && !orderIsShortage && !['cancelled', 'delivered', 'returned'].includes(normalizeOrderStatus(order.status)) ? `
+                            ${!order.shiprocketAwbCode && !orderIsShortage && !order.isFulfillmentBlocked && order.fulfillmentStatus === 'ready_to_fulfill' && !['cancelled', 'delivered', 'returned'].includes(normalizeOrderStatus(order.status)) ? `
                               <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-action="shiprocket-fulfill" data-id="${order.id}" style="padding:3px 8px;font-size:11px;font-weight:600;white-space:nowrap;">🚀 Ship</button>
                             ` : ''}
                             <button class="admin-action-link" type="button" data-action="track-admin-order" data-id="${order.id}" style="white-space:nowrap;">Track</button>
@@ -3822,8 +3867,14 @@
                   </div>
                   <div class="admin-card__foot">
                     <div class="admin-footer-actions">
-                      ${!selectedOrder?.shiprocketAwbCode ? `<button class="admin-btn admin-btn--primary" type="button" data-action="shiprocket-fulfill" data-id="${selectedOrder?.id || ''}">🚀 Ship with Shiprocket</button>` : ''}
-                      <button class="admin-btn admin-btn--ghost" type="button" data-action="ship-order" data-id="${selectedOrder?.id || ''}">Ship</button>
+                      ${!selectedOrder?.shiprocketAwbCode ? `
+                        ${selectedOrder?.isFulfillmentBlocked || Boolean(selectedOrder?.hasStockShortage || selectedOrder?.status === 'stock_shortage') ? `
+                          <button class="admin-btn admin-btn--primary" type="button" disabled title="🚫 Shipping blocked: Order has stock shortage" style="opacity:0.5;cursor:not-allowed;">🚫 Ship Blocked</button>
+                        ` : `
+                          <button class="admin-btn admin-btn--primary" type="button" data-action="shiprocket-fulfill" data-id="${selectedOrder?.id || ''}">🚀 Ship with Shiprocket</button>
+                        `}
+                      ` : ''}
+                      <button class="admin-btn admin-btn--ghost" type="button" data-action="ship-order" data-id="${selectedOrder?.id || ''}" ${selectedOrder?.isFulfillmentBlocked ? 'disabled title="Stock unavailable"' : ''}>Ship</button>
                       <button class="admin-btn admin-btn--ghost" type="button" data-action="deliver-order" data-id="${selectedOrder?.id || ''}">Deliver</button>
                       <button class="admin-btn admin-btn--danger" type="button" data-action="cancel-order" data-id="${selectedOrder?.id || ''}" ${['delivered', 'returned', 'cancelled'].includes(normalizeOrderStatus(selectedOrder?.status)) ? 'disabled title="Delivered and returned orders cannot be cancelled"' : ''}>Cancel</button>
                       <button class="admin-btn admin-btn--soft" type="button" data-action="refund-order" data-id="${selectedOrder?.id || ''}">Refund</button>
