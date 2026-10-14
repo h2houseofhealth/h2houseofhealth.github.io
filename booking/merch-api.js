@@ -10270,20 +10270,60 @@ module.exports = function mountMerchApi(app, {
       const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);
       const customerEmail = String(order.customer_email || order.guest_email || '').trim().toLowerCase();
 
-      // Query candidate Private Coupons (or coupons assigned to users) for merch
+      const shortageCouponIds = new Set(
+        activeShortages.map((s) => Number(s.compensation_coupon_id)).filter((id) => Number.isInteger(id) && id > 0)
+      );
+
+      // Query candidate Private Coupons for merch:
+      // Strictly exclude public coupons, inactive coupons, and expired coupons.
+      // Prioritize coupons associated with this customer or created for this order.
+      // Exclude coupons assigned to any other email address.
       const couponRows = db.prepare(`
         SELECT *
         FROM coupons
-        WHERE (LOWER(COALESCE(coupon_type, '')) = 'private' OR assigned_user_email IS NOT NULL OR recipient_email IS NOT NULL)
-          AND (portal IS NULL OR LOWER(portal) IN ('merch', 'all'))
-        ORDER BY active DESC, datetime(created_at) DESC, id DESC
-      `).all();
+        WHERE (portal IS NULL OR LOWER(portal) IN ('merch', 'all'))
+          AND active = 1
+          AND (is_active IS NULL OR is_active = 1)
+          AND (LOWER(COALESCE(coupon_type, '')) = 'private' OR assigned_user_email IS NOT NULL OR recipient_email IS NOT NULL)
+          AND (LOWER(COALESCE(coupon_type, '')) != 'public')
+          AND (valid_till IS NULL OR valid_till >= date('now'))
+          AND (expires_at IS NULL OR expires_at >= date('now'))
+          AND (
+            (assigned_user_email IS NOT NULL AND LOWER(assigned_user_email) = ?)
+            OR (recipient_email IS NOT NULL AND LOWER(recipient_email) = ?)
+            OR (assigned_user_email IS NULL AND recipient_email IS NULL)
+          )
+        ORDER BY datetime(created_at) DESC, id DESC
+      `).all(customerEmail, customerEmail);
+
+      const cleanOrderSuffix = String(order.order_number || order.id || '').replace(/[^A-Za-z0-9]/g, '').slice(-6).toUpperCase();
 
       const eligibleCoupons = [];
       const ineligibleCoupons = [];
 
       for (const c of couponRows) {
         const evalResult = evaluateCompensationCouponEligibility(c, order, items);
+
+        const isOrderSpecific = Boolean(
+          shortageCouponIds.has(c.id) ||
+          (order.order_number && c.description && c.description.toLowerCase().includes(String(order.order_number).toLowerCase())) ||
+          (cleanOrderSuffix && c.code && c.code.toUpperCase().includes(`CARE-${cleanOrderSuffix}`))
+        );
+        const isCustomerSpecific = Boolean(
+          (c.assigned_user_email && customerEmail && c.assigned_user_email.toLowerCase() === customerEmail) ||
+          (c.recipient_email && customerEmail && c.recipient_email.toLowerCase() === customerEmail)
+        );
+
+        let category = 'other_private';
+        let categoryLabel = 'Other Eligible Private Coupon';
+        if (isOrderSpecific) {
+          category = 'order_specific';
+          categoryLabel = 'Created for this Order';
+        } else if (isCustomerSpecific) {
+          category = 'customer_specific';
+          categoryLabel = 'Customer-Specific Compensation';
+        }
+
         const couponSummary = {
           id: c.id,
           code: c.code,
@@ -10299,6 +10339,10 @@ module.exports = function mountMerchApi(app, {
           appliesTo: c.applies_to || 'merch',
           scopeLabel: evalResult.scopeLabel,
           assignedUserEmail: c.assigned_user_email || c.recipient_email || null,
+          isOrderSpecific,
+          isCustomerSpecific,
+          category,
+          categoryLabel,
         };
 
         if (evalResult.eligible) {
@@ -10311,12 +10355,35 @@ module.exports = function mountMerchApi(app, {
         }
       }
 
+      // Sort eligible coupons:
+      // 1. Order-specific coupons first (created for this specific shortage/order)
+      // 2. Customer-specific coupons second (assigned to this customer)
+      // 3. Other eligible private coupons third
+      eligibleCoupons.sort((a, b) => {
+        const catOrder = { order_specific: 1, customer_specific: 2, other_private: 3 };
+        const diff = (catOrder[a.category] || 99) - (catOrder[b.category] || 99);
+        if (diff !== 0) return diff;
+        return b.id - a.id;
+      });
+
+      // Keep the eligible list concise:
+      // Cap other_private coupons to at most 5 so the selector is never cluttered indiscriminately
+      let otherPrivateCount = 0;
+      const conciseEligibleCoupons = [];
+      for (const c of eligibleCoupons) {
+        if (c.category === 'other_private') {
+          if (otherPrivateCount >= 5) continue;
+          otherPrivateCount++;
+        }
+        conciseEligibleCoupons.push(c);
+      }
+
       res.json({
         success: true,
         orderId: order.id,
         orderNumber: order.order_number,
         customerEmail,
-        eligibleCoupons,
+        eligibleCoupons: conciseEligibleCoupons,
         ineligibleCoupons,
       });
     } catch (err) {
@@ -10464,6 +10531,10 @@ module.exports = function mountMerchApi(app, {
           appliesTo: createdCouponRow.applies_to,
           scopeLabel: evalResult.scopeLabel,
           assignedUserEmail: createdCouponRow.assigned_user_email,
+          isOrderSpecific: true,
+          isCustomerSpecific: true,
+          category: 'order_specific',
+          categoryLabel: 'Created for this Order',
         },
       });
     } catch (err) {

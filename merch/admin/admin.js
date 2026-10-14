@@ -7911,26 +7911,37 @@
           </div>
 
           <!-- Phase 4: Admin-Controlled Courtesy Compensation -->
-          <div style="background:#f6ffed;border:1px solid #b7eb8f;border-radius:8px;padding:12px 16px;">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:8px;">
+          <div style="background:#f6ffed;border:1px solid #b7eb8f;border-radius:8px;padding:14px 16px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
               <div style="display:flex;align-items:center;gap:8px;">
-                <span style="font-size:12px;font-weight:700;color:#135200;">
-                  🎁 Courtesy Compensation (Optional)
+                <span style="font-size:12.5px;font-weight:700;color:#135200;">
+                  🎁 Courtesy Compensation
                 </span>
                 <span class="admin-badge admin-badge--success" style="font-size:10px;">Admin Controlled</span>
               </div>
-              <button type="button" id="openCreateCompensationCouponBtn" class="admin-btn admin-btn--sm" style="background:#237804;color:#fff;border:none;font-size:11px;padding:3px 10px;border-radius:4px;cursor:pointer;font-weight:600;">
-                + Create Compensation Coupon
+            </div>
+
+            <!-- Primary Action Banner: Create Compensation Coupon directly for this Order -->
+            <div style="background:#ffffff;border:1.5px solid #52c41a;border-radius:6px;padding:12px 14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.04);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+              <div style="flex:1;min-width:240px;">
+                <div style="font-size:12.5px;font-weight:700;color:#135200;display:flex;align-items:center;gap:6px;">
+                  <span>➕ Create Compensation Coupon</span>
+                  <span class="admin-badge admin-badge--success" style="font-size:9.5px;padding:1px 6px;">Primary Action</span>
+                </div>
+                <div style="font-size:11px;color:#595959;margin-top:3px;line-height:1.4;">
+                  Recommended: Issue a tailor-made private coupon restricted to <code>${escapeHtml(customerEmail || 'customer')}</code> for this delayed order. Automatically applied to the email upon creation.
+                </div>
+              </div>
+              <button type="button" id="openCreateCompensationCouponBtn" class="admin-btn admin-btn--primary" style="background:#237804;border-color:#237804;font-size:12px;font-weight:600;padding:7px 16px;white-space:nowrap;cursor:pointer;display:flex;align-items:center;gap:6px;">
+                <span>➕</span>
+                <span>Create Compensation Coupon</span>
               </button>
             </div>
-            <p style="font-size:11px;color:#389e0d;margin:0 0 10px;line-height:1.4;">
-              Select an existing eligible Private Coupon to attach as courtesy compensation, create a new one directly for this customer, or choose to send an apology update only.
-            </p>
 
-            <!-- Inline Create Coupon Form (Hidden by default) -->
-            <div id="stockDelayCreateCouponForm" style="display:none;background:#ffffff;border:1px solid #b7eb8f;border-radius:6px;padding:14px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,0.05);">
+            <!-- Inline Create Coupon Form (Hidden by default, toggled via primary button) -->
+            <div id="stockDelayCreateCouponForm" style="display:none;background:#ffffff;border:1.5px solid #b7eb8f;border-radius:6px;padding:14px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,0.05);">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;border-bottom:1px solid #f0f0f0;padding-bottom:6px;">
-                <strong style="font-size:12px;color:#135200;">➕ Create Private Courtesy Coupon for Customer</strong>
+                <strong style="font-size:12px;color:#135200;">➕ Create Private Courtesy Coupon for this Customer</strong>
                 <span style="font-size:11px;color:#8c8c8c;">Private &middot; Backend Enforced</span>
               </div>
 
@@ -8009,24 +8020,34 @@
 
               <div style="display:flex;gap:8px;justify-content:flex-end;">
                 <button type="button" id="cancelCreateCouponBtn" class="admin-btn admin-btn--ghost admin-btn--sm" style="font-size:11px;">Cancel</button>
-                <button type="button" id="submitCreateCouponBtn" class="admin-btn admin-btn--primary admin-btn--sm" style="font-size:11px;background:#237804;border-color:#237804;">Create Coupon</button>
+                <button type="button" id="submitCreateCouponBtn" class="admin-btn admin-btn--primary admin-btn--sm" style="font-size:11px;background:#237804;border-color:#237804;font-weight:600;">Create & Apply Coupon</button>
               </div>
             </div>
 
-            <label class="admin-field" style="margin-bottom:6px;">
-              <span style="font-weight:600;font-size:12px;color:#262626;">Courtesy Coupon Selection</span>
+            <!-- Existing Coupons Selector Section -->
+            <div style="border-top:1px dashed #b7eb8f;padding-top:10px;margin-top:4px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:4px;">
+                <label class="admin-field" style="margin:0;">
+                  <span style="font-weight:600;font-size:12px;color:#262626;">Or Select an Existing Eligible Coupon:</span>
+                </label>
+                <span id="couponMatchesCount" class="admin-table__muted" style="font-size:11px;"></span>
+              </div>
+
+              <!-- Compact Search Filter Input -->
+              <div style="position:relative;margin-bottom:8px;">
+                <input type="text" id="searchCompensationCouponsInput" class="admin-input" placeholder="🔍 Search eligible coupons by code, benefit, or scope..." style="width:100%;font-size:11.5px;padding-right:26px;background:#fff;border-color:#d9d9d9;" />
+                <button type="button" id="clearCouponSearchBtn" style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:13px;color:#8c8c8c;cursor:pointer;padding:2px 4px;" title="Clear search">✕</button>
+              </div>
+
               <select id="stockDelayCompensationCouponSelect" class="admin-select" style="width:100%;font-size:12px;background:#fff;">
-                <option value="">No coupon — send email only</option>
-                ${eligibleCoupons.map((c) => `
-                  <option value="${c.id}">${escapeHtml(c.code)} &middot; ${escapeHtml(c.benefit)} &middot; Exp: ${escapeHtml(c.expiryLabel)} &middot; ${escapeHtml(c.remainingUsagesLabel || 'Available')}</option>
-                `).join('')}
+                <!-- Populated via renderCouponOptions() -->
               </select>
-            </label>
+            </div>
 
             <div id="stockDelayCouponDetailsCard" style="display:none;background:#fff;border:1px solid #d9f7be;border-radius:6px;padding:10px 12px;margin-top:8px;font-size:11px;color:#333;"></div>
 
-            <div id="noEligibleCouponsNotice" style="${eligibleCoupons.length === 0 ? '' : 'display:none;'}margin-top:6px;font-size:11px;color:#8c8c8c;font-style:italic;">
-              ℹ️ No eligible private coupons attached. Click "+ Create Compensation Coupon" above to create one, or send with apology details only.
+            <div id="noEligibleCouponsNotice" style="${eligibleCoupons.length === 0 ? '' : 'display:none;'}margin-top:8px;font-size:11px;color:#8c8c8c;font-style:italic;">
+              ℹ️ No eligible private coupons found for this customer. Use the primary "Create Compensation Coupon" action above to create one, or send an apology email only.
             </div>
 
             ${ineligibleCoupons.length > 0 ? `
@@ -8146,15 +8167,110 @@
       const resetApologyBtn = bodyEl.querySelector('#resetApologyMessageBtn');
       const previewSpinner = bodyEl.querySelector('#previewUpdatingSpinner');
       const noEligibleNotice = bodyEl.querySelector('#noEligibleCouponsNotice');
+      const couponSearchInput = bodyEl.querySelector('#searchCompensationCouponsInput');
+      const clearSearchBtn = bodyEl.querySelector('#clearCouponSearchBtn');
+      const couponMatchesCount = bodyEl.querySelector('#couponMatchesCount');
+
+      function renderCouponOptions(filterText = '') {
+        if (!couponSelect) return;
+        const currentVal = couponSelect.value;
+        const q = String(filterText || '').trim().toLowerCase();
+
+        const filtered = q
+          ? eligibleCoupons.filter((c) => {
+              return (
+                String(c.code || '').toLowerCase().includes(q) ||
+                String(c.benefit || '').toLowerCase().includes(q) ||
+                String(c.scopeLabel || '').toLowerCase().includes(q) ||
+                String(c.description || '').toLowerCase().includes(q) ||
+                String(c.categoryLabel || '').toLowerCase().includes(q)
+              );
+            })
+          : eligibleCoupons;
+
+        const orderCoupons = filtered.filter((c) => c.category === 'order_specific');
+        const customerCoupons = filtered.filter((c) => c.category === 'customer_specific');
+        const otherCoupons = filtered.filter((c) => c.category === 'other_private');
+
+        let optionsHtml = `<option value="">No coupon — send email only</option>`;
+
+        if (orderCoupons.length > 0) {
+          optionsHtml += `<optgroup label="⭐ Created for this Order (${escapeHtml(order.orderNumber || 'Order #' + order.id)})">`;
+          orderCoupons.forEach((c) => {
+            optionsHtml += `<option value="${c.id}">${escapeHtml(c.code)} &middot; ${escapeHtml(c.benefit)} &middot; Exp: ${escapeHtml(c.expiryLabel)} &middot; ${escapeHtml(c.remainingUsagesLabel || 'Available')}</option>`;
+          });
+          optionsHtml += `</optgroup>`;
+        }
+
+        if (customerCoupons.length > 0) {
+          optionsHtml += `<optgroup label="👤 Customer-Specific Courtesy (${escapeHtml(customerEmail)})">`;
+          customerCoupons.forEach((c) => {
+            optionsHtml += `<option value="${c.id}">${escapeHtml(c.code)} &middot; ${escapeHtml(c.benefit)} &middot; Exp: ${escapeHtml(c.expiryLabel)} &middot; ${escapeHtml(c.remainingUsagesLabel || 'Available')}</option>`;
+          });
+          optionsHtml += `</optgroup>`;
+        }
+
+        if (otherCoupons.length > 0) {
+          optionsHtml += `<optgroup label="🔒 Other Eligible Private Coupons">`;
+          otherCoupons.forEach((c) => {
+            optionsHtml += `<option value="${c.id}">${escapeHtml(c.code)} &middot; ${escapeHtml(c.benefit)} &middot; Exp: ${escapeHtml(c.expiryLabel)} &middot; ${escapeHtml(c.remainingUsagesLabel || 'Available')}</option>`;
+          });
+          optionsHtml += `</optgroup>`;
+        }
+
+        if (q && filtered.length === 0) {
+          optionsHtml += `<option disabled value="__no_matches__">— No coupons match "${escapeHtml(q)}" —</option>`;
+        }
+
+        couponSelect.innerHTML = optionsHtml;
+
+        // Restore previous selection if present in the current options list
+        if (currentVal && Array.from(couponSelect.options).some((opt) => opt.value === currentVal)) {
+          couponSelect.value = currentVal;
+        } else if (!q) {
+          couponSelect.value = currentVal || '';
+        }
+
+        if (couponMatchesCount) {
+          if (q) {
+            couponMatchesCount.textContent = `Showing ${filtered.length} of ${eligibleCoupons.length} coupon${eligibleCoupons.length === 1 ? '' : 's'}`;
+          } else {
+            couponMatchesCount.textContent = eligibleCoupons.length > 0 ? `(${eligibleCoupons.length} eligible coupon${eligibleCoupons.length === 1 ? '' : 's'})` : '';
+          }
+        }
+      }
+
+      // Initial populate of grouped select options
+      renderCouponOptions();
+
+      // Search input listeners for real-time filtering
+      couponSearchInput?.addEventListener('input', () => {
+        const val = couponSearchInput.value;
+        if (clearSearchBtn) clearSearchBtn.style.display = val ? 'inline' : 'none';
+        renderCouponOptions(val);
+      });
+
+      clearSearchBtn?.addEventListener('click', () => {
+        if (couponSearchInput) couponSearchInput.value = '';
+        if (clearSearchBtn) clearSearchBtn.style.display = 'none';
+        renderCouponOptions('');
+        couponSearchInput?.focus();
+      });
 
       function renderCouponCard(coupon) {
         if (!couponCard) return;
         if (coupon) {
           couponCard.style.display = 'block';
           couponCard.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-              <span><strong>Selected Code:</strong> <code style="font-weight:700;color:#237804;font-size:12px;">${escapeHtml(coupon.code)}</code></span>
-              <span class="admin-badge admin-badge--success">${escapeHtml(coupon.benefit)}</span>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+              <div>
+                <strong>Selected Code:</strong> <code style="font-weight:700;color:#237804;font-size:12px;">${escapeHtml(coupon.code)}</code>
+                <span class="admin-badge admin-badge--success" style="margin-left:6px;">${escapeHtml(coupon.benefit)}</span>
+                ${coupon.categoryLabel ? `<span class="admin-badge admin-badge--ready-comm" style="margin-left:4px;font-size:9.5px;">${escapeHtml(coupon.categoryLabel)}</span>` : ''}
+              </div>
+              <button type="button" id="deselectCompensationCouponBtn" class="admin-btn admin-btn--ghost admin-btn--sm" style="font-size:11px;padding:1px 8px;color:#cf1322;border-color:#ffa39e;">
+                ✕ Remove
+              </button>
             </div>
             <div style="color:#595959;line-height:1.5;">
               <strong>Scope:</strong> ${escapeHtml(coupon.scopeLabel || 'All Merch')} &middot;
@@ -8162,6 +8278,11 @@
               <strong>Availability:</strong> ${escapeHtml(coupon.remainingUsagesLabel || '1 remaining')}
             </div>
           `;
+          const deselectBtn = couponCard.querySelector('#deselectCompensationCouponBtn');
+          deselectBtn?.addEventListener('click', () => {
+            if (couponSelect) couponSelect.value = '';
+            refreshEmailPreview();
+          });
         } else {
           couponCard.style.display = 'none';
           couponCard.innerHTML = '';
@@ -8322,6 +8443,7 @@
         const isHidden = createForm.style.display === 'none';
         if (isHidden) {
           createForm.style.display = 'block';
+          if (openCreateBtn) openCreateBtn.innerHTML = '<span>✕</span><span>Close Create Form</span>';
           if (codeInput) codeInput.value = generateCouponCode();
           if (typeSelect) typeSelect.value = 'percentage';
           if (valInput) {
@@ -8344,11 +8466,13 @@
           codeInput?.focus();
         } else {
           createForm.style.display = 'none';
+          if (openCreateBtn) openCreateBtn.innerHTML = '<span>➕</span><span>Create Compensation Coupon</span>';
         }
       });
 
       cancelCreateBtn?.addEventListener('click', () => {
         if (createForm) createForm.style.display = 'none';
+        if (openCreateBtn) openCreateBtn.innerHTML = '<span>➕</span><span>Create Compensation Coupon</span>';
       });
 
       regenCodeBtn?.addEventListener('click', () => {
@@ -8434,26 +8558,33 @@
             }),
           });
 
-          toast('Coupon Created', res.message || `Coupon ${code} created successfully.`, 'success');
+          toast('Coupon Created & Applied', res.message || `Courtesy compensation coupon ${code} applied. Email preview updated.`, 'success');
 
-          const newCoupon = res.coupon;
+          const newCoupon = {
+            ...res.coupon,
+            isOrderSpecific: true,
+            isCustomerSpecific: true,
+            category: 'order_specific',
+            categoryLabel: 'Created for this Order',
+          };
           eligibleCoupons.unshift(newCoupon);
 
-          // Rebuild select options
+          if (couponSearchInput) {
+            couponSearchInput.value = '';
+            if (clearSearchBtn) clearSearchBtn.style.display = 'none';
+          }
+
+          // Rebuild select options with new coupon grouped at the top
+          renderCouponOptions('');
           if (couponSelect) {
-            couponSelect.innerHTML = `
-              <option value="">No coupon — send email only</option>
-              ${eligibleCoupons.map((c) => `
-                <option value="${c.id}" ${c.id === newCoupon.id ? 'selected' : ''}>${escapeHtml(c.code)} &middot; ${escapeHtml(c.benefit)} &middot; Exp: ${escapeHtml(c.expiryLabel)} &middot; ${escapeHtml(c.remainingUsagesLabel || 'Available')}</option>
-              `).join('')}
-            `;
             couponSelect.value = String(newCoupon.id);
           }
 
           if (noEligibleNotice) noEligibleNotice.style.display = 'none';
           if (createForm) createForm.style.display = 'none';
+          if (openCreateBtn) openCreateBtn.innerHTML = '<span>➕</span><span>Create Compensation Coupon</span>';
 
-          // Trigger preview refresh with the newly selected coupon
+          // Trigger preview refresh with the newly created and selected coupon
           await refreshEmailPreview();
         } catch (err) {
           toast('Coupon Creation Failed', err.message || 'Unable to create compensation coupon.', 'danger');
