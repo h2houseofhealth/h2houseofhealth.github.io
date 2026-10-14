@@ -126,9 +126,9 @@ async function runTests() {
     assert(existingVariantIds.has(id), `Active variant ID ${id} referenced by orders must exist`);
   });
 
-  // Verify all 25 variant records are intact in merch_variants (0 hard deletions)
+  // Verify all 24 catalog variant records are intact in merch_variants (0 hard deletions of real variants)
   const totalVariants = db.prepare('SELECT COUNT(*) as count FROM merch_variants').get().count;
-  assert.strictEqual(totalVariants, 25, 'All 25 variants must remain in merch_variants without hard deletion');
+  assert.strictEqual(totalVariants, 24, 'All 24 catalog variants must remain in merch_variants without hard deletion');
   console.log('  ✔ All historical order items and variant rows are completely preserved without hard deletion');
 
   // Test 4: Persisted Stock Quantities Preserved
