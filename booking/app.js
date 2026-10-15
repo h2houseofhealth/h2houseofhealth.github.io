@@ -1212,6 +1212,7 @@ async function bootstrap() {
   const params = new URLSearchParams(window.location.search);
   const launchGuestBooking = params.get('entry') === 'guest';
   const requestedAuth = params.get('auth') === '1';
+  const hasGoogleAuthError = params.get('auth_error') === 'google';
   const incomingReturnState = getIncomingAuthReturnState();
   if (incomingReturnState) {
     storePendingAuthReturnState({
@@ -1231,6 +1232,15 @@ async function bootstrap() {
   }
   populateTimeSlots();
   await Promise.all([loadCurrencyConfig(), loadCurrentUser()]);
+    if (hasGoogleAuthError && !state.user) {
+      openAuthFromLanding('google-auth-error');
+      if (elements.authError) {
+        elements.authError.textContent = 'Google authentication was cancelled or failed. Please try again.';
+      }
+      try {
+        window.history.replaceState(null, '', window.location.pathname + window.location.hash);
+      } catch {}
+    }
     if (!state.user && launchGuestBooking) {
       await enterGuestBookingMode({ scrollToServices: true });
       window.history.replaceState({}, '', '/booking/');
@@ -1242,21 +1252,24 @@ async function bootstrap() {
     await loadProfile();
     await loadDashboardData();
     ensurePostLoginDashboardChoice();
-    if (shouldOpenGuestServices && state.user.role === 'user') {
-      state.postLoginChoice = state.postLoginChoice || (isCurrentUserMembershipActive() ? 'continue-member' : 'continue-non-member');
-      state.activeUserTab = 'services';
-      window.location.hash = '#services';
-    }
-    if (launchGuestBooking && state.user.role === 'user') {
-      state.postLoginChoice = isCurrentUserMembershipActive() ? 'continue-member' : 'continue-non-member';
-      state.activeUserTab = 'services';
-      window.location.hash = '#services';
-    }
-    if (state.user.role === 'user' && !initialTab) {
-      state.membershipBrowseVisible = false;
-      if (!launchGuestBooking) {
-        state.activeUserTab = 'membership';
-        window.location.hash = '#membership';
+    const restoredReturnState = restoreBookingReturnStateAfterAuth();
+    if (!restoredReturnState) {
+      if (shouldOpenGuestServices && state.user.role === 'user') {
+        state.postLoginChoice = state.postLoginChoice || (isCurrentUserMembershipActive() ? 'continue-member' : 'continue-non-member');
+        state.activeUserTab = 'services';
+        window.location.hash = '#services';
+      }
+      if (launchGuestBooking && state.user.role === 'user') {
+        state.postLoginChoice = isCurrentUserMembershipActive() ? 'continue-member' : 'continue-non-member';
+        state.activeUserTab = 'services';
+        window.location.hash = '#services';
+      }
+      if (state.user.role === 'user' && !initialTab) {
+        state.membershipBrowseVisible = false;
+        if (!launchGuestBooking) {
+          state.activeUserTab = 'membership';
+          window.location.hash = '#membership';
+        }
       }
     }
   } else {
@@ -2051,12 +2064,15 @@ function attachEvents() {
     elements.guestCheckoutDialog?.close();
   });
 
+  elements.googleAuthBtn?.addEventListener('click', () => {
+    storePendingAuthReturnState(getCurrentBookingReturnState(isRegisterMode ? 'signup-google' : 'login-google'));
+  });
+
   // Checkout Options Handlers
   elements.checkoutWithGoogle?.addEventListener('click', () => {
     elements.checkoutOptionsDialog?.close();
-    if (window.gapi && window.gapi.auth2) {
-      window.gapi.auth2.getAuthInstance().signIn();
-    }
+    storePendingAuthReturnState(getCurrentBookingReturnState('checkout-google'));
+    window.location.href = buildApiUrl('/auth/google?returnTo=/booking/#cart');
   });
 
   elements.checkoutWithEmailLogin?.addEventListener('click', () => {
@@ -2705,11 +2721,13 @@ function renderAuthMode(preserveMessage = false) {
   elements.authSwitchBtn.textContent = isRegisterMode ? 'Sign in' : 'Register';
   elements.forgotPasswordBtn.textContent = isForgotPasswordMode ? 'Back to sign in' : 'Forgot password?';
   elements.forgotPasswordBtn.hidden = isRegisterMode;
+  const shouldShowGoogleAuth = isLoginStep || isSignupDetailsStep;
   if (elements.googleAuthBtn) {
-    elements.googleAuthBtn.hidden = true;
+    elements.googleAuthBtn.hidden = !shouldShowGoogleAuth;
+    elements.googleAuthBtn.href = buildApiUrl('/auth/google?returnTo=/booking/');
   }
   if (elements.authDivider) {
-    elements.authDivider.hidden = true;
+    elements.authDivider.hidden = !shouldShowGoogleAuth;
   }
   if (elements.mobileAuthSection) {
     elements.mobileAuthSection.hidden = !isLoginStep;

@@ -405,8 +405,15 @@ function renderAuthMode(preserveMessage = false) {
   elements.forgotPasswordBtn.textContent = state.forgotMode ? 'Back to sign in' : 'Forgot password?';
   elements.forgotPasswordBtn.hidden = state.registerMode;
 
-  if (elements.authDivider) elements.authDivider.hidden = true;
-  if (elements.googleAuthBtn) elements.googleAuthBtn.hidden = true;
+  const shouldShowGoogleAuth = isLoginStep || isSignupDetailsStep;
+
+  if (elements.authDivider) elements.authDivider.hidden = !shouldShowGoogleAuth;
+  if (elements.googleAuthBtn) {
+    elements.googleAuthBtn.hidden = !shouldShowGoogleAuth;
+    const returnTo = getReturnTo();
+    const targetUrl = returnTo ? `/auth/google?returnTo=${encodeURIComponent(returnTo)}` : '/auth/google';
+    elements.googleAuthBtn.href = buildApiUrl(targetUrl);
+  }
 
   updateAuthOtpResendUI();
 }
@@ -842,6 +849,13 @@ function bindEvents() {
 
 function init() {
   bindEvents();
+  const params = new URLSearchParams(window.location.search || '');
+  if (params.get('auth_error') === 'google') {
+    elements.authError.textContent = 'Google authentication was cancelled or failed. Please try again.';
+    try {
+      window.history.replaceState(null, '', window.location.pathname);
+    } catch {}
+  }
   renderAuthMode();
   loadCurrentUser();
 }
