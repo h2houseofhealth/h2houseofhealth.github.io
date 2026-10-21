@@ -974,28 +974,87 @@ function healthHandler(_req, res) {
 
 app.get(['/health', '/api/health'], healthHandler);
 
-app.get('/auth/google', ensureGoogleOAuthConfigured, passport.authenticate('google', { scope: ['profile', 'email'] }));
+function sanitizeAuthReturnUrl(raw) {
+  if (!raw || typeof raw !== 'string') return '/booking/';
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//') && !trimmed.startsWith('/\\')) {
+    return trimmed;
+  }
+  return '/booking/';
+}
+
+app.get('/api/auth/config', (_req, res) => {
+  res.json({
+    googleOAuthEnabled: GOOGLE_OAUTH_ENABLED,
+  });
+});
+
+app.get('/auth/google', ensureGoogleOAuthConfigured, (req, res, next) => {
+  const returnTo = sanitizeAuthReturnUrl(req.query.returnTo || req.query.state || '/booking/');
+  const state = Buffer.from(JSON.stringify({ returnTo })).toString('base64url');
+  passport.authenticate('google', {
+    scope: ['profile', 'email'],
+    state,
+  })(req, res, next);
+});
 
 app.get('/auth/google/callback', ensureGoogleOAuthConfigured, (req, res, next) => {
+  let returnTo = '/booking/';
+  if (req.query.state) {
+    try {
+      const decoded = JSON.parse(Buffer.from(String(req.query.state), 'base64url').toString('utf8'));
+      if (decoded && typeof decoded.returnTo === 'string') {
+        returnTo = sanitizeAuthReturnUrl(decoded.returnTo);
+      }
+    } catch {
+      if (typeof req.query.state === 'string' && req.query.state.startsWith('/')) {
+        returnTo = sanitizeAuthReturnUrl(req.query.state);
+      }
+    }
+  }
+
+  const isMerch = returnTo.startsWith('/merch');
+  const failureRedirect = isMerch ? '/merch/auth.html?auth_error=google' : '/booking/?auth_error=google';
+
   passport.authenticate('google', { session: true }, (error, user) => {
     if (error) {
       console.error('Google OAuth callback error:', String(error?.message || error));
-      return res.redirect('/booking/?auth_error=google');
+      return res.redirect(failureRedirect);
     }
 
     if (!user) {
-      return res.redirect('/booking/?auth_error=google');
+      return res.redirect(failureRedirect);
     }
 
     req.logIn(user, (loginError) => {
       if (loginError) {
         console.error('Google OAuth login error:', String(loginError?.message || loginError));
-        return res.redirect('/booking/?auth_error=google');
+        return res.redirect(failureRedirect);
       }
 
       const token = setAuthCookie(req, res, user);
       app.locals.merchGuestOrderSync?.(user);
-      return res.redirect(`/booking/#auth_token=${encodeURIComponent(token)}`);
+
+      if (user.role === 'admin') {
+        if (isMerch) {
+          return res.redirect('/merch/admin/index.html');
+        }
+        return res.redirect(`/booking/#auth_token=${encodeURIComponent(token)}`);
+      }
+
+      if (isMerch) {
+        return res.redirect(returnTo);
+      }
+
+      if (returnTo.includes('#')) {
+        const [basePath, hashPart] = returnTo.split('#');
+        const hashParams = new URLSearchParams(hashPart);
+        hashParams.set('auth_token', token);
+        return res.redirect(`${basePath}#${hashParams.toString()}`);
+      }
+
+      const cleanReturnTo = returnTo.endsWith('/') ? returnTo : `${returnTo}/`;
+      return res.redirect(`${cleanReturnTo}#auth_token=${encodeURIComponent(token)}`);
     });
   })(req, res, next);
 });
