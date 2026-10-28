@@ -7047,7 +7047,8 @@ module.exports = function mountMerchApi(app, {
       : (hasRealEmail(merchProfile?.email) ? String(merchProfile.email).trim().toLowerCase() : '');
     const realEmailToUse = hasIncomingRealEmail ? incomingCustomerEmail : existingRealEmail;
 
-    if (hasIncomingRealEmail && authUser) {
+    // Only fill the account email when it has none; never overwrite an existing real login email with the checkout email.
+    if (hasIncomingRealEmail && authUser && !hasRealEmail(authUser.email)) {
       try {
         const emailOwner = db
           .prepare('SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1')
@@ -7746,7 +7747,8 @@ module.exports = function mountMerchApi(app, {
       : (hasRealEmail(merchProfile?.email) ? String(merchProfile.email).trim().toLowerCase() : '');
     const realEmailToUse = hasIncomingRealEmail ? incomingCustomerEmail : existingRealEmail;
 
-    if (hasIncomingRealEmail && authUser) {
+    // Only fill the account email when it has none; never overwrite an existing real login email with the checkout email.
+    if (hasIncomingRealEmail && authUser && !hasRealEmail(authUser.email)) {
       try {
         const emailOwner = db
           .prepare('SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1')
