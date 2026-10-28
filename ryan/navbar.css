@@ -1,0 +1,592 @@
+/* ==========================================================================
+   H2 UNIVERSAL RESPONSIVE NAVBAR
+   Consistent across Ryan's campaign and H2 pages
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+
+:root {
+  --nav-terracotta: #AE5431;
+  --nav-terracotta-hover: #964223;
+  --nav-terracotta-active: #7E361B;
+  --nav-terracotta-subtle: rgba(174, 84, 49, 0.08);
+  --nav-terracotta-glow: rgba(174, 84, 49, 0.22);
+  --nav-bg-header: #FAF7F2;
+  --nav-charcoal: #1C1817;
+  --nav-charcoal-muted: #6B625E;
+  --nav-border: rgba(174, 84, 49, 0.12);
+  --nav-height: 74px;
+  --nav-max-width: 1440px;
+}
+
+/* Site Header */
+header.site-header {
+  position: sticky;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: var(--nav-height);
+  background-color: var(--nav-bg-header);
+  border-bottom: 1px solid var(--nav-border);
+  z-index: 999;
+  box-sizing: border-box;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--nav-charcoal);
+  -webkit-font-smoothing: antialiased;
+  transition: height 0.2s ease, background-color 0.2s ease;
+}
+
+header.site-header * {
+  box-sizing: border-box;
+}
+
+header.site-header .header-inner {
+  max-width: var(--nav-max-width);
+  height: 100%;
+  margin: 0 auto;
+  padding: 0 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+/* Logo */
+header.site-header .header-logo {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  flex-shrink: 0;
+  transition: opacity 0.18s ease;
+}
+
+header.site-header .header-logo:hover {
+  opacity: 0.88;
+}
+
+header.site-header .header-logo-img {
+  width: auto;
+  height: 36px;
+  max-height: 36px;
+  object-fit: contain;
+  display: block;
+}
+
+/* Center Desktop Navigation */
+header.site-header .header-nav {
+  display: flex;
+  align-items: center;
+  margin: 0 auto;
+}
+
+header.site-header .nav-list {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+header.site-header .nav-item {
+  position: relative;
+}
+
+header.site-header .nav-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 22.5px;
+  color: var(--nav-charcoal);
+  text-decoration: none;
+  border-radius: 6px;
+  transition: color 0.18s ease, background-color 0.18s ease;
+  position: relative;
+  letter-spacing: -0.01em;
+}
+
+header.site-header .nav-link:hover {
+  color: var(--nav-terracotta);
+  background-color: var(--nav-terracotta-subtle);
+}
+
+/* Active Link State */
+header.site-header .nav-link.active {
+  color: var(--nav-terracotta);
+  font-weight: 600;
+}
+
+header.site-header .nav-link.active::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 12px;
+  right: 12px;
+  height: 2.5px;
+  background-color: var(--nav-terracotta);
+  border-radius: 2px;
+}
+
+/* Right Actions Area */
+header.site-header .header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+/* Header Icon Buttons */
+header.site-header .header-icon-btn {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--nav-charcoal);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+  flex-shrink: 0;
+}
+
+header.site-header .header-icon-btn:hover {
+  background-color: var(--nav-terracotta-subtle);
+  color: var(--nav-terracotta);
+  transform: translateY(-1px);
+}
+
+header.site-header .header-icon-btn:active {
+  transform: translateY(0);
+}
+
+/* User Profile Account Icon Button - Terracotta Brand Color (#AE5431) */
+header.site-header .header-icon-btn.account-icon-btn {
+  color: #AE5431;
+}
+
+header.site-header .header-icon-btn.account-icon-btn svg {
+  stroke: #AE5431;
+  color: #AE5431;
+  stroke-width: 1.8;
+  display: block;
+}
+
+header.site-header .header-icon-btn.account-icon-btn:hover {
+  background-color: var(--nav-terracotta-subtle);
+  color: var(--nav-terracotta-hover);
+}
+
+header.site-header .header-icon-btn.account-icon-btn:hover svg {
+  stroke: var(--nav-terracotta-hover);
+}
+
+.user-account-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* Cart Badge */
+header.site-header .cart-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9999px;
+  background-color: var(--nav-terracotta);
+  color: #FFFFFF;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  box-shadow: 0 1px 4px rgba(174, 84, 49, 0.35);
+  box-sizing: border-box;
+}
+
+/* Prominent Shop Now CTA Button */
+.btn-ryans-collection {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40.5px;
+  padding: 9px 20px;
+  border-radius: 9999px;
+  background-color: var(--nav-terracotta);
+  color: #FFFFFF !important;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22.5px;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 10px var(--nav-terracotta-glow);
+  transition: background-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.btn-ryans-collection:hover {
+  background-color: var(--nav-terracotta-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px var(--nav-terracotta-glow);
+}
+
+.btn-ryans-collection:active {
+  background-color: var(--nav-terracotta-active);
+  transform: translateY(0);
+}
+
+/* Mobile Hamburger Toggle */
+header.site-header .mobile-menu-toggle {
+  display: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 7px;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+  color: var(--nav-charcoal);
+  transition: background-color 0.18s ease;
+  flex-shrink: 0;
+}
+
+header.site-header .mobile-menu-toggle:hover {
+  background-color: var(--nav-terracotta-subtle);
+}
+
+header.site-header .hamburger-bar {
+  display: block;
+  width: 20px;
+  height: 2px;
+  background-color: currentColor;
+  border-radius: 2px;
+  transition: transform 0.24s ease, opacity 0.24s ease;
+}
+
+header.site-header .mobile-menu-toggle[aria-expanded="true"] .hamburger-bar:nth-child(1) {
+  transform: translateY(7px) rotate(45deg);
+}
+header.site-header .mobile-menu-toggle[aria-expanded="true"] .hamburger-bar:nth-child(2) {
+  opacity: 0;
+}
+header.site-header .mobile-menu-toggle[aria-expanded="true"] .hamburger-bar:nth-child(3) {
+  transform: translateY(-7px) rotate(-45deg);
+}
+
+/* Mobile Drawer Overlay / Backdrop */
+.mobile-nav-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(28, 24, 23, 0.48);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  z-index: 1000;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.28s ease, visibility 0.28s ease;
+}
+
+.mobile-nav-backdrop.open {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Mobile Slide-in Drawer */
+.mobile-nav-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  max-width: 85vw;
+  background-color: #FAF7F2;
+  box-shadow: -6px 0 28px rgba(28, 24, 23, 0.2);
+  z-index: 1001;
+  transform: translateX(100%);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.28s;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  box-sizing: border-box;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.mobile-nav-drawer.open {
+  transform: translateX(0);
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.mobile-nav-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--nav-border);
+}
+
+.mobile-nav-logo-img {
+  height: 32px;
+  width: auto;
+  object-fit: contain;
+}
+
+.mobile-nav-close {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--nav-charcoal);
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.mobile-nav-close:hover {
+  background-color: var(--nav-terracotta-subtle);
+  color: var(--nav-terracotta);
+}
+
+.mobile-nav-menu {
+  flex: 1;
+  padding: 20px 16px;
+}
+
+.mobile-nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mobile-nav-link {
+  display: flex;
+  align-items: center;
+  padding: 12px 14px;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--nav-charcoal);
+  text-decoration: none;
+  border-radius: 8px;
+  transition: color 0.18s ease, background-color 0.18s ease;
+}
+
+.mobile-nav-link:hover {
+  color: var(--nav-terracotta);
+  background-color: var(--nav-terracotta-subtle);
+}
+
+.mobile-nav-link.active {
+  color: var(--nav-terracotta);
+  background-color: var(--nav-terracotta-subtle);
+  font-weight: 600;
+}
+
+.mobile-nav-footer {
+  padding: 18px 20px;
+  border-top: 1px solid var(--nav-border);
+  background-color: rgba(174, 84, 49, 0.03);
+}
+
+.mobile-nav-footer .btn-ryans-collection {
+  width: 100%;
+}
+
+/* ==========================================================================
+   Responsive Media Queries
+   ========================================================================== */
+
+/* Tablet (≤ 1024px) */
+@media screen and (max-width: 1024px) {
+  header.site-header .header-nav {
+    display: none;
+  }
+
+  header.site-header .mobile-menu-toggle {
+    display: flex;
+  }
+
+  header.site-header .header-inner {
+    padding: 0 20px;
+    gap: 12px;
+  }
+}
+
+/* Medium Mobile / Small Tablet (≤ 768px) */
+@media screen and (max-width: 768px) {
+  :root {
+    --nav-height: 66px;
+  }
+
+  header.site-header {
+    height: 66px;
+  }
+
+  header.site-header .header-inner {
+    padding: 0 16px;
+    gap: 10px;
+  }
+
+  header.site-header .header-logo-img {
+    height: 30px;
+  }
+
+  header.site-header .header-actions {
+    gap: 8px;
+  }
+
+  header.site-header .header-icon-btn {
+    width: 36px;
+    height: 36px;
+  }
+
+  header.site-header .mobile-menu-toggle {
+    width: 36px;
+    height: 36px;
+    padding: 6px;
+  }
+
+  .btn-ryans-collection {
+    height: 36px;
+    padding: 7px 14px;
+    font-size: 13px;
+    line-height: 20px;
+  }
+}
+
+/* Compact Mobile (≤ 540px) */
+@media screen and (max-width: 540px) {
+  :root {
+    --nav-height: 62px;
+  }
+
+  header.site-header {
+    height: 62px;
+  }
+
+  header.site-header .header-inner {
+    padding: 0 12px;
+    gap: 6px;
+  }
+
+  header.site-header .header-logo-img {
+    height: 27px;
+    max-width: 82px;
+  }
+
+  header.site-header .header-actions {
+    gap: 5px;
+  }
+
+  header.site-header .header-icon-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  header.site-header .header-icon-btn svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  header.site-header .cart-badge {
+    top: -1px;
+    right: -1px;
+    min-width: 16px;
+    height: 16px;
+    line-height: 16px;
+    font-size: 10px;
+    padding: 0 3px;
+  }
+
+  header.site-header .mobile-menu-toggle {
+    width: 32px;
+    height: 32px;
+    padding: 5px;
+  }
+
+  header.site-header .hamburger-bar {
+    width: 17px;
+  }
+
+  .btn-ryans-collection {
+    height: 32px;
+    padding: 6px 11px;
+    font-size: 12px;
+    line-height: 18px;
+    letter-spacing: 0;
+  }
+}
+
+/* Extra Small Phones (≤ 375px) */
+@media screen and (max-width: 375px) {
+  header.site-header .header-inner {
+    padding: 0 8px;
+    gap: 4px;
+  }
+
+  header.site-header .header-logo-img {
+    height: 24px;
+    max-width: 68px;
+  }
+
+  header.site-header .header-actions {
+    gap: 4px;
+  }
+
+  header.site-header .header-icon-btn {
+    width: 30px;
+    height: 30px;
+  }
+
+  header.site-header .header-icon-btn svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  header.site-header .mobile-menu-toggle {
+    width: 30px;
+    height: 30px;
+    padding: 5px;
+  }
+
+  header.site-header .hamburger-bar {
+    width: 16px;
+  }
+
+  .btn-ryans-collection {
+    height: 28px;
+    padding: 5px 8px;
+    font-size: 11px;
+    line-height: 16px;
+  }
+}
