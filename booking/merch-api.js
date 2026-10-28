@@ -7724,6 +7724,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const isGuestCheckout = !authUser;
     const guestName = isGuestCheckout ? resolvedCustomer.name : null;
     const guestEmail = isGuestCheckout ? resolvedCustomer.email : null;
+    const guestPhone = isGuestCheckout ? resolvedCustomer.phone : null;
     if (String(req.body?.currency || '').trim().toUpperCase() === 'USD') {
       return res.status(400).json({ error: 'Cash on Delivery is only available in INR' });
     }
