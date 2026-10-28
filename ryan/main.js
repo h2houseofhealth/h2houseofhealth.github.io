@@ -134,7 +134,11 @@ const DEFAULT_COUPON_DISCOUNT = 1150;
 // Commission to Ryan: ₹2,300 per bottle + ₹1,000 per mist.
 const RYAN_BUNDLE_DISCOUNT_RATE = 0.15;
 const RYAN_INDIVIDUAL_DISCOUNT_RATE = 0.05;
-const RYAN_PAIR_PRICE = 22990 + 11990;
+// Money helpers: totals are exact to the paisa and are never rounded to whole rupees,
+// so the page total always equals the amount the server sends to Razorpay.
+const roundRs = (value) => Math.round(value * 100) / 100;
+const formatRs = (value) => Number(value).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const getRyanPairPrice = () => H2_CATALOGUE[0].price + H2_CATALOGUE[1].price;
 const VALID_RYAN_CODES = ['RYANH2', 'RYAN', 'RYAN100'];
 
 let currentCart = [];
@@ -318,6 +322,63 @@ function removeItemFromCart(index) {
 /* ==========================================================================
    APP INITIALIZATION
    ========================================================================== */
+/**
+ * Bottle and mist prices are owned by the database (edited in the admin portal). Read them once on load
+ * so the page shows exactly what the server will charge; the hard-coded values above are only a fallback.
+ */
+async function syncPricesFromServer() {
+  try {
+    const res = await fetch('/api/merch/products', { credentials: 'include' });
+    if (!res.ok) return;
+    const products = await res.json();
+    const priceOf = (pattern) => {
+      const product = products.find((p) => pattern.test(String(p.name || '')));
+      const prices = ((product && product.variants) || [])
+        .filter((v) => Number(v.isActive ?? 1) === 1 && !v.deletedAt)
+        .map((v) => Number(v.price))
+        .filter((n) => n > 0);
+      return prices.length ? Math.min(...prices) / 100 : 0;
+    };
+    const bottlePrice = priceOf(/bottle/i);
+    const mistPrice = priceOf(/(mist|spray)/i);
+    if (!bottlePrice && !mistPrice) return;
+
+    const unitPrices = { bottle: bottlePrice, mist: mistPrice };
+    for (const [key, price] of Object.entries(unitPrices)) {
+      if (!price) continue;
+      const catalogueItem = H2_CATALOGUE.find((item) => item.id === key);
+      if (catalogueItem) catalogueItem.price = price;
+      BEST_OFFERS_ITEMS.filter((offer) => offer.productId === key).forEach((offer) => { offer.price = price; });
+      if (typeof FEATURE_DATA !== 'undefined' && FEATURE_DATA[key]) {
+        FEATURE_DATA[key].price = `₹${price.toLocaleString('en-IN')}`;
+      }
+      const priceLabel = document.querySelector(`[data-product="${key}"] .product-price`);
+      if (priceLabel) priceLabel.textContent = `₹${price.toLocaleString('en-IN')}`;
+      const addBtn = document.getElementById(`${key}AddToCartBtn`);
+      if (addBtn) addBtn.dataset.price = String(price);
+    }
+
+    const pairPrice = getRyanPairPrice();
+    BUNDLE_OFFER.originalPrice = pairPrice;
+    BUNDLE_OFFER.price = roundRs(pairPrice * (1 - RYAN_BUNDLE_DISCOUNT_RATE));
+    BUNDLE_OFFER.savingsAmount = roundRs(pairPrice * RYAN_BUNDLE_DISCOUNT_RATE);
+
+    currentCart.forEach((item) => {
+      if (isPreMadeBundle(item)) {
+        item.price = BUNDLE_OFFER.price;
+        item.originalPrice = pairPrice;
+      } else if (isStandaloneBottle(item) && bottlePrice) {
+        item.price = bottlePrice;
+      } else if (isStandaloneMist(item) && mistPrice) {
+        item.price = mistPrice;
+      }
+    });
+    saveCart(currentCart);
+  } catch (err) {
+    console.warn('[H2 Prices] Could not load live prices, using page defaults:', err);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   initCartStore();
   initCartCounter();
@@ -330,6 +391,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initFeatureLightbox();
   initRazorpayCheckout();
   initAuthSystem();
+  syncPricesFromServer();
 
   if (window.location.hash) {
     const target = document.querySelector(window.location.hash);
@@ -726,15 +788,15 @@ function renderCartDrawer() {
   // Confirmed Business Rules:
   // Bundle (1 bottle + 1 mist): 15% off
   // Bottle / mist not part of a bundle: 5% off
-  const bundleDiscount = totalBundleCount * RYAN_PAIR_PRICE * RYAN_BUNDLE_DISCOUNT_RATE;
-  const autoBundleDiscount = autoBundleCount * RYAN_PAIR_PRICE * RYAN_BUNDLE_DISCOUNT_RATE;
-  const unbundledBottleDiscount = unbundledBottles * H2_CATALOGUE[0].price * RYAN_INDIVIDUAL_DISCOUNT_RATE;
-  const unbundledMistDiscount = unbundledMists * H2_CATALOGUE[1].price * RYAN_INDIVIDUAL_DISCOUNT_RATE;
+  const bundleDiscount = roundRs(totalBundleCount * getRyanPairPrice() * RYAN_BUNDLE_DISCOUNT_RATE);
+  const autoBundleDiscount = roundRs(autoBundleCount * getRyanPairPrice() * RYAN_BUNDLE_DISCOUNT_RATE);
+  const unbundledBottleDiscount = roundRs(unbundledBottles * H2_CATALOGUE[0].price * RYAN_INDIVIDUAL_DISCOUNT_RATE);
+  const unbundledMistDiscount = roundRs(unbundledMists * H2_CATALOGUE[1].price * RYAN_INDIVIDUAL_DISCOUNT_RATE);
 
   const hasEligibleItems = (getCartTotalBottleCount() > 0 || getCartStandaloneMistCount() > 0);
   const isCouponValid = Boolean(appliedCoupon && VALID_RYAN_CODES.includes(appliedCoupon) && hasEligibleItems);
   // Ryan Fernando exclusive coupon: 5% off each unbundled bottle / mist
-  const ryanCustomerDiscount = isCouponValid ? (unbundledBottleDiscount + unbundledMistDiscount) : 0;
+  const ryanCustomerDiscount = isCouponValid ? roundRs((unbundledBottles * H2_CATALOGUE[0].price + unbundledMists * H2_CATALOGUE[1].price) * RYAN_INDIVIDUAL_DISCOUNT_RATE) : 0;
 
   // Total user discount: automatic bundle discount + applied Ryan coupon discount
   const totalUserDiscount = bundleDiscount + ryanCustomerDiscount;
@@ -745,9 +807,9 @@ function renderCartDrawer() {
     return sum + retail * (item.quantity || 1);
   }, 0);
 
-  const payable = Math.max(0, Math.round(fullRetailSubtotal - totalUserDiscount));
-  const totalSavings = Math.round(totalUserDiscount);
-  const gstIncluded = Math.max(0, payable - Math.round(payable / 1.18));
+  const payable = Math.max(0, roundRs(fullRetailSubtotal - totalUserDiscount));
+  const totalSavings = roundRs(totalUserDiscount);
+  const gstIncluded = Math.max(0, roundRs(payable - Math.round(payable * 100 / 1.18) / 100));
 
   if (currentCart.length === 0) {
     itemsContainer.innerHTML = '';
@@ -852,7 +914,7 @@ function renderCartDrawer() {
             </div>
           </div>
         </div>
-        <div class="cart-item-price">₹${(item.price * item.quantity).toLocaleString('en-IN')}.00</div>
+        <div class="cart-item-price">₹${formatRs((item.price * item.quantity))}</div>
       </div>
     `
     )
@@ -945,7 +1007,7 @@ function renderCartDrawer() {
 
   // 3. Itemized Estimated-Total Breakdown using authoritative values
   if (breakdownSubtotalVal) {
-    breakdownSubtotalVal.textContent = `₹${fullRetailSubtotal.toLocaleString('en-IN')}.00`;
+    breakdownSubtotalVal.textContent = `₹${formatRs(fullRetailSubtotal)}`;
   }
 
   if (breakdownBundleRow) {
@@ -1007,14 +1069,14 @@ function renderCartDrawer() {
   }
 
   if (breakdownTaxVal) {
-    breakdownTaxVal.textContent = `₹${gstIncluded.toLocaleString('en-IN')}.00`;
+    breakdownTaxVal.textContent = `₹${formatRs(gstIncluded)}`;
   }
 
   // Original Subtotal strike-through and savings pill in footer
   if (originalSubtotal) {
     if (totalSavings > 0) {
       originalSubtotal.hidden = false;
-      originalSubtotal.textContent = `₹${fullRetailSubtotal.toLocaleString('en-IN')}.00`;
+      originalSubtotal.textContent = `₹${formatRs(fullRetailSubtotal)}`;
     } else {
       originalSubtotal.hidden = true;
     }
@@ -1024,7 +1086,7 @@ function renderCartDrawer() {
     if (totalSavings > 0) {
       savingsPillWrap.hidden = false;
       if (savingsText) {
-        savingsText.textContent = `₹${totalSavings.toLocaleString('en-IN')}.00`;
+        savingsText.textContent = `₹${formatRs(totalSavings)}`;
       }
     } else {
       savingsPillWrap.hidden = true;
@@ -1032,7 +1094,7 @@ function renderCartDrawer() {
   }
 
   if (finalTotal) {
-    finalTotal.textContent = `₹${payable.toLocaleString('en-IN')}.00`;
+    finalTotal.textContent = `₹${formatRs(payable)}`;
   }
 }
 
@@ -1069,9 +1131,9 @@ function renderBestOffers() {
         <h5 class="bundle-title">${BUNDLE_OFFER.title}</h5>
         <p class="bundle-desc">${BUNDLE_OFFER.desc}</p>
         <div class="bundle-pricing-row">
-          <strong class="bundle-price-main">₹${BUNDLE_OFFER.price.toLocaleString('en-IN')}.00</strong>
-          <span class="bundle-price-strike">₹${BUNDLE_OFFER.originalPrice.toLocaleString('en-IN')}.00</span>
-          <span class="bundle-savings-pill">Save ₹${BUNDLE_OFFER.savingsAmount.toLocaleString('en-IN')}.00 (${BUNDLE_OFFER.savingsPercent})</span>
+          <strong class="bundle-price-main">₹${formatRs(BUNDLE_OFFER.price)}</strong>
+          <span class="bundle-price-strike">₹${formatRs(BUNDLE_OFFER.originalPrice)}</span>
+          <span class="bundle-savings-pill">Save ₹${formatRs(BUNDLE_OFFER.savingsAmount)} (${BUNDLE_OFFER.savingsPercent})</span>
         </div>
       </div>
 
@@ -1233,14 +1295,14 @@ function renderCheckoutPage() {
   const unbundledBottles = getCartIndividualBottleCount();
   const unbundledMists = getCartIndividualMistCount();
 
-  const bundleDiscount = totalBundleCount * RYAN_PAIR_PRICE * RYAN_BUNDLE_DISCOUNT_RATE;
-  const autoBundleDiscount = autoBundleCount * RYAN_PAIR_PRICE * RYAN_BUNDLE_DISCOUNT_RATE;
-  const unbundledBottleDiscount = unbundledBottles * H2_CATALOGUE[0].price * RYAN_INDIVIDUAL_DISCOUNT_RATE;
-  const unbundledMistDiscount = unbundledMists * H2_CATALOGUE[1].price * RYAN_INDIVIDUAL_DISCOUNT_RATE;
+  const bundleDiscount = roundRs(totalBundleCount * getRyanPairPrice() * RYAN_BUNDLE_DISCOUNT_RATE);
+  const autoBundleDiscount = roundRs(autoBundleCount * getRyanPairPrice() * RYAN_BUNDLE_DISCOUNT_RATE);
+  const unbundledBottleDiscount = roundRs(unbundledBottles * H2_CATALOGUE[0].price * RYAN_INDIVIDUAL_DISCOUNT_RATE);
+  const unbundledMistDiscount = roundRs(unbundledMists * H2_CATALOGUE[1].price * RYAN_INDIVIDUAL_DISCOUNT_RATE);
 
   const hasEligibleItems = (getCartTotalBottleCount() > 0 || getCartStandaloneMistCount() > 0);
   const isCouponValid = Boolean(appliedCoupon && VALID_RYAN_CODES.includes(appliedCoupon) && hasEligibleItems);
-  const ryanCustomerDiscount = isCouponValid ? (unbundledBottleDiscount + unbundledMistDiscount) : 0;
+  const ryanCustomerDiscount = isCouponValid ? roundRs((unbundledBottles * H2_CATALOGUE[0].price + unbundledMists * H2_CATALOGUE[1].price) * RYAN_INDIVIDUAL_DISCOUNT_RATE) : 0;
 
   const totalUserDiscount = bundleDiscount + ryanCustomerDiscount;
 
@@ -1249,9 +1311,9 @@ function renderCheckoutPage() {
     return sum + retail * (item.quantity || 1);
   }, 0);
 
-  const payable = Math.max(0, Math.round(fullRetailSubtotal - totalUserDiscount));
-  const totalSavings = Math.round(totalUserDiscount);
-  const gstIncluded = Math.max(0, payable - Math.round(payable / 1.18));
+  const payable = Math.max(0, roundRs(fullRetailSubtotal - totalUserDiscount));
+  const totalSavings = roundRs(totalUserDiscount);
+  const gstIncluded = Math.max(0, roundRs(payable - Math.round(payable * 100 / 1.18) / 100));
 
   // Customer draft with auto-fill for authenticated user or saved guest info
   let draft = {};
@@ -1294,7 +1356,7 @@ function renderCheckoutPage() {
           </div>
         </div>
         <div class="shopify-summary-product__price">
-          ₹${(linePrice * qty).toLocaleString('en-IN')}.00
+          ₹${formatRs((linePrice * qty))}
         </div>
       </div>
     `;
@@ -1459,7 +1521,7 @@ function renderCheckoutPage() {
 
         <div class="shopify-checkout-actions">
           <button type="submit" class="shopify-pay-button" id="shopifyPayBtn">
-            <span>CONTINUE TO PAYMENT (₹${payable.toLocaleString('en-IN')}.00)</span>
+            <span>CONTINUE TO PAYMENT (₹${formatRs(payable)})</span>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
               <line x1="5" y1="12" x2="19" y2="12"></line>
               <polyline points="12 5 19 12 12 19"></polyline>
@@ -1492,7 +1554,7 @@ function renderCheckoutPage() {
         <div class="shopify-pricing">
           <div class="shopify-price-row">
             <span>Original subtotal</span>
-            <strong>₹${fullRetailSubtotal.toLocaleString('en-IN')}.00</strong>
+            <strong>₹${formatRs(fullRetailSubtotal)}</strong>
           </div>
           ${bundleDiscount > 0 ? `
             <div class="shopify-price-row shopify-price-row--discount">
@@ -1517,7 +1579,7 @@ function renderCheckoutPage() {
           </div>
           <div class="shopify-price-row">
             <span>Tax (GST 18% included)</span>
-            <strong>₹${gstIncluded.toLocaleString('en-IN')}.00</strong>
+            <strong>₹${formatRs(gstIncluded)}</strong>
           </div>
         </div>
 
@@ -1544,14 +1606,14 @@ function renderCheckoutPage() {
             ` : ''}
             <div class="shopify-savings-breakdown__total">
               <span>Total Savings</span>
-              <strong>₹${totalSavings.toLocaleString('en-IN')}.00</strong>
+              <strong>₹${formatRs(totalSavings)}</strong>
             </div>
           </div>
         ` : ''}
 
         <div class="shopify-total">
           <span>Total</span>
-          <strong><small>INR</small>₹${payable.toLocaleString('en-IN')}.00</strong>
+          <strong><small>INR</small>₹${formatRs(payable)}</strong>
         </div>
 
         <div class="shopify-trust">
@@ -1819,7 +1881,7 @@ async function startRazorpayCheckout(customer, submitBtn, errorMsg) {
     if (!orderRes.ok || !orderData.razorpayOrderId) {
       throw new Error(orderData.error || orderData.message || 'Failed to initialize payment.');
     }
-    const payableRupees = Math.round(Number(orderData.originalInrAmount || orderData.amount || 0) / 100);
+    const payableRupees = Number(orderData.originalInrAmount || orderData.amount || 0) / 100;
     orderData.payableRupees = payableRupees;
 
     if (typeof Razorpay === 'undefined') {
@@ -1874,7 +1936,7 @@ async function startRazorpayCheckout(customer, submitBtn, errorMsg) {
             alert('Payment verification error: ' + (verifyData.error || verifyData.message || 'Please contact H2 support.'));
             if (submitBtn) {
               submitBtn.disabled = false;
-              submitBtn.innerHTML = `<span>Proceed to Pay (₹${orderData.payableRupees.toLocaleString('en-IN')}.00)</span>`;
+              submitBtn.innerHTML = `<span>Proceed to Pay (₹${formatRs(orderData.payableRupees)})</span>`;
             }
           }
         } catch (err) {
@@ -1886,7 +1948,7 @@ async function startRazorpayCheckout(customer, submitBtn, errorMsg) {
         ondismiss: function () {
           if (submitBtn) {
             submitBtn.disabled = false;
-            submitBtn.innerHTML = `<span>CONTINUE TO PAYMENT (₹${orderData.payableRupees.toLocaleString('en-IN')}.00)</span>`;
+            submitBtn.innerHTML = `<span>CONTINUE TO PAYMENT (₹${formatRs(orderData.payableRupees)})</span>`;
           }
         }
       }
@@ -1900,7 +1962,7 @@ async function startRazorpayCheckout(customer, submitBtn, errorMsg) {
       }
       if (submitBtn) {
         submitBtn.disabled = false;
-        submitBtn.innerHTML = `<span>Retry Payment (₹${orderData.payableRupees.toLocaleString('en-IN')}.00)</span>`;
+        submitBtn.innerHTML = `<span>Retry Payment (₹${formatRs(orderData.payableRupees)})</span>`;
       }
     });
 
@@ -1951,7 +2013,7 @@ function showBookingConfirmation(confirmation) {
           </div>
           <div class="booking-order-row">
             <span class="label">Amount Paid:</span>
-            <span class="val" id="confirmAmountPaid">₹${Number(confirmation.amount || 0).toLocaleString('en-IN')}.00</span>
+            <span class="val" id="confirmAmountPaid">₹${formatRs(Number(confirmation.amount || 0))}</span>
           </div>
           <div class="booking-order-row">
             <span class="label">Shipping Destination:</span>
@@ -2091,7 +2153,7 @@ function initAddToCartActions() {
         productId: 'bottle',
         name: 'H2 Molecular Hydrogen Water Bottle',
         variant: variant,
-        price: 22990,
+        price: H2_CATALOGUE[0].price,
         quantity: 1,
         image: img
       });
@@ -2112,7 +2174,7 @@ function initAddToCartActions() {
         productId: 'mist',
         name: 'H2 Hydrogen Mist Spray',
         variant: variant,
-        price: 11990,
+        price: H2_CATALOGUE[1].price,
         quantity: 1,
         image: img
       });
@@ -3075,7 +3137,7 @@ async function openMyOrdersModal() {
             </div>
             <div class="h2-order-total">
               <span>Paid Amount:</span>
-              <span>₹${total.toLocaleString('en-IN')}.00</span>
+              <span>₹${formatRs(total)}</span>
             </div>
           </div>
         `;
