@@ -996,23 +996,25 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!ryanMainCoupon && ryanId) {
       db.prepare(`
         INSERT INTO coupons (code, description, portal, discount_type, discount_value, applies_to, is_active, active, coupon_type, influencer_id, created_at)
-        VALUES ('RYAN', 'Ryan influencer discount (₹1,150 off per eligible bottle)', 'merch', 'flat', 1150, 'category:bottles', 1, 1, 'public', ?, datetime('now'))
+        VALUES ('RYAN', 'Ryan influencer discount (5% off bottles/mists, 15% off bottle + mist bundles)', 'merch', 'flat', 1150, 'merch', 1, 1, 'public', ?, datetime('now'))
       `).run(ryanId);
     }
     const ryanCoupon = db.prepare("SELECT id FROM coupons WHERE LOWER(code) = 'ryan100' LIMIT 1").get();
     if (!ryanCoupon && ryanId) {
       db.prepare(`
         INSERT INTO coupons (code, description, portal, discount_type, discount_value, applies_to, is_active, active, coupon_type, influencer_id, created_at)
-        VALUES ('RYAN100', 'Ryan influencer discount (₹1,150 off per eligible bottle)', 'merch', 'flat', 1150, 'category:bottles', 1, 1, 'public', ?, datetime('now'))
+        VALUES ('RYAN100', 'Ryan influencer discount (5% off bottles/mists, 15% off bottle + mist bundles)', 'merch', 'flat', 1150, 'merch', 1, 1, 'public', ?, datetime('now'))
       `).run(ryanId);
     }
     const ryanH2Coupon = db.prepare("SELECT id FROM coupons WHERE LOWER(code) = 'ryanh2' LIMIT 1").get();
     if (!ryanH2Coupon && ryanId) {
       db.prepare(`
         INSERT INTO coupons (code, description, portal, discount_type, discount_value, applies_to, is_active, active, coupon_type, influencer_id, created_at)
-        VALUES ('RYANH2', 'Ryan influencer discount (₹1,150 off per eligible bottle)', 'merch', 'flat', 1150, 'category:bottles', 1, 1, 'public', ?, datetime('now'))
+        VALUES ('RYANH2', 'Ryan influencer discount (5% off bottles/mists, 15% off bottle + mist bundles)', 'merch', 'flat', 1150, 'merch', 1, 1, 'public', ?, datetime('now'))
       `).run(ryanId);
     }
+    // Ryan pricing now covers bottles and mists, so his coupons must not be limited to the bottle category.
+    db.prepare("UPDATE coupons SET applies_to = 'merch' WHERE UPPER(code) IN ('RYAN', 'RYAN100', 'RYANH2') AND applies_to = 'category:bottles'").run();
     // Ensure RyanH2 campaign persists all 4 bottle variant IDs [569, 570, 571, 572]
     try {
       const ryanH2Campaign = db.prepare("SELECT id, target_variant_ids FROM merch_campaigns WHERE LOWER(slug) = 'ryanh2'").get();
@@ -6173,7 +6175,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           if ([169, 170, 171, 172, 569, 570, 571, 572].includes(vId)) {
             totalBottles += Math.round(linePaise / 2299000);
           } else if ([173, 174, 175, 176, 573, 574].includes(vId)) {
-            totalMists += Math.round(linePaise / 1190000);
+            totalMists += Math.round(linePaise / 1199000);
           }
         }
       }
@@ -6182,11 +6184,66 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           totalBottles += Math.round(Number(fallbackArgs.productLineTotals[11]) / 2299000);
         }
         if (fallbackArgs.productLineTotals[12]) {
-          totalMists += Math.round(Number(fallbackArgs.productLineTotals[12]) / 1190000);
+          totalMists += Math.round(Number(fallbackArgs.productLineTotals[12]) / 1199000);
         }
       }
     }
     return { totalBottles, totalMists };
+  }
+
+  // Ryan landing-page pricing: bottle+mist pairs form a bundle (15% off), extra bottles/mists get 5% off.
+  // Commission to Ryan: ₹2,300 per bottle + ₹1,000 per mist (a bundle therefore earns ₹3,300).
+  const RYAN_BUNDLE_DISCOUNT_PCT = 15;
+  const RYAN_INDIVIDUAL_DISCOUNT_PCT = 5;
+  const RYAN_BOTTLE_COMMISSION_PAISE = 230000;
+  const RYAN_MIST_COMMISSION_PAISE = 100000;
+
+  // Active Ryan influencer row (by handle/name), used when an order comes from the /ryan landing page without a coupon.
+  function getActiveRyanInfluencerId() {
+    const row = db.prepare("SELECT id FROM merch_influencers WHERE active = 1 AND (LOWER(handle) = 'ryan_h2' OR LOWER(name) = 'ryan') ORDER BY id LIMIT 1").get();
+    return row ? Number(row.id) : 0;
+  }
+
+  function classifyRyanItem(item) {
+    const pid = Number(item.productId || item.product_id);
+    const name = String(item.productName || item.name || '');
+    const isBottle = pid === 11 || String(item.category || '').toLowerCase() === 'bottles' || /bottle/i.test(name);
+    const isMist = !isBottle && (pid === 12 || String(item.category || '').toLowerCase() === 'sprays' || /(mist|spray)/i.test(name));
+    return { isBottle, isMist };
+  }
+
+  function getRyanPricing(items = []) {
+    let bottleQty = 0;
+    let mistQty = 0;
+    let bottleTotal = 0;
+    let mistTotal = 0;
+    for (const item of (items || [])) {
+      const qty = Math.max(0, Number(item.quantity || 0));
+      if (qty <= 0) continue;
+      const { isBottle, isMist } = classifyRyanItem(item);
+      if (!isBottle && !isMist) continue;
+      const rawUnit = Number(item.unitPrice || item.price || 0);
+      const linePaise = Number(item.lineTotal) > 0
+        ? Number(item.lineTotal)
+        : qty * (rawUnit < 100000 ? rawUnit * 100 : rawUnit);
+      if (isBottle) { bottleQty += qty; bottleTotal += linePaise; }
+      else { mistQty += qty; mistTotal += linePaise; }
+    }
+    const bundleCount = Math.min(bottleQty, mistQty);
+    const bottleAvg = bottleQty ? bottleTotal / bottleQty : 0;
+    const mistAvg = mistQty ? mistTotal / mistQty : 0;
+    const extraBottles = bottleQty - bundleCount;
+    const extraMists = mistQty - bundleCount;
+    return {
+      bottleQty,
+      mistQty,
+      bundleCount,
+      extraBottles,
+      extraMists,
+      bundleDiscountPaise: Math.round(bundleCount * (bottleAvg + mistAvg) * RYAN_BUNDLE_DISCOUNT_PCT / 100),
+      individualDiscountPaise: Math.round((extraBottles * bottleAvg + extraMists * mistAvg) * RYAN_INDIVIDUAL_DISCOUNT_PCT / 100),
+      commissionPaise: bottleQty * RYAN_BOTTLE_COMMISSION_PAISE + mistQty * RYAN_MIST_COMMISSION_PAISE,
+    };
   }
 
   function validateMerchCouponForUser(args) {
@@ -6311,44 +6368,21 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     });
 
     if (isRyan) {
-      let totalBottles = 0;
-      let totalMists = 0;
-      for (const item of items) {
-        const vid = Number(item.variantId || item.id);
-        const pid = Number(item.productId || item.product_id);
-        const qty = Math.max(0, Number(item.quantity || 0));
-        const isEligibleBottle = campaignVariantIds.length > 0
-          ? campaignVariantIds.includes(vid)
-          : (pid === 11 || /bottle/i.test(String(item.productName || item.name || '')));
-        if (isEligibleBottle) totalBottles += qty;
-        const isMist = pid === 12 || /(mist|spray)/i.test(String(item.productName || item.name || ''));
-        if (isMist) totalMists += qty;
+      const pricing = getRyanPricing(items);
+      if (pricing.bottleQty + pricing.mistQty === 0) {
+        return { error: 'This coupon is only valid for the Hydrogen Water Bottle or Hydrogen Mist.' };
       }
-
-      if (totalBottles === 0) {
-        let variantLabel = [campaign?.variantColor, campaign?.variantSize].filter(Boolean).join(' ');
-        if (targetVariants.length > 1) {
-          variantLabel = targetVariants.map((v) => [v.color, v.size].filter(Boolean).join(' ')).join(' / ');
-        }
-        return {
-          error: variantLabel
-            ? `This coupon is only valid for the ${variantLabel} variant(s) of Hydrogen Water Bottle.`
-            : 'This coupon is only valid for the Hydrogen Water Bottle.',
-        };
-      }
-
-      const bundleCount = Math.min(totalBottles, totalMists);
-      const individualBottleCount = Math.max(0, totalBottles - bundleCount);
-      const ryanDiscountPaise = individualBottleCount * 115000; // ₹1,150 per individual bottle
       const subtotalPaise = Math.max(0, Math.round(Number(args.subtotalAmountPaise || 0)));
 
-      result.discountAmountPaise = ryanDiscountPaise;
-      result.finalAmountPaise = Math.max(0, subtotalPaise - ryanDiscountPaise);
-      result.bundleDiscountPaise = bundleCount * 523350; // ₹5,233.50 per bundle
-      result.ryanCommissionPaise = totalBottles * 230000; // ₹2,300 per bottle
-      result.totalBottles = totalBottles;
-      result.bundleCount = bundleCount;
-      result.individualBottleCount = individualBottleCount;
+      result.discountAmountPaise = pricing.individualDiscountPaise;
+      result.finalAmountPaise = Math.max(0, subtotalPaise - pricing.individualDiscountPaise);
+      result.bundleDiscountPaise = pricing.bundleDiscountPaise;
+      result.ryanCommissionPaise = pricing.commissionPaise;
+      result.totalBottles = pricing.bottleQty;
+      result.totalMists = pricing.mistQty;
+      result.bundleCount = pricing.bundleCount;
+      result.individualBottleCount = pricing.extraBottles;
+      result.individualMistCount = pricing.extraMists;
 
       if (result.coupon) {
         result.coupon.influencerName = campaign?.influencerName || result.coupon.influencerName || 'Ryan';
@@ -6414,25 +6448,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
 
   function getMerchCommissionSnapshot(coupon, items = [], attribution = {}) {
-    const isRyan = isRyanAttribution({ coupon, ...attribution });
+    const isRyan = attribution.forceRyan || isRyanAttribution({ coupon, ...attribution });
     if (isRyan) {
-      let totalBottles = 0;
       const lineCommissions = new Map();
       for (const item of (items || [])) {
-        const isBottle = Number(item.productId || item.product_id) === 11 ||
-          String(item.category || '').toLowerCase() === 'bottles' ||
-          /bottle/i.test(String(item.productName || item.name || ''));
         const qty = Math.max(0, Number(item.quantity || 0));
-        if (isBottle) {
-          totalBottles += qty;
-          const bottleComm = qty * 230000; // ₹2,300 per bottle (230,000 paise)
-          lineCommissions.set(Number(item.variantId || item.id), bottleComm);
-        } else {
-          lineCommissions.set(Number(item.variantId || item.id), 0);
-        }
+        const { isBottle, isMist } = classifyRyanItem(item);
+        const perUnit = isBottle ? RYAN_BOTTLE_COMMISSION_PAISE : (isMist ? RYAN_MIST_COMMISSION_PAISE : 0);
+        const key = Number(item.variantId || item.id);
+        lineCommissions.set(key, (lineCommissions.get(key) || 0) + qty * perUnit);
       }
-      const total = totalBottles * 230000; // 230,000 paise per bottle
-      return { total, byProduct: lineCommissions };
+      return { total: getRyanPricing(items).commissionPaise, byProduct: lineCommissions };
     }
 
     if (!coupon?.influencerId && !attribution?.influencerId) return { total: 0, byProduct: new Map() };
@@ -6459,22 +6485,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
 
   function getMerchBundleDiscountPaise(bundleCode, items = []) {
-    let totalBottles = 0;
-    let totalMists = 0;
-    for (const item of (items || [])) {
-      const isBottle = Number(item.productId || item.product_id) === 11 ||
-        String(item.category || '').toLowerCase() === 'bottles' ||
-        /bottle/i.test(String(item.productName || item.name || ''));
-      const isMist = Number(item.productId || item.product_id) === 12 ||
-        String(item.category || '').toLowerCase() === 'sprays' ||
-        /(mist|spray)/i.test(String(item.productName || item.name || ''));
-      const qty = Math.max(0, Number(item.quantity || 0));
-      if (isBottle) totalBottles += qty;
-      if (isMist) totalMists += qty;
-    }
-    const bundleQty = Math.min(totalBottles, totalMists);
-    if (bundleQty <= 0) return 0;
-    return Math.round(bundleQty * 523350); // 15% off ₹34,890 bundle = ₹5,233.50 per bundle
+    return getRyanPricing(items).bundleDiscountPaise; // 15% off each bottle+mist pair
   }
 
   function recordMerchCouponRedemption(payload) {
@@ -6955,7 +6966,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       if (campRow?.coupon_code) effectiveCouponCode = normalizeMerchCouponCode(campRow.coupon_code);
     }
 
-    let isInfluencerCampaignActive = Boolean(campaignSlug || campaignAttributionCookie?.influencerId);
+    let isInfluencerCampaignActive = Boolean(campaignSlug || campaignAttributionCookie?.influencerId || String(req.body?.landingPage || '').trim().toLowerCase() === 'ryan');
     if (!isInfluencerCampaignActive && effectiveCouponCode) {
       const cRow = db.prepare('SELECT influencer_id FROM coupons WHERE LOWER(code) = LOWER(?) LIMIT 1').get(effectiveCouponCode);
       if (cRow && Number(cRow.influencer_id) > 0) {
@@ -7017,13 +7028,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     const { campaignId, influencerId } = resolveOrderCampaignAttribution(req, couponResult);
-    const isRyan = isRyanAttribution({
+    // Orders from the /ryan landing page always get Ryan's pricing and commission, with or without a coupon.
+    const isRyanLanding = String(req.body?.landingPage || '').trim().toLowerCase() === 'ryan';
+    const isRyan = isRyanLanding || isRyanAttribution({
       coupon: couponResult?.coupon,
       influencerId,
       campaignId,
       campaignSlug: campaignSlug || req.body?.campaignSlug,
     });
-    const finalInfluencerId = isRyan ? 10 : influencerId;
+    const finalInfluencerId = isRyan
+      ? (Number(couponResult?.coupon?.influencerId || influencerId || 0) || getActiveRyanInfluencerId() || null)
+      : influencerId;
 
     const hasActiveCoupon = Boolean(couponResult?.coupon && (Number(couponResult.discountAmountPaise || 0) > 0 || isRyan));
     const isCouponInfluencer = Boolean(
@@ -7043,14 +7058,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const bundleDiscountPaise = (hasActiveInfluencerCoupon && !isRyan) ? 0 : getMerchBundleDiscountPaise(bundleCode, validatedItems);
     const shippingCharge = 0; // Free shipping by default as of now
     const discountAmount = isRyan
-      ? Math.max(0, bundleDiscountPaise + Math.max(0, Math.round(Number(couponResult?.discountAmountPaise || 0))))
+      ? Math.max(0, getRyanPricing(validatedItems).bundleDiscountPaise + getRyanPricing(validatedItems).individualDiscountPaise)
       : (hasActiveInfluencerCoupon
         ? Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
         : (bundleDiscountPaise > 0 ? bundleDiscountPaise : Math.max(0, Math.round(Number(couponResult?.discountAmountPaise || 0)))));
     const discountedSubtotal = Math.max(0, subtotal - discountAmount);
     // Product prices are GST-inclusive; derive included GST on discounted amount.
     const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
-    const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems, { influencerId: finalInfluencerId, campaignId, campaignSlug: campaignSlug || req.body?.campaignSlug });
+    const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems, { influencerId: finalInfluencerId, campaignId, campaignSlug: campaignSlug || req.body?.campaignSlug, forceRyan: isRyan });
     const totalAmount = Math.max(100, subtotal + shippingCharge - discountAmount);
     const orderNumber = generateOrderNumber();
     const shippingAddressPayload = address || {};
@@ -7659,13 +7674,17 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     const { campaignId, influencerId } = resolveOrderCampaignAttribution(req, couponResult);
-    const isRyan = isRyanAttribution({
+    // Orders from the /ryan landing page always get Ryan's pricing and commission, with or without a coupon.
+    const isRyanLanding = String(req.body?.landingPage || '').trim().toLowerCase() === 'ryan';
+    const isRyan = isRyanLanding || isRyanAttribution({
       coupon: couponResult?.coupon,
       influencerId,
       campaignId,
       campaignSlug: campaignSlug || req.body?.campaignSlug,
     });
-    const finalInfluencerId = isRyan ? 10 : influencerId;
+    const finalInfluencerId = isRyan
+      ? (Number(couponResult?.coupon?.influencerId || influencerId || 0) || getActiveRyanInfluencerId() || null)
+      : influencerId;
 
     const hasActiveCoupon = Boolean(couponResult?.coupon && (Number(couponResult.discountAmountPaise || 0) > 0 || isRyan));
     const isCouponInfluencer = Boolean(
@@ -7688,14 +7707,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const shippingCharge = 0; // Free shipping by default as of now
     const codSurcharge = 5000; // ₹50
     const discountAmount = isRyan
-      ? Math.max(0, bundleDiscountPaise + Math.max(0, Math.round(Number(couponResult?.discountAmountPaise || 0))))
+      ? Math.max(0, getRyanPricing(validatedItems).bundleDiscountPaise + getRyanPricing(validatedItems).individualDiscountPaise)
       : (hasActiveInfluencerCoupon
         ? Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
         : (bundleDiscountPaise > 0 ? bundleDiscountPaise : Math.max(0, Math.round(Number(couponResult?.discountAmountPaise || 0)))));
     const discountedSubtotal = Math.max(0, subtotal - discountAmount);
     // Product prices are GST-inclusive; derive included GST on discounted amount.
     const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
-    const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems, { influencerId: finalInfluencerId, campaignId, campaignSlug: campaignSlug || req.body?.campaignSlug });
+    const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems, { influencerId: finalInfluencerId, campaignId, campaignSlug: campaignSlug || req.body?.campaignSlug, forceRyan: isRyan });
     const totalAmount = Math.max(100, subtotal + shippingCharge + codSurcharge - discountAmount);
     const orderNumber = generateOrderNumber();
     const shippingAddressPayload = address || {};

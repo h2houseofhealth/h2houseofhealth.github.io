@@ -1,0 +1,1182 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ryan Fernando × H2 House of Health — Wellness Starts With Better Choices</title>
+    <meta
+      name="description"
+      content="Discover H2 House of Health essentials, curated and recommended by celebrity sports nutritionist Ryan Fernando. Pure molecular hydrogen hydration."
+    />
+
+    <!-- Google Fonts: Editorial Serif + Modern Clean Sans -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Preload Critical Hero Image & Logo -->
+    <link rel="preload" as="image" href="assets/H2_Logo_brand.png" />
+    <link rel="preload" as="image" href="assets/ryan-fernando-hero.png" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="assets/H2_Logo_brand.png" />
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="styles.css?v=2" />
+    <link rel="stylesheet" href="navbar.css" />
+  </head>
+
+  <body>
+    <!-- Site Header -->
+    <header class="site-header" id="siteHeader">
+      <div class="header-inner">
+        <!-- Logo on the Left -->
+        <a href="/" class="header-logo" aria-label="H2 House of Health">
+          <img
+            src="assets/H2_Logo_brand.png"
+            alt="H2 House of Health Logo"
+            class="header-logo-img"
+            width="135"
+            height="50"
+          />
+        </a>
+
+        <!-- Center Desktop Navigation Links -->
+        <nav class="header-nav" id="headerNav" aria-label="Main Navigation">
+          <ul class="nav-list">
+            <li class="nav-item">
+              <a href="#collection" class="nav-link">The Collection</a>
+            </li>
+            <li class="nav-item">
+              <a href="#approachSection" class="nav-link">The H2 Approach</a>
+            </li>
+            <li class="nav-item">
+              <a href="#heroSection" class="nav-link">Why Ryan Trusts H2</a>
+            </li>
+          </ul>
+        </nav>
+
+        <!-- Header Actions on the Right -->
+        <div class="header-actions">
+          <!-- Search Control & Dropdown Popover -->
+          <div class="search-anchor-wrapper">
+            <button
+              class="header-icon-btn"
+              id="searchToggleBtn"
+              type="button"
+              aria-label="Search products"
+              aria-expanded="false"
+              aria-controls="searchDropdown"
+              title="Search"
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="11" cy="11" r="7" />
+                <path d="M16.5 16.5 21 21" />
+              </svg>
+            </button>
+
+            <!-- Search Dropdown Popover -->
+            <div class="search-popover" id="searchDropdown" role="dialog" aria-label="Product Search" hidden>
+              <div class="search-input-wrapper">
+                <svg class="search-input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <circle cx="11" cy="11" r="7"></circle>
+                  <path d="M16.5 16.5 21 21"></path>
+                </svg>
+                <input
+                  type="text"
+                  class="search-input"
+                  id="searchInput"
+                  placeholder="Search H2 products..."
+                  autocomplete="off"
+                  aria-label="Search H2 products"
+                />
+                <button class="search-clear-btn" id="searchClearBtn" type="button" aria-label="Clear search" hidden>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </svg>
+                </button>
+              </div>
+
+              <div class="search-results-section" id="searchResultsSection">
+                <div class="search-results-header">H2 Products</div>
+                <div class="search-results-list" id="searchResultsList" role="list">
+                  <!-- Injected via JavaScript from existing H2 catalogue -->
+                </div>
+                <div class="search-empty-state" id="searchEmptyState" hidden>
+                  <p class="search-empty-msg">No products found matching "<span id="searchEmptyQuery"></span>"</p>
+                </div>
+                <a href="#collection" class="search-view-all-link" id="searchViewAllBtn">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <circle cx="11" cy="11" r="7"></circle>
+                    <path d="M16.5 16.5 21 21"></path>
+                  </svg>
+                  <span>View all results for "<span id="searchQueryLabel">h2</span>"</span>
+                  <span class="search-arrow" aria-hidden="true">&rarr;</span>
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <!-- User Account / Sign In Control -->
+          <div class="user-account-wrapper" id="userAccountWrapper">
+            <button
+              class="header-icon-btn account-icon-btn"
+              id="headerAccountBtn"
+              type="button"
+              aria-label="Account / Sign In"
+              aria-expanded="false"
+              aria-haspopup="dialog"
+              title="Account / Sign In"
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#AE5431"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                <circle cx="12" cy="7" r="4"></circle>
+              </svg>
+            </button>
+
+            <!-- Account Dropdown Menu for Logged-In User -->
+            <div class="account-dropdown-menu" id="accountDropdownMenu" hidden>
+              <div class="account-dropdown-head">
+                <div class="account-user-name" id="dropdownUserName">Signed In User</div>
+                <div class="account-user-email" id="dropdownUserEmail">user@example.com</div>
+              </div>
+              <div class="account-dropdown-divider"></div>
+              <button type="button" class="account-dropdown-item" id="accountViewOrdersBtn">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
+                  <line x1="3" y1="6" x2="21" y2="6"></line>
+                  <path d="M16 10a4 4 0 0 1-8 0"></path>
+                </svg>
+                <span>My Orders</span>
+              </button>
+              <button type="button" class="account-dropdown-item" id="accountSignOutBtn">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                  <polyline points="16 17 21 12 16 7"></polyline>
+                  <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+                <span>Sign Out</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Cart Icon Button with Live Counter Badge -->
+          <button
+            class="header-icon-btn cart-icon-btn"
+            id="cartToggleBtn"
+            type="button"
+            aria-label="Shopping Cart (0 items)"
+            title="Cart"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M4 5h2.2l1.6 8.4a1.4 1.4 0 0 0 1.38 1.16h7.6a1.4 1.4 0 0 0 1.35-1.03L19.6 8H7.1" />
+              <circle cx="9.4" cy="19" r="1.1" fill="currentColor" />
+              <circle cx="17" cy="19" r="1.1" fill="currentColor" />
+            </svg>
+            <span class="cart-badge" id="cartBadge" aria-live="polite">0</span>
+          </button>
+
+          <!-- Prominent Shop Now CTA Button -->
+          <a href="#collection" class="btn btn-ryans-collection" id="headerRyanBtn">
+            Shop Now
+          </a>
+
+          <!-- Mobile Menu Hamburger Toggle -->
+          <button
+            class="mobile-menu-toggle"
+            id="mobileMenuToggle"
+            type="button"
+            aria-label="Toggle navigation menu"
+            aria-expanded="false"
+            aria-controls="mobileNavDrawer"
+          >
+            <span class="hamburger-bar"></span>
+            <span class="hamburger-bar"></span>
+            <span class="hamburger-bar"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Mobile Navigation Drawer -->
+      <div class="mobile-nav-backdrop" id="mobileNavBackdrop"></div>
+      <div class="mobile-nav-drawer" id="mobileNavDrawer" aria-hidden="true">
+        <div class="mobile-nav-top">
+          <a href="/" class="mobile-nav-logo" aria-label="H2 House of Health">
+            <img src="assets/H2_Logo_brand.png" alt="H2 House of Health Logo" class="mobile-nav-logo-img" width="120" height="42" />
+          </a>
+          <button class="mobile-nav-close" id="mobileNavClose" type="button" aria-label="Close menu">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+
+        <nav class="mobile-nav-menu" aria-label="Mobile Navigation">
+          <ul class="mobile-nav-list">
+            <li><a href="#collection" class="mobile-nav-link">The Collection</a></li>
+            <li><a href="#approachSection" class="mobile-nav-link">The H2 Approach</a></li>
+            <li><a href="#heroSection" class="mobile-nav-link">Why Ryan Trusts H2</a></li>
+          </ul>
+        </nav>
+
+        <div class="mobile-nav-footer">
+          <a href="#collection" class="btn btn-ryans-collection">
+            Shop Now &rarr;
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main id="mainContent">
+      <!-- Section 1: Hero Section -->
+      <section
+        class="hero-section"
+        id="heroSection"
+        aria-label="Ryan Fernando × H2 House of Health"
+      >
+        <div class="hero-container">
+          <!-- Left Column: Campaign Copy -->
+          <div class="hero-copy-column">
+            <p class="hero-eyebrow">RYAN FERNANDO × H2 HOUSE OF HEALTH</p>
+
+            <h1 class="hero-headline">
+              <span class="headline-line">Wellness</span>
+              <span class="headline-line">Starts With</span>
+              <span class="headline-line headline-highlight">Better Choices</span>
+            </h1>
+
+            <p class="hero-supporting-text">
+              Discover H2 House of Health essentials, curated and recommended by Ryan Fernando.
+            </p>
+
+            <div class="hero-cta-group">
+              <a href="#collection" class="btn btn-primary-cta" id="heroCtaBtn">
+                <span>Shop the Collection</span>
+                <svg
+                  class="cta-arrow-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M5 12h14" />
+                  <path d="m12 5 7 7-7 7" />
+                </svg>
+              </a>
+            </div>
+          </div>
+
+          <!-- Right Column: Ryan's Hero Image -->
+          <div class="hero-image-column" aria-label="Ryan Fernando with H2 Water Bottle">
+            <div class="hero-image-frame">
+              <picture>
+                <!-- Optimized portrait framing on tablet & mobile screens -->
+                <source
+                  media="(max-width: 1023px)"
+                  srcset="assets/ryan-fernando-portrait.png"
+                />
+                <!-- Full landscape image for desktop and tablets -->
+                <img
+                  src="assets/ryan-fernando-hero.png"
+                  alt="Ryan Fernando smiling in a terracotta blazer, holding the H2 Molecular Hydrogen Water Bottle in his right hand and giving a thumbs up with his left"
+                  class="hero-ryan-image"
+                  width="1672"
+                  height="940"
+                  fetchpriority="high"
+                  loading="eager"
+                  decoding="async"
+                />
+              </picture>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 2: The H2 Approach -->
+      <section
+        class="approach-section"
+        id="approachSection"
+        aria-labelledby="approachHeading"
+      >
+        <div class="approach-container">
+          <!-- Left Column: Editorial Copy -->
+          <div class="approach-copy-column">
+            <div class="approach-eyebrow-wrapper">
+              <p class="approach-eyebrow">THE H2 APPROACH</p>
+              <div class="approach-accent-line" aria-hidden="true"></div>
+            </div>
+
+            <h2 class="approach-heading" id="approachHeading">
+              <span class="heading-row">Why Ryan Fernando</span>
+              <span class="heading-row">Trusts <span class="heading-highlight">H2 Products</span></span>
+            </h2>
+
+            <p class="approach-body">
+              Thoughtful essentials for everyday wellness. Explore molecular hydrogen water and a portable hydrogen mist, designed to fit into your daily routine.
+            </p>
+
+            <div class="approach-divider" aria-hidden="true"></div>
+
+            <p class="approach-closing">
+              Small choices. Thoughtful routines.<br />Everyday wellness.
+            </p>
+          </div>
+
+          <!-- Right Column: Product Essentials Podium -->
+          <div class="approach-visual-column">
+            <div class="approach-image-frame">
+              <img
+                src="assets/section2-products-plinth.png"
+                alt="H2 Molecular Hydrogen Water Bottle, Hydrogen Mist Spray, and terracotta hoodie arranged on natural stone plinths"
+                class="approach-products-image"
+                width="1024"
+                height="682"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 3: The Collection -->
+      <section
+        class="collection-section"
+        id="collection"
+        aria-labelledby="collectionHeading"
+      >
+        <div class="collection-container">
+          <!-- Section 3 Header -->
+          <div class="collection-header">
+            <p class="collection-eyebrow">THE COLLECTION</p>
+            <div class="collection-accent-line" aria-hidden="true"></div>
+            <h2 class="collection-heading" id="collectionHeading">
+              Ryan Fernando’s <span class="collection-highlight">H2 Essentials</span>
+            </h2>
+            <p class="collection-subtitle">
+              Thoughtfully designed for everyday wellness. Explore the collection and choose the variants that fit your routine.
+            </p>
+          </div>
+
+          <!-- Product Cards Grid -->
+          <div class="collection-grid">
+            <!-- Product Card 1: H2 Molecular Hydrogen Water Bottle -->
+            <article class="product-card" data-product="bottle">
+              <div class="product-image-box">
+                <span class="product-badge best-seller-badge">★ Best Seller</span>
+                <img
+                  id="bottleMainImg"
+                  src="assets/products/card-bottle-silver.jpg"
+                  alt="H2 Molecular Hydrogen Water Bottle in Silver"
+                  class="product-card-img"
+                  width="800"
+                  height="600"
+                  loading="lazy"
+                />
+              </div>
+
+              <div class="product-card-body">
+                <h3 class="product-title">H2 Molecular Hydrogen Water Bottle</h3>
+                <div class="product-price">₹22,990</div>
+                <p class="product-specs">460 ml · Silver, Black, Gold, Blue</p>
+
+                <div class="product-variants-section">
+                  <span class="variants-label">Choose Colour</span>
+                  <div class="variant-swatches" role="radiogroup" aria-label="Choose Bottle Colour">
+                    <!-- Silver Swatch -->
+                    <button
+                      class="swatch-btn active"
+                      type="button"
+                      role="radio"
+                      aria-checked="true"
+                      data-product="bottle"
+                      data-variant="Silver"
+                      data-img="assets/products/card-bottle-silver.jpg"
+                      data-in-stock="true"
+                      data-alt="H2 Molecular Hydrogen Water Bottle in Silver"
+                      aria-label="Silver"
+                    >
+                      <span class="swatch-thumb-frame">
+                        <img src="assets/products/bottle-silver.png" alt="" class="swatch-thumb" />
+                      </span>
+                      <span class="swatch-label">Silver</span>
+                    </button>
+
+                    <!-- Black Swatch -->
+                    <button
+                      class="swatch-btn"
+                      type="button"
+                      role="radio"
+                      aria-checked="false"
+                      data-product="bottle"
+                      data-variant="Black"
+                      data-img="assets/products/card-bottle-black.jpg"
+                      data-in-stock="true"
+                      data-alt="H2 Molecular Hydrogen Water Bottle in Black"
+                      aria-label="Black"
+                    >
+                      <span class="swatch-thumb-frame">
+                        <img src="assets/products/bottle-black.png" alt="" class="swatch-thumb" />
+                      </span>
+                      <span class="swatch-label">Black</span>
+                    </button>
+
+                    <!-- Gold Swatch -->
+                    <button
+                      class="swatch-btn"
+                      type="button"
+                      role="radio"
+                      aria-checked="false"
+                      data-product="bottle"
+                      data-variant="Gold"
+                      data-img="assets/products/card-bottle-gold.jpg"
+                      data-in-stock="true"
+                      data-alt="H2 Molecular Hydrogen Water Bottle in Gold"
+                      aria-label="Gold"
+                    >
+                      <span class="swatch-thumb-frame">
+                        <img src="assets/products/bottle-gold.png" alt="" class="swatch-thumb" />
+                      </span>
+                      <span class="swatch-label">Gold</span>
+                    </button>
+
+                    <!-- Blue Swatch -->
+                    <button
+                      class="swatch-btn"
+                      type="button"
+                      role="radio"
+                      aria-checked="false"
+                      data-product="bottle"
+                      data-variant="Blue"
+                      data-img="assets/products/card-bottle-blue.jpg"
+                      data-in-stock="true"
+                      data-alt="H2 Molecular Hydrogen Water Bottle in Blue"
+                      aria-label="Blue"
+                    >
+                      <span class="swatch-thumb-frame">
+                        <img src="assets/products/bottle-blue.png" alt="" class="swatch-thumb" />
+                      </span>
+                      <span class="swatch-label">Blue</span>
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  class="btn btn-card-cta"
+                  id="bottleAddToCartBtn"
+                  type="button"
+                  data-product-name="H2 Molecular Hydrogen Water Bottle"
+                  data-price="22990"
+                >
+                  <span class="cta-text">Add to Cart</span>
+                  <span class="cta-arrow" aria-hidden="true">&rarr;</span>
+                </button>
+
+                <!-- Compact Product Features Gallery inside Bottle Card -->
+                <div class="card-features-container">
+                  <h4 class="card-features-label">Product Features</h4>
+                  <div class="card-features-grid" id="bottleCardFeaturesGrid" role="list"></div>
+                </div>
+              </div>
+            </article>
+
+            <!-- Product Card 2: H2 Hydrogen Mist Spray -->
+            <article class="product-card" data-product="mist">
+              <div class="product-image-box">
+                <img
+                  id="mistMainImg"
+                  src="assets/products/card-mist-white.jpg"
+                  alt="H2 Hydrogen Mist Spray in White"
+                  class="product-card-img"
+                  width="800"
+                  height="600"
+                  loading="lazy"
+                />
+              </div>
+
+              <div class="product-card-body">
+                <h3 class="product-title">H2 Hydrogen Mist Spray</h3>
+                <div class="product-price">₹11,990</div>
+                <p class="product-specs">13 ml · White, Black</p>
+
+                <div class="product-variants-section">
+                  <span class="variants-label">Choose Colour</span>
+                  <div class="variant-swatches" role="radiogroup" aria-label="Choose Mist Colour">
+                    <!-- White Swatch (Available) -->
+                    <button
+                      class="swatch-btn active"
+                      type="button"
+                      role="radio"
+                      aria-checked="true"
+                      data-product="mist"
+                      data-variant="White"
+                      data-img="assets/products/card-mist-white.jpg"
+                      data-in-stock="true"
+                      data-alt="H2 Hydrogen Mist Spray in White"
+                      aria-label="White"
+                    >
+                      <span class="swatch-thumb-frame">
+                        <img src="assets/products/mist-white.png" alt="" class="swatch-thumb" />
+                      </span>
+                      <span class="swatch-label">White</span>
+                    </button>
+
+                    <!-- Black Swatch (Available) -->
+                    <button
+                      class="swatch-btn"
+                      type="button"
+                      role="radio"
+                      aria-checked="false"
+                      data-product="mist"
+                      data-variant="Black"
+                      data-img="assets/products/card-mist-black.jpg"
+                      data-in-stock="true"
+                      data-alt="H2 Hydrogen Mist Spray in Black"
+                      aria-label="Black"
+                    >
+                      <span class="swatch-thumb-frame">
+                        <img src="assets/products/mist-black.png" alt="" class="swatch-thumb" />
+                      </span>
+                      <span class="swatch-label">Black</span>
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  class="btn btn-card-cta"
+                  id="mistAddToCartBtn"
+                  type="button"
+                  data-product-name="H2 Hydrogen Mist Spray"
+                  data-price="11990"
+                >
+                  <span class="cta-text">Add to Cart</span>
+                  <span class="cta-arrow" aria-hidden="true">&rarr;</span>
+                </button>
+
+                <!-- Compact Product Features Gallery inside Mist Card -->
+                <div class="card-features-container">
+                  <h4 class="card-features-label">Product Features</h4>
+                  <div class="card-features-grid" id="mistCardFeaturesGrid" role="list"></div>
+                </div>
+              </div>
+            </article>
+
+            <!-- Product Card 3: H2 Hoodie -->
+            <article class="product-card product-card-soldout" data-product="hoodie">
+              <div class="product-image-box">
+                <span class="product-badge sold-out-badge">Sold Out</span>
+                <img
+                  src="assets/products/card-hoodie-terracotta.jpg"
+                  alt="H2 Hoodie in Terracotta"
+                  class="product-card-img"
+                  width="800"
+                  height="600"
+                  loading="lazy"
+                />
+              </div>
+
+              <div class="product-card-body">
+                <h3 class="product-title">H2 Hoodie</h3>
+                <div class="product-price">₹3,499</div>
+                <p class="product-specs">Terracotta · Sizes S, M, L, XL, XXL</p>
+
+                <div class="product-variants-section">
+                  <span class="variants-label">Colour</span>
+                  <div class="variant-swatches" role="radiogroup" aria-label="Hoodie Colour">
+                    <button
+                      class="swatch-btn active"
+                      type="button"
+                      role="radio"
+                      aria-checked="true"
+                      disabled
+                      aria-label="Terracotta"
+                    >
+                      <span class="swatch-thumb-frame">
+                        <img src="assets/products/hoodie-terracotta.png" alt="" class="swatch-thumb" />
+                      </span>
+                      <span class="swatch-label">Terracotta</span>
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  class="btn btn-card-cta btn-sold-out"
+                  type="button"
+                  disabled
+                  aria-disabled="true"
+                >
+                  <span class="cta-text">Sold Out</span>
+                </button>
+
+                <!-- Compact Product Features Gallery inside Hoodie Card -->
+                <div class="card-features-container">
+                  <h4 class="card-features-label">Product Features</h4>
+                  <div class="card-features-grid" id="hoodieCardFeaturesGrid" role="list"></div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+    </main>
+
+    <!-- Dedicated Shopify-Style Checkout Page with Razorpay Gateway Section -->
+    <section id="checkoutPage" class="shopify-checkout" hidden aria-labelledby="checkoutPageTitle"></section>
+
+    <!-- Booking / Order Confirmation (Shown after payment success) -->
+    <section id="bookingConfirmation" class="booking-confirmation" hidden aria-labelledby="bookingConfirmationTitle"></section>
+
+    <!-- Cart Drawer Backdrop Overlay -->
+    <div class="cart-backdrop" id="cartBackdrop" tabindex="-1" hidden></div>
+
+    <!-- Cart Drawer -->
+    <aside class="cart-drawer" id="cartDrawer" role="dialog" aria-modal="true" aria-labelledby="cartDrawerTitle" hidden>
+      <!-- Cart Drawer Header -->
+      <div class="cart-drawer-header">
+        <h3 class="cart-drawer-title" id="cartDrawerTitle">YOUR CART (<span id="cartDrawerCount">0</span>)</h3>
+        <button class="cart-close-btn" id="cartCloseBtn" type="button" aria-label="Close shopping cart">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Cart Drawer Scrollable Content -->
+      <div class="cart-drawer-body" id="cartDrawerBody">
+        <!-- H2 Promotional Banner -->
+        <div class="cart-promo-banner">
+          <div class="cart-promo-icon-wrap" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+            </svg>
+          </div>
+          <div class="cart-promo-text">
+            <strong class="cart-promo-heading">Cleaner Water. Healthier Lives.</strong>
+            <p class="cart-promo-sub">Bring home the power of molecular hydrogen for everyday wellness.</p>
+          </div>
+        </div>
+
+        <!-- Cart Items List Container -->
+        <div class="cart-items-list" id="cartItemsList" role="list">
+          <!-- Dynamically populated cart items -->
+        </div>
+
+        <!-- Empty Cart Notice -->
+        <div class="cart-empty-notice" id="cartEmptyNotice" hidden>
+          <p class="cart-empty-text">Your cart is currently empty.</p>
+          <a href="#collection" class="btn btn-shop-now cart-empty-shop-btn" id="cartEmptyShopBtn">
+            Shop H2 Essentials
+          </a>
+        </div>
+
+        <!-- Coupon & Discount Area (Always visible for Ryan Fernando campaign) -->
+        <div class="cart-coupon-section" id="cartCouponSection">
+          <!-- Automatic Bundle Promotion Banner (Separated from Coupons) -->
+          <div class="bundle-discount-banner" id="bundleDiscountBanner" hidden>
+            <div class="bundle-banner-left">
+              <svg class="bundle-banner-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+              </svg>
+              <div class="bundle-banner-text-wrap">
+                <strong class="bundle-banner-title" id="bundleDiscountLabel">Bottle + Mist Bundle — 15% off</strong>
+                <span class="bundle-banner-sub">Automatic bundle savings applied</span>
+              </div>
+            </div>
+            <div class="bundle-banner-right">
+              <span class="bundle-banner-amount" id="bundleDiscountVal">− ₹5,233.50</span>
+            </div>
+          </div>
+
+          <div class="coupon-input-group">
+            <span class="coupon-tag-icon" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+                <line x1="7" y1="7" x2="7.01" y2="7"></line>
+              </svg>
+            </span>
+            <input
+              type="text"
+              class="coupon-input"
+              id="couponInput"
+              value="RYANH2"
+              placeholder="Enter coupon code"
+              aria-label="Enter coupon code"
+            />
+            <button class="coupon-apply-btn" id="couponApplyBtn" type="button">
+              Apply
+            </button>
+          </div>
+
+          <div class="coupon-message" id="couponMessage" hidden></div>
+
+          <!-- Applied Coupon Pill & Discount Row (Always visible for Ryan Fernando campaign) -->
+          <div class="applied-coupon-row" id="appliedCouponRow">
+            <div class="discount-badge-highlight" id="couponBadgeHighlight">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+              </svg>
+              <span>Coupon <strong>RYANH2</strong> applied: <strong>−₹1,150.00</strong> discount</span>
+            </div>
+            <div class="applied-coupon-pill">
+              <div class="coupon-pill-left">
+                <svg class="coupon-gear-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+                <span class="coupon-code-name" id="appliedCouponCode">RYANH2</span>
+              </div>
+              <div class="coupon-pill-right">
+                <span class="coupon-discount-val" id="appliedCouponAmount">− ₹1,150.00</span>
+                <button class="coupon-remove-btn" id="couponRemoveBtn" type="button" aria-label="Remove coupon">✕</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- In-Cart "Best Offers" Horizontally Scrollable Section -->
+        <div class="cart-best-offers-section" id="cartBestOffersSection">
+          <div class="best-offers-header">
+            <div class="best-offers-title-wrap">
+              <h4 class="best-offers-title">
+                <span class="best-offers-title-text">BEST OFFERS</span>
+                <span class="best-offers-explore">Explore more</span>
+              </h4>
+              <div class="best-offers-underline" aria-hidden="true"></div>
+            </div>
+            <div class="best-offers-nav">
+              <button class="best-offers-arrow prev" id="bestOffersPrevBtn" type="button" aria-label="Previous offers">
+                &lsaquo;
+              </button>
+              <button class="best-offers-arrow next" id="bestOffersNextBtn" type="button" aria-label="Next offers">
+                &rsaquo;
+              </button>
+            </div>
+          </div>
+          <div class="best-offers-carousel" id="bestOffersCarousel" tabindex="0" role="region" aria-label="Best Offers Recommendations">
+            <!-- Dynamic Best Offers cards using existing Section 3 assets -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Sticky Total & Checkout Footer with Itemized Estimated Total Breakdown -->
+      <div class="cart-drawer-footer" id="cartDrawerFooter">
+        <div class="cart-breakdown-card" id="cartBreakdownCard">
+          <div class="breakdown-row" id="breakdownSubtotalRow">
+            <span class="breakdown-label">Original subtotal</span>
+            <span class="breakdown-value" id="breakdownSubtotalVal">₹0.00</span>
+          </div>
+          <div class="breakdown-row breakdown-discount" id="breakdownBundleRow" hidden>
+            <span class="breakdown-label" id="breakdownBundleLabel">Bottle + Mist Bundle discount (1 bundle)</span>
+            <span class="breakdown-value" id="breakdownBundleVal">−₹0.00</span>
+          </div>
+          <div class="breakdown-row breakdown-discount" id="breakdownProductRow" hidden>
+            <span class="breakdown-label" id="breakdownProductLabel">Individual product discount</span>
+            <span class="breakdown-value" id="breakdownProductVal">−₹0.00</span>
+          </div>
+          <div class="breakdown-row breakdown-discount" id="breakdownCouponRow">
+            <span class="breakdown-label" id="breakdownCouponLabel">RYANH2 coupon discount</span>
+            <span class="breakdown-value" id="breakdownCouponVal">−₹1,150.00</span>
+          </div>
+          <div class="breakdown-row" id="breakdownShippingRow">
+            <span class="breakdown-label">Shipping</span>
+            <span class="breakdown-value breakdown-badge-free">FREE</span>
+          </div>
+          <div class="breakdown-row breakdown-tax" id="breakdownTaxRow">
+            <span class="breakdown-label">Tax (GST 18% included)</span>
+            <span class="breakdown-value" id="breakdownTaxVal">₹0.00</span>
+          </div>
+          <div class="breakdown-divider" aria-hidden="true"></div>
+          <div class="breakdown-row breakdown-total">
+            <div class="total-label-wrap">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                <rect x="2" y="5" width="20" height="14" rx="2"></rect>
+                <line x1="2" y1="10" x2="22" y2="10"></line>
+              </svg>
+              <span class="breakdown-total-label">Estimated total</span>
+            </div>
+            <div class="total-pricing-wrap">
+              <span class="original-subtotal" id="cartOriginalSubtotal" hidden>₹0</span>
+              <span class="final-total" id="cartFinalTotal">₹0</span>
+            </div>
+          </div>
+          <div class="savings-pill-wrap" id="cartSavingsPillWrap" hidden>
+            <span class="savings-pill">Total savings: <strong id="cartSavingsText">₹0</strong></span>
+          </div>
+        </div>
+        <button class="btn btn-cart-checkout" id="cartCheckoutBtn" type="button">
+          Checkout
+        </button>
+      </div>
+    </aside>
+
+    <!-- Feature Image Zoom Lightbox Modal -->
+    <div class="feature-lightbox" id="featureLightbox" role="dialog" aria-modal="true" aria-label="Feature Image Zoom View" hidden>
+      <div class="lightbox-backdrop" id="lightboxBackdrop" tabindex="-1"></div>
+      <div class="lightbox-dialog" role="document">
+        <div class="lightbox-header">
+          <div class="lightbox-title-wrap">
+            <span class="lightbox-product-title" id="lightboxProductTitle">Molecular Hydrogen Water Bottle · Silver</span>
+            <h4 class="lightbox-feature-title" id="lightboxFeatureTitle">Leak-Proof Cap</h4>
+          </div>
+          <div class="lightbox-controls">
+            <span class="lightbox-counter" id="lightboxCounter">1 / 5</span>
+            <button class="lightbox-close-btn" id="lightboxCloseBtn" type="button" aria-label="Close zoom preview">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="lightbox-body">
+          <button class="lightbox-nav-btn lightbox-prev-btn" id="lightboxPrevBtn" type="button" aria-label="Previous image">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="15 18 9 12 15 6"></polyline>
+            </svg>
+          </button>
+
+          <div class="lightbox-image-stage">
+            <img id="lightboxImg" src="" alt="" class="lightbox-img" />
+          </div>
+
+          <button class="lightbox-nav-btn lightbox-next-btn" id="lightboxNextBtn" type="button" aria-label="Next image">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+          </button>
+        </div>
+
+        <div class="lightbox-footer">
+          <p class="lightbox-caption" id="lightboxCaption"></p>
+          <span class="lightbox-hint">Use <kbd>←</kbd> <kbd>→</kbd> keys to navigate · Press <kbd>Esc</kbd> to close</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Razorpay Checkout & Delivery Details Modal -->
+    <div class="checkout-modal-backdrop" id="checkoutModalBackdrop" hidden></div>
+    <div class="checkout-modal" id="checkoutDeliveryModal" role="dialog" aria-modal="true" aria-labelledby="checkoutModalTitle" hidden>
+      <div class="checkout-modal-header">
+        <div class="checkout-modal-title-group">
+          <span class="checkout-modal-badge">SECURE RAZORPAY CHECKOUT</span>
+          <h3 class="checkout-modal-title" id="checkoutModalTitle">Delivery Details</h3>
+        </div>
+        <button class="checkout-modal-close" id="checkoutModalCloseBtn" type="button" aria-label="Close delivery details">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <form class="checkout-form" id="checkoutDeliveryForm" novalidate>
+        <div class="checkout-form-grid">
+          <div class="form-group">
+            <label for="custName" class="form-label">Full Name <span class="req">*</span></label>
+            <input type="text" id="custName" class="form-input" placeholder="e.g. Rahul Sharma" required />
+          </div>
+          <div class="form-group">
+            <label for="custPhone" class="form-label">Phone Number <span class="req">*</span></label>
+            <input type="tel" id="custPhone" class="form-input" placeholder="10-digit mobile number" pattern="[0-9]{10}" required />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="custEmail" class="form-label">Email Address <span class="req">*</span></label>
+          <input type="email" id="custEmail" class="form-input" placeholder="name@example.com" required />
+          <span class="form-hint">Razorpay payment confirmation and tracking details will be sent here.</span>
+        </div>
+
+        <div class="form-group">
+          <label for="custAddress" class="form-label">Delivery Address <span class="req">*</span></label>
+          <input type="text" id="custAddress" class="form-input" placeholder="House / Flat / Street address" required />
+        </div>
+
+        <div class="checkout-form-grid">
+          <div class="form-group">
+            <label for="custCity" class="form-label">City <span class="req">*</span></label>
+            <input type="text" id="custCity" class="form-input" placeholder="City" required />
+          </div>
+          <div class="form-group">
+            <label for="custPincode" class="form-label">PIN Code <span class="req">*</span></label>
+            <input type="text" id="custPincode" class="form-input" placeholder="6-digit PIN code" maxlength="6" required />
+          </div>
+        </div>
+
+        <div class="checkout-order-summary-box">
+          <div class="summary-line">
+            <span>Payable Amount</span>
+            <strong class="summary-amount" id="checkoutModalPayable">₹0.00</strong>
+          </div>
+          <div class="summary-security">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1B7A42" stroke-width="2.2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+            <span>256-bit SSL Encrypted Payment via Razorpay</span>
+          </div>
+        </div>
+
+        <div class="checkout-error-msg" id="checkoutFormError" hidden></div>
+
+        <button type="submit" class="btn btn-pay-now" id="proceedToPayBtn">
+          Proceed to Pay with Razorpay
+        </button>
+      </form>
+    </div>
+
+    <!-- Order Success Modal -->
+    <div class="checkout-modal-backdrop" id="orderSuccessBackdrop" hidden></div>
+    <div class="order-success-modal" id="orderSuccessModal" role="dialog" aria-modal="true" aria-labelledby="orderSuccessTitle" hidden>
+      <div class="order-success-card">
+        <div class="order-success-icon-wrap" aria-hidden="true">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 6L9 17l-5-5"></path>
+          </svg>
+        </div>
+        <h3 class="order-success-title" id="orderSuccessTitle">Order Confirmed!</h3>
+        <p class="order-success-sub">Thank you for your order. Your hydrogen wellness journey begins now.</p>
+
+        <div class="order-details-card">
+          <div class="order-detail-row">
+            <span class="detail-label">Payment ID:</span>
+            <strong class="detail-val" id="successPaymentId">pay_...</strong>
+          </div>
+          <div class="order-detail-row">
+            <span class="detail-label">Order ID:</span>
+            <strong class="detail-val" id="successOrderId">order_...</strong>
+          </div>
+          <div class="order-detail-row">
+            <span class="detail-label">Amount Paid:</span>
+            <strong class="detail-val" id="successAmount">₹0.00</strong>
+          </div>
+          <div class="order-detail-row">
+            <span class="detail-label">Deliver to:</span>
+            <span class="detail-val" id="successDeliveryTo">...</span>
+          </div>
+        </div>
+
+        <button type="button" class="btn btn-continue-shopping" id="continueShoppingBtn">
+          Continue Shopping
+        </button>
+      </div>
+    </div>
+
+    <!-- Authentication Modal (Sign In / Sign Up / Guest / Google OAuth) -->
+    <div class="h2-auth-backdrop" id="authModalBackdrop" hidden></div>
+    <div class="h2-auth-modal" id="authModal" role="dialog" aria-modal="true" aria-labelledby="authModalTitle" hidden>
+      <div class="h2-auth-panel">
+        <button type="button" class="h2-auth-close" id="authModalCloseBtn" aria-label="Close dialog">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+
+        <div class="h2-auth-header">
+          <div class="h2-auth-badge">H2 HOUSE OF HEALTH</div>
+          <h2 class="h2-auth-title" id="authModalTitle">Welcome to H2</h2>
+          <p class="h2-auth-subtitle">Sign in to track orders, save delivery addresses, and enjoy seamless checkout.</p>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <div class="h2-auth-tabs" role="tablist">
+          <button type="button" class="h2-auth-tab active" id="authTabSignIn" role="tab" aria-selected="true" data-tab="signin">Sign In</button>
+          <button type="button" class="h2-auth-tab" id="authTabSignUp" role="tab" aria-selected="false" data-tab="signup">Create Account</button>
+          <button type="button" class="h2-auth-tab" id="authTabGuest" role="tab" aria-selected="false" data-tab="guest">Guest Checkout</button>
+        </div>
+
+        <div class="h2-auth-alert" id="authModalAlert" hidden></div>
+
+        <!-- Tab 1: Sign In (Email OTP via AWS SES & Password) -->
+        <div class="h2-auth-pane active" id="paneSignIn">
+          <!-- Step 1: Email Input for OTP -->
+          <div id="otpFlowStep1">
+            <div class="h2-auth-badge" style="margin-bottom:12px;">FAST EMAIL CODE SIGN IN</div>
+            <form id="authSendOtpForm" class="h2-auth-form">
+              <div class="h2-field-group">
+                <label for="otpEmailInput">Email Address</label>
+                <input type="email" id="otpEmailInput" placeholder="name@example.com" required autocomplete="email" />
+                <span style="font-size:12px;color:#756D69;line-height:1.4;">We will email you a secure 6-digit verification code. No password needed.</span>
+              </div>
+              <button type="submit" class="h2-auth-submit-btn" id="btnSendOtp">
+                Send Verification Code
+              </button>
+            </form>
+          </div>
+
+          <!-- Step 2: 6-Digit OTP Verification -->
+          <div id="otpFlowStep2" hidden>
+            <div class="h2-auth-badge" style="background:rgba(27,122,66,0.1);color:#1B7A42;margin-bottom:10px;">CODE SENT TO INBOX</div>
+            <p style="font-size:13px;color:#4A423D;margin:0 0 14px;line-height:1.4;">
+              Enter the 6-digit code sent to <strong id="otpSentEmailTarget"></strong>
+              <button type="button" class="shopify-auth-link" id="otpChangeEmailBtn" style="margin-left:6px;font-size:12px;">Edit</button>
+            </p>
+            <form id="authVerifyOtpForm" class="h2-auth-form">
+              <div class="h2-field-group">
+                <label for="otpCodeInput">6-Digit Verification Code</label>
+                <input type="text" id="otpCodeInput" placeholder="••••••" maxlength="6" inputmode="numeric" pattern="[0-9]*" style="font-size:24px;letter-spacing:6px;text-align:center;font-weight:700;" required autocomplete="one-time-code" />
+              </div>
+              <button type="submit" class="h2-auth-submit-btn" id="btnVerifyOtp">
+                Verify &amp; Sign In
+              </button>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:12px;">
+                <button type="button" class="shopify-auth-link" id="btnResendOtp">Resend Code</button>
+                <span id="otpCountdownTimer" style="color:#756D69;"></span>
+              </div>
+            </form>
+          </div>
+
+          <div class="h2-auth-divider">
+            <span>OR SIGN IN WITH PASSWORD</span>
+          </div>
+
+          <form id="authSignInForm" class="h2-auth-form">
+            <div class="h2-field-group">
+              <label for="signInIdentity">Email Address or Mobile</label>
+              <input type="text" id="signInIdentity" placeholder="name@example.com or mobile" autocomplete="username" />
+            </div>
+            <div class="h2-field-group">
+              <label for="signInPassword">Password</label>
+              <input type="password" id="signInPassword" placeholder="••••••••" autocomplete="current-password" />
+            </div>
+            <button type="submit" class="h2-auth-submit-btn" id="btnSignInSubmit" style="background:#243038;">
+              Sign In with Password
+            </button>
+          </form>
+        </div>
+
+        <!-- Tab 2: Sign Up -->
+        <div class="h2-auth-pane" id="paneSignUp" hidden>
+          <!-- Google OAuth Button -->
+          <a href="/auth/google" class="h2-auth-google-btn" id="authGoogleBtnSignUp">
+            <svg class="h2-google-icon" width="18" height="18" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+            </svg>
+            <span>Sign Up with Google</span>
+          </a>
+
+          <div class="h2-auth-divider">
+            <span>OR CREATE AN ACCOUNT</span>
+          </div>
+
+          <form id="authSignUpForm" class="h2-auth-form">
+            <div class="h2-field-group">
+              <label for="signUpName">Full Name</label>
+              <input type="text" id="signUpName" placeholder="e.g. Rahul Sharma" required autocomplete="name" />
+            </div>
+            <div class="h2-field-group">
+              <label for="signUpEmail">Email Address</label>
+              <input type="email" id="signUpEmail" placeholder="name@example.com" required autocomplete="email" />
+            </div>
+            <div class="h2-field-group">
+              <label for="signUpPhone">Mobile Number (Optional)</label>
+              <input type="tel" id="signUpPhone" placeholder="10-digit mobile number" maxlength="10" autocomplete="tel" />
+            </div>
+            <div class="h2-field-group">
+              <label for="signUpPassword">Password (min 6 characters)</label>
+              <input type="password" id="signUpPassword" placeholder="••••••••" minlength="6" required autocomplete="new-password" />
+            </div>
+            <button type="submit" class="h2-auth-submit-btn" id="btnSignUpSubmit">
+              Create Account
+            </button>
+          </form>
+        </div>
+
+        <!-- Tab 3: Guest Checkout -->
+        <div class="h2-auth-pane" id="paneGuest" hidden>
+          <div class="h2-guest-card">
+            <div class="h2-guest-badge">NO PASSWORD REQUIRED</div>
+            <h3 class="h2-guest-title">Fast Guest Checkout</h3>
+            <p class="h2-guest-desc">Check out immediately without creating an account. You can track your shipment and delivery using your email or phone number.</p>
+            <div class="h2-field-group">
+              <label for="guestName">Your Name (Optional)</label>
+              <input type="text" id="guestName" placeholder="e.g. Rahul Sharma" />
+            </div>
+            <div class="h2-field-group">
+              <label for="guestEmail">Email Address (Optional)</label>
+              <input type="email" id="guestEmail" placeholder="For instant receipt & tracking" />
+            </div>
+            <button type="button" class="h2-auth-submit-btn h2-guest-btn" id="btnGuestContinue">
+              Continue as Guest
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- My Orders Modal -->
+    <div class="h2-auth-backdrop" id="myOrdersBackdrop" hidden></div>
+    <div class="h2-orders-modal" id="myOrdersModal" role="dialog" aria-modal="true" aria-labelledby="myOrdersTitle" hidden>
+      <div class="h2-orders-panel">
+        <button type="button" class="h2-auth-close" id="myOrdersCloseBtn" aria-label="Close orders">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+
+        <div class="h2-orders-header">
+          <div class="h2-auth-badge">PURCHASE HISTORY</div>
+          <h2 class="h2-auth-title" id="myOrdersTitle">My Orders</h2>
+          <p class="h2-auth-subtitle" id="myOrdersSubtitle">Your Ryan Fernando × H2 purchase orders and receipts.</p>
+        </div>
+
+        <div class="h2-orders-list" id="myOrdersList">
+          <div class="h2-orders-loading">Loading your orders...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Razorpay Standard Checkout SDK -->
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
+    <!-- Interactive Scripts -->
+    <script src="navbar.js?v=1" defer></script>
+    <script src="main.js?v=2"></script>
+  </body>
+</html>
