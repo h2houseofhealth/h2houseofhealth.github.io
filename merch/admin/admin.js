@@ -2398,6 +2398,18 @@
     els.sidebarOverlay.hidden = !state.sidebarOpen;
   }
 
+  function setSidebarCollapsed(isCollapsed) {
+    document.body.classList.toggle('admin-sidebar-collapsed', isCollapsed);
+    els.sidebarOpenBtn?.setAttribute('aria-label', isCollapsed ? 'Expand navigation' : 'Collapse navigation');
+    try {
+      localStorage.setItem('adminSidebarCollapsed', isCollapsed ? '1' : '0');
+    } catch (_) {}
+  }
+
+  function toggleSidebarCollapsed() {
+    setSidebarCollapsed(!document.body.classList.contains('admin-sidebar-collapsed'));
+  }
+
   function getActiveNotifications() {
     return (Array.isArray(state.notifications) ? state.notifications : [])
       .filter((item) => !item.dismissedAt)
@@ -10874,7 +10886,13 @@
       }
     });
 
-    els.sidebarOpenBtn?.addEventListener('click', () => setSidebarOpen(true));
+    els.sidebarOpenBtn?.addEventListener('click', () => {
+      if (window.matchMedia('(min-width: 981px)').matches) {
+        toggleSidebarCollapsed();
+      } else {
+        setSidebarOpen(true);
+      }
+    });
     els.sidebarCloseBtn?.addEventListener('click', () => setSidebarOpen(false));
     els.sidebarOverlay?.addEventListener('click', () => setSidebarOpen(false));
     els.adminModal?.addEventListener('click', (event) => {
@@ -10920,6 +10938,9 @@
     if (!(await ensureAdminSession())) return;
     state.view = getViewFromLocation();
     bindEvents();
+    try {
+      setSidebarCollapsed(localStorage.getItem('adminSidebarCollapsed') === '1');
+    } catch (_) {}
     renderAll();
     loadDashboardStats();
     loadHypeData();

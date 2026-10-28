@@ -3913,3 +3913,32 @@ body.merch-admin-page {
   }
 }
 
+
+/* Desktop sidebar collapse (hamburger toggles an icon-only rail) */
+.admin-topbar__menu { display: inline-flex; }
+
+@media (min-width: 981px) {
+  .admin-shell { transition: grid-template-columns 0.26s ease; }
+
+  body.admin-sidebar-collapsed .admin-shell {
+    grid-template-columns: 84px minmax(0, 1fr);
+  }
+
+  body.admin-sidebar-collapsed .admin-sidebar {
+    padding-left: 12px;
+    padding-right: 12px;
+    overflow-x: hidden;
+  }
+
+  body.admin-sidebar-collapsed .admin-sidebar__brand,
+  body.admin-sidebar-collapsed .admin-sidebar__meta,
+  body.admin-sidebar-collapsed .admin-nav__item > span:not(.admin-nav__icon) {
+    display: none;
+  }
+
+  body.admin-sidebar-collapsed .admin-nav__item {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+}
