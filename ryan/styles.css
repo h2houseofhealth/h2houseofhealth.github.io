@@ -4713,3 +4713,10 @@ button {
 }
 
 
+
+/* Ryan's offer is automatic: no coupon entry, pill or coupon message is shown */
+.coupon-input-group,
+.coupon-message,
+.applied-coupon-row {
+  display: none !important;
+}

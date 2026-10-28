@@ -6369,6 +6369,12 @@ module.exports = function mountMerchApi(app, {
   const RYAN_BOTTLE_COMMISSION_PAISE = 230000;
   const RYAN_MIST_COMMISSION_PAISE = 100000;
 
+  // Active Ryan influencer row (by handle/name), used when an order comes from the /ryan landing page without a coupon.
+  function getActiveRyanInfluencerId() {
+    const row = db.prepare("SELECT id FROM merch_influencers WHERE active = 1 AND (LOWER(handle) = 'ryan_h2' OR LOWER(name) = 'ryan') ORDER BY id LIMIT 1").get();
+    return row ? Number(row.id) : 0;
+  }
+
   function classifyRyanItem(item) {
     const pid = Number(item.productId || item.product_id);
     const name = String(item.productName || item.name || '');
@@ -6613,7 +6619,7 @@ module.exports = function mountMerchApi(app, {
   }
 
   function getMerchCommissionSnapshot(coupon, items = [], attribution = {}) {
-    const isRyan = isRyanAttribution({ coupon, ...attribution });
+    const isRyan = attribution.forceRyan || isRyanAttribution({ coupon, ...attribution });
     if (isRyan) {
       const lineCommissions = new Map();
       for (const item of (items || [])) {
@@ -7135,7 +7141,7 @@ module.exports = function mountMerchApi(app, {
       if (campRow?.coupon_code) effectiveCouponCode = normalizeMerchCouponCode(campRow.coupon_code);
     }
 
-    let isInfluencerCampaignActive = Boolean(campaignSlug || campaignAttributionCookie?.influencerId);
+    let isInfluencerCampaignActive = Boolean(campaignSlug || campaignAttributionCookie?.influencerId || String(req.body?.landingPage || '').trim().toLowerCase() === 'ryan');
     if (!isInfluencerCampaignActive && effectiveCouponCode) {
       const cRow = db.prepare('SELECT influencer_id FROM coupons WHERE LOWER(code) = LOWER(?) LIMIT 1').get(effectiveCouponCode);
       if (cRow && Number(cRow.influencer_id) > 0) {
@@ -7197,13 +7203,17 @@ module.exports = function mountMerchApi(app, {
     }
 
     const { campaignId, influencerId } = resolveOrderCampaignAttribution(req, couponResult);
-    const isRyan = isRyanAttribution({
+    // Orders from the /ryan landing page always get Ryan's pricing and commission, with or without a coupon.
+    const isRyanLanding = String(req.body?.landingPage || '').trim().toLowerCase() === 'ryan';
+    const isRyan = isRyanLanding || isRyanAttribution({
       coupon: couponResult?.coupon,
       influencerId,
       campaignId,
       campaignSlug: campaignSlug || req.body?.campaignSlug,
     });
-    const finalInfluencerId = isRyan ? (Number(couponResult?.coupon?.influencerId || influencerId || 0) || 10) : influencerId;
+    const finalInfluencerId = isRyan
+      ? (Number(couponResult?.coupon?.influencerId || influencerId || 0) || getActiveRyanInfluencerId() || null)
+      : influencerId;
 
     const hasActiveCoupon = Boolean(couponResult?.coupon && (Number(couponResult.discountAmountPaise || 0) > 0 || isRyan));
     const isCouponInfluencer = Boolean(
@@ -7223,14 +7233,14 @@ module.exports = function mountMerchApi(app, {
     const bundleDiscountPaise = (hasActiveInfluencerCoupon && !isRyan) ? 0 : getMerchBundleDiscountPaise(bundleCode, validatedItems);
     const shippingCharge = 0; // Free shipping by default as of now
     const discountAmount = isRyan
-      ? Math.max(0, bundleDiscountPaise + Math.max(0, Math.round(Number(couponResult?.discountAmountPaise || 0))))
+      ? Math.max(0, getRyanPricing(validatedItems).bundleDiscountPaise + getRyanPricing(validatedItems).individualDiscountPaise)
       : (hasActiveInfluencerCoupon
         ? Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
         : (bundleDiscountPaise > 0 ? bundleDiscountPaise : Math.max(0, Math.round(Number(couponResult?.discountAmountPaise || 0)))));
     const discountedSubtotal = Math.max(0, subtotal - discountAmount);
     // Product prices are GST-inclusive; derive included GST on discounted amount.
     const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
-    const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems, { influencerId: finalInfluencerId, campaignId, campaignSlug: campaignSlug || req.body?.campaignSlug });
+    const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems, { influencerId: finalInfluencerId, campaignId, campaignSlug: campaignSlug || req.body?.campaignSlug, forceRyan: isRyan });
     const totalAmount = Math.max(100, subtotal + shippingCharge - discountAmount);
     const orderNumber = generateOrderNumber();
     const shippingAddressPayload = address || {};
@@ -7840,13 +7850,17 @@ module.exports = function mountMerchApi(app, {
     }
 
     const { campaignId, influencerId } = resolveOrderCampaignAttribution(req, couponResult);
-    const isRyan = isRyanAttribution({
+    // Orders from the /ryan landing page always get Ryan's pricing and commission, with or without a coupon.
+    const isRyanLanding = String(req.body?.landingPage || '').trim().toLowerCase() === 'ryan';
+    const isRyan = isRyanLanding || isRyanAttribution({
       coupon: couponResult?.coupon,
       influencerId,
       campaignId,
       campaignSlug: campaignSlug || req.body?.campaignSlug,
     });
-    const finalInfluencerId = isRyan ? (Number(couponResult?.coupon?.influencerId || influencerId || 0) || 10) : influencerId;
+    const finalInfluencerId = isRyan
+      ? (Number(couponResult?.coupon?.influencerId || influencerId || 0) || getActiveRyanInfluencerId() || null)
+      : influencerId;
 
     const hasActiveCoupon = Boolean(couponResult?.coupon && (Number(couponResult.discountAmountPaise || 0) > 0 || isRyan));
     const isCouponInfluencer = Boolean(
@@ -7869,14 +7883,14 @@ module.exports = function mountMerchApi(app, {
     const shippingCharge = 0; // Free shipping by default as of now
     const codSurcharge = 5000; // ₹50
     const discountAmount = isRyan
-      ? Math.max(0, bundleDiscountPaise + Math.max(0, Math.round(Number(couponResult?.discountAmountPaise || 0))))
+      ? Math.max(0, getRyanPricing(validatedItems).bundleDiscountPaise + getRyanPricing(validatedItems).individualDiscountPaise)
       : (hasActiveInfluencerCoupon
         ? Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
         : (bundleDiscountPaise > 0 ? bundleDiscountPaise : Math.max(0, Math.round(Number(couponResult?.discountAmountPaise || 0)))));
     const discountedSubtotal = Math.max(0, subtotal - discountAmount);
     // Product prices are GST-inclusive; derive included GST on discounted amount.
     const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
-    const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems, { influencerId: finalInfluencerId, campaignId, campaignSlug: campaignSlug || req.body?.campaignSlug });
+    const commissionSnapshot = getMerchCommissionSnapshot(couponResult.coupon, validatedItems, { influencerId: finalInfluencerId, campaignId, campaignSlug: campaignSlug || req.body?.campaignSlug, forceRyan: isRyan });
     const totalAmount = Math.max(100, subtotal + shippingCharge + codSurcharge - discountAmount);
     const orderNumber = generateOrderNumber();
     const shippingAddressPayload = address || {};

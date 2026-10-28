@@ -225,16 +225,9 @@ function initCartStore() {
       saveCart(currentCart);
     }
 
-    // Ryan Fernando exclusive campaign: RYANH2 is active by default unless explicitly removed
-    const savedCoupon = localStorage.getItem('h2_applied_coupon');
-    if (savedCoupon === 'NONE' || savedCoupon === 'REMOVED' || savedCoupon === '') {
-      appliedCoupon = null;
-    } else if (savedCoupon && typeof savedCoupon === 'string' && savedCoupon.trim()) {
-      appliedCoupon = savedCoupon.trim().toUpperCase();
-    } else {
-      appliedCoupon = DEFAULT_COUPON_CODE;
-      localStorage.setItem('h2_applied_coupon', DEFAULT_COUPON_CODE);
-    }
+    // Ryan's offer (5% bottle/mist, 15% bundle) always applies on this page; there is no coupon to enter or remove.
+    appliedCoupon = DEFAULT_COUPON_CODE;
+    localStorage.removeItem('h2_applied_coupon');
   } catch (err) {
     console.warn('[H2 Cart] Failed to initialize cart store:', err);
     currentCart = [];
@@ -789,7 +782,7 @@ function renderCartDrawer() {
       if (appliedCoupon) {
         breakdownCouponRow.hidden = false;
         if (breakdownCouponLabel) {
-          breakdownCouponLabel.textContent = `${appliedCoupon} coupon discount (Applies to Bottles & Mists)`;
+          breakdownCouponLabel.textContent = `Ryan's offer (5% on Bottles & Mists)`;
         }
         if (breakdownCouponVal) {
           breakdownCouponVal.textContent = '₹0.00';
@@ -986,7 +979,7 @@ function renderCartDrawer() {
           itemsLabel = ` (${unbundledBottles} bottle${unbundledBottles > 1 ? 's' : ''} + ${unbundledMists} mist${unbundledMists > 1 ? 's' : ''})`;
         }
         if (breakdownCouponLabel) {
-          breakdownCouponLabel.textContent = `${appliedCoupon} coupon discount${itemsLabel}`;
+          breakdownCouponLabel.textContent = `Ryan's offer · 5% off${itemsLabel}`;
         }
         if (breakdownCouponVal) {
           breakdownCouponVal.textContent = `−₹${ryanCustomerDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -994,14 +987,14 @@ function renderCartDrawer() {
       } else if (totalBundleCount > 0 && unbundledBottles === 0 && unbundledMists === 0) {
         // Explain clearly why coupon discount is ₹0.00 when bundle is present
         if (breakdownCouponLabel) {
-          breakdownCouponLabel.textContent = `${appliedCoupon} coupon discount (Bundle discount already applies)`;
+          breakdownCouponLabel.textContent = `Ryan's offer (bundle discount already applies)`;
         }
         if (breakdownCouponVal) {
           breakdownCouponVal.textContent = `₹0.00`;
         }
       } else {
         if (breakdownCouponLabel) {
-          breakdownCouponLabel.textContent = `${appliedCoupon} coupon discount (Applies to Bottles & Mists)`;
+          breakdownCouponLabel.textContent = `Ryan's offer (5% on Bottles & Mists)`;
         }
         if (breakdownCouponVal) {
           breakdownCouponVal.textContent = `₹0.00`;
@@ -1496,20 +1489,6 @@ function renderCheckoutPage() {
           ${productsHtml}
         </div>
 
-        <!-- Coupon Input Area -->
-        <div class="shopify-coupon">
-          <div class="shopify-coupon__row">
-            <div class="shopify-coupon__field">
-              <input type="text" id="checkoutCouponInput" placeholder="Discount code" value="${escapeHtml(appliedCoupon || '')}" />
-            </div>
-            <button type="button" class="shopify-coupon__apply" id="checkoutCouponApplyBtn">APPLY</button>
-            ${appliedCoupon ? `<button type="button" class="shopify-coupon__remove" id="checkoutCouponRemoveBtn">✕</button>` : ''}
-          </div>
-          <div id="checkoutCouponMsg" class="shopify-coupon__message ${isCouponValid ? 'is-success' : 'is-error'}" ${appliedCoupon ? '' : 'hidden'}>
-            ${appliedCoupon ? (isCouponValid ? (ryanCustomerDiscount > 0 ? `Coupon ${appliedCoupon} applied!` : `${appliedCoupon} applied — ₹0.00 additional coupon discount because the bundle discount already applies.`) : 'Invalid coupon code') : ''}
-          </div>
-        </div>
-
         <div class="shopify-pricing">
           <div class="shopify-price-row">
             <span>Original subtotal</span>
@@ -1523,12 +1502,12 @@ function renderCheckoutPage() {
           ` : ''}
           ${ryanCustomerDiscount > 0 ? `
             <div class="shopify-price-row shopify-price-row--discount">
-              <span>${appliedCoupon} coupon discount</span>
+              <span>Ryan's offer · 5% off</span>
               <strong>−₹${ryanCustomerDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
             </div>
           ` : (appliedCoupon ? `
             <div class="shopify-price-row shopify-price-row--discount" style="opacity:0.85;">
-              <span>${appliedCoupon} coupon discount ${totalBundleCount > 0 && unbundledBottles === 0 && unbundledMists === 0 ? '(Bundle already includes 15% off)' : '(Applies to Bottles & Mists)'}</span>
+              <span>Ryan's offer ${totalBundleCount > 0 && unbundledBottles === 0 && unbundledMists === 0 ? '(Bundle already includes 15% off)' : '(5% on Bottles & Mists)'}</span>
               <strong>₹0.00</strong>
             </div>
           ` : '')}
@@ -1822,7 +1801,7 @@ async function startRazorpayCheckout(customer, submitBtn, errorMsg) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         items: checkoutItems,
-        couponCode: appliedCoupon || '',
+        landingPage: 'ryan',
         customer: { name: customer.name, email: customer.email, phone: customer.phone },
         address: {
           recipientName: customer.name,
