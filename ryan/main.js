@@ -1284,6 +1284,14 @@ function returnToShop() {
 /**
  * Render Complete Dedicated Checkout Page with Razorpay Payment Section
  */
+const INDIAN_STATES = [
+  'Andaman and Nicobar Islands', 'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chandigarh', 'Chhattisgarh',
+  'Dadra and Nagar Haveli and Daman and Diu', 'Delhi', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jammu and Kashmir',
+  'Jharkhand', 'Karnataka', 'Kerala', 'Ladakh', 'Lakshadweep', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya',
+  'Mizoram', 'Nagaland', 'Odisha', 'Puducherry', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura',
+  'Uttar Pradesh', 'Uttarakhand', 'West Bengal'
+];
+
 function renderCheckoutPage() {
   const container = document.getElementById('checkoutPage');
   if (!container) return;
@@ -1331,6 +1339,7 @@ function renderCheckoutPage() {
       if (!draft.address && lastAddr.address) draft.address = lastAddr.address;
       if (!draft.city && lastAddr.city) draft.city = lastAddr.city;
       if (!draft.pincode && lastAddr.pincode) draft.pincode = lastAddr.pincode;
+      if (!draft.state && lastAddr.state) draft.state = lastAddr.state;
     }
   }
 
@@ -1418,11 +1427,6 @@ function renderCheckoutPage() {
               <label class="shopify-field-label" for="checkoutCountry">Country / Region <span class="req">*</span></label>
               <select id="checkoutCountry" name="country">
                 <option value="India" selected>India</option>
-                <option value="United States">United States</option>
-                <option value="United Arab Emirates">United Arab Emirates</option>
-                <option value="United Kingdom">United Kingdom</option>
-                <option value="Singapore">Singapore</option>
-                <option value="Canada">Canada</option>
               </select>
             </div>
             <div class="shopify-field">
@@ -1448,6 +1452,14 @@ function renderCheckoutPage() {
             <div class="shopify-field">
               <label class="shopify-field-label" for="checkoutCustPincode">PIN Code <span class="req">*</span></label>
               <input type="text" id="checkoutCustPincode" name="pincode" value="${escapeHtml(draft.pincode || '')}" placeholder="6-digit PIN code" maxlength="6" inputmode="numeric" required autocomplete="postal-code" />
+            </div>
+            <div class="shopify-field shopify-field--wide">
+              <label class="shopify-field-label" for="checkoutCustState">State <span class="req">*</span></label>
+              <select id="checkoutCustState" name="state" required autocomplete="address-level1">
+                <option value="">Select state</option>
+                ${INDIAN_STATES.map((st) => `<option value="${escapeHtml(st)}"${draft.state === st ? ' selected' : ''}>${escapeHtml(st)}</option>`).join('')}
+              </select>
+              <span class="shopify-field-hint">Used by the courier for delivery. Please pick the state that matches your PIN code.</span>
             </div>
             <div class="shopify-field shopify-field--wide">
               <label class="shopify-field-label" for="checkoutCustPhone">Phone Number <span class="req">*</span></label>
@@ -1761,11 +1773,20 @@ function bindCheckoutPageEvents() {
       const apartment = container.querySelector('#checkoutCustApartment')?.value.trim() || '';
       const city = container.querySelector('#checkoutCustCity')?.value.trim() || '';
       const pincode = container.querySelector('#checkoutCustPincode')?.value.trim() || '';
+      const state = container.querySelector('#checkoutCustState')?.value.trim() || '';
       const phone = container.querySelector('#checkoutCustPhone')?.value.trim() || '';
 
-      if (!firstName || !lastName || !email || !address || !city || !pincode || !phone) {
+      if (!firstName || !lastName || !email || !address || !city || !state || !pincode || !phone) {
         if (errorMsg) {
           errorMsg.textContent = 'Please fill in all required delivery fields.';
+          errorMsg.hidden = false;
+        }
+        return;
+      }
+
+      if (!/^\d{6}$/.test(pincode)) {
+        if (errorMsg) {
+          errorMsg.textContent = 'Please enter a valid 6-digit PIN code.';
           errorMsg.hidden = false;
         }
         return;
@@ -1789,7 +1810,7 @@ function bindCheckoutPageEvents() {
 
       if (errorMsg) errorMsg.hidden = true;
 
-      const customer = { name, firstName, lastName, phone, email, address, apartment, city, pincode };
+      const customer = { name, firstName, lastName, phone, email, address, apartment, city, state, pincode };
       try {
         localStorage.setItem('h2_customer_details', JSON.stringify(customer));
       } catch (err) {}
@@ -1871,6 +1892,7 @@ async function startRazorpayCheckout(customer, submitBtn, errorMsg) {
           line1: customer.address,
           line2: customer.apartment || '',
           city: customer.city,
+          state: customer.state,
           postalCode: customer.pincode,
           country: 'India'
         }
