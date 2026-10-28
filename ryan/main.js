@@ -2680,7 +2680,7 @@ async function initAuthSystem() {
   if (accountViewOrdersBtn) {
     accountViewOrdersBtn.addEventListener('click', () => {
       if (accountDropdownMenu) accountDropdownMenu.hidden = true;
-      openMyOrdersModal();
+      window.location.href = '/merch/';
     });
   }
 
@@ -2938,72 +2938,38 @@ async function initAuthSystem() {
     });
   }
 
-  // Guest Continue
+  // Guest Continue: checkout works without a login, so just close the modal
   const btnGuestContinue = document.getElementById('btnGuestContinue');
   if (btnGuestContinue) {
-    btnGuestContinue.addEventListener('click', async () => {
-      const guestName = document.getElementById('guestName')?.value.trim();
-      const guestEmail = document.getElementById('guestEmail')?.value.trim();
-      btnGuestContinue.disabled = true;
-      btnGuestContinue.textContent = 'Initializing guest checkout...';
-
-      try {
-        const res = await fetch('/api/auth/guest-session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: guestName, email: guestEmail })
-        });
-        const data = await res.json();
-        if (data.ok && data.token) {
-          currentAuthToken = data.token;
-          currentAuthUser = data.guestUser;
-          localStorage.setItem('h2_auth_token', data.token);
-          updateAuthHeaderUI();
-          closeAuthModal();
-          showAuthToast('Proceeding as Guest');
-          const checkoutPage = document.getElementById('checkoutPage');
-          if (checkoutPage && !checkoutPage.hidden) {
-            renderCheckoutPage();
-          }
-        }
-      } catch (err) {
-        closeAuthModal();
-      } finally {
-        btnGuestContinue.disabled = false;
-        btnGuestContinue.textContent = 'Continue as Guest';
-      }
+    btnGuestContinue.addEventListener('click', () => {
+      closeAuthModal();
+      showAuthToast('Continuing as guest');
     });
-  }
-
-  // My Orders Modal controls
-  const myOrdersCloseBtn = document.getElementById('myOrdersCloseBtn');
-  const myOrdersBackdrop = document.getElementById('myOrdersBackdrop');
-  if (myOrdersCloseBtn) myOrdersCloseBtn.addEventListener('click', closeMyOrdersModal);
-  if (myOrdersBackdrop) myOrdersBackdrop.addEventListener('click', closeMyOrdersModal);
-
-  // If we already have a saved token, verify it
-  if (currentAuthToken) {
-    await fetchAuthUser();
-  } else {
     updateAuthHeaderUI();
   }
+
+  // The site's login session lives in an httpOnly cookie shared with /merch, so always ask the server who is signed in
+  await fetchAuthUser();
 }
 
 async function fetchAuthUser() {
-  if (!currentAuthToken) return;
   try {
     const res = await fetch('/api/auth/me', {
-      headers: { 'Authorization': `Bearer ${currentAuthToken}` }
+      credentials: 'include',
+      headers: currentAuthToken ? { 'Authorization': `Bearer ${currentAuthToken}` } : {}
     });
     if (res.ok) {
       const data = await res.json();
-      if (data.ok && data.user) {
+      if (data.user) {
         currentAuthUser = data.user;
         updateAuthHeaderUI();
         return;
       }
     }
   } catch (err) {}
+  currentAuthUser = null;
+  currentAuthToken = null;
+  localStorage.removeItem('h2_auth_token');
   updateAuthHeaderUI();
 }
 
@@ -3041,6 +3007,12 @@ function updateAuthHeaderUI() {
 }
 
 function openAuthModal(defaultTab = 'signin') {
+  // Sign in / create account use the site's real login page and return here afterwards.
+  // Guest checkout needs no session: the server accepts checkout without a login.
+  if (defaultTab !== 'guest') {
+    window.location.href = `/merch/auth.html?returnTo=${encodeURIComponent('/ryan/')}`;
+    return;
+  }
   const modal = document.getElementById('authModal');
   const backdrop = document.getElementById('authModalBackdrop');
   if (!modal || !backdrop) return;
@@ -3060,6 +3032,10 @@ function closeAuthModal() {
 }
 
 function switchAuthTab(tabName) {
+  if (tabName !== 'guest') {
+    window.location.href = `/merch/auth.html?returnTo=${encodeURIComponent('/ryan/')}`;
+    return;
+  }
   const tabs = document.querySelectorAll('.h2-auth-tab');
   tabs.forEach(t => {
     const isActive = t.dataset.tab === tabName;
@@ -3090,7 +3066,10 @@ function hideAuthModalAlert() {
   if (alertEl) alertEl.hidden = true;
 }
 
-function handleSignOut() {
+async function handleSignOut() {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+  } catch (err) {}
   localStorage.removeItem('h2_auth_token');
   currentAuthToken = null;
   currentAuthUser = null;
