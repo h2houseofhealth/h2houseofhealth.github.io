@@ -7943,13 +7943,13 @@ module.exports = function mountMerchApi(app, {
       decrementMerchPurchaseVariant(item.variantId, item.quantity);
     }
 
-    if (bundleDiscountPaise === 0 && Number(couponResult.coupon?.id || 0) > 0 && Number(discountAmount || 0) > 0 && Number(authUser?.id || 0) > 0) {
+    if (Number(couponResult.coupon?.id || 0) > 0 && Number(couponResult.discountAmountPaise || 0) > 0 && Number(authUser?.id || 0) > 0) {
       recordMerchCouponRedemption({
         couponId: Number(couponResult.coupon.id),
         userId: Number(authUser.id),
         contextType: 'merch_cod',
         contextRef: String(orderId),
-        discountAmountPaise: discountAmount,
+        discountAmountPaise: Number(couponResult.discountAmountPaise || 0),
       });
     }
 
