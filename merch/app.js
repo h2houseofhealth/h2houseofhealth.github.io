@@ -2348,12 +2348,20 @@ function getWishlistProductPrice(item) {
   function getCheckoutTotals() {
     const rawSubtotal = getRawCartTotal();
     const bundleDiscount = getMerchBundleDiscountAmount();
-    const subtotal = Math.max(0, rawSubtotal - bundleDiscount);
-    let couponDiscount = Math.max(0, Number(state.merchCouponPreview?.discountAmountInr || 0));
-    if (isRyanAttribution()) {
-      const indBottles = getCartIndividualBottleCount();
-      couponDiscount = indBottles * 1150;
+    const isRyan = isRyanAttribution();
+    const hasActiveCoupon = Boolean(state.merchCouponPreview);
+
+    let couponDiscount = 0;
+    if (hasActiveCoupon) {
+      if (isRyan) {
+        const indBottles = getCartIndividualBottleCount();
+        couponDiscount = indBottles * 1150;
+      } else if (bundleDiscount === 0) {
+        couponDiscount = Math.max(0, Number(state.merchCouponPreview.discountAmountInr || 0));
+      }
     }
+
+    const subtotal = Math.max(0, rawSubtotal - bundleDiscount);
     const shipping = getMerchShippingCharge(Math.max(0, subtotal - couponDiscount));
     const total = Math.max(1, subtotal + shipping - couponDiscount);
     const totalSavings = bundleDiscount + couponDiscount;
@@ -3359,8 +3367,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       : '';
     if (!state.currentUser) {
       els.merchAuthCta.innerHTML = `
-        <a href="/merch/auth.html?returnTo=%2Fmerch%2F" class="header-book-now-btn">
-           Sign Up / Login
+        <a href="/merch/auth.html?returnTo=%2Fmerch%2F" class="header-book-now-btn header-auth-btn" aria-label="Sign Up or Login">
+          Sign Up / Login
         </a>
       `;
       return;

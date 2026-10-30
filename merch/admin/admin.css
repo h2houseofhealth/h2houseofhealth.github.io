@@ -3914,6 +3914,57 @@ body.merch-admin-page {
 }
 
 
+/* 2. Global Touch Targets & Tap Highlight */
+button,
+a,
+input,
+select,
+textarea,
+.admin-nav__item,
+.admin-btn,
+.admin-icon-btn {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* 3. Mobile Input Zoom Prevention (iOS Safari & Chrome) */
+@media (max-width: 768px) {
+  .admin-input,
+  .admin-select,
+  .admin-textarea,
+  .admin-orders-date-field .admin-input,
+  .admin-revenue-filter .admin-select,
+  .admin-status-filter .admin-select,
+  .admin-order-status-range .admin-input,
+  .admin-offer-variant-row__discount input,
+  .admin-campaign-success-card__input {
+    font-size: 16px !important;
+  }
+
+  .admin-icon-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .admin-modal {
+    padding: 10px;
+  }
+
+  .admin-modal__dialog {
+    max-height: calc(100dvh - 20px);
+    border-radius: 18px;
+  }
+}
+
+/* 4. Table Overflow Protection */
+.admin-card__body:has(> table),
+.admin-modal__body:has(table),
+.admin-section__body:has(table) {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
 /* Desktop sidebar collapse (hamburger toggles an icon-only rail) */
 .admin-topbar__menu { display: inline-flex; }
 
