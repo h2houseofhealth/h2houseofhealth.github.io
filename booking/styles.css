@@ -173,26 +173,8 @@
   transition: color 0.25s ease;
 }
 
-.storefront-header .storefront-header__nav a::before {
-  position: absolute;
-  bottom: 4px;
-  left: 50%;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: transparent;
-  content: "";
-  transform: translateX(-50%);
-  transition: background 0.25s ease;
-}
-
 .storefront-header .storefront-header__nav a:hover {
   color: #af5431;
-}
-
-.storefront-header .storefront-header__nav a:hover::before,
-.storefront-header .storefront-header__nav a.is-active::before {
-  background: #3f3f3f;
 }
 
 .storefront-header__drawer {
@@ -12555,8 +12537,9 @@ body {
   box-shadow: 0 10px 22px rgba(200, 101, 45, 0.22) !important;
 }
 
-/* Keep the secondary Book Now CTA mobile-only. */
-#memberChoiceGate .member-choice-book-session-btn {
+/* Keep the secondary Book Now CTA mobile-only, and hide in-page auth button (navbar handles auth). */
+#memberChoiceGate .member-choice-book-session-btn,
+#topExplorePlansBtn {
   display: none !important;
 }
 
@@ -18111,36 +18094,6 @@ main.portal:has(#memberChoiceGate:not([hidden])) {
   max-width: 100% !important;
   margin-left: 0 !important;
   margin-right: 0 !important;
-}
-.storefront-header__cta {
-  margin-left: 0;
-  display: flex;
-  align-items: center;
-}
-
-.header-book-now-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: auto;
-  min-width: 115px;
-  height: 42px;
-  padding: 0 18px !important;
-  border-radius: 999px;
-  background: #ae5431;
-  color: #fff !important;
-  text-decoration: none;
-  font-size: 16px !important;
-  font-weight: 600 !important;
-  line-height: 1 !important;
-  text-transform: none !important;
-  white-space: nowrap;
-  transition: background .2s ease;
-}
-
-.header-book-now-btn:hover {
-  background: #8d4326;
-  color: #fff !important;
 }
 
 /* Shared storefront container: header and every booking portal view. */
