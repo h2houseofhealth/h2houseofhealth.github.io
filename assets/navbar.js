@@ -51,26 +51,40 @@
 
   // --- 2. Live Badge Synchronization ---
   function updateBadges() {
-    // 1. Cart Count
+    const isBookingPage = window.location.pathname.startsWith('/booking');
     let cartCount = 0;
-    try {
-      const guestCart = JSON.parse(localStorage.getItem('merch_cart_guest') || '[]');
-      if (Array.isArray(guestCart)) {
-        cartCount += guestCart.reduce((acc, item) => acc + (Number(item.quantity) || 1), 0);
-      }
-      if (cartCount === 0) {
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && key.startsWith('merch_cart_user_')) {
-            const userCart = JSON.parse(localStorage.getItem(key) || '[]');
-            if (Array.isArray(userCart)) {
-              cartCount += userCart.reduce((acc, item) => acc + (Number(item.quantity) || 1), 0);
-              break;
+
+    if (isBookingPage) {
+      try {
+        const guestBookingCart = JSON.parse(localStorage.getItem('h2_guest_cart') || '[]');
+        if (Array.isArray(guestBookingCart)) {
+          cartCount = guestBookingCart.filter((b) => {
+            if (!b || typeof b !== 'object') return false;
+            if (String(b.status || '').trim().toLowerCase() === 'cancelled') return false;
+            return String(b.paymentStatus || 'unpaid').trim().toLowerCase() !== 'paid';
+          }).length;
+        }
+      } catch {}
+    } else {
+      try {
+        const guestCart = JSON.parse(localStorage.getItem('merch_cart_guest') || '[]');
+        if (Array.isArray(guestCart)) {
+          cartCount += guestCart.reduce((acc, item) => acc + (Number(item.quantity) || 1), 0);
+        }
+        if (cartCount === 0) {
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('merch_cart_user_')) {
+              const userCart = JSON.parse(localStorage.getItem(key) || '[]');
+              if (Array.isArray(userCart)) {
+                cartCount += userCart.reduce((acc, item) => acc + (Number(item.quantity) || 1), 0);
+                break;
+              }
             }
           }
         }
-      }
-    } catch {}
+      } catch {}
+    }
 
     const cartBadges = document.querySelectorAll('#cartBadge, .h2-navbar__badge--cart');
     cartBadges.forEach((badge) => {
@@ -142,6 +156,7 @@
   // --- 4. Cross-Page Action Interceptors ---
   function bindActions() {
     const isMerchPage = window.location.pathname.startsWith('/merch');
+    const isBookingPage = window.location.pathname.startsWith('/booking');
 
     // Search Action
     document.querySelectorAll('#searchToggleBtn').forEach((btn) => {
@@ -161,7 +176,14 @@
     // Cart Action
     document.querySelectorAll('#cartToggleBtn').forEach((btn) => {
       btn.addEventListener('click', function (e) {
-        if (isMerchPage) {
+        if (isBookingPage) {
+          e.preventDefault();
+          if (typeof window.openBookingCart === 'function') {
+            window.openBookingCart();
+          } else {
+            window.location.hash = '#cart';
+          }
+        } else if (isMerchPage) {
           if (typeof window.openCart === 'function') {
             e.preventDefault();
             window.openCart();
@@ -189,23 +211,32 @@
     });
   }
 
-  // --- 5. Merch Deep Link Trigger ---
-  function handleMerchDeepLinks() {
-    if (!window.location.pathname.startsWith('/merch')) return;
-
+  // --- 5. Merch & Booking Deep Link Trigger ---
+  function handleDeepLinks() {
+    const isMerch = window.location.pathname.startsWith('/merch');
+    const isBooking = window.location.pathname.startsWith('/booking');
     const params = new URLSearchParams(window.location.search);
-    if (params.get('cart') === '1') {
-      setTimeout(() => {
-        if (typeof window.openCart === 'function') window.openCart();
-      }, 350);
-    } else if (params.get('search') === '1') {
-      setTimeout(() => {
-        if (typeof window.openSearch === 'function') window.openSearch();
-      }, 350);
-    } else if (params.get('wishlist') === '1') {
-      setTimeout(() => {
-        if (typeof window.openAccountDrawer === 'function') window.openAccountDrawer('account-wishlist');
-      }, 350);
+
+    if (isMerch) {
+      if (params.get('cart') === '1') {
+        setTimeout(() => {
+          if (typeof window.openCart === 'function') window.openCart();
+        }, 350);
+      } else if (params.get('search') === '1') {
+        setTimeout(() => {
+          if (typeof window.openSearch === 'function') window.openSearch();
+        }, 350);
+      } else if (params.get('wishlist') === '1') {
+        setTimeout(() => {
+          if (typeof window.openAccountDrawer === 'function') window.openAccountDrawer('account-wishlist');
+        }, 350);
+      }
+    } else if (isBooking) {
+      if (params.get('cart') === '1') {
+        setTimeout(() => {
+          if (typeof window.openBookingCart === 'function') window.openBookingCart();
+        }, 350);
+      }
     }
   }
 
@@ -238,7 +269,7 @@
     updateBadges();
     bindDrawer();
     bindActions();
-    handleMerchDeepLinks();
+    handleDeepLinks();
     checkAuth();
 
     window.addEventListener('storage', updateBadges);
