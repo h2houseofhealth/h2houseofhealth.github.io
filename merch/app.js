@@ -3379,8 +3379,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       : '';
     if (!state.currentUser) {
       els.merchAuthCta.innerHTML = `
-        <a href="/merch/auth.html?returnTo=%2Fmerch%2F" class="header-book-now-btn">
-           Sign Up / Login
+        <a href="/merch/auth.html?returnTo=%2Fmerch%2F" class="header-book-now-btn header-auth-btn" aria-label="Sign Up or Login">
+          Sign Up / Login
         </a>
       `;
       return;
