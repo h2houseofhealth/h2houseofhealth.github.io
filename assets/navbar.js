@@ -209,6 +209,21 @@
         }
       });
     });
+
+    // Book Now Action
+    document.querySelectorAll('#h2BookNowBtn').forEach((btn) => {
+      btn.addEventListener('click', function (e) {
+        if (isBookingPage) {
+          e.preventDefault();
+          if (typeof window.enterGuestBookingMode === 'function') {
+            window.enterGuestBookingMode({ scrollToServices: true });
+          } else {
+            window.location.href = '/booking/?entry=guest';
+          }
+        }
+      });
+    });
+
     // Auth Action (Sign Up / Sign In)
     document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn').forEach((btn) => {
       btn.addEventListener('click', function (e) {

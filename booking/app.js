@@ -1232,7 +1232,8 @@ async function bootstrap() {
     }
   }
   populateTimeSlots();
-  await Promise.all([loadCurrencyConfig(), loadCurrentUser()]);
+  const currencyPromise = typeof loadCurrencyConfig === 'function' ? loadCurrencyConfig() : Promise.resolve();
+  await Promise.all([currencyPromise, loadCurrentUser()]);
     if (hasGoogleAuthError && !state.user) {
       openAuthFromLanding('google-auth-error');
       if (elements.authError) {
@@ -1822,6 +1823,12 @@ function attachEvents() {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       openAuthFromLanding();
+    });
+  });
+  document.querySelectorAll('#h2BookNowBtn').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      await enterGuestBookingMode({ scrollToServices: true });
     });
   });
   [elements.myBookingsFilterAll, elements.myBookingsFilterUpcoming, elements.myBookingsFilterCompleted, elements.myBookingsFilterScheduleLater]
@@ -3662,6 +3669,7 @@ async function enterGuestBookingMode({ scrollToServices = true } = {}) {
     });
   }
 }
+window.enterGuestBookingMode = enterGuestBookingMode;
 
 function getGuestCartBookings() {
   return Array.isArray(state.cart) ? state.cart : [];
