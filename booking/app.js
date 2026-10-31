@@ -1140,6 +1140,7 @@ function openAuthFromLanding(choice = '') {
     elements.authCard?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 }
+window.openAuthFromLanding = openAuthFromLanding;
 
 function ensurePostLoginDashboardChoice() {
   if (state.user?.role !== 'user' || state.postLoginChoice) return;
@@ -1816,6 +1817,12 @@ function attachEvents() {
   });
   elements.bookingsViewCartBtn?.addEventListener('click', async () => {
     await openBookingCart();
+  });
+  document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      openAuthFromLanding();
+    });
   });
   [elements.myBookingsFilterAll, elements.myBookingsFilterUpcoming, elements.myBookingsFilterCompleted, elements.myBookingsFilterScheduleLater]
     .filter(Boolean)
@@ -8487,9 +8494,9 @@ function renderMemberChoiceGateCta() {
 function render() {
   document.body.classList.remove('app-booting');
   const isAuthenticated = Boolean(state.user);
-  const isGuest = Boolean(state.isGuestUser && !state.user);
+  const showAuthCard = !isAuthenticated && Boolean(state.showAuthCard);
+  const isGuest = Boolean(state.isGuestUser && !state.user && !showAuthCard);
   const isAppUser = isAuthenticated || isGuest;
-  const showAuthCard = !isAppUser && state.showAuthCard;
   const showPublicChoiceGate = !isAppUser && !showAuthCard;
   document.body.classList.toggle('auth-mode', showAuthCard);
   if (elements.authShell) elements.authShell.hidden = !showAuthCard;
