@@ -1127,8 +1127,11 @@ async function bootstrap() {
       state.showAuthCard = true;
       state.pendingPreAuthChoice = incomingReturnState?.postLoginChoice || '';
       renderAuthMode();
-    } else if (shouldOpenGuestServices) {
+    } else if (shouldOpenGuestServices || initialTab === 'cart') {
       await enterGuestBookingMode({ scrollToServices: false });
+      if (initialTab === 'cart') {
+        state.activeUserTab = 'cart';
+      }
     } else {
     const storedGuestToken = getStoredGuestSessionToken();
     const storedGuestCart = loadStoredGuestCart();
@@ -1174,6 +1177,10 @@ function attachEvents() {
   window.addEventListener('hashchange', () => {
     const nextTab = getUserTabFromHash(window.location.hash);
     if (!nextTab) return;
+    if (nextTab === 'cart' && (!state.user || !state.postLoginChoice)) {
+      openBookingCart();
+      return;
+    }
     if (!state.isGuestUser && (!state.user || state.user.role !== 'user' || !state.postLoginChoice)) return;
     const guestHasBookings = Boolean(
       state.isGuestUser &&
@@ -1614,37 +1621,36 @@ function attachEvents() {
       elements.userBookingsSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   });
-  elements.userTabCart?.addEventListener('click', async () => {
+  async function openBookingCart() {
+    if (state.user?.role === 'admin') return;
+    if (!state.user && !state.isGuestUser) {
+      await enterGuestBookingMode({ scrollToServices: false });
+    }
+    if (state.user?.role === 'user' && !state.postLoginChoice) {
+      state.postLoginChoice = isCurrentUserMembershipActive() ? 'continue-member' : 'continue-non-member';
+    }
     resetServiceBrowserState();
     state.servicesBackTargetTab = '';
     state.activeUserTab = 'cart';
     window.location.hash = '#cart';
-    await loadPublicCoupons();
+    try {
+      await loadPublicCoupons();
+    } catch {}
     render();
     requestAnimationFrame(() => {
       elements.userCartSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
+  }
+  window.openBookingCart = openBookingCart;
+
+  elements.userTabCart?.addEventListener('click', async () => {
+    await openBookingCart();
   });
   elements.cartBtn?.addEventListener('click', async () => {
-    if (state.user?.role !== 'user' || !state.postLoginChoice) return;
-    resetServiceBrowserState();
-    state.activeUserTab = 'cart';
-    window.location.hash = '#cart';
-    await loadPublicCoupons();
-    render();
-    requestAnimationFrame(() => {
-      elements.userCartSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
+    await openBookingCart();
   });
-  elements.bookingsViewCartBtn?.addEventListener('click', () => {
-    if (state.user?.role !== 'user' || !state.postLoginChoice) return;
-    resetServiceBrowserState();
-    state.activeUserTab = 'cart';
-    window.location.hash = '#cart';
-    render();
-    requestAnimationFrame(() => {
-      elements.userCartSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
+  elements.bookingsViewCartBtn?.addEventListener('click', async () => {
+    await openBookingCart();
   });
   [elements.myBookingsFilterAll, elements.myBookingsFilterUpcoming, elements.myBookingsFilterCompleted, elements.myBookingsFilterScheduleLater]
     .filter(Boolean)
@@ -14507,6 +14513,17 @@ function renderCartButtonState() {
   elements.cartBtn.setAttribute('aria-label', count > 0 ? `Cart, ${count} item${count === 1 ? '' : 's'}` : 'Cart');
   if (elements.userTabCart) {
     elements.userTabCart.textContent = count > 0 ? `Cart (${count})` : 'Cart';
+  }
+
+  // Sync navbar cart badge when on booking page
+  const navbarCartBadge = document.getElementById('cartBadge');
+  if (navbarCartBadge) {
+    navbarCartBadge.textContent = count > 99 ? '99+' : String(count);
+    if (count > 0) {
+      navbarCartBadge.removeAttribute('hidden');
+    } else {
+      navbarCartBadge.setAttribute('hidden', '');
+    }
   }
 }
 

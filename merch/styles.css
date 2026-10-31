@@ -347,12 +347,14 @@ button {
 
 .merch-auth-row .storefront-header__cta {
   margin-left: 0;
-  
 }
 
-/* Keep the merch hero and navbar visually continuous. */
-.merch-page .storefront-header {
-  box-shadow: none;
+.merch-auth-cta-wrap,
+#merchAuthCta {
+  display: inline-flex !important;
+  align-items: center !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 
 body.is-auth-loading .merch-auth-cta {
@@ -360,7 +362,26 @@ body.is-auth-loading .merch-auth-cta {
 }
 
 .merch-auth-cta .header-book-now-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 22px;
+  border-radius: 999px;
+  background: #a64d27;
+  color: #fff !important;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
   white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(166, 77, 39, 0.28);
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.merch-auth-cta .header-book-now-btn:hover {
+  background: #8e3e1c;
+  color: #fff !important;
+  transform: translateY(-1px);
 }
 
 .merch-account-btn {

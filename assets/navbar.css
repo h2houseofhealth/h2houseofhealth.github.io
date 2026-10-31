@@ -1,0 +1,508 @@
+/* ==========================================================================
+   H2 House of Health - Unified Isolated Navbar (.h2-navbar)
+   Scoped CSS completely isolated from theme, booking, and merch stylesheets.
+   ========================================================================== */
+
+@font-face {
+  font-family: "Roboto Mono";
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url("/cdn/fonts/roboto_mono/robotomono_n5.29a963c13062654edff960e0fc0769528bdca7e5.woff2") format("woff2"),
+       url("/cdn/fonts/roboto_mono/robotomono_n5.ba11b9a58fc32158ddb2acccd36cc62c012f4109.woff") format("woff");
+}
+
+:root {
+  --h2-nav-rust: #ae5431;
+  --h2-nav-rust-hover: #8d4326;
+  --h2-nav-rust-light: rgba(174, 84, 49, 0.08);
+  --h2-nav-rust-border: rgba(174, 84, 49, 0.35);
+  --h2-nav-text: #2f2f2f;
+  --h2-nav-text-muted: #555555;
+  --h2-nav-bg: #ffffff;
+  --h2-nav-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+  --h2-nav-radius: 999px;
+  --h2-nav-font: "Roboto Mono", monospace;
+}
+
+/* Outer sticky container */
+.h2-navbar-wrapper {
+  position: sticky !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  width: 100% !important;
+  z-index: 1000 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  box-sizing: border-box !important;
+}
+
+/* Pill card */
+.h2-navbar {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 16px !important;
+  box-sizing: border-box !important;
+  width: calc(100% - 32px) !important;
+  max-width: 1480px !important;
+  min-height: 52px !important;
+  margin: 10px auto 6px auto !important;
+  padding: 6px 20px !important;
+  background: var(--h2-nav-bg) !important;
+  border-radius: var(--h2-nav-radius) !important;
+  border: 1px solid rgba(174, 84, 49, 0.08) !important;
+  box-shadow: var(--h2-nav-shadow) !important;
+}
+
+@media screen and (min-width: 1200px) {
+  .h2-navbar {
+    width: calc(100% - 48px) !important;
+    gap: 20px !important;
+  }
+}
+
+/* Left side: logo + desktop links */
+.h2-navbar__left {
+  display: flex !important;
+  align-items: center !important;
+  gap: clamp(16px, 1.8vw, 36px) !important;
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+}
+
+/* Brand Logo */
+.h2-navbar__logo {
+  display: inline-flex !important;
+  align-items: center !important;
+  flex: 0 0 135px !important;
+  width: 135px !important;
+  max-width: 135px !important;
+  text-decoration: none !important;
+  line-height: 0 !important;
+}
+
+.h2-navbar__logo img {
+  display: block !important;
+  width: 135px !important;
+  max-width: 135px !important;
+  height: auto !important;
+  object-fit: contain !important;
+}
+
+/* Desktop Navigation */
+.h2-navbar__nav {
+  display: block !important;
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+}
+
+.h2-navbar__links {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  flex-wrap: nowrap !important;
+  gap: clamp(10px, 1.3vw, 22px) !important;
+  list-style: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  width: auto !important;
+}
+
+.h2-navbar__item {
+  display: inline-flex !important;
+  align-items: center !important;
+  flex: 0 0 auto !important;
+  list-style: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Navigation Links */
+.h2-navbar__link {
+  position: relative !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  font-family: var(--h2-nav-font) !important;
+  font-size: 11.5px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.02em !important;
+  line-height: 1.5 !important;
+  text-transform: uppercase !important;
+  white-space: nowrap !important;
+  color: var(--h2-nav-text) !important;
+  padding: 8px 3px !important;
+  text-decoration: none !important;
+  transition: color 0.2s ease !important;
+}
+
+.h2-navbar__link:hover {
+  color: var(--h2-nav-rust) !important;
+}
+
+/* Single Active Indicator Dot (Terracotta) */
+.h2-navbar__link::after {
+  content: "" !important;
+  display: none !important;
+  position: absolute !important;
+  bottom: 0px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  width: 4px !important;
+  height: 4px !important;
+  border-radius: 50% !important;
+  background-color: var(--h2-nav-rust) !important;
+}
+
+.h2-navbar__link[aria-current="page"]::after,
+.h2-navbar__link.is-active::after {
+  display: block !important;
+}
+
+.h2-navbar__link[aria-current="page"],
+.h2-navbar__link.is-active {
+  color: var(--h2-nav-rust) !important;
+}
+
+/* Action Suite (Right Side) */
+.h2-navbar__actions {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 8px !important;
+  flex: 0 0 auto !important;
+  margin-left: auto !important;
+}
+
+/* Action Icon Buttons (Search, Cart, Wishlist) */
+.h2-navbar__action-btn {
+  position: relative !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 36px !important;
+  height: 36px !important;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  color: var(--h2-nav-text) !important;
+  cursor: pointer !important;
+  border-radius: 50% !important;
+  transition: background 0.2s ease, color 0.2s ease !important;
+  flex-shrink: 0 !important;
+}
+
+.h2-navbar__action-btn:hover {
+  background: var(--h2-nav-rust-light) !important;
+  color: var(--h2-nav-rust) !important;
+}
+
+.h2-navbar__action-btn svg {
+  width: 19px !important;
+  height: 19px !important;
+  stroke: currentColor !important;
+  fill: none !important;
+  stroke-width: 1.8 !important;
+}
+
+/* Badges for Cart and Wishlist */
+.h2-navbar__badge {
+  position: absolute !important;
+  top: -2px !important;
+  right: -2px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 17px !important;
+  height: 17px !important;
+  padding: 0 4px !important;
+  border-radius: 999px !important;
+  background: var(--h2-nav-rust) !important;
+  color: #ffffff !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  line-height: 1 !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15) !important;
+}
+
+.h2-navbar__badge[hidden] {
+  display: none !important;
+}
+
+/* Primary CTA: Book Now */
+.h2-navbar__btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 38px !important;
+  padding: 0 16px !important;
+  min-width: 90px !important;
+  border-radius: var(--h2-nav-radius) !important;
+  text-decoration: none !important;
+  font-family: inherit !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.02em !important;
+  white-space: nowrap !important;
+  transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease !important;
+  flex-shrink: 0 !important;
+  box-sizing: border-box !important;
+  cursor: pointer !important;
+}
+
+.h2-navbar__btn--primary {
+  background: var(--h2-nav-rust) !important;
+  border: 1px solid var(--h2-nav-rust) !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(174, 84, 49, 0.2) !important;
+}
+
+.h2-navbar__btn--primary:hover {
+  background: var(--h2-nav-rust-hover) !important;
+  border-color: var(--h2-nav-rust-hover) !important;
+  color: #ffffff !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 12px rgba(174, 84, 49, 0.3) !important;
+}
+
+/* Secondary CTA: Sign Up / Sign In */
+.h2-navbar__btn--outline {
+  background: transparent !important;
+  border: 1px solid var(--h2-nav-rust-border) !important;
+  color: var(--h2-nav-rust) !important;
+  box-shadow: none !important;
+}
+
+.h2-navbar__btn--outline:hover {
+  background: var(--h2-nav-rust-light) !important;
+  border-color: var(--h2-nav-rust) !important;
+  color: var(--h2-nav-rust) !important;
+  transform: translateY(-1px) !important;
+}
+
+/* User Profile button state */
+.h2-navbar__btn--profile {
+  background: var(--h2-nav-rust-light) !important;
+  border: 1px solid var(--h2-nav-rust-border) !important;
+  color: var(--h2-nav-rust) !important;
+  gap: 8px !important;
+  padding: 0 16px !important;
+}
+
+.h2-navbar__avatar {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 26px !important;
+  height: 26px !important;
+  border-radius: 50% !important;
+  background: var(--h2-nav-rust) !important;
+  color: #ffffff !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+}
+
+/* Mobile Hamburger Toggle */
+.h2-navbar__drawer-toggle {
+  display: none !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 36px !important;
+  height: 36px !important;
+  border: none !important;
+  background: transparent !important;
+  color: var(--h2-nav-text) !important;
+  cursor: pointer !important;
+  padding: 0 !important;
+  flex-shrink: 0 !important;
+}
+
+/* Mobile Drawer Overlay and Container */
+.h2-navbar__drawer-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  background: rgba(0, 0, 0, 0.4) !important;
+  z-index: 9998 !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  transition: opacity 0.25s ease, visibility 0.25s ease !important;
+}
+
+.h2-navbar__drawer-backdrop.is-open {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.h2-navbar__drawer {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  bottom: 0 !important;
+  width: 85% !important;
+  max-width: 360px !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  background: #ffffff !important;
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.15) !important;
+  transform: translateX(-100%) !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  transition: transform 0.25s ease, opacity 0.25s ease, visibility 0.25s ease !important;
+  z-index: 9999 !important;
+  padding: 24px !important;
+  overflow-y: auto !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.h2-navbar__drawer.is-open {
+  transform: translateX(0) !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+.h2-navbar__drawer-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding-bottom: 20px !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+  margin-bottom: 24px !important;
+}
+
+.h2-navbar__drawer-title {
+  font-family: var(--h2-nav-font) !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.05em !important;
+  text-transform: uppercase !important;
+  color: var(--h2-nav-rust) !important;
+}
+
+.h2-navbar__drawer-close {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 32px !important;
+  height: 32px !important;
+  border: none !important;
+  background: transparent !important;
+  font-size: 24px !important;
+  line-height: 1 !important;
+  cursor: pointer !important;
+  color: var(--h2-nav-text) !important;
+}
+
+.h2-navbar__drawer-links {
+  list-style: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 14px !important;
+}
+
+.h2-navbar__drawer-link {
+  display: block !important;
+  font-family: var(--h2-nav-font) !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.03em !important;
+  text-transform: uppercase !important;
+  color: var(--h2-nav-text) !important;
+  text-decoration: none !important;
+  padding: 8px 0 !important;
+  transition: color 0.2s ease !important;
+}
+
+.h2-navbar__drawer-link:hover,
+.h2-navbar__drawer-link.is-active {
+  color: var(--h2-nav-rust) !important;
+}
+
+/* ==========================================================================
+   Responsive Breakpoints
+   ========================================================================== */
+
+@media screen and (max-width: 1199px) {
+  .h2-navbar__nav {
+    display: none !important;
+  }
+
+  .h2-navbar__drawer-toggle {
+    display: inline-flex !important;
+  }
+
+  .h2-navbar {
+    padding: 6px 14px !important;
+    width: calc(100% - 20px) !important;
+  }
+
+  .h2-navbar__btn {
+    height: 36px !important;
+    padding: 0 14px !important;
+    font-size: 12px !important;
+    min-width: 0 !important;
+  }
+
+  .h2-navbar__action-btn {
+    width: 32px !important;
+    height: 32px !important;
+  }
+}
+
+@media screen and (max-width: 540px) {
+  .h2-navbar__btn--outline {
+    display: none !important;
+  }
+
+  .h2-navbar__logo {
+    flex: 0 0 80px !important;
+    width: 80px !important;
+    max-width: 80px !important;
+  }
+
+  .h2-navbar__logo img {
+    width: 80px !important;
+    max-width: 80px !important;
+  }
+
+  .h2-navbar {
+    padding: 5px 12px !important;
+    gap: 8px !important;
+    min-height: 48px !important;
+  }
+
+  .h2-navbar__left {
+    gap: 8px !important;
+  }
+
+  .h2-navbar__action-btn {
+    width: 28px !important;
+    height: 28px !important;
+  }
+
+  .h2-navbar__action-btn svg {
+    width: 17px !important;
+    height: 17px !important;
+  }
+
+  .h2-navbar__actions {
+    gap: 4px !important;
+  }
+
+  .h2-navbar__btn {
+    height: 32px !important;
+    padding: 0 12px !important;
+    font-size: 11.5px !important;
+  }
+}
+
+/* Hide legacy header elements if present on page */
+.shopify-section-header:has(.h2-navbar-wrapper) sticky-header:not(:has(.h2-navbar)),
+.storefront-header-wrapper:has(.h2-navbar-wrapper) > .storefront-header {
+  display: none !important;
+}
