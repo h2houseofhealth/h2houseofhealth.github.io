@@ -98,11 +98,11 @@ function post(url, body) {
   });
 }
 
-// Bottle Variant: 169 (Product ID: 11, ₹22,990 = 2,299,000 paise)
-// Mist Variant: 173 (Product ID: 12, ₹11,900 = 1,190,000 paise)
+// Active Bottle Variant: 569 (Product ID: 11, ₹22,990 = 2,299,000 paise)
+// Active Mist Variant: 574 (Product ID: 12, ₹11,900 = 1,190,000 paise)
 const BOTTLE = {
   productId: 11,
-  variantId: 169,
+  variantId: 569,
   productName: 'H2 Molecular Hydrogen Water Bottle',
   price: 22990,
   unitPrice: 2299000,
@@ -111,7 +111,7 @@ const BOTTLE = {
 
 const MIST = {
   productId: 12,
-  variantId: 173,
+  variantId: 574,
   productName: 'H2 Hydrogen Mist Spray',
   price: 11900,
   unitPrice: 1190000,
