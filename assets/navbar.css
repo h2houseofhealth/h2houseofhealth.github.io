@@ -506,3 +506,15 @@
 .storefront-header-wrapper:has(.h2-navbar-wrapper) > .storefront-header {
   display: none !important;
 }
+
+.h2-navbar__drawer-divider {
+  height: 1px;
+  background: rgba(174, 84, 49, 0.15);
+  margin: 12px 0;
+  list-style: none;
+}
+
+.h2-navbar__drawer-auth {
+  color: var(--h2-nav-accent) !important;
+  font-weight: 600 !important;
+}

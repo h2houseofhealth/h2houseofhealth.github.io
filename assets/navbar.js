@@ -209,6 +209,37 @@
         }
       });
     });
+
+    // Book Now Action
+    document.querySelectorAll('#h2BookNowBtn').forEach((btn) => {
+      btn.addEventListener('click', function (e) {
+        if (isBookingPage) {
+          e.preventDefault();
+          if (typeof window.enterGuestBookingMode === 'function') {
+            window.enterGuestBookingMode({ scrollToServices: true });
+          } else {
+            window.location.href = '/booking/?entry=guest';
+          }
+        }
+      });
+    });
+
+    // Auth Action (Sign Up / Sign In)
+    document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn').forEach((btn) => {
+      btn.addEventListener('click', function (e) {
+        if (isBookingPage) {
+          e.preventDefault();
+          if (typeof window.openAuthFromLanding === 'function') {
+            window.openAuthFromLanding();
+          } else {
+            window.location.href = '/booking/?auth=1';
+          }
+        } else if (isMerchPage) {
+          e.preventDefault();
+          window.location.href = '/merch/auth.html?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search);
+        }
+      });
+    });
   }
 
   // --- 5. Merch & Booking Deep Link Trigger ---
@@ -250,14 +281,24 @@
       const user = data?.user;
       if (!user) return;
 
-      const authBtns = document.querySelectorAll('#h2AuthBtn, .h2-navbar__btn--outline');
+      const authBtns = document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn, .h2-navbar__btn--outline');
       authBtns.forEach((btn) => {
         const displayName = (user.name || user.email || 'My Account').split(' ')[0];
         const initials = getInitials(displayName);
         btn.innerHTML = `<span class="h2-navbar__avatar">${initials}</span> <span>${displayName}</span>`;
         btn.classList.remove('h2-navbar__btn--outline');
         btn.classList.add('h2-navbar__btn--profile');
-        btn.setAttribute('href', '/booking/');
+        if (window.location.pathname.startsWith('/merch')) {
+          btn.setAttribute('href', '#');
+          btn.addEventListener('click', function (e) {
+            e.preventDefault();
+            if (typeof window.openAccountDrawer === 'function') {
+              window.openAccountDrawer();
+            }
+          });
+        } else {
+          btn.setAttribute('href', '/booking/');
+        }
         btn.setAttribute('aria-label', `Account of ${displayName}`);
       });
     } catch {}

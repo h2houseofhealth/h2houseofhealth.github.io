@@ -990,6 +990,7 @@ function openAuthFromLanding(choice = '') {
     elements.authCard?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 }
+window.openAuthFromLanding = openAuthFromLanding;
 
 function ensurePostLoginDashboardChoice() {
   if (state.user?.role !== 'user' || state.postLoginChoice) return;
@@ -1081,7 +1082,8 @@ async function bootstrap() {
     }
   }
   populateTimeSlots();
-  await Promise.all([loadCurrencyConfig(), loadCurrentUser()]);
+  const currencyPromise = typeof loadCurrencyConfig === 'function' ? loadCurrencyConfig() : Promise.resolve();
+  await Promise.all([currencyPromise, loadCurrentUser()]);
   if (hasGoogleAuthError && !state.user) {
     openAuthFromLanding('google-auth-error');
     if (elements.authError) {
@@ -1651,6 +1653,18 @@ function attachEvents() {
   });
   elements.bookingsViewCartBtn?.addEventListener('click', async () => {
     await openBookingCart();
+  });
+  document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      openAuthFromLanding();
+    });
+  });
+  document.querySelectorAll('#h2BookNowBtn').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      await enterGuestBookingMode({ scrollToServices: true });
+    });
   });
   [elements.myBookingsFilterAll, elements.myBookingsFilterUpcoming, elements.myBookingsFilterCompleted, elements.myBookingsFilterScheduleLater]
     .filter(Boolean)
@@ -3461,6 +3475,7 @@ async function enterGuestBookingMode({ scrollToServices = true } = {}) {
     });
   }
 }
+window.enterGuestBookingMode = enterGuestBookingMode;
 
 function getGuestCartBookings() {
   return Array.isArray(state.cart) ? state.cart : [];
@@ -8287,9 +8302,9 @@ function renderMemberChoiceGateCta() {
 function render() {
   document.body.classList.remove('app-booting');
   const isAuthenticated = Boolean(state.user);
-  const isGuest = Boolean(state.isGuestUser && !state.user);
+  const showAuthCard = !isAuthenticated && Boolean(state.showAuthCard);
+  const isGuest = Boolean(state.isGuestUser && !state.user && !showAuthCard);
   const isAppUser = isAuthenticated || isGuest;
-  const showAuthCard = !isAppUser && state.showAuthCard;
   const showPublicChoiceGate = !isAppUser && !showAuthCard;
   document.body.classList.toggle('auth-mode', showAuthCard);
   if (elements.authShell) elements.authShell.hidden = !showAuthCard;
@@ -17311,4 +17326,13 @@ function renderMyBookingsSessionTracking() {
       }
     }
   }
+}
+
+async function loadCurrencyConfig() {
+  try {
+    const cfg = await api('/api/currency/config');
+    if (cfg && cfg.inrPerUsd) {
+      state.currencyConfig = cfg;
+    }
+  } catch {}
 }
