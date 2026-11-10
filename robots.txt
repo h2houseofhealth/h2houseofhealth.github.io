@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /merch/admin/
+Disallow: /merch/auth.html
+Disallow: /invoice/
+Disallow: /*?*adminTracking=
+Disallow: /*?*returnTo=
+Sitemap: https://www.h2houseofhealth.com/sitemap.xml

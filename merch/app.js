@@ -276,8 +276,11 @@
   }
 
   function normalizeProductImageUrl(value) {
-    const raw = String(value || '').trim();
+    let raw = String(value || '').trim();
     if (!raw) return '';
+    if (raw.includes('WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg')) {
+      return '/cdn/shop/files/products/h2-hydrogen-water-bottle-silver.jpg';
+    }
     if (/^(https?:|data:|blob:)/i.test(raw)) return raw;
     if (raw.startsWith('/')) return raw;
     if (raw.startsWith('cdn/') || raw.startsWith('booking/') || raw.startsWith('uploads/')) return `/${raw}`;
@@ -310,7 +313,7 @@
     const category = String(product?.category || '').toLowerCase();
     const name = String(product?.name || '').toLowerCase();
     if (category === 'sprays' || name.includes('mist') || name.includes('spray')) return '/cdn/shop/files/hero/h2-mist-transparent-source.png';
-    if (category === 'bottles' || name.includes('bottle')) return '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113';
+    if (category === 'bottles' || name.includes('bottle')) return '/cdn/shop/files/products/h2-hydrogen-water-bottle-silver.jpg';
     if (category === 'hoodies' || name.includes('hoodie')) return HOODIE_CARD_IMAGE;
     return FALLBACK_PRODUCT_IMAGE;
   }
@@ -3111,7 +3114,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           return;
         }
         if (action === 'shop') {
-          window.location.href = '/merch/';
+          window.location.href = '/merch/wellness-products/';
           return;
         }
         if (action === 'send-whatsapp') {
@@ -3379,7 +3382,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       : '';
     if (!state.currentUser) {
       els.merchAuthCta.innerHTML = `
-        <a href="/merch/auth.html?returnTo=%2Fmerch%2F" class="header-book-now-btn header-auth-btn" aria-label="Sign Up or Login">
+        <a href="/merch/auth.html?returnTo=%2Fmerch%2Fwellness-products%2F" class="header-book-now-btn header-auth-btn" aria-label="Sign Up or Login">
           Sign Up / Login
         </a>
       `;
@@ -5328,6 +5331,13 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           : (product.images?.[0] || product.imageUrl || getProductFallbackImage(product)));
       const cardSizes = displayVariant?.size ? [displayVariant.size] : [];
       const cardColors = displayVariant?.color ? [displayVariant.color] : [];
+      const cardAlt = isBottle
+        ? `${product.name} - Portable Hydrogen Water Bottle${displayVariant?.color ? ` (${displayVariant.color})` : ''}`
+        : (isMist
+          ? `${product.name} - Handheld Hydrogen Water Facial Mister${displayVariant?.color ? ` (${displayVariant.color})` : ''}`
+          : (isHoodie
+            ? `H2 House of Health Signature Hoodie${displayVariant?.color ? ` (${displayVariant.color})` : ''}`
+            : product.name));
       const cardSpecifications = Object.entries(getProductSpecifications(product, displayVariant))
         .filter(([label, value]) => String(label).trim() && String(value).trim())
         .slice(0, 2);
@@ -5355,11 +5365,12 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             <span>${escapeHtml(presentation.annotation)}</span>
             <svg viewBox="0 0 92 54"><path d="M5 7c2 29 26 41 70 34" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="m67 34 9 7-11 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </div>
-          <img src="${escapeHtml(cardImage)}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
+          <img src="${escapeHtml(cardImage)}" alt="${escapeHtml(cardAlt)}" width="400" height="400" loading="lazy" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
         </div>
         <div class="product-card__body">
           <p class="product-card__category">${escapeHtml(getCategoryLabel(product.category))}</p>
           <h3 class="product-card__name">${escapeHtml(product.name)}</h3>
+          ${product.description ? `<p class="product-card__desc">${escapeHtml(product.description)}</p>` : ''}
           ${(cardSizes.length || cardColors.length) ? `<p class="product-card__variant">${cardSizes.length ? `Size: ${cardSizes.join(', ')}` : ''}${cardSizes.length && cardColors.length ? ' · ' : ''}${cardColors.length ? `Color: ${cardColors.join(', ')}` : ''}</p>` : ''}
           ${cardSpecifications.length ? `<div class="product-card__specs">${cardSpecifications.map(([label, value]) => `<span><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</span>`).join('')}</div>` : ''}
           <p class="product-card__stock ${stockClass}">${escapeHtml(stockLabel)}</p>
@@ -5477,6 +5488,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     document.querySelector('.merch-categories').hidden = true;
     const _shopOffersSection = document.getElementById('shopOffersSection');
     if (_shopOffersSection) _shopOffersSection.hidden = true;
+    const _merchBenefits = document.getElementById('merchBenefitsSection');
+    if (_merchBenefits) _merchBenefits.hidden = true;
+    const _merchFaq = document.getElementById('merchFaqSection');
+    if (_merchFaq) _merchFaq.hidden = true;
     if (els.checkoutPage) els.checkoutPage.hidden = true;
     if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
     if (els.orderTracking) els.orderTracking.hidden = true;
@@ -5502,6 +5517,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     document.querySelector('.merch-categories').hidden = false;
     const _shopOffersSection2 = document.getElementById('shopOffersSection');
     if (_shopOffersSection2) _shopOffersSection2.hidden = state.offers.length === 0;
+    const _merchBenefits2 = document.getElementById('merchBenefitsSection');
+    if (_merchBenefits2) _merchBenefits2.hidden = false;
+    const _merchFaq2 = document.getElementById('merchFaqSection');
+    if (_merchFaq2) _merchFaq2.hidden = false;
     if (window.location.hash === '#booking-confirmation' || window.location.hash === '#checkout' || getTrackingOrderIdFromHash() || window.location.search) {
       history.replaceState(null, '', window.location.pathname);
     }
@@ -5514,7 +5533,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       || getProductFallbackImage(product);
     els.productGallery.innerHTML = `
       <div class="gallery-main gallery-main--${escapeHtml(String(product.category || '').toLowerCase())}" tabindex="0" aria-label="${escapeHtml(product.name)} image gallery">
-        <img id="galleryMainImg" src="${escapeHtml(mainImage)}" alt="${escapeHtml(product.name)}" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
+        <img id="galleryMainImg" src="${escapeHtml(mainImage)}" alt="${escapeHtml(product.name)}" width="600" height="600" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
         ${slides.some((slide) => slide.type === 'video') ? '<video id="galleryMainVideo" controls playsinline preload="metadata" hidden></video>' : ''}
         ${slides.length > 1 ? `
           <button class="gallery-nav gallery-nav--previous" type="button" data-gallery-direction="previous" aria-label="Previous product image">&#8592;</button>
@@ -5525,7 +5544,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         <div class="gallery-thumbs">
           ${slides.map((slide, i) => `
             <button class="gallery-thumb ${i === 0 ? 'is-active' : ''}" data-index="${i}" type="button" aria-label="View ${escapeHtml(slide.label)}">
-              <img src="${escapeHtml(slide.src)}" alt="" />
+              <img src="${escapeHtml(slide.src)}" alt="" width="80" height="80" loading="lazy" />
             </button>
           `).join('')}
         </div>
@@ -7002,7 +7021,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
               <span>${state.checkoutSubmitting ? 'PROCESSING...' : 'CONTINUE TO PAYMENT'}</span>
               <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
             </button>
-            <a href="/merch/" class="shopify-continue-button" data-action="continue-shopping">
+            <a href="/merch/wellness-products/" class="shopify-continue-button" data-action="continue-shopping">
               CONTINUE SHOPPING
             </a>
           </div>

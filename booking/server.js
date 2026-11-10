@@ -953,6 +953,23 @@ app.use(
 app.use(passport.initialize());
 app.use(passport.session());
 app.use((req, res, next) => {
+  const host = String(req.get('host') || '').toLowerCase().split(':')[0];
+  if (host === 'h2houseofhealth.com') {
+    return res.redirect(301, `https://www.h2houseofhealth.com${req.originalUrl || req.url}`);
+  }
+  next();
+});
+
+// ─── Search Engine Core Files ───────────────────────────────────────────────
+app.get('/robots.txt', (_req, res) => {
+  res.type('text/plain').sendFile(path.join(WEBSITE_ROOT, 'robots.txt'));
+});
+
+app.get('/sitemap.xml', (_req, res) => {
+  res.type('application/xml').sendFile(path.join(WEBSITE_ROOT, 'sitemap.xml'));
+});
+
+app.use((req, res, next) => {
   const pathName = String(req.path || '');
   if (
     pathName === '/booking/app.js' ||
@@ -963,6 +980,24 @@ app.use((req, res, next) => {
   }
   return next();
 });
+
+// ─── 301 Redirect from legacy /merch/ to /merch/wellness-products/ ──────────
+app.get(['/merch', '/merch/', '/merch/index.html'], (req, res, next) => {
+  if (req.path.startsWith('/merch/wellness-products')) {
+    return next();
+  }
+  const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+  return res.redirect(301, `/merch/wellness-products/${query}`);
+});
+
+app.get(['/merch/wellness-products', '/merch/wellness-products/'], (req, res) => {
+  if (req.path === '/merch/wellness-products') {
+    const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    return res.redirect(301, `/merch/wellness-products/${query}`);
+  }
+  res.sendFile(path.join(WEBSITE_ROOT, 'merch', 'wellness-products', 'index.html'));
+});
+
 app.use('/booking', express.static(path.join(__dirname)));
 app.use('/merch', express.static(path.join(WEBSITE_ROOT, 'merch')));
 app.use('/uploads', express.static(uploadsDir));

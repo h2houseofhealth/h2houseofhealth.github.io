@@ -28,8 +28,8 @@ function buildApiUrl(url = '') {
 function getReturnTo() {
   const params = new URLSearchParams(window.location.search || '');
   const candidate = String(params.get('returnTo') || '').trim();
-  if (!candidate) return '/merch/';
-  if (!candidate.startsWith('/')) return '/merch/';
+  if (!candidate) return '/merch/wellness-products/';
+  if (!candidate.startsWith('/')) return '/merch/wellness-products/';
   return candidate;
 }
 
@@ -748,7 +748,7 @@ function bindEvents() {
   });
 
   elements.authBackToChoicesBtn?.addEventListener('click', () => {
-    window.location.href = '/merch/';
+    window.location.href = '/merch/wellness-products/';
   });
 
   elements.authPasswordToggleBtn?.addEventListener('click', toggleAuthPasswordVisibility);
