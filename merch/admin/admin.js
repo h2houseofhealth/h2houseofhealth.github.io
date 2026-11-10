@@ -9804,7 +9804,7 @@
         renderOrderEditModal(state.orders.filter((item) => state.selectedOrderIds.includes(Number(item.id))));
         return;
       case 'track-admin-order':
-        if (order) window.open(`/merch/index.html?adminTracking=1#track-order/${encodeURIComponent(order.id)}`, '_blank', 'noopener,noreferrer');
+        if (order) window.open(`/merch/wellness-products/?adminTracking=1#track-order/${encodeURIComponent(order.id)}`, '_blank', 'noopener,noreferrer');
         return;
       case 'save-order-edits': {
         const form = els.adminModalDialog.querySelector('[data-order-edit-form]');

@@ -5172,8 +5172,8 @@ module.exports = function mountMerchApi(app, {
     const origin = getMerchEmailOrigin(req);
     return {
       home: `${origin}/`,
-      shop: `${origin}/merch/`,
-      track: `${origin}/merch/#track-order/${encodeURIComponent(String(orderId || ''))}`,
+      shop: `${origin}/merch/wellness-products/`,
+      track: `${origin}/merch/wellness-products/#track-order/${encodeURIComponent(String(orderId || ''))}`,
       logo: getMerchEmailAssetUrl(req, '/cdn/shop/files/H2_Logo9664.png?v=1767874858&width=240'),
       hero: getMerchEmailAssetUrl(req, '/booking/assets/invoice-page.png'),
       leaf: getMerchEmailAssetUrl(req, '/booking/assets/leaf.png'),
@@ -6700,7 +6700,7 @@ module.exports = function mountMerchApi(app, {
   app.get('/c/:slug', (req, res) => {
     const rawSlug = String(req.params.slug || '').trim();
     if (!rawSlug) {
-      return res.redirect('/merch/');
+      return res.redirect('/merch/wellness-products/');
     }
     const campaign = db.prepare(`
       SELECT c.id, c.slug, c.name, c.influencer_id AS influencerId, c.coupon_id AS couponId,
@@ -6716,12 +6716,12 @@ module.exports = function mountMerchApi(app, {
     `).get(rawSlug);
 
     if (!campaign || Number(campaign.isActive) !== 1 || Number(campaign.influencerActive) !== 1 || Number(campaign.couponActive) !== 1) {
-      return res.redirect('/merch/');
+      return res.redirect('/merch/wellness-products/');
     }
 
     const expiry = campaign.couponExpiresAt || campaign.couponValidTill;
     if (expiry && new Date(expiry).getTime() < Date.now()) {
-      return res.redirect('/merch/');
+      return res.redirect('/merch/wellness-products/');
     }
 
     try {
@@ -6755,7 +6755,7 @@ module.exports = function mountMerchApi(app, {
       httpOnly: false,
     });
 
-    return res.redirect(`/merch/?campaign=${encodeURIComponent(campaign.slug)}#checkout`);
+    return res.redirect(`/merch/wellness-products/?campaign=${encodeURIComponent(campaign.slug)}#checkout`);
   });
 
   app.get('/api/merch/campaigns/resolve', (req, res) => {
