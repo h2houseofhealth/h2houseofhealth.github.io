@@ -8541,6 +8541,11 @@ body.merch-page:not(.merch-admin-page) .merch-offer-card--hoodie .merch-offer-ca
   margin: 0 auto;
 }
 
+.merch-shop .merch-offers {
+  padding: 0 0 36px;
+  max-width: 100%;
+}
+
 .merch-offers .section-title {
   margin-bottom: clamp(22px, 3vw, 34px);
 }

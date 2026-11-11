@@ -8024,12 +8024,12 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   function renderShopOffersSection() {
     const section = document.getElementById('shopOffersSection');
     if (!section) return;
-    section.hidden = state.currentView !== 'shop';
+    section.hidden = state.currentView !== 'shop' || state.offers.length === 0;
     const grid = section.querySelector('#shopOffersGrid');
     if (!grid) return;
 
     if (!state.offers.length) {
-      grid.innerHTML = '<p class="merch-offers__empty">No offers available right now.</p>';
+      grid.innerHTML = '';
       return;
     }
 
