@@ -34,7 +34,7 @@
       "mainEntity": [
         {
           "@type": "Question",
-          "name": "What is a molecular hydrogen water vessel?",
+          "name": "What is a hydrogen water bottle and how does it work?",
           "acceptedAnswer": {
             "@type": "Answer",
             "text": "This specialized wellness device uses solid PEM/SPE electrolysis to infuse pure molecular hydrogen gas into drinking water, delivering dissolved molecular hydrogen."
@@ -344,52 +344,6 @@
         </div>
         </section>
 
-        <!-- Hydrogen Benefits & Features Section -->
-        <section id="merchBenefitsSection" class="merch-benefits-section" aria-labelledby="benefitsSectionTitle">
-          <div class="merch-benefits__header">
-            <h2 id="benefitsSectionTitle" class="section-title">Hydrogen-Rich / H2 Water Bottle: Benefits and Features</h2>
-            <p class="merch-benefits__intro">Welcome to H2 House of Health, where our advanced collection infuses drinking water with dissolved molecular hydrogen, delivering clean, hydrogen-rich water for your daily hydration routine. Whether you are at home, working at your desk, or on the move, carrying a reliable H2 bottle ensures you enjoy fresh, crisp water at the touch of a button. Alongside our specialized hydration gear, we curate mindful lifestyle goods built with high-grade materials and premium craftsmanship. Explore our collection below to discover innovative hydration technology engineered for everyday life.</p>
-          </div>
-          <div class="merch-benefits-grid">
-            <div class="merch-benefit-card">
-              <div class="merch-benefit-card__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-              </div>
-              <h3 class="merch-benefit-card__title">Advanced PEM &amp; SPE Electrolysis</h3>
-              <p class="merch-benefit-card__desc">Utilizes solid polymer electrolyte (SPE/PEM) electrolysis technology to generate dissolved molecular hydrogen in drinking water.</p>
-            </div>
-            <div class="merch-benefit-card">
-              <div class="merch-benefit-card__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M12 18h.01"/></svg>
-              </div>
-              <h3 class="merch-benefit-card__title">Portable &amp; Rechargeable</h3>
-              <p class="merch-benefit-card__desc">Powered by a rechargeable 700mAh lithium polymer battery, our hydrogen rich water bottle prepares fresh drinks in a 5-minute cycle wherever you go.</p>
-            </div>
-            <div class="merch-benefit-card">
-              <div class="merch-benefit-card__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-              </div>
-              <h3 class="merch-benefit-card__title">Premium Craftsmanship</h3>
-              <p class="merch-benefit-card__desc">Built with a durable BPA-free glass body and a stainless steel shell, designed for everyday use.</p>
-            </div>
-            <div class="merch-benefit-card">
-              <div class="merch-benefit-card__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-              </div>
-              <h3 class="merch-benefit-card__title">Integrated In-House Synergy</h3>
-              <p class="merch-benefit-card__desc">Complements our studio therapies. You can also <a href="/booking/">book an in-house wellness session</a> at our center or learn more <a href="/pages/about-us.html">about our hydrogen wellness house</a>.</p>
-            </div>
-          </div>
-        </section>
-
-        <!-- Shop Offers — populated by JS from /api/merch/offers; hidden when no active offers exist -->
-        <section id="shopOffersSection" class="merch-offers" aria-label="Shop offers" hidden>
-          <h3 class="section-title">Shop Offers</h3>
-          <div id="shopOffersGrid" class="merch-offers__grid">
-            <!-- Offer cards rendered by merch/app.js -->
-          </div>
-        </section>
-
         <!-- Product Listing -->
         <section id="shopSection" class="merch-shop" aria-labelledby="shopSectionTitle">
         <div class="shop-header">
@@ -398,6 +352,14 @@
             <p class="shop-subtitle">Explore our collection of molecular hydration devices and premium house gear with transparent pricing.</p>
           </div>
         </div>
+
+        <!-- Shop Offers — populated by JS from /api/merch/offers; hidden when no active offers exist -->
+        <div id="shopOffersSection" class="merch-offers" aria-label="Shop offers" hidden>
+          <div id="shopOffersGrid" class="merch-offers__grid">
+            <!-- Offer cards rendered by merch/app.js -->
+          </div>
+        </div>
+
         <div class="product-filter-bar" aria-label="Product filters and sorting">
           <div class="product-filter-bar__left">
             <select id="categoryFilter" class="shop-select" aria-label="Filter by category">
@@ -406,7 +368,7 @@
               <option value="bottles">Hydrogen Water Bottles</option>
               <option value="sprays">Hydrogen Mists / Sprays</option>
             </select>
-                      </div>
+          </div>
           <label class="sort-control">
             <span>Sort by:</span>
             <select id="sortSelect" class="shop-select" aria-label="Sort by">
@@ -431,6 +393,44 @@
         </div>
         </section>
 
+        <!-- Hydrogen Benefits & Features Section -->
+        <section id="merchBenefitsSection" class="merch-benefits-section" aria-labelledby="benefitsSectionTitle">
+          <div class="merch-benefits__header">
+            <h2 id="benefitsSectionTitle" class="section-title">Hydrogen-Rich / H2 Water Bottle: Benefits and Features</h2>
+            <p class="merch-benefits__intro">Generate fresh, clean hydrogen-rich water at the touch of a button. Our portable H2 bottle delivers dissolved molecular hydrogen wherever you go.</p>
+          </div>
+          <div class="merch-benefits-grid">
+            <div class="merch-benefit-card">
+              <div class="merch-benefit-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+              </div>
+              <h3 class="merch-benefit-card__title">Advanced PEM &amp; SPE Electrolysis</h3>
+              <p class="merch-benefit-card__desc">Utilizes solid polymer electrolyte (SPE/PEM) electrolysis technology to generate dissolved molecular hydrogen in drinking water.</p>
+            </div>
+            <div class="merch-benefit-card">
+              <div class="merch-benefit-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M12 18h.01"/></svg>
+              </div>
+              <h3 class="merch-benefit-card__title">Portable &amp; Rechargeable</h3>
+              <p class="merch-benefit-card__desc">Powered by a rechargeable 700mAh lithium polymer battery, our hydrogen rich water bottle prepares fresh drinks in a 5-minute cycle wherever you go.</p>
+            </div>
+            <div class="merch-benefit-card">
+              <div class="merch-benefit-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              </div>
+              <h3 class="merch-benefit-card__title">Premium Craftsmanship</h3>
+              <p class="merch-benefit-card__desc">Built with a durable BPA-free glass body and a stainless steel shell, designed for everyday use.</p>
+            </div>
+            <div class="merch-benefit-card">
+              <div class="merch-benefit-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+              </div>
+              <h3 class="merch-benefit-card__title">Visit the Studio</h3>
+              <p class="merch-benefit-card__desc">Experience our therapies in person. You can <a href="/booking/">book a wellness session</a> at our center or learn more <a href="/pages/about-us.html">about our house</a>.</p>
+            </div>
+          </div>
+        </section>
+
         <!-- Merch FAQ Section -->
         <section id="merchFaqSection" class="merch-faq-section" aria-labelledby="faqSectionTitle">
           <div class="merch-faq__header">
@@ -439,7 +439,7 @@
           </div>
           <div class="merch-faq__grid">
             <div class="merch-faq__item">
-              <h3 class="merch-faq__question">What is a molecular hydrogen water vessel?</h3>
+              <h3 class="merch-faq__question">What is a hydrogen water bottle and how does it work?</h3>
               <div class="merch-faq__answer">
                 <p>This specialized wellness device uses solid PEM/SPE electrolysis to infuse pure molecular hydrogen gas into drinking water, delivering dissolved molecular hydrogen.</p>
               </div>
