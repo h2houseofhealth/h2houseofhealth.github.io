@@ -998,6 +998,22 @@ app.get(['/merch/wellness-products', '/merch/wellness-products/'], (req, res) =>
   res.sendFile(path.join(WEBSITE_ROOT, 'merch', 'wellness-products', 'index.html'));
 });
 
+// ─── 301 Redirect legacy individual product pages to /merch/wellness-products/ ───
+app.get([
+  '/products/hoodies',
+  '/products/hoodies/',
+  '/products/hoodies.html',
+  '/products/molecular-hydrogen-water-bottles',
+  '/products/molecular-hydrogen-water-bottles/',
+  '/products/molecular-hydrogen-water-bottles.html',
+  '/products/spray-bottle',
+  '/products/spray-bottle/',
+  '/products/spray-bottle.html'
+], (req, res) => {
+  const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+  return res.redirect(301, `/merch/wellness-products/${query}`);
+});
+
 app.use('/booking', express.static(path.join(__dirname)));
 app.use('/merch', express.static(path.join(WEBSITE_ROOT, 'merch')));
 app.use('/uploads', express.static(uploadsDir));
