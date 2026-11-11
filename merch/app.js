@@ -197,9 +197,9 @@
   // Presentation-only fallbacks for the storefront card redesign. These are
   // not product/API fields and should be replaced with real catalog metadata.
   const PRODUCT_CARD_PRESENTATION = {
-    bottles: { badge: 'BESTSELLER', stars: '★★★★★', reviews: 128, annotation: 'Molecular Hydrogen on the go' },
-    sprays: { badge: 'NEW ARRIVAL', stars: '★★★★★', reviews: 96, annotation: 'Refresh & rejuvenate anywhere' },
-    hoodies: { badge: 'LIMITED DROP', stars: '★★★★★', reviews: 74, annotation: 'Wear the wellness lifestyle' },
+    bottles: { badge: 'BESTSELLER', stars: '★★★★★', annotation: 'Molecular Hydrogen on the go' },
+    sprays: { badge: 'NEW ARRIVAL', stars: '★★★★★', annotation: 'Refresh & rejuvenate anywhere' },
+    hoodies: { badge: 'LIMITED DROP', stars: '★★★★★', annotation: 'Wear the wellness lifestyle' },
   };
 
   function getProductCardPresentation(product) {
@@ -207,7 +207,6 @@
     return PRODUCT_CARD_PRESENTATION[category] || {
       badge: 'NEW ARRIVAL',
       stars: '★★★★★',
-      reviews: 0,
       annotation: 'Made for your everyday ritual',
     };
   }
@@ -5374,9 +5373,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           ${(cardSizes.length || cardColors.length) ? `<p class="product-card__variant">${cardSizes.length ? `Size: ${cardSizes.join(', ')}` : ''}${cardSizes.length && cardColors.length ? ' · ' : ''}${cardColors.length ? `Color: ${cardColors.join(', ')}` : ''}</p>` : ''}
           ${cardSpecifications.length ? `<div class="product-card__specs">${cardSpecifications.map(([label, value]) => `<span><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</span>`).join('')}</div>` : ''}
           <p class="product-card__stock ${stockClass}">${escapeHtml(stockLabel)}</p>
-          <div class="product-card__rating" aria-label="${escapeHtml(`${presentation.stars || '★★★★★'} (${presentation.reviews} reviews)`)}">
+          <div class="product-card__rating" aria-label="${escapeHtml(presentation.stars || '★★★★★')}">
             <span class="product-card__stars" aria-hidden="true">${presentation.stars || '★★★★★'}</span>
-            <span>(${presentation.reviews})</span>
           </div>
           <p class="product-card__price">
             ${offerInfo ? `
