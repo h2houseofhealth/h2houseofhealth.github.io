@@ -9120,6 +9120,12 @@ textarea,
   font-weight: 600;
 }
 
+.product-detail-faq {
+  margin-top: clamp(48px, 6vw, 72px);
+  padding: clamp(36px, 5vw, 48px) 0 0;
+  border-top: 1px solid rgba(174, 84, 49, 0.12);
+}
+
 /* ─── Product Card Description ─── */
 .product-card__desc {
   font-size: 13px;

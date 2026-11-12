@@ -1856,6 +1856,7 @@ function getWishlistProductPrice(item) {
     productEmpty: document.getElementById('productEmpty'),
     smartMerchSidebar: document.getElementById('smartMerchSidebar'),
     productDetail: document.getElementById('productDetail'),
+    productDetailFaq: document.getElementById('productDetailFaq'),
     productGallery: document.getElementById('productGallery'),
     productInfo: document.getElementById('productInfo'),
     shopSection: document.getElementById('shopSection'),
@@ -5462,6 +5463,98 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   // â”€â”€â”€ Render: Product Detail â”€â”€â”€
+  const BOTTLE_DETAIL_FAQS = [
+    {
+      q: 'How does the H2 Molecular Hydrogen Water Bottle work?',
+      a: 'It uses solid polymer electrolyte (SPE) and proton exchange membrane (PEM) electrolysis to infuse drinking water with pure dissolved molecular hydrogen gas (up to 3,000+ ppb) in a single 5-minute cycle.'
+    },
+    {
+      q: 'What water can I use in the bottle?',
+      a: 'Use filtered drinking water, purified water, or mineral water. Avoid hot boiling water, carbonated soda, or juices in the bottle.'
+    },
+    {
+      q: 'What materials is the bottle made of?',
+      a: 'Built with a durable BPA-free glass body, a protective stainless steel shell, and platinum-titanium electrolysis electrodes.'
+    },
+    {
+      q: 'How do I charge and clean the bottle?',
+      a: 'Powered by a rechargeable 700mAh lithium polymer battery charged via USB-C. Hand wash the glass body with mild soap; keep the electronic base dry.'
+    },
+    {
+      q: 'What is the warranty and return coverage?',
+      a: 'Covered by a 7-day transit damage replacement upon delivery and a 6-month parts warranty for electrical and mechanical components.'
+    }
+  ];
+
+  const MIST_DETAIL_FAQS = [
+    {
+      q: 'What is the H2 Hydrogen Mist Spray and how does it work?',
+      a: 'Combines micro-electrolysis with ultrasonic atomization to produce a fine hydrogen-rich mist (1000 ppb concentration) for instant, refreshing facial hydration.'
+    },
+    {
+      q: 'What is the tank capacity and battery life?',
+      a: 'Features a 13ml water tank and a rechargeable 500mAh battery charged via Micro USB, providing multiple mist cycles on a single charge.'
+    },
+    {
+      q: 'What type of water should I use in the mist spray?',
+      a: 'Use clean drinking water or mineral water. Do not put essential oils, toners, or heavy lotions inside the tank to prevent nozzle clogging.'
+    },
+    {
+      q: 'How compact and portable is it?',
+      a: 'Weighing just 60g and measuring 103mm × 40mm, it fits easily in your pocket, handbag, or gym kit.'
+    },
+    {
+      q: 'What is the warranty and return coverage?',
+      a: 'Covered by a 7-day transit damage replacement upon delivery and a 6-month parts warranty for internal components.'
+    }
+  ];
+
+  function renderProductDetailFaq(product) {
+    const faqContainer = document.getElementById('productDetailFaq');
+    if (!faqContainer) return;
+
+    let faqs = [];
+    let title = '';
+    let subtitle = '';
+
+    if (isBottleProduct(product)) {
+      faqs = BOTTLE_DETAIL_FAQS;
+      title = 'H2 Water Bottle FAQs';
+      subtitle = 'Common questions about bottle usage, SPE/PEM electrolysis technology, and maintenance.';
+    } else if (isMistProduct(product)) {
+      faqs = MIST_DETAIL_FAQS;
+      title = 'H2 Hydrogen Mist Spray FAQs';
+      subtitle = 'Answers about facial hydration, ultrasonic misting, maintenance, and charging.';
+    }
+
+    if (!faqs.length) {
+      faqContainer.hidden = true;
+      faqContainer.innerHTML = '';
+      return;
+    }
+
+    faqContainer.hidden = false;
+    faqContainer.innerHTML = `
+      <div class="merch-faq__header">
+        <h2 class="section-title">${escapeHtml(title)}</h2>
+        <p class="merch-faq__subtitle">${escapeHtml(subtitle)}</p>
+      </div>
+      <div class="merch-faq__grid">
+        ${faqs.map((item) => `
+          <div class="merch-faq__item">
+            <h3 class="merch-faq__question">${escapeHtml(item.q)}</h3>
+            <div class="merch-faq__answer">
+              <p>${escapeHtml(item.a)}</p>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      <div class="merch-faq__footer">
+        <p>Have more questions? <a href="/pages/contact.html">Contact our wellness team</a> or read our <a href="/refund/">7-day return and warranty policy</a>.</p>
+      </div>
+    `;
+  }
+
   function showProductDetail(productId, variantId = null) {
     const product = state.products.find(p => Number(p.id) === Number(productId));
     if (!product) return;
@@ -5497,6 +5590,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
     renderProductGallery(product);
     renderProductInfo(product);
+    renderProductDetailFaq(product);
 
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -5507,6 +5601,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     state.selectedVariant = null;
 
     els.productDetail.hidden = true;
+    const _productDetailFaq = document.getElementById('productDetailFaq');
+    if (_productDetailFaq) _productDetailFaq.hidden = true;
     if (els.checkoutPage) els.checkoutPage.hidden = true;
     if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
     if (els.orderTracking) els.orderTracking.hidden = true;
