@@ -155,6 +155,10 @@
     offersLoading: false,
     availableCoupons: [],
     activeOfferId: null,
+    currency: (function() {
+      try { return localStorage.getItem('h2_currency') || 'INR'; } catch { return 'INR'; }
+    })(),
+    currencyConfig: { defaultCurrency: 'INR', supportedCurrencies: ['INR', 'USD'], inrPerUsd: 85 },
   };
   window.__state = state;
 
@@ -2208,6 +2212,14 @@ function getWishlistProductPrice(item) {
   }
 
   function formatCheckoutMoney(amountInr) {
+    if (state.currency === 'USD') {
+      const rate = state.currencyConfig?.inrPerUsd || 85;
+      const usd = Math.round((Number(amountInr || 0) / rate) * 100) / 100;
+      return '$' + usd.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    }
     return '₹' + Number(amountInr || 0).toLocaleString('en-IN', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
@@ -4241,7 +4253,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     const isPending = (String(order.status || '').toLowerCase() === 'pending' || String(order.paymentStatus || '').toLowerCase() === 'pending') && String(order.status || '').toLowerCase() !== 'cancelled';
     const confirmPrompt = isPending
       ? `Cancel ${order.orderNumber || `Order #${order.id}`}? This order will be removed from your orders.`
-      : `Cancel ${order.orderNumber || `Order #${order.id}`}? Any payment will be refunded.`;
+      : `Cancel ${order.orderNumber || `Order #${order.id}`}? No refund.`;
     if (!window.confirm(confirmPrompt)) return;
     try {
       const result = await api(`/api/merch/orders/${encodeURIComponent(order.id)}/cancel`, { method: 'POST' });
@@ -4250,7 +4262,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         renderAccountDrawer();
         showCheckoutNotice('Order cancelled', `${order.orderNumber || `Order #${order.id}`} was cancelled and removed.`);
       } else {
-        state.merchOrders = state.merchOrders.map((item) => String(item.id) === String(order.id) ? (result.order || { ...order, status: 'cancelled', paymentStatus: 'refunded' }) : item);
+        state.merchOrders = state.merchOrders.map((item) => String(item.id) === String(order.id) ? (result.order || { ...order, status: 'cancelled', paymentStatus: order.paymentStatus }) : item);
         renderAccountDrawer();
         showCheckoutNotice('Order cancelled', `${order.orderNumber || `Order #${order.id}`} was cancelled successfully.`);
       }
@@ -5933,8 +5945,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     els.searchResults.innerHTML = results.map(p => `
       <div class="search-result-item" data-product-id="${p.id}" style="
         display: flex; gap: 12px; padding: 12px; cursor: pointer; border-bottom: 1px solid var(--border);
-        border-radius: 8px; transition: background 0.2s;
-      " onmouseover="this.style.background='rgba(0,0,0,0.03)'" onmouseout="this.style.background='transparent'">
+        border-radius: 8px; transition: background 0.2s; touch-action: manipulation;
+      ">
         <img src="${escapeHtml(p.images?.[0] || p.imageUrl || FALLBACK_PRODUCT_IMAGE)}" alt="" style="width: 48px; height: 48px; border-radius: 6px; object-fit: cover;" onerror="this.src='${FALLBACK_PRODUCT_IMAGE}'" />
         <div>
           <p style="font-weight: 600; font-size: 14px; margin: 0 0 2px;">${escapeHtml(p.name)}</p>
@@ -6951,6 +6963,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
         ${renderCheckoutRecommendations()}
 
+        <div class="checkout-currency-selector" aria-label="Select currency">
+          <span class="checkout-currency-label">Currency</span>
+          <div class="currency-toggle-group">
+            <button type="button" class="currency-toggle-btn ${state.currency === 'INR' ? 'is-active' : ''}" data-currency="INR">₹ INR</button>
+            <button type="button" class="currency-toggle-btn ${state.currency === 'USD' ? 'is-active' : ''}" data-currency="USD">$ USD</button>
+          </div>
+        </div>
+
         <div class="shopify-pricing">
           <div class="shopify-price-row"><span>Subtotal</span><strong>${formatCheckoutMoney(totals.rawSubtotal)}</strong></div>
           ${totals.bundleDiscount > 0 ? `
@@ -7169,6 +7189,17 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     form.addEventListener('change', () => {
       state.checkoutDraft = getCheckoutDraftFromForm(form);
       renderCheckoutPage();
+    });
+    els.checkoutPage?.querySelectorAll('.currency-toggle-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const curr = btn.dataset.currency;
+        if (curr && (curr === 'INR' || curr === 'USD')) {
+          state.currency = curr;
+          try { localStorage.setItem('h2_currency', curr); } catch {}
+          renderCheckoutPage();
+        }
+      });
     });
     form.addEventListener('submit', handleCheckoutPageSubmit);
     els.checkoutPage?.querySelector('#checkoutAddMoreProductsBtn')?.addEventListener('click', (e) => {
@@ -8288,6 +8319,18 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     }
   }
 
+  async function loadCurrencyConfig() {
+    try {
+      const res = await fetch(buildApiUrl('/api/currency/config'));
+      if (res.ok) {
+        const cfg = await res.json();
+        if (cfg && cfg.inrPerUsd) {
+          state.currencyConfig = cfg;
+        }
+      }
+    } catch {}
+  }
+
   // ─── Initialize ───
   async function init() {
     cleanupLegacySharedCartStorage();
@@ -8297,8 +8340,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     loadCart(state.currentUser);
     renderCartBadge();
     bindEvents();
-    await loadMerchProducts();
-    await resolveCampaignAttribution();
+    await Promise.all([loadCurrencyConfig(), loadMerchProducts(), resolveCampaignAttribution()]);
     renderProductGrid();
     routeFromLocation();
     loadTrendingProducts();

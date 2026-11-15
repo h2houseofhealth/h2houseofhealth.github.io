@@ -39,10 +39,6 @@ class ShiprocketService {
     return (this.pickupLocation || process.env.SHIPROCKET_PICKUP_LOCATION || 'work').trim();
   }
 
-  getPickupPostcode() {
-    return (this.pickupPostcode || process.env.SHIPROCKET_PICKUP_POSTCODE || '500033').trim();
-  }
-
   /**
    * Authenticate and obtain or refresh Bearer token
    */
@@ -264,7 +260,7 @@ class ShiprocketService {
   async checkServiceability({ pickupPostcode, deliveryPostcode, weight = 0.5, cod = false }) {
     const isCod = cod ? 1 : 0;
     const query = new URLSearchParams({
-      pickup_postcode: String(pickupPostcode || this.getPickupPostcode() || '500033'),
+      pickup_postcode: String(pickupPostcode || '452001'),
       delivery_postcode: String(deliveryPostcode),
       weight: String(weight || 0.5),
       cod: String(isCod),
@@ -275,19 +271,17 @@ class ShiprocketService {
     });
 
     const couriers = result?.data?.available_courier_companies || [];
-    return couriers
-      .map((c) => ({
-        courierCompanyId: c.courier_company_id,
-        courierName: c.courier_name,
-        rate: Number(c.rate || 0),
-        etd: c.etd,
-        estimatedDeliveryDays: c.estimated_delivery_days,
-        rating: c.rating,
-        mode: c.mode,
-        trackingPerformance: c.tracking_performance,
-        isSurface: c.is_surface,
-      }))
-      .sort((a, b) => a.rate - b.rate);
+    return couriers.map((c) => ({
+      courierCompanyId: c.courier_company_id,
+      courierName: c.courier_name,
+      rate: Number(c.rate || 0),
+      etd: c.etd,
+      estimatedDeliveryDays: c.estimated_delivery_days,
+      rating: c.rating,
+      mode: c.mode,
+      trackingPerformance: c.tracking_performance,
+      isSurface: c.is_surface,
+    }));
   }
 
   /**

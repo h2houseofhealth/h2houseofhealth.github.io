@@ -1181,10 +1181,6 @@ a {
   background: rgba(200, 101, 45, 0.05);
 }
 
-.admin-table tbody tr.is-selected {
-  background: rgba(200, 101, 45, 0.09) !important;
-}
-
 .admin-table__muted {
   color: var(--admin-muted);
   font-size: 12px;
@@ -2890,7 +2886,7 @@ body.merch-admin-page {
 .admin-profile { padding: 10px 16px; min-width: 267px; border: 0; border-radius: 20px; background: #fff; box-shadow: var(--admin-shadow-soft); }
 .admin-profile__avatar { width: 48px; height: 48px; font-size: 14px; background: linear-gradient(135deg, #ff9b4c, #d95a25); }
 .admin-profile__meta strong { font-size: 16px; }
-.admin-profile__meta::after { content: none; }
+.admin-profile__meta::after { content: "⌄"; position: absolute; right: 19px; top: 19px; color: #615b58; font-size: 22px; }
 .admin-profile { position: relative; }
 .admin-profile__chevron {
   position: absolute;
