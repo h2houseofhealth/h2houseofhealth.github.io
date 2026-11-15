@@ -891,6 +891,23 @@ app.use(
 app.use(passport.initialize());
 app.use(passport.session());
 app.use((req, res, next) => {
+  const host = String(req.get('host') || '').toLowerCase().split(':')[0];
+  if (host === 'h2houseofhealth.com') {
+    return res.redirect(301, `https://www.h2houseofhealth.com${req.originalUrl || req.url}`);
+  }
+  next();
+});
+
+// ─── Search Engine Core Files ───────────────────────────────────────────────
+app.get('/robots.txt', (_req, res) => {
+  res.type('text/plain').sendFile(path.join(WEBSITE_ROOT, 'robots.txt'));
+});
+
+app.get('/sitemap.xml', (_req, res) => {
+  res.type('application/xml').sendFile(path.join(WEBSITE_ROOT, 'sitemap.xml'));
+});
+
+app.use((req, res, next) => {
   const pathName = String(req.path || '');
   if (
     pathName === '/booking/app.js' ||
@@ -901,6 +918,40 @@ app.use((req, res, next) => {
   }
   return next();
 });
+
+// ─── 301 Redirect from legacy /merch/ to /merch/wellness-products/ ──────────
+app.get(['/merch', '/merch/', '/merch/index.html'], (req, res, next) => {
+  if (req.path.startsWith('/merch/wellness-products')) {
+    return next();
+  }
+  const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+  return res.redirect(301, `/merch/wellness-products/${query}`);
+});
+
+app.get(['/merch/wellness-products', '/merch/wellness-products/'], (req, res) => {
+  if (req.path === '/merch/wellness-products') {
+    const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    return res.redirect(301, `/merch/wellness-products/${query}`);
+  }
+  res.sendFile(path.join(WEBSITE_ROOT, 'merch', 'wellness-products', 'index.html'));
+});
+
+// ─── 301 Redirect legacy individual product pages to /merch/wellness-products/ ───
+app.get([
+  '/products/hoodies',
+  '/products/hoodies/',
+  '/products/hoodies.html',
+  '/products/molecular-hydrogen-water-bottles',
+  '/products/molecular-hydrogen-water-bottles/',
+  '/products/molecular-hydrogen-water-bottles.html',
+  '/products/spray-bottle',
+  '/products/spray-bottle/',
+  '/products/spray-bottle.html'
+], (req, res) => {
+  const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+  return res.redirect(301, `/merch/wellness-products/${query}`);
+});
+
 app.use('/booking', express.static(path.join(__dirname)));
 app.use('/merch', express.static(path.join(WEBSITE_ROOT, 'merch')));
 app.use('/uploads', express.static(uploadsDir));
@@ -3612,7 +3663,15 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   if (validFrom && validTill && new Date(validFrom).getTime() >= new Date(validTill).getTime()) {
     return res.status(400).json({ message: 'validTill must be after validFrom.' });
   }
-  if (portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0) {
+  if (portal === 'merch' && couponCategory === 'influencer') {
+    if (!Number.isInteger(influencerId) || influencerId <= 0) {
+      return res.status(400).json({ message: 'An assigned influencer is required for influencer coupons.' });
+    }
+    const influencer = db.prepare('SELECT id FROM merch_influencers WHERE id = ?').get(influencerId);
+    if (!influencer) {
+      return res.status(400).json({ message: 'Influencer not found.' });
+    }
+  } else if (portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0) {
     const influencer = db.prepare('SELECT id FROM merch_influencers WHERE id = ?').get(influencerId);
     if (!influencer) {
       return res.status(400).json({ message: 'Influencer not found.' });
@@ -3867,7 +3926,15 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   if (validFrom && validTill && new Date(validFrom).getTime() >= new Date(validTill).getTime()) {
     return res.status(400).json({ message: 'validTill must be after validFrom.' });
   }
-  if (portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0) {
+  if (portal === 'merch' && couponCategory === 'influencer') {
+    if (!Number.isInteger(influencerId) || influencerId <= 0) {
+      return res.status(400).json({ message: 'An assigned influencer is required for influencer coupons.' });
+    }
+    const influencer = db.prepare('SELECT id FROM merch_influencers WHERE id = ?').get(influencerId);
+    if (!influencer) {
+      return res.status(400).json({ message: 'Influencer not found.' });
+    }
+  } else if (portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0) {
     const influencer = db.prepare('SELECT id FROM merch_influencers WHERE id = ?').get(influencerId);
     if (!influencer) {
       return res.status(400).json({ message: 'Influencer not found.' });
