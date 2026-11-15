@@ -2341,10 +2341,13 @@ function getWishlistProductPrice(item) {
   }
 
   function isPublicMerchCoupon(coupon) {
-    if (String(coupon?.couponType || 'public').toLowerCase() !== 'public') return false;
-    if (Number(coupon?.influencerId || 0) > 0 || coupon?.influencerName || coupon?.influencer) return false;
-    // Backward-compatible guard for older API responses that do not include influencerId.
-    return !/influencer\s+merch\s+campaign\s+coupon/i.test(String(coupon?.description || ''));
+    if (!coupon) return false;
+    if (String(coupon.couponType || 'public').toLowerCase() !== 'public') return false;
+    const category = String(coupon.couponCategory || coupon.category || coupon.ownerType || '').trim().toLowerCase();
+    if (category === 'influencer' || category === 'private') return false;
+    if (Number(coupon.influencerId || coupon.influencer_id || 0) > 0 || coupon.influencerName || coupon.influencer) return false;
+    if (/influencer/i.test(String(coupon.festivalName || '')) || /influencer/i.test(String(coupon.description || ''))) return false;
+    return true;
   }
 
   async function loadMerchCoupons() {
@@ -2564,7 +2567,8 @@ function getWishlistProductPrice(item) {
     }
     const cartAvailableCoupons = document.getElementById('cartAvailableCoupons');
     if (cartAvailableCoupons) {
-      const coupons = state.availableCoupons.filter(isPublicMerchCoupon);
+      const coupons = (state.availableCoupons || []).filter(isPublicMerchCoupon);
+      cartAvailableCoupons.hidden = coupons.length === 0;
       cartAvailableCoupons.innerHTML = coupons.length ? `
         <p class="cart-available-coupons__title">Available coupons</p>
         ${coupons.map((coupon) => `
@@ -6940,15 +6944,21 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
               </div>
             </div>
           ` : ''}
-          ${state.availableCoupons.length ? `<div class="checkout-coupon-offers" aria-label="Available coupons">
-            <p class="checkout-coupon-offers__title">Available coupons</p>
-            ${state.availableCoupons.filter(isPublicMerchCoupon).map((coupon) => `
-              <button type="button" class="checkout-coupon-offer${String(coupon.code) === String(state.merchCouponCode) ? ' is-selected' : ''}" data-checkout-coupon-code="${escapeHtml(coupon.code)}">
-                <span><strong>${escapeHtml(coupon.code)}</strong><small>${escapeHtml(coupon.couponCategory === 'festival' ? 'Festival coupon' : coupon.couponCategory === 'seasonal' ? 'Seasonal coupon' : 'Public coupon')}${coupon.description ? ` · ${escapeHtml(coupon.description)}` : ''}</small></span>
-                <b>${escapeHtml(getCouponDiscountLabel(coupon))}</b>
-              </button>
-            `).join('')}
-          </div>` : ''}
+          ${(() => {
+            const publicOffers = (state.availableCoupons || []).filter(isPublicMerchCoupon);
+            if (!publicOffers.length) return '';
+            return `
+              <div class="checkout-coupon-offers" aria-label="Available coupons">
+                <p class="checkout-coupon-offers__title">Available coupons</p>
+                ${publicOffers.map((coupon) => `
+                  <button type="button" class="checkout-coupon-offer${String(coupon.code) === String(state.merchCouponCode) ? ' is-selected' : ''}" data-checkout-coupon-code="${escapeHtml(coupon.code)}">
+                    <span><strong>${escapeHtml(coupon.code)}</strong><small>${escapeHtml(coupon.couponCategory === 'festival' ? 'Festival coupon' : coupon.couponCategory === 'seasonal' ? 'Seasonal coupon' : 'Public coupon')}${coupon.description ? ` · ${escapeHtml(coupon.description)}` : ''}</small></span>
+                    <b>${escapeHtml(getCouponDiscountLabel(coupon))}</b>
+                  </button>
+                `).join('')}
+              </div>
+            `;
+          })()}
         </div>
 
         ${renderCheckoutRecommendations()}

@@ -3727,7 +3727,15 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
   if (validFrom && validTill && new Date(validFrom).getTime() >= new Date(validTill).getTime()) {
     return res.status(400).json({ message: 'validTill must be after validFrom.' });
   }
-  if (portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0) {
+  if (portal === 'merch' && couponCategory === 'influencer') {
+    if (!Number.isInteger(influencerId) || influencerId <= 0) {
+      return res.status(400).json({ message: 'An assigned influencer is required for influencer coupons.' });
+    }
+    const influencer = db.prepare('SELECT id FROM merch_influencers WHERE id = ?').get(influencerId);
+    if (!influencer) {
+      return res.status(400).json({ message: 'Influencer not found.' });
+    }
+  } else if (portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0) {
     const influencer = db.prepare('SELECT id FROM merch_influencers WHERE id = ?').get(influencerId);
     if (!influencer) {
       return res.status(400).json({ message: 'Influencer not found.' });
@@ -3982,7 +3990,15 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
   if (validFrom && validTill && new Date(validFrom).getTime() >= new Date(validTill).getTime()) {
     return res.status(400).json({ message: 'validTill must be after validFrom.' });
   }
-  if (portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0) {
+  if (portal === 'merch' && couponCategory === 'influencer') {
+    if (!Number.isInteger(influencerId) || influencerId <= 0) {
+      return res.status(400).json({ message: 'An assigned influencer is required for influencer coupons.' });
+    }
+    const influencer = db.prepare('SELECT id FROM merch_influencers WHERE id = ?').get(influencerId);
+    if (!influencer) {
+      return res.status(400).json({ message: 'Influencer not found.' });
+    }
+  } else if (portal === 'merch' && Number.isInteger(influencerId) && influencerId > 0) {
     const influencer = db.prepare('SELECT id FROM merch_influencers WHERE id = ?').get(influencerId);
     if (!influencer) {
       return res.status(400).json({ message: 'Influencer not found.' });
