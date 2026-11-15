@@ -57,7 +57,7 @@
   box-shadow: var(--h2-nav-shadow) !important;
 }
 
-@media screen and (min-width: 1200px) {
+@media screen and (min-width: 1400px) {
   .h2-navbar {
     width: calc(100% - 48px) !important;
     gap: 20px !important;
@@ -427,7 +427,7 @@
    Responsive Breakpoints
    ========================================================================== */
 
-@media screen and (max-width: 1199px) {
+@media screen and (max-width: 1399px) {
   .h2-navbar__nav {
     display: none !important;
   }
