@@ -10,9 +10,6 @@ const elements = {
 };
 
 let paymentState = null;
-let currentCurrency = (function() {
-  try { return localStorage.getItem('h2_currency') || 'INR'; } catch { return 'INR'; }
-})();
 
 bootstrap();
 
@@ -52,11 +49,6 @@ function renderPaymentSummary() {
   const customerEmail = paymentState.booking?.guestEmail || paymentState.customer?.email || '';
   const customerPhone = paymentState.booking?.guestPhone || paymentState.customer?.mobile || '';
   
-  const isUsd = currentCurrency === 'USD';
-  const rate = paymentState.currencyConfig?.inrPerUsd || 85;
-  const totalAmountInr = Number(summary.totalAmountInr || 0);
-  const totalUsd = Math.round((totalAmountInr / rate) * 100) / 100;
-  
   detailCard.innerHTML = `
     <div class="admin-membership-head">
       <div>
@@ -82,7 +74,7 @@ function renderPaymentSummary() {
       </div>
       <div class="admin-membership-meta-item">
         <strong>Total</strong>
-        <span>${isUsd ? `$${totalUsd.toFixed(2)} USD` : `Rs. ${totalAmountInr.toLocaleString('en-IN')}`}</span>
+        <span>Rs. ${Number(summary.totalAmountInr || 0).toLocaleString('en-IN')}</span>
       </div>
     </div>
     ${customerPhone ? `
@@ -93,13 +85,6 @@ function renderPaymentSummary() {
         </div>
       </div>
     ` : ''}
-    <div class="checkout-currency-selector" style="margin-top: 14px;" aria-label="Select currency">
-      <span class="checkout-currency-label">Currency</span>
-      <div class="currency-toggle-group">
-        <button type="button" class="currency-toggle-btn ${!isUsd ? 'is-active' : ''}" data-pay-currency="INR">₹ INR</button>
-        <button type="button" class="currency-toggle-btn ${isUsd ? 'is-active' : ''}" data-pay-currency="USD">$ USD</button>
-      </div>
-    </div>
   `;
 
   const breakdown = document.createElement('div');
@@ -108,21 +93,17 @@ function renderPaymentSummary() {
 
   const items = [];
   if (Number(summary.packagePriceInr || 0) > 0) {
-    const inr = Number(summary.packagePriceInr);
-    items.push(isUsd ? `${summary.serviceName || paymentState.booking?.serviceName}: $${(inr / rate).toFixed(2)} USD (₹${inr.toLocaleString('en-IN')})` : `${summary.serviceName || paymentState.booking?.serviceName}: Rs. ${inr.toLocaleString('en-IN')}`);
+    items.push(`${summary.serviceName || paymentState.booking?.serviceName}: Rs. ${Number(summary.packagePriceInr).toLocaleString('en-IN')}`);
   } else if (Number(summary.amountInr || 0) > 0) {
-    const inr = Number(summary.amountInr);
-    items.push(isUsd ? `${paymentState.booking?.serviceName || 'Service'}: $${(inr / rate).toFixed(2)} USD (₹${inr.toLocaleString('en-IN')})` : `${paymentState.booking?.serviceName || 'Service'}: Rs. ${inr.toLocaleString('en-IN')}`);
+    items.push(`${paymentState.booking?.serviceName || 'Service'}: Rs. ${Number(summary.amountInr).toLocaleString('en-IN')}`);
   }
   if (Number(summary.extraSessions || 0) > 0 && Number(summary.extraSessionPriceInr || 0) > 0) {
-    const inr = Number(summary.extraSessions * summary.extraSessionPriceInr);
     items.push(
-      isUsd ? `${summary.extraSessions} extra session(s): $${(inr / rate).toFixed(2)} USD (₹${inr.toLocaleString('en-IN')})` : `${summary.extraSessions} extra session(s): Rs. ${inr.toLocaleString('en-IN')}`
+      `${summary.extraSessions} extra session(s): Rs. ${Number(summary.extraSessions * summary.extraSessionPriceInr).toLocaleString('en-IN')}`
     );
   }
   addOnLines.forEach((item) => {
-    const inr = Number(item.amountInr || 0);
-    items.push(isUsd ? `${item.serviceName}: $${(inr / rate).toFixed(2)} USD (₹${inr.toLocaleString('en-IN')})` : `${item.serviceName}: Rs. ${inr.toLocaleString('en-IN')}`);
+    items.push(`${item.serviceName}: Rs. ${Number(item.amountInr || 0).toLocaleString('en-IN')}`);
   });
   if (!items.length) {
     items.push('No payable items found.');
@@ -137,25 +118,11 @@ function renderPaymentSummary() {
 
   detailCard.appendChild(breakdown);
   elements.paymentSummary.appendChild(detailCard);
-
-  detailCard.querySelectorAll('[data-pay-currency]').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      const curr = btn.dataset.payCurrency;
-      if (curr && (curr === 'INR' || curr === 'USD')) {
-        currentCurrency = curr;
-        try { localStorage.setItem('h2_currency', curr); } catch {}
-        renderPaymentSummary();
-      }
-    });
-  });
-
   elements.paymentLead.textContent =
     paymentState.paymentStatus === 'paid'
       ? 'This booking is already paid.'
       : 'Review the booking details below and complete payment.';
   elements.payNowBtn.disabled = paymentState.paymentStatus === 'paid' || paymentState.status === 'cancelled';
-  elements.payNowBtn.textContent = isUsd ? `Pay Now ($${totalUsd.toFixed(2)})` : `Pay Now`;
 }
 
 async function handlePayNow() {
@@ -166,7 +133,7 @@ async function handlePayNow() {
     const order = await api('/api/public/payments/create-order', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, currency: currentCurrency }),
+      body: JSON.stringify({ token }),
     });
 
     if (!window.Razorpay) {
@@ -183,7 +150,6 @@ async function handlePayNow() {
       prefill: {
         name: order.customer?.name || '',
         email: order.customer?.email || '',
-        contact: order.customer?.mobile || order.customer?.phone || order.booking?.guestPhone || '',
       },
       theme: {
         color: '#8b5e3c',

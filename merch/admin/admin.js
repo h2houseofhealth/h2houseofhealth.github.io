@@ -7850,7 +7850,7 @@
     }
     const match = header.match(/filename="?([^";]+)"?/i);
     if (match?.[1]) return match[1];
-    return 'Merch-invoice.pdf';
+    return 'H2_invoice.pdf';
   }
 
   async function openOrderInvoice(orderId) {
@@ -10091,20 +10091,14 @@
         return;
       case 'delete-coupon':
         if (coupon) {
-          const couponToDelete = { ...coupon }; // snapshot before modal replaces state
           openConfirmModal({
             title: 'Delete coupon',
-            message: `Delete coupon ${couponToDelete.code}?`,
+            message: `Delete coupon ${coupon.code}?`,
             confirmLabel: 'Delete',
             onConfirm: async () => {
-              try {
-                await apiRequest(`/api/admin/coupons/${encodeURIComponent(couponToDelete.id)}`, { method: 'DELETE' });
-                toast('Coupon deleted', `${couponToDelete.code} removed from the list.`, 'danger');
-                state.selectedCouponId = null;
-                await loadCouponData();
-              } catch (err) {
-                toast('Delete failed', err?.message || 'Could not delete coupon. Please try again.', 'error');
-              }
+              await apiRequest(`/api/admin/coupons/${encodeURIComponent(coupon.id)}`, { method: 'DELETE' });
+              toast('Coupon deleted', `${coupon.code} removed from the list.`, 'danger');
+              await loadCouponData();
             },
           });
         }
