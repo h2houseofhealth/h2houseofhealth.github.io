@@ -6883,19 +6883,53 @@ module.exports = function mountMerchApi(app, {
     try {
       const rawProductIds = String(req.query?.productIds || '').split(',');
       const productIds = [...new Set(rawProductIds.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0))];
+
+      const hasInfluencerId = hasColumn('coupons', 'influencer_id');
+      const hasCampaignsTable = hasTable('merch_campaigns');
+      const hasCampaignInfluencerId = hasCampaignsTable && hasColumn('merch_campaigns', 'influencer_id');
+      const hasCampaignCouponId = hasCampaignsTable && hasColumn('merch_campaigns', 'coupon_id');
+      const hasCampaignCouponCode = hasCampaignsTable && hasColumn('merch_campaigns', 'coupon_code');
+      const hasFestivalName = hasColumn('coupons', 'festival_name');
+      const hasDescription = hasColumn('coupons', 'description');
+
+      let campaignExclusion = '';
+      if (hasCampaignsTable && hasCampaignInfluencerId && (hasCampaignCouponId || hasCampaignCouponCode)) {
+        const campaignConditions = [];
+        if (hasCampaignCouponId) {
+          campaignConditions.push('(mc.coupon_id IS NOT NULL AND mc.coupon_id = coupons.id)');
+        }
+        if (hasCampaignCouponCode) {
+          campaignConditions.push("(mc.coupon_code IS NOT NULL AND TRIM(mc.coupon_code) != '' AND LOWER(TRIM(mc.coupon_code)) = LOWER(TRIM(coupons.code)))");
+        }
+        campaignExclusion = `
+          AND NOT EXISTS (
+            SELECT 1 FROM merch_campaigns mc
+            WHERE mc.influencer_id IS NOT NULL
+              AND (${campaignConditions.join(' OR ')})
+          )
+        `;
+      }
+
+      const textSafetyNet = `
+        ${hasFestivalName ? "AND LOWER(COALESCE(festival_name, '')) NOT LIKE '%influencer%'" : ''}
+        ${hasDescription ? "AND LOWER(COALESCE(description, '')) NOT LIKE '%influencer%'" : ''}
+      `;
+
       const rows = db.prepare(`
         SELECT id, code, description, discount_type AS discountType, discount_value AS discountValue,
                applies_to AS appliesTo, max_redemptions AS maxRedemptions, per_user_limit AS perUserLimit,
                active, is_active AS isActive, coupon_type AS couponType,
                commission_type AS commissionType, commission_rate AS commissionRate,
                valid_from AS validFrom, valid_till AS validTill, expires_at AS expiresAt,
-               festival_name AS festivalName, influencer_id AS influencerId, created_at AS createdAt
+               festival_name AS festivalName, ${hasInfluencerId ? 'influencer_id' : 'NULL'} AS influencerId, created_at AS createdAt
         FROM coupons
         WHERE portal = 'merch'
           AND active = 1
           AND COALESCE(is_active, 1) = 1
           AND COALESCE(coupon_type, 'public') = 'public'
-          AND influencer_id IS NULL
+          ${hasInfluencerId ? 'AND influencer_id IS NULL' : ''}
+          ${campaignExclusion}
+          ${textSafetyNet}
           AND (valid_from IS NULL OR datetime(valid_from) <= datetime('now'))
           AND ((valid_till IS NOT NULL AND datetime(valid_till) > datetime('now'))
             OR (valid_till IS NULL AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))))
@@ -9328,6 +9362,11 @@ module.exports = function mountMerchApi(app, {
           WHERE id = ?
         `).run(rawSlug, campaignName, influencerId, coupon.id, coupon.code, targetProductId, targetVariantId, targetVariantIdsJson, updateCampaignId);
 
+        // Also ensure this coupon is associated with the influencer in coupons table
+        try {
+          db.prepare('UPDATE coupons SET influencer_id = ? WHERE (id = ? OR LOWER(TRIM(code)) = LOWER(TRIM(?))) AND (influencer_id IS NULL OR influencer_id = ?)').run(influencerId, coupon.id, coupon.code, influencerId);
+        } catch (_) {}
+
         return res.json({
           campaign: {
             id: updateCampaignId,
@@ -9411,7 +9450,7 @@ module.exports = function mountMerchApi(app, {
 
       // Also ensure this coupon is associated with the influencer in coupons table if not already
       try {
-        db.prepare('UPDATE coupons SET influencer_id = ? WHERE id = ? AND (influencer_id IS NULL OR influencer_id = ?)').run(influencerId, coupon.id, influencerId);
+        db.prepare('UPDATE coupons SET influencer_id = ? WHERE (id = ? OR LOWER(TRIM(code)) = LOWER(TRIM(?))) AND (influencer_id IS NULL OR influencer_id = ?)').run(influencerId, coupon.id, coupon.code, influencerId);
       } catch {}
 
       res.status(201).json({
