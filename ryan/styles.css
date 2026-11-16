@@ -3692,6 +3692,26 @@ button {
   line-height: 1.45;
 }
 
+.shopify-summary-disclaimer {
+  margin-top: 0;
+  margin-bottom: 4px;
+  padding: 10px 12px;
+  background: #FAF8F5;
+  border: 1px solid rgba(174, 84, 49, 0.15);
+  border-left: 3px solid var(--h2-terracotta);
+  border-radius: 6px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 1.45;
+  color: #5C544F;
+  box-sizing: border-box;
+}
+
+.shopify-summary-disclaimer strong {
+  color: #1A1A1A;
+  font-weight: 700;
+}
+
 /* Order Summary Aside */
 .shopify-summary {
   position: sticky;

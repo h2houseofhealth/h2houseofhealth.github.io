@@ -1852,6 +1852,7 @@ function getWishlistProductPrice(item) {
 
   // â”€â”€â”€ Elements â”€â”€â”€
   const els = {
+    merchPageContainer: document.querySelector('.merch-page-container'),
     productGrid: document.getElementById('productGrid'),
     productEmpty: document.getElementById('productEmpty'),
     smartMerchSidebar: document.getElementById('smartMerchSidebar'),
@@ -3180,12 +3181,22 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     state.currentView = 'confirmation';
     state.latestConfirmation = confirmation;
 
+    const _pageContainer = els.merchPageContainer || document.querySelector('.merch-page-container');
+    if (_pageContainer) _pageContainer.hidden = true;
+    const _merchHero = document.querySelector('.merch-hero');
+    if (_merchHero) _merchHero.hidden = true;
+    const _merchCats = document.querySelector('.merch-categories');
+    if (_merchCats) _merchCats.hidden = true;
+    const _shopOffers = document.getElementById('shopOffersSection');
+    if (_shopOffers) _shopOffers.hidden = true;
+    const _merchBenefits = document.getElementById('merchBenefitsSection');
+    if (_merchBenefits) _merchBenefits.hidden = true;
+    const _merchFaq = document.getElementById('merchFaqSection');
+    if (_merchFaq) _merchFaq.hidden = true;
     els.productDetail.hidden = true;
     els.shopSection.hidden = true;
     if (els.checkoutPage) els.checkoutPage.hidden = true;
     if (els.orderTracking) els.orderTracking.hidden = true;
-    document.querySelector('.merch-hero').hidden = true;
-    document.querySelector('.merch-categories').hidden = true;
     if (els.bookingConfirmation) {
       els.bookingConfirmation.hidden = false;
       els.bookingConfirmation.innerHTML = BookingConfirmationPage(confirmation);
@@ -3269,12 +3280,22 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   async function showOrderTracking(orderId) {
     state.currentView = 'tracking';
 
+    const _pageContainer = els.merchPageContainer || document.querySelector('.merch-page-container');
+    if (_pageContainer) _pageContainer.hidden = true;
+    const _merchHero = document.querySelector('.merch-hero');
+    if (_merchHero) _merchHero.hidden = true;
+    const _merchCats = document.querySelector('.merch-categories');
+    if (_merchCats) _merchCats.hidden = true;
+    const _shopOffers = document.getElementById('shopOffersSection');
+    if (_shopOffers) _shopOffers.hidden = true;
+    const _merchBenefits = document.getElementById('merchBenefitsSection');
+    if (_merchBenefits) _merchBenefits.hidden = true;
+    const _merchFaq = document.getElementById('merchFaqSection');
+    if (_merchFaq) _merchFaq.hidden = true;
     els.productDetail.hidden = true;
     els.shopSection.hidden = true;
     if (els.checkoutPage) els.checkoutPage.hidden = true;
     if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
-    document.querySelector('.merch-hero').hidden = true;
-    document.querySelector('.merch-categories').hidden = true;
     closeCart();
     closeAccountDrawer();
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -3376,8 +3397,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     }, 300);
   }
 
+  const openCartDrawer = openCart;
+  const closeCartDrawer = closeCart;
   window.openCart = openCart;
+  window.openCartDrawer = openCart;
   window.closeCart = closeCart;
+  window.closeCartDrawer = closeCart;
+  window.openAccountDrawer = openAccountDrawer;
+  window.closeAccountDrawer = closeAccountDrawer;
 
   function getMerchantProfile() {
     const profile = state.merchProfile || {};
@@ -3396,6 +3423,35 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   function renderAccountTrigger() {
+    const authBtns = document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn');
+    if (state.currentUser) {
+      const profile = getMerchantProfile();
+      const displayName = (profile.fullName || state.currentUser.name || state.currentUser.email || 'My Account').split(' ')[0];
+      const initials = escapeHtml(getInitials(displayName));
+      authBtns.forEach((btn) => {
+        btn.innerHTML = `<span class="h2-navbar__avatar">${initials}</span> <span>${escapeHtml(displayName)}</span>`;
+        btn.classList.remove('h2-navbar__btn--outline');
+        btn.classList.add('h2-navbar__btn--profile');
+        btn.setAttribute('href', '#');
+        btn.setAttribute('aria-label', `Account of ${displayName}`);
+        btn.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (typeof window.closeNavDrawer === 'function') window.closeNavDrawer();
+          openAccountDrawer('account-profile');
+        };
+      });
+    } else if (state.authResolved) {
+      authBtns.forEach((btn) => {
+        btn.classList.add('h2-navbar__btn--outline');
+        btn.classList.remove('h2-navbar__btn--profile');
+        btn.innerHTML = 'Sign Up / Sign In';
+        btn.setAttribute('href', '/merch/auth.html?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search));
+        btn.setAttribute('aria-label', 'Sign Up or Sign In');
+        btn.onclick = null;
+      });
+    }
+
     if (!els.merchAuthCta) return;
 
     if (!state.authResolved) {
@@ -4264,7 +4320,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         const targetSection = button.dataset.accountNav || 'account-profile';
         if (targetSection === 'cart') {
           closeAccountDrawer();
-          openCartDrawer();
+          if (els.accountDrawer) els.accountDrawer.hidden = true;
+          if (els.accountDrawerOverlay) els.accountDrawerOverlay.hidden = true;
+          openCart();
           return;
         }
         state.accountActiveSection = targetSection;
@@ -5191,7 +5249,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     renderAccountDrawer();
   }
 
-  async function openAccountDrawer(initialSection = 'account-orders') {
+  async function openAccountDrawer(initialSection = 'account-profile') {
     if (!els.accountDrawer) return;
     if (!state.authResolved) await loadCustomerContext();
 
@@ -5631,6 +5689,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     state.quantity = 1;
 
     // Hide shop, show detail
+    const _pageContainer = els.merchPageContainer || document.querySelector('.merch-page-container');
+    if (_pageContainer) _pageContainer.hidden = true;
     els.shopSection.hidden = true;
     document.querySelector('.merch-hero').hidden = true;
     document.querySelector('.merch-categories').hidden = true;
@@ -5663,6 +5723,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     if (els.checkoutPage) els.checkoutPage.hidden = true;
     if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
     if (els.orderTracking) els.orderTracking.hidden = true;
+    const _pageContainer = els.merchPageContainer || document.querySelector('.merch-page-container');
+    if (_pageContainer) _pageContainer.hidden = false;
     els.shopSection.hidden = false;
     document.querySelector('.merch-hero').hidden = false;
     document.querySelector('.merch-categories').hidden = false;
@@ -7025,6 +7087,11 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         </div>
 
         <div class="shopify-pricing">
+          ${countCartBottles() > 0 ? `
+            <div class="shopify-disclaimer-box shopify-summary-disclaimer" style="margin-bottom:6px;padding:10px 12px;background:#FAF8F5;border:1px solid rgba(174,84,49,0.15);border-left:3px solid var(--h2-terracotta,#ae5431);border-radius:6px;color:#5C544F;font-size:11px;line-height:1.45;">
+              <strong style="color:#1A1A1A;">Bottle Color Disclaimer:</strong> Bottle color availability may vary slightly depending on stock. All products are authentic and backed by H2 House of Health warranty.
+            </div>
+          ` : ''}
           <div class="shopify-price-row"><span>Subtotal</span><strong>${formatCheckoutMoney(totals.rawSubtotal)}</strong></div>
           ${totals.bundleDiscount > 0 ? `
             <div class="shopify-price-row shopify-price-row--discount">
@@ -7188,9 +7255,6 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             <a href="/privacy/" target="_blank" style="color:#ae5431;text-decoration:underline;">Privacy Policy</a>, 
             <a href="/shipping/" target="_blank" style="color:#ae5431;text-decoration:underline;">Shipping Policy</a>, and 
             <a href="/refund/" target="_blank" style="color:#ae5431;text-decoration:underline;">Return &amp; Warranty Policy</a> (7-Day shipment-damage returns; 6-Month parts warranty).
-            <div style="margin-top:8px;padding:8px 10px;background:#fdfaf7;border-left:3px solid #ae5431;border-radius:4px;color:#555;font-size:11.5px;line-height:1.45;">
-              <strong style="color:#111;">Bottle Color Disclaimer:</strong> The color of the bottle may vary depending on availability. Customers may receive the bottle in any available color, and a specific color cannot be guaranteed. Product images are for illustrative purposes only.
-            </div>
           </div>
         </form>
         ${renderCheckoutSummary()}
@@ -7214,13 +7278,23 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     }
     state.currentView = 'checkout';
     state.checkoutErrors = {};
+    const _pageContainer = els.merchPageContainer || document.querySelector('.merch-page-container');
+    if (_pageContainer) _pageContainer.hidden = true;
+    const _merchHero = document.querySelector('.merch-hero');
+    if (_merchHero) _merchHero.hidden = true;
+    const _merchCats = document.querySelector('.merch-categories');
+    if (_merchCats) _merchCats.hidden = true;
+    const _shopOffers = document.getElementById('shopOffersSection');
+    if (_shopOffers) _shopOffers.hidden = true;
+    const _merchBenefits = document.getElementById('merchBenefitsSection');
+    if (_merchBenefits) _merchBenefits.hidden = true;
+    const _merchFaq = document.getElementById('merchFaqSection');
+    if (_merchFaq) _merchFaq.hidden = true;
     els.productDetail.hidden = true;
     els.shopSection.hidden = true;
     if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
     if (els.orderTracking) els.orderTracking.hidden = true;
     if (els.checkoutPage) els.checkoutPage.hidden = false;
-    document.querySelector('.merch-hero').hidden = true;
-    document.querySelector('.merch-categories').hidden = true;
     closeCart();
     loadMerchCoupons();
     renderCheckoutPage();
@@ -7851,9 +7925,19 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       if (e.key === 'Escape') closeSearch();
     });
 
-    // Cart
+    // Cart & Account
     els.cartToggleBtn.addEventListener('click', openCart);
     els.wishlistToggleBtn?.addEventListener('click', () => openAccountDrawer('account-wishlist'));
+    document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        if (state.currentUser || btn.classList.contains('h2-navbar__btn--profile')) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (typeof window.closeNavDrawer === 'function') window.closeNavDrawer();
+          openAccountDrawer('account-profile');
+        }
+      });
+    });
     els.cartCloseBtn.addEventListener('click', closeCart);
     els.cartOverlay.addEventListener('click', closeCart);
     els.cartShopBtn.addEventListener('click', () => {
