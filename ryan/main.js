@@ -2680,7 +2680,7 @@ async function initAuthSystem() {
   if (accountViewOrdersBtn) {
     accountViewOrdersBtn.addEventListener('click', () => {
       if (accountDropdownMenu) accountDropdownMenu.hidden = true;
-      window.location.href = '/merch/';
+      window.location.href = '/merch/wellness-products/';
     });
   }
 

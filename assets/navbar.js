@@ -168,7 +168,7 @@
           }
         } else {
           e.preventDefault();
-          window.location.href = '/merch/?search=1';
+          window.location.href = '/merch/wellness-products/?search=1';
         }
       });
     });
@@ -190,7 +190,7 @@
           }
         } else {
           e.preventDefault();
-          window.location.href = '/merch/?cart=1';
+          window.location.href = '/merch/wellness-products/?cart=1';
         }
       });
     });
@@ -205,7 +205,7 @@
           }
         } else {
           e.preventDefault();
-          window.location.href = '/merch/?wishlist=1';
+          window.location.href = '/merch/wellness-products/?wishlist=1';
         }
       });
     });
