@@ -3947,7 +3947,7 @@
                         <td><strong>${escapeHtml(money(order.totalAmount))}</strong></td>
                         <td>
                           <span class="admin-badge ${statusClass(orderDisplayStatus)}">${escapeHtml(getStatusLabel(orderDisplayStatus))}</span>
-                          ${order.fulfillmentStatus || orderIsAwaitingRestock ? `
+                          ${(order.fulfillmentStatus || orderIsAwaitingRestock) && String(order.fulfillmentStatus).toLowerCase() !== 'cancelled' && String(order.fulfillmentStatus).toLowerCase() !== String(orderDisplayStatus).toLowerCase() ? `
                             <br><span class="admin-badge ${fulfillmentClass}" style="margin-top:3px;font-size:10px;">${escapeHtml(fulfillmentLabel)}</span>
                           ` : ''}
                           ${orderIsActionRequired ? `
@@ -4007,7 +4007,7 @@
                       <button class="admin-btn admin-btn--ghost" type="button" data-action="ship-order" data-id="${selectedOrder?.id || ''}" ${selectedOrder?.isFulfillmentBlocked ? 'disabled title="Stock unavailable"' : ''}>Ship</button>
                       <button class="admin-btn admin-btn--ghost" type="button" data-action="deliver-order" data-id="${selectedOrder?.id || ''}">Deliver</button>
                       <button class="admin-btn admin-btn--danger" type="button" data-action="cancel-order" data-id="${selectedOrder?.id || ''}" ${['delivered', 'returned', 'cancelled'].includes(normalizeOrderStatus(selectedOrder?.status)) ? 'disabled title="Delivered and returned orders cannot be cancelled"' : ''}>Cancel</button>
-                      <button class="admin-btn admin-btn--soft" type="button" data-action="refund-order" data-id="${selectedOrder?.id || ''}">Refund</button>
+                      <button class="admin-btn admin-btn--soft" type="button" data-action="refund-order" data-id="${selectedOrder?.id || ''}" ${String(selectedOrder?.paymentStatus).toLowerCase() === 'refunded' ? 'disabled title="Order is already refunded"' : ''}>Refund</button>
                     </div>
                   </div>
                 </article>
@@ -7632,7 +7632,9 @@
 
   function cancelOrder(order) {
     order.status = 'cancelled';
-    order.paymentStatus = 'refunded';
+    if (String(order.paymentStatus || '').toLowerCase() === 'cod_pending') {
+      order.paymentStatus = 'cancelled';
+    }
     order.timeline.unshift({
       label: 'Cancelled',
       note: 'Admin cancelled this order from the dashboard',
@@ -9871,7 +9873,7 @@
           if (action === 'bulk-order-invoice') await openOrderInvoice(selectedOrder.id);
           if (action === 'bulk-order-email') await emailOrderInvoice(selectedOrder.id);
           if (action === 'bulk-order-download') await downloadOrderInvoice(selectedOrder.id);
-          if (action === 'bulk-order-cancel') await updateOrderOnServer(selectedOrder, { status: 'cancelled', payment_status: 'refunded' });
+          if (action === 'bulk-order-cancel') await updateOrderOnServer(selectedOrder, { status: 'cancelled' });
         }
         if (['bulk-order-cancel', 'bulk-order-refund'].includes(action)) await loadOrderData();
         return;
@@ -10020,7 +10022,7 @@
       case 'cancel-order':
         if (order) {
           try {
-            await updateOrderOnServer(order, { status: 'cancelled', payment_status: 'refunded' });
+            await updateOrderOnServer(order, { status: 'cancelled' });
             toast('Order cancelled', `${order.orderNumber} has been marked cancelled.`, 'warning');
           } catch (error) {
             toast('Order update failed', error.message || 'Unable to cancel the order.', 'warning');

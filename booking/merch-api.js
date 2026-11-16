@@ -874,6 +874,20 @@ module.exports = function mountMerchApi(app, {
     db.exec('ALTER TABLE merch_orders ADD COLUMN charged_amount REAL');
   }
 
+  // Backfill: Fix orders that were falsely marked payment_status = 'refunded' upon cancellation
+  try {
+    db.exec(`
+      UPDATE merch_orders
+      SET payment_status = CASE
+        WHEN razorpay_payment_id IS NOT NULL AND razorpay_payment_id != '' THEN 'paid'
+        ELSE 'cancelled'
+      END
+      WHERE status = 'cancelled' AND payment_status = 'refunded'
+    `);
+  } catch (e) {
+    console.warn('[Merch] cancelled payment_status backfill notice:', e?.message);
+  }
+
   if (!hasColumn('merch_influencers', 'avatar_url')) {
     db.exec('ALTER TABLE merch_influencers ADD COLUMN avatar_url TEXT');
   }
@@ -10233,6 +10247,9 @@ module.exports = function mountMerchApi(app, {
       updates.push('cancelled_by = ?');
       params.push('admin');
       updates.push("cancelled_at = datetime('now')");
+      if (!payment_status && String(existingOrder.payment_status || '').toLowerCase() === 'cod_pending') {
+        updates.push("payment_status = 'cancelled'");
+      }
     }
     if (payment_status) {
       updates.push('payment_status = ?');
