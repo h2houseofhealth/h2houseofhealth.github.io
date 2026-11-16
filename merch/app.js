@@ -197,9 +197,9 @@
   // Presentation-only fallbacks for the storefront card redesign. These are
   // not product/API fields and should be replaced with real catalog metadata.
   const PRODUCT_CARD_PRESENTATION = {
-    bottles: { badge: 'BESTSELLER', stars: '★★★★★', reviews: 128, annotation: 'Molecular Hydrogen on the go' },
-    sprays: { badge: 'NEW ARRIVAL', stars: '★★★★★', reviews: 96, annotation: 'Refresh & rejuvenate anywhere' },
-    hoodies: { badge: 'LIMITED DROP', stars: '★★★★★', reviews: 74, annotation: 'Wear the wellness lifestyle' },
+    bottles: { badge: 'BESTSELLER', stars: '★★★★★', annotation: 'Molecular Hydrogen on the go' },
+    sprays: { badge: 'NEW ARRIVAL', stars: '★★★★★', annotation: 'Refresh & rejuvenate anywhere' },
+    hoodies: { badge: 'LIMITED DROP', stars: '★★★★★', annotation: 'Wear the wellness lifestyle' },
   };
 
   function getProductCardPresentation(product) {
@@ -207,7 +207,6 @@
     return PRODUCT_CARD_PRESENTATION[category] || {
       badge: 'NEW ARRIVAL',
       stars: '★★★★★',
-      reviews: 0,
       annotation: 'Made for your everyday ritual',
     };
   }
@@ -276,8 +275,11 @@
   }
 
   function normalizeProductImageUrl(value) {
-    const raw = String(value || '').trim();
+    let raw = String(value || '').trim();
     if (!raw) return '';
+    if (raw.includes('WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg')) {
+      return '/cdn/shop/files/products/h2-hydrogen-water-bottle-silver.jpg';
+    }
     if (/^(https?:|data:|blob:)/i.test(raw)) return raw;
     if (raw.startsWith('/')) return raw;
     if (raw.startsWith('cdn/') || raw.startsWith('booking/') || raw.startsWith('uploads/')) return `/${raw}`;
@@ -310,7 +312,7 @@
     const category = String(product?.category || '').toLowerCase();
     const name = String(product?.name || '').toLowerCase();
     if (category === 'sprays' || name.includes('mist') || name.includes('spray')) return '/cdn/shop/files/hero/h2-mist-transparent-source.png';
-    if (category === 'bottles' || name.includes('bottle')) return '/cdn/shop/files/WhatsApp_Image_2026-02-06_at_16.09.32_27f7d.jpg?v=1770378113';
+    if (category === 'bottles' || name.includes('bottle')) return '/cdn/shop/files/products/h2-hydrogen-water-bottle-silver.jpg';
     if (category === 'hoodies' || name.includes('hoodie')) return HOODIE_CARD_IMAGE;
     return FALLBACK_PRODUCT_IMAGE;
   }
@@ -1854,6 +1856,7 @@ function getWishlistProductPrice(item) {
     productEmpty: document.getElementById('productEmpty'),
     smartMerchSidebar: document.getElementById('smartMerchSidebar'),
     productDetail: document.getElementById('productDetail'),
+    productDetailFaq: document.getElementById('productDetailFaq'),
     productGallery: document.getElementById('productGallery'),
     productInfo: document.getElementById('productInfo'),
     shopSection: document.getElementById('shopSection'),
@@ -2338,10 +2341,13 @@ function getWishlistProductPrice(item) {
   }
 
   function isPublicMerchCoupon(coupon) {
-    if (String(coupon?.couponType || 'public').toLowerCase() !== 'public') return false;
-    if (Number(coupon?.influencerId || 0) > 0 || coupon?.influencerName || coupon?.influencer) return false;
-    // Backward-compatible guard for older API responses that do not include influencerId.
-    return !/influencer\s+merch\s+campaign\s+coupon/i.test(String(coupon?.description || ''));
+    if (!coupon) return false;
+    if (String(coupon.couponType || 'public').toLowerCase() !== 'public') return false;
+    const category = String(coupon.couponCategory || coupon.category || coupon.ownerType || '').trim().toLowerCase();
+    if (category === 'influencer' || category === 'private') return false;
+    if (Number(coupon.influencerId || coupon.influencer_id || 0) > 0 || coupon.influencerName || coupon.influencer) return false;
+    if (/influencer/i.test(String(coupon.festivalName || '')) || /influencer/i.test(String(coupon.description || ''))) return false;
+    return true;
   }
 
   async function loadMerchCoupons() {
@@ -2561,7 +2567,8 @@ function getWishlistProductPrice(item) {
     }
     const cartAvailableCoupons = document.getElementById('cartAvailableCoupons');
     if (cartAvailableCoupons) {
-      const coupons = state.availableCoupons.filter(isPublicMerchCoupon);
+      const coupons = (state.availableCoupons || []).filter(isPublicMerchCoupon);
+      cartAvailableCoupons.hidden = coupons.length === 0;
       cartAvailableCoupons.innerHTML = coupons.length ? `
         <p class="cart-available-coupons__title">Available coupons</p>
         ${coupons.map((coupon) => `
@@ -3111,7 +3118,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           return;
         }
         if (action === 'shop') {
-          window.location.href = '/merch/';
+          window.location.href = '/merch/wellness-products/';
           return;
         }
         if (action === 'send-whatsapp') {
@@ -3379,7 +3386,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       : '';
     if (!state.currentUser) {
       els.merchAuthCta.innerHTML = `
-        <a href="/merch/auth.html?returnTo=%2Fmerch%2F" class="header-book-now-btn header-auth-btn" aria-label="Sign Up or Login">
+        <a href="/merch/auth.html?returnTo=%2Fmerch%2Fwellness-products%2F" class="header-book-now-btn header-auth-btn" aria-label="Sign Up or Login">
           Sign Up / Login
         </a>
       `;
@@ -5326,8 +5333,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         : (isHoodie || isHoodieCombo
           ? HOODIE_CARD_IMAGE
           : (product.images?.[0] || product.imageUrl || getProductFallbackImage(product)));
-      const cardSizes = displayVariant?.size ? [displayVariant.size] : [];
-      const cardColors = displayVariant?.color ? [displayVariant.color] : [];
+      const cardSizes = [...new Set((product.variants || []).map((variant) => variant.size).filter(Boolean))];
+      const cardColors = [...new Set((product.variants || []).map((variant) => variant.color).filter(Boolean))];
       const cardSpecifications = Object.entries(getProductSpecifications(product, displayVariant))
         .filter(([label, value]) => String(label).trim() && String(value).trim())
         .slice(0, 2);
@@ -5355,17 +5362,17 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
             <span>${escapeHtml(presentation.annotation)}</span>
             <svg viewBox="0 0 92 54"><path d="M5 7c2 29 26 41 70 34" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="m67 34 9 7-11 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </div>
-          <img src="${escapeHtml(cardImage)}" alt="${escapeHtml(product.name)}" loading="lazy" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
+          <img src="${escapeHtml(cardImage)}" alt="${escapeHtml(cardAlt)}" width="400" height="400" loading="lazy" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
         </div>
         <div class="product-card__body">
           <p class="product-card__category">${escapeHtml(getCategoryLabel(product.category))}</p>
           <h3 class="product-card__name">${escapeHtml(product.name)}</h3>
+          ${product.description ? `<p class="product-card__desc">${escapeHtml(product.description)}</p>` : ''}
           ${(cardSizes.length || cardColors.length) ? `<p class="product-card__variant">${cardSizes.length ? `Size: ${cardSizes.join(', ')}` : ''}${cardSizes.length && cardColors.length ? ' · ' : ''}${cardColors.length ? `Color: ${cardColors.join(', ')}` : ''}</p>` : ''}
           ${cardSpecifications.length ? `<div class="product-card__specs">${cardSpecifications.map(([label, value]) => `<span><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</span>`).join('')}</div>` : ''}
           <p class="product-card__stock ${stockClass}">${escapeHtml(stockLabel)}</p>
-          <div class="product-card__rating" aria-label="${escapeHtml(`${presentation.stars || '★★★★★'} (${presentation.reviews} reviews)`)}">
+          <div class="product-card__rating" aria-label="${escapeHtml(presentation.stars || '★★★★★')}">
             <span class="product-card__stars" aria-hidden="true">${presentation.stars || '★★★★★'}</span>
-            <span>(${presentation.reviews})</span>
           </div>
           <p class="product-card__price">
             ${offerInfo ? `
@@ -5453,6 +5460,98 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   // â”€â”€â”€ Render: Product Detail â”€â”€â”€
+  const BOTTLE_DETAIL_FAQS = [
+    {
+      q: 'How does the H2 Molecular Hydrogen Water Bottle work?',
+      a: 'It uses solid polymer electrolyte (SPE) and proton exchange membrane (PEM) electrolysis to infuse drinking water with pure dissolved molecular hydrogen gas (up to 3,000+ ppb) in a single 5-minute cycle.'
+    },
+    {
+      q: 'What water can I use in the bottle?',
+      a: 'Use filtered drinking water, purified water, or mineral water. Avoid hot boiling water, carbonated soda, or juices in the bottle.'
+    },
+    {
+      q: 'What materials is the bottle made of?',
+      a: 'Built with a durable BPA-free glass body, a protective stainless steel shell, and platinum-titanium electrolysis electrodes.'
+    },
+    {
+      q: 'How do I charge and clean the bottle?',
+      a: 'Powered by a rechargeable 700mAh lithium polymer battery charged via USB-C. Hand wash the glass body with mild soap; keep the electronic base dry.'
+    },
+    {
+      q: 'What is the warranty and return coverage?',
+      a: 'Covered by a 7-day transit damage replacement upon delivery and a 6-month parts warranty for electrical and mechanical components.'
+    }
+  ];
+
+  const MIST_DETAIL_FAQS = [
+    {
+      q: 'What is the H2 Hydrogen Mist Spray and how does it work?',
+      a: 'Combines micro-electrolysis with ultrasonic atomization to produce a fine hydrogen-rich mist (1000 ppb concentration) for instant, refreshing facial hydration.'
+    },
+    {
+      q: 'What is the tank capacity and battery life?',
+      a: 'Features a 13ml water tank and a rechargeable 500mAh battery charged via Micro USB, providing multiple mist cycles on a single charge.'
+    },
+    {
+      q: 'What type of water should I use in the mist spray?',
+      a: 'Use clean drinking water or mineral water. Do not put essential oils, toners, or heavy lotions inside the tank to prevent nozzle clogging.'
+    },
+    {
+      q: 'How compact and portable is it?',
+      a: 'Weighing just 60g and measuring 103mm × 40mm, it fits easily in your pocket, handbag, or gym kit.'
+    },
+    {
+      q: 'What is the warranty and return coverage?',
+      a: 'Covered by a 7-day transit damage replacement upon delivery and a 6-month parts warranty for internal components.'
+    }
+  ];
+
+  function renderProductDetailFaq(product) {
+    const faqContainer = document.getElementById('productDetailFaq');
+    if (!faqContainer) return;
+
+    let faqs = [];
+    let title = '';
+    let subtitle = '';
+
+    if (isBottleProduct(product)) {
+      faqs = BOTTLE_DETAIL_FAQS;
+      title = 'H2 Water Bottle FAQs';
+      subtitle = 'Common questions about bottle usage, SPE/PEM electrolysis technology, and maintenance.';
+    } else if (isMistProduct(product)) {
+      faqs = MIST_DETAIL_FAQS;
+      title = 'H2 Hydrogen Mist Spray FAQs';
+      subtitle = 'Answers about facial hydration, ultrasonic misting, maintenance, and charging.';
+    }
+
+    if (!faqs.length) {
+      faqContainer.hidden = true;
+      faqContainer.innerHTML = '';
+      return;
+    }
+
+    faqContainer.hidden = false;
+    faqContainer.innerHTML = `
+      <div class="merch-faq__header">
+        <h2 class="section-title">${escapeHtml(title)}</h2>
+        <p class="merch-faq__subtitle">${escapeHtml(subtitle)}</p>
+      </div>
+      <div class="merch-faq__grid">
+        ${faqs.map((item) => `
+          <div class="merch-faq__item">
+            <h3 class="merch-faq__question">${escapeHtml(item.q)}</h3>
+            <div class="merch-faq__answer">
+              <p>${escapeHtml(item.a)}</p>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      <div class="merch-faq__footer">
+        <p>Have more questions? <a href="/pages/contact.html">Contact our wellness team</a> or read our <a href="/refund/">7-day return and warranty policy</a>.</p>
+      </div>
+    `;
+  }
+
   function showProductDetail(productId, variantId = null) {
     const product = state.products.find(p => Number(p.id) === Number(productId));
     if (!product) return;
@@ -5477,6 +5576,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     document.querySelector('.merch-categories').hidden = true;
     const _shopOffersSection = document.getElementById('shopOffersSection');
     if (_shopOffersSection) _shopOffersSection.hidden = true;
+    const _merchBenefits = document.getElementById('merchBenefitsSection');
+    if (_merchBenefits) _merchBenefits.hidden = true;
+    const _merchFaq = document.getElementById('merchFaqSection');
+    if (_merchFaq) _merchFaq.hidden = true;
     if (els.checkoutPage) els.checkoutPage.hidden = true;
     if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
     if (els.orderTracking) els.orderTracking.hidden = true;
@@ -5484,6 +5587,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
     renderProductGallery(product);
     renderProductInfo(product);
+    renderProductDetailFaq(product);
 
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -5494,6 +5598,8 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     state.selectedVariant = null;
 
     els.productDetail.hidden = true;
+    const _productDetailFaq = document.getElementById('productDetailFaq');
+    if (_productDetailFaq) _productDetailFaq.hidden = true;
     if (els.checkoutPage) els.checkoutPage.hidden = true;
     if (els.bookingConfirmation) els.bookingConfirmation.hidden = true;
     if (els.orderTracking) els.orderTracking.hidden = true;
@@ -5502,6 +5608,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     document.querySelector('.merch-categories').hidden = false;
     const _shopOffersSection2 = document.getElementById('shopOffersSection');
     if (_shopOffersSection2) _shopOffersSection2.hidden = state.offers.length === 0;
+    const _merchBenefits2 = document.getElementById('merchBenefitsSection');
+    if (_merchBenefits2) _merchBenefits2.hidden = false;
+    const _merchFaq2 = document.getElementById('merchFaqSection');
+    if (_merchFaq2) _merchFaq2.hidden = false;
     if (window.location.hash === '#booking-confirmation' || window.location.hash === '#checkout' || getTrackingOrderIdFromHash() || window.location.search) {
       history.replaceState(null, '', window.location.pathname);
     }
@@ -5514,7 +5624,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       || getProductFallbackImage(product);
     els.productGallery.innerHTML = `
       <div class="gallery-main gallery-main--${escapeHtml(String(product.category || '').toLowerCase())}" tabindex="0" aria-label="${escapeHtml(product.name)} image gallery">
-        <img id="galleryMainImg" src="${escapeHtml(mainImage)}" alt="${escapeHtml(product.name)}" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
+        <img id="galleryMainImg" src="${escapeHtml(mainImage)}" alt="${escapeHtml(product.name)}" width="600" height="600" onerror="this.onerror=null;this.src='${getProductFallbackImage(product)}'" />
         ${slides.some((slide) => slide.type === 'video') ? '<video id="galleryMainVideo" controls playsinline preload="metadata" hidden></video>' : ''}
         ${slides.length > 1 ? `
           <button class="gallery-nav gallery-nav--previous" type="button" data-gallery-direction="previous" aria-label="Previous product image">&#8592;</button>
@@ -5525,7 +5635,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         <div class="gallery-thumbs">
           ${slides.map((slide, i) => `
             <button class="gallery-thumb ${i === 0 ? 'is-active' : ''}" data-index="${i}" type="button" aria-label="View ${escapeHtml(slide.label)}">
-              <img src="${escapeHtml(slide.src)}" alt="" />
+              <img src="${escapeHtml(slide.src)}" alt="" width="80" height="80" loading="lazy" />
             </button>
           `).join('')}
         </div>
@@ -6827,15 +6937,21 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
               </div>
             </div>
           ` : ''}
-          ${state.availableCoupons.length ? `<div class="checkout-coupon-offers" aria-label="Available coupons">
-            <p class="checkout-coupon-offers__title">Available coupons</p>
-            ${state.availableCoupons.filter(isPublicMerchCoupon).map((coupon) => `
-              <button type="button" class="checkout-coupon-offer${String(coupon.code) === String(state.merchCouponCode) ? ' is-selected' : ''}" data-checkout-coupon-code="${escapeHtml(coupon.code)}">
-                <span><strong>${escapeHtml(coupon.code)}</strong><small>${escapeHtml(coupon.couponCategory === 'festival' ? 'Festival coupon' : coupon.couponCategory === 'seasonal' ? 'Seasonal coupon' : 'Public coupon')}${coupon.description ? ` · ${escapeHtml(coupon.description)}` : ''}</small></span>
-                <b>${escapeHtml(getCouponDiscountLabel(coupon))}</b>
-              </button>
-            `).join('')}
-          </div>` : ''}
+          ${(() => {
+            const publicOffers = (state.availableCoupons || []).filter(isPublicMerchCoupon);
+            if (!publicOffers.length) return '';
+            return `
+              <div class="checkout-coupon-offers" aria-label="Available coupons">
+                <p class="checkout-coupon-offers__title">Available coupons</p>
+                ${publicOffers.map((coupon) => `
+                  <button type="button" class="checkout-coupon-offer${String(coupon.code) === String(state.merchCouponCode) ? ' is-selected' : ''}" data-checkout-coupon-code="${escapeHtml(coupon.code)}">
+                    <span><strong>${escapeHtml(coupon.code)}</strong><small>${escapeHtml(coupon.couponCategory === 'festival' ? 'Festival coupon' : coupon.couponCategory === 'seasonal' ? 'Seasonal coupon' : 'Public coupon')}${coupon.description ? ` · ${escapeHtml(coupon.description)}` : ''}</small></span>
+                    <b>${escapeHtml(getCouponDiscountLabel(coupon))}</b>
+                  </button>
+                `).join('')}
+              </div>
+            `;
+          })()}
         </div>
 
         ${renderCheckoutRecommendations()}
@@ -7002,7 +7118,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
               <span>${state.checkoutSubmitting ? 'PROCESSING...' : 'CONTINUE TO PAYMENT'}</span>
               <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
             </button>
-            <a href="/merch/" class="shopify-continue-button" data-action="continue-shopping">
+            <a href="/merch/wellness-products/" class="shopify-continue-button" data-action="continue-shopping">
               CONTINUE SHOPPING
             </a>
           </div>
@@ -8005,12 +8121,12 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   function renderShopOffersSection() {
     const section = document.getElementById('shopOffersSection');
     if (!section) return;
-    section.hidden = state.currentView !== 'shop';
+    section.hidden = state.currentView !== 'shop' || state.offers.length === 0;
     const grid = section.querySelector('#shopOffersGrid');
     if (!grid) return;
 
     if (!state.offers.length) {
-      grid.innerHTML = '<p class="merch-offers__empty">No offers available right now.</p>';
+      grid.innerHTML = '';
       return;
     }
 
