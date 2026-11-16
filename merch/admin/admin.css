@@ -2942,10 +2942,14 @@ body.merch-admin-page {
   font-weight: 700;
   letter-spacing: .08em;
 }
-.admin-profile-dropdown__identity > div { min-width: 0; display: grid; gap: 3px; }
-.admin-profile-dropdown__identity strong { font-size: 15px; }
-.admin-profile-dropdown__identity span,
-.admin-profile-dropdown__identity small { color: var(--admin-muted); font-size: 12px; overflow-wrap: anywhere; }
+.admin-profile-dropdown__identity > div,
+.admin-profile-dropdown__details { min-width: 0; display: grid; gap: 3px; }
+.admin-profile-dropdown__identity strong,
+.admin-profile-dropdown__name { font-size: 15px; color: var(--admin-text, #111); }
+.admin-profile-dropdown__details span,
+.admin-profile-dropdown__details small,
+.admin-profile-dropdown__email,
+.admin-profile-dropdown__role { color: var(--admin-muted, #717171); font-size: 12px; overflow-wrap: anywhere; word-break: break-all; }
 .admin-profile-dropdown__actions { display: grid; gap: 4px; padding-top: 10px; }
 .admin-profile-dropdown__actions button {
   width: 100%;

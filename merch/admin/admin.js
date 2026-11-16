@@ -151,13 +151,15 @@
   }
 
   function initials(name) {
-    return String(name || '')
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean)
+    const raw = String(name || '').trim();
+    if (!raw) return 'H2';
+    if (/^h2\b/i.test(raw)) return 'H2';
+    const parts = raw.split(/\s+/).filter(Boolean);
+    if (parts.length === 1 && parts[0].length <= 2) return parts[0].toUpperCase();
+    return parts
       .slice(0, 2)
       .map((part) => part[0]?.toUpperCase() || '')
-      .join('') || 'AH';
+      .join('') || 'H2';
   }
 
   function slugify(value) {
@@ -1967,6 +1969,22 @@
       if (String(result?.user?.role || '').toLowerCase() !== 'admin') {
         throw new Error('Admin access is required.');
       }
+      state.currentUser = result.user || {};
+      const profileEmail = result.user?.email || 'h2houseofhealth@gmail.com';
+      const adminName = result.user?.name || 'H2';
+      const metaEl = document.querySelector('.admin-profile__meta small');
+      if (metaEl) metaEl.textContent = profileEmail;
+      const metaName = document.querySelector('.admin-profile__meta strong');
+      if (metaName) metaName.textContent = adminName;
+      const dropEmailEl = document.getElementById('adminDropdownEmail') || document.querySelector('.admin-profile-dropdown__email');
+      if (dropEmailEl) dropEmailEl.textContent = profileEmail;
+      const dropNameEl = document.querySelector('.admin-profile-dropdown__name');
+      if (dropNameEl) dropNameEl.textContent = adminName;
+      const avatarText = initials(adminName);
+      const avatar1 = document.getElementById('profileAvatar');
+      if (avatar1) avatar1.textContent = avatarText;
+      const avatar2 = document.getElementById('adminDropdownAvatar');
+      if (avatar2) avatar2.textContent = avatarText;
       return true;
     } catch (error) {
       toast('Admin sign-in required', error.message || 'Please sign in with the admin account.', 'warning');
@@ -6177,7 +6195,7 @@
 
   // ── Change Password (3-step: send OTP → verify OTP → set new password) ──
   function renderChangePasswordModal(step = 'email', ctx = {}) {
-    const adminEmail = 'admin@h2health.local';
+    const adminEmail = state.currentUser?.email || 'h2houseofhealth@gmail.com';
 
     const steps = {
       email: {
@@ -7768,7 +7786,7 @@
 
   function renderAll() {
     els.pageTitle.textContent = SECTION_TITLES[state.view] || 'Dashboard';
-    if (els.profileAvatar) els.profileAvatar.textContent = initials('Admin House');
+    if (els.profileAvatar) els.profileAvatar.textContent = initials(state.currentUser?.name || 'H2');
 
     document.querySelectorAll('.admin-nav__item').forEach((button) => {
       button.classList.toggle('is-active', button.dataset.navView === state.view);

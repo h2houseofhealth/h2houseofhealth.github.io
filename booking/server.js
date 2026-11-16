@@ -103,7 +103,7 @@ const HAS_EXPLICIT_CORS_ORIGINS = FRONTEND_ORIGINS.length > 0 || DEPLOYMENT_ORIG
 console.log('FRONTEND_ORIGINS:', process.env.FRONTEND_ORIGINS || '');
 console.log('HAS_EXPLICIT_CORS_ORIGINS:', HAS_EXPLICIT_CORS_ORIGINS);
 console.log('ALLOWED_CORS_ORIGINS:', ALLOWED_CORS_ORIGINS);
-const ADMIN_DISCOUNT_GATE_PASSWORD = normalizeEnvValue(process.env.ADMIN_DISCOUNT_GATE_PASSWORD || 'H2-FOUNDERS-2026');
+const ADMIN_DISCOUNT_GATE_PASSWORD = normalizeEnvValue(process.env.ADMIN_DISCOUNT_GATE_PASSWORD || '');
 const RAZORPAY_KEY_ID = normalizeEnvValue(process.env.RAZORPAY_KEY_ID);
 const RAZORPAY_KEY_SECRET = normalizeEnvValue(process.env.RAZORPAY_KEY_SECRET);
 const RAZORPAY_MODE = normalizeEnvValue(process.env.RAZORPAY_MODE || '').toLowerCase() || (RAZORPAY_KEY_ID.startsWith('rzp_live_') ? 'live' : 'test');
@@ -16822,20 +16822,29 @@ function seedDoctors() {
 }
 
 function seedAdmin() {
-  const email = normalizeEnvValue(process.env.ADMIN_LOGIN_EMAIL || 'admin@h2health.local').toLowerCase();
+  const email = normalizeEnvValue(process.env.ADMIN_LOGIN_EMAIL || 'h2houseofhealth@gmail.com').toLowerCase();
   const initialPassword = normalizeEnvValue(process.env.ADMIN_INITIAL_PASSWORD);
-  if (IS_PRODUCTION && !initialPassword) {
-    console.warn('ADMIN_INITIAL_PASSWORD is not configured; skipping automatic production admin creation/reset.');
+  if (!email || !initialPassword) {
+    if (IS_PRODUCTION) {
+      console.warn('ADMIN_INITIAL_PASSWORD is not configured; skipping automatic production admin creation/reset.');
+    }
     return;
   }
-  const defaultPasswordHash = bcrypt.hashSync(initialPassword || 'Admin@12345', 10);
+  const defaultPasswordHash = bcrypt.hashSync(initialPassword, 10);
   const existing = db.prepare('SELECT id, password_hash FROM users WHERE email = ?').get(email);
 
   if (!existing) {
+    const legacyAdmin = db.prepare("SELECT id FROM users WHERE email = 'admin@h2health.local'").get();
+    if (legacyAdmin) {
+      db.prepare("UPDATE users SET email = ?, password_hash = ?, role = 'admin' WHERE id = ?")
+        .run(email, defaultPasswordHash, legacyAdmin.id);
+      return;
+    }
+
     db.prepare(
       `INSERT INTO users (name, email, password_hash, role, created_at)
        VALUES (?, ?, ?, 'admin', datetime('now'))`
-    ).run('Portal Admin', email, defaultPasswordHash);
+    ).run('H2', email, defaultPasswordHash);
     return;
   }
 
