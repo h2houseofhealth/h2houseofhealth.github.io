@@ -4303,7 +4303,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         renderAccountDrawer();
         showCheckoutNotice('Order cancelled', `${order.orderNumber || `Order #${order.id}`} was cancelled and removed.`);
       } else {
-        state.merchOrders = state.merchOrders.map((item) => String(item.id) === String(order.id) ? (result.order || { ...order, status: 'cancelled', paymentStatus: 'refunded' }) : item);
+        state.merchOrders = state.merchOrders.map((item) => String(item.id) === String(order.id) ? (result.order || { ...order, status: 'cancelled' }) : item);
         renderAccountDrawer();
         showCheckoutNotice('Order cancelled', `${order.orderNumber || `Order #${order.id}`} was cancelled successfully.`);
       }
