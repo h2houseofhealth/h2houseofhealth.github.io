@@ -2593,19 +2593,19 @@ function getWishlistProductPrice(item) {
       const mistImg = mistItem.image || FALLBACK_PRODUCT_IMAGE;
 
       bundleCartHtml = `
-        <div class="cart-item cart-item--bundle" style="background:#fdfaf7;border:1px solid #eadcd2;border-radius:10px;padding:12px;margin-bottom:12px;display:flex;align-items:center;gap:12px;">
+        <div class="cart-item cart-item--bundle" style="background:#fdfaf7;border:1px solid #eadcd2;border-radius:10px;padding:12px;margin-bottom:12px;display:flex;align-items:flex-start;gap:12px;">
           <div class="shopify-summary-bundle__images" style="width:72px;height:56px;padding:2px;gap:2px;flex-shrink:0;">
             <div class="shopify-summary-bundle__img" style="width:30px;height:48px;">
-              <img src="${escapeHtml(bottleImg)}" alt="${escapeHtml(bottleItem.productName)}" style="width:100%;height:100%;object-fit:cover;" />
+              <img src="${escapeHtml(bottleImg)}" alt="${escapeHtml(bottleItem.productName)}" style="width:100%;height:100%;object-fit:contain;" />
             </div>
             <span class="shopify-summary-bundle__plus" style="font-size:10px;">+</span>
             <div class="shopify-summary-bundle__img" style="width:30px;height:48px;">
-              <img src="${escapeHtml(mistImg)}" alt="${escapeHtml(mistItem.productName)}" style="width:100%;height:100%;object-fit:cover;" />
+              <img src="${escapeHtml(mistImg)}" alt="${escapeHtml(mistItem.productName)}" style="width:100%;height:100%;object-fit:contain;" />
             </div>
           </div>
           <div class="cart-item__details" style="min-width:0;flex:1;">
             <span class="shopify-summary-bundle__badge" style="font-size:9px;padding:2px 5px;margin-bottom:3px;">BUNDLE OFFER</span>
-            <p class="cart-item__name" style="font-size:0.95em;font-weight:700;margin:0 0 2px;">Bottle + Mist Bundle</p>
+            <p class="cart-item__name" style="font-size:0.95em;font-weight:700;margin:0 0 2px;line-height:1.35;word-break:break-word;">Bottle + Mist Bundle</p>
             <p class="cart-item__variant" style="font-size:0.8em;color:#78350f;margin:0 0 4px;">Includes: Bottle + Mist</p>
             <div class="shopify-summary-product__stepper" style="margin-top:4px;margin-bottom:4px;" role="group" aria-label="Quantity for Bottle + Mist Bundle">
               <button type="button" class="shopify-summary-product__step-btn" data-cart-step-bundle="down" aria-label="Decrease bundle quantity" ${bundleQty <= 1 ? 'title="Remove bundle"' : ''}>−</button>
@@ -2617,7 +2617,7 @@ function getWishlistProductPrice(item) {
               ${bundleDiscountAmount > 0 ? `<span style="text-decoration:line-through;color:var(--text-muted);font-size:0.85em;margin-left:6px;">${formatPrice(bundleRegularLineTotal)}</span>` : ''}
             </p>
           </div>
-          <button class="cart-item__remove" data-cart-remove-bundle="H2BUNDLE15" aria-label="Remove bundle">✕</button>
+          <button class="cart-item__remove" data-cart-remove-bundle="H2BUNDLE15" aria-label="Remove bundle" style="align-self:flex-start;border:none;background:none;cursor:pointer;padding:2px 4px;">✕</button>
         </div>
       `;
     }
@@ -3106,7 +3106,13 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
           return;
         }
         if (action === 'shop') {
-          window.location.href = '/merch/wellness-products/';
+          showShop();
+          const categoriesSection = document.querySelector('.merch-categories') || document.getElementById('merchCategories');
+          if (categoriesSection) {
+            categoriesSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          } else {
+            window.location.href = '/merch/wellness-products/#merchCategories';
+          }
           return;
         }
         if (action === 'send-whatsapp') {
@@ -3322,14 +3328,29 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       showCheckoutPage();
       return true;
     }
+    if (window.location.hash === '#merchCategories' || window.location.hash === '#categories' || window.location.hash === '#shop-by-category') {
+      showShop();
+      setTimeout(() => {
+        const categoriesSection = document.querySelector('.merch-categories') || document.getElementById('merchCategories');
+        categoriesSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+      return true;
+    }
     return false;
   }
 
   function openCart() {
+    if (typeof window.closeNavDrawer === 'function') {
+      window.closeNavDrawer();
+    }
+    if (typeof closeAccountDrawer === 'function') {
+      closeAccountDrawer();
+    }
     els.cartDrawer.hidden = false;
     els.cartOverlay.hidden = false;
     requestAnimationFrame(() => {
       els.cartDrawer.classList.add('is-open');
+      if (els.cartOverlay) els.cartOverlay.classList.add('is-open');
     });
     renderCart();
   }
@@ -3342,6 +3363,9 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       if (els.cartOverlay) els.cartOverlay.hidden = true;
     }, 300);
   }
+
+  window.openCart = openCart;
+  window.closeCart = closeCart;
 
   function getMerchantProfile() {
     const profile = state.merchProfile || {};
@@ -3829,12 +3853,41 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
 
     els.accountDrawerContent.innerHTML = `
       <nav class="account-panel-nav" aria-label="Account sections">
-        <button type="button" data-account-nav="account-profile" aria-current="${state.accountActiveSection === 'account-profile' ? 'page' : 'false'}">${renderAccountNavIcon('profile')}<span>My Profile</span></button>
-        <button type="button" data-account-nav="account-orders" aria-current="${state.accountActiveSection === 'account-orders' ? 'page' : 'false'}">${renderAccountNavIcon('orders')}<span>My Orders</span>${orders.length > 0 ? `<span class="account-nav-badge">${orders.length}</span>` : ''}</button>
-        <button type="button" data-account-nav="cart">${renderAccountNavIcon('cart')}<span>My Cart</span>${totalCartCount > 0 ? `<span class="account-nav-badge">${totalCartCount}</span>` : ''}</button>
-        <button type="button" data-account-nav="account-addresses" aria-current="${state.accountActiveSection === 'account-addresses' ? 'page' : 'false'}">${renderAccountNavIcon('addresses')}<span>My Addresses</span></button>
-        <button type="button" data-account-nav="account-wishlist" aria-current="${state.accountActiveSection === 'account-wishlist' ? 'page' : 'false'}">${renderAccountNavIcon('wishlist')}<span>Wishlist</span>${wishlistItems.length > 0 ? `<span class="account-nav-badge">${wishlistItems.length}</span>` : ''}</button>
-        ${state.influencerDashboard?.influencer ? `<button type="button" data-account-nav="account-influencer" aria-current="${state.accountActiveSection === 'account-influencer' ? 'page' : 'false'}">${renderAccountNavIcon('influencer')}<span>Influencer Dashboard</span></button>` : ''}
+        <button type="button" data-account-nav="account-profile" aria-current="${state.accountActiveSection === 'account-profile' ? 'page' : 'false'}">
+          <span class="account-panel-nav__icon-wrap">${renderAccountNavIcon('profile')}</span>
+          <span class="account-panel-nav__label"><span class="account-nav-full">My </span>Profile</span>
+        </button>
+        <button type="button" data-account-nav="account-orders" aria-current="${state.accountActiveSection === 'account-orders' ? 'page' : 'false'}">
+          <span class="account-panel-nav__icon-wrap">
+            ${renderAccountNavIcon('orders')}
+            ${orders.length > 0 ? `<span class="account-nav-badge">${orders.length}</span>` : ''}
+          </span>
+          <span class="account-panel-nav__label"><span class="account-nav-full">My </span>Orders</span>
+        </button>
+        <button type="button" data-account-nav="cart">
+          <span class="account-panel-nav__icon-wrap">
+            ${renderAccountNavIcon('cart')}
+            ${totalCartCount > 0 ? `<span class="account-nav-badge">${totalCartCount}</span>` : ''}
+          </span>
+          <span class="account-panel-nav__label"><span class="account-nav-full">My </span>Cart</span>
+        </button>
+        <button type="button" data-account-nav="account-addresses" aria-current="${state.accountActiveSection === 'account-addresses' ? 'page' : 'false'}">
+          <span class="account-panel-nav__icon-wrap">${renderAccountNavIcon('addresses')}</span>
+          <span class="account-panel-nav__label"><span class="account-nav-full">My </span>Addresses</span>
+        </button>
+        <button type="button" data-account-nav="account-wishlist" aria-current="${state.accountActiveSection === 'account-wishlist' ? 'page' : 'false'}">
+          <span class="account-panel-nav__icon-wrap">
+            ${renderAccountNavIcon('wishlist')}
+            ${wishlistItems.length > 0 ? `<span class="account-nav-badge">${wishlistItems.length}</span>` : ''}
+          </span>
+          <span class="account-panel-nav__label">Wishlist</span>
+        </button>
+        ${state.influencerDashboard?.influencer ? `
+          <button type="button" data-account-nav="account-influencer" aria-current="${state.accountActiveSection === 'account-influencer' ? 'page' : 'false'}">
+            <span class="account-panel-nav__icon-wrap">${renderAccountNavIcon('influencer')}</span>
+            <span class="account-panel-nav__label">Influencer</span>
+          </button>
+        ` : ''}
       </nav>
       <section id="account-profile" data-account-section="account-profile" class="account-card account-card--profile">
         <div class="account-card__avatar profile-avatar${profile.avatarUrl ? ' has-image' : ''}"${avatarStyle}>${accountInitials}</div>
@@ -7775,6 +7828,10 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
     els.cartShopBtn.addEventListener('click', () => {
       closeCart();
       showShop();
+      requestAnimationFrame(() => {
+        const categoriesSection = document.querySelector('.merch-categories') || document.getElementById('merchCategories');
+        categoriesSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
     });
 
     // Checkout button — Razorpay integration
@@ -7815,7 +7872,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       if (continueBtn) {
         event.preventDefault();
         showShop();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        requestAnimationFrame(() => {
+          const categoriesSection = document.querySelector('.merch-categories') || document.getElementById('merchCategories');
+          if (categoriesSection) {
+            categoriesSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          } else {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        });
       }
     });
 

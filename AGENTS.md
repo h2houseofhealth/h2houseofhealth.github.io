@@ -29,7 +29,7 @@ Single-service Node 20 (CommonJS) app: static marketing site + booking portal + 
 
 - `better-sqlite3`, WAL mode. Schema auto-created by `migrate()` on every boot; schema source of truth is `migrate()` in `booking/server.js`, not `booking/migrations/` (only `001-guest-checkout.js`, already folded into base schema).
 - Paths: `$DATA_DIR`/`$UPLOADS_DIR`, else `booking/data/booking.db` and `booking/uploads/` (both gitignored — never commit `*.db*` or uploads).
-- Seed admin on boot: `admin@h2health.local` / `Admin@12345` (`seedAdmin()` only backfills missing password/role).
+- Seed admin on boot: Configured via `ADMIN_LOGIN_EMAIL` / `ADMIN_INITIAL_PASSWORD` in `.env` (`seedAdmin()` only backfills missing user or role, never overwrites changed passwords).
 - Note: `booking/config/db.js` opens a second SQLite connection used only by legacy `GET /users`; main code uses the `db` in `server.js`.
 
 ## Env / config quirks
