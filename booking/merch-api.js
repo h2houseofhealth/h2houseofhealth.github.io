@@ -15,7 +15,7 @@ const { convertInrPaiseToCurrency, normalizeCurrency, getCurrencyConfig } = requ
 const router = express.Router();
 
 const FIXED_ADMIN_EMAIL = 'h2houseofhealth@gmail.com';
-const ADMIN_DISCOUNT_GATE_PASSWORD = String(process.env.ADMIN_DISCOUNT_GATE_PASSWORD || 'admin-H2-2026').trim();
+const ADMIN_DISCOUNT_GATE_PASSWORD = String(process.env.ADMIN_DISCOUNT_GATE_PASSWORD || '').trim();
 
 const MERCH_HYPE_LABELS = [
   'Most Selling Product',
@@ -1772,8 +1772,7 @@ module.exports = function mountMerchApi(app, {
   function verifyAdminAuthorization(req, password) {
     const inputPass = String(password || '').trim();
     if (!inputPass) return false;
-    if (inputPass === ADMIN_DISCOUNT_GATE_PASSWORD) return true;
-    if (inputPass === 'Admin@12345') return true;
+    if (ADMIN_DISCOUNT_GATE_PASSWORD && inputPass === ADMIN_DISCOUNT_GATE_PASSWORD) return true;
 
     const adminUserId = Number(req?.user?.sub);
     if (Number.isInteger(adminUserId) && adminUserId > 0) {

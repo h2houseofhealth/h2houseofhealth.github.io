@@ -33,10 +33,11 @@ function getReturnTo() {
   return candidate;
 }
 
-const ADMIN_LOGIN_EMAIL = 'admin@h2health.local';
+const ADMIN_LOGIN_EMAIL = 'h2houseofhealth@gmail.com';
 
 function isAdminLoginIdentity(value) {
-  return String(value || '').trim().toLowerCase() === ADMIN_LOGIN_EMAIL;
+  const norm = String(value || '').trim().toLowerCase();
+  return norm === ADMIN_LOGIN_EMAIL || norm === 'admin@h2health.local' || norm.startsWith('admin@');
 }
 
 function getPhoneErrorMessage(countryCode = '+91') {
