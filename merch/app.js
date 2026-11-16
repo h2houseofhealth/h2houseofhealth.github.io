@@ -5333,8 +5333,15 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
         : (isHoodie || isHoodieCombo
           ? HOODIE_CARD_IMAGE
           : (product.images?.[0] || product.imageUrl || getProductFallbackImage(product)));
-      const cardSizes = [...new Set((product.variants || []).map((variant) => variant.size).filter(Boolean))];
-      const cardColors = [...new Set((product.variants || []).map((variant) => variant.color).filter(Boolean))];
+      const cardSizes = displayVariant?.size ? [displayVariant.size] : [];
+      const cardColors = displayVariant?.color ? [displayVariant.color] : [];
+      const cardAlt = isBottle
+        ? `${product.name} - Portable Hydrogen Water Bottle${displayVariant?.color ? ` (${displayVariant.color})` : ''}`
+        : (isMist
+          ? `${product.name} - Handheld Hydrogen Water Facial Mister${displayVariant?.color ? ` (${displayVariant.color})` : ''}`
+          : (isHoodie
+            ? `H2 House of Health Signature Hoodie${displayVariant?.color ? ` (${displayVariant.color})` : ''}`
+            : product.name));
       const cardSpecifications = Object.entries(getProductSpecifications(product, displayVariant))
         .filter(([label, value]) => String(label).trim() && String(value).trim())
         .slice(0, 2);
