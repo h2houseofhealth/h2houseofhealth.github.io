@@ -107,7 +107,7 @@ jobs:
       - name: Verify public site health
         run: |
           for i in $(seq 1 10); do
-            code=$(curl -s -o /dev/null -m 10 -w '%{http_code}' https://h2houseofhealth.com/api/health)
+            code=$(curl -s -o /dev/null -m 10 -w '%{http_code}' https://www.h2houseofhealth.com/api/health)
             echo "Public health check: $code"
             [ "$code" = "200" ] && exit 0
             sleep 6
