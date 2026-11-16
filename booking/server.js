@@ -3736,7 +3736,7 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
       code, description, discount_type, discount_value, commission_type, commission_rate, commission_per_order_paise, commission_by_product_json, scope_rules_json, applies_to, max_redemptions, per_user_limit, expires_at, active,
       coupon_type, assigned_user_email, used_by, is_active, valid_from, valid_till,
       recipient_email, recipient_name, festival_name, emailed_at, email_status, email_error, portal, influencer_id, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(code) DO UPDATE SET
       description = excluded.description,
       discount_type = excluded.discount_type,
