@@ -4755,11 +4755,17 @@
 											<h5 class='footer-block__contacts-label subtitle h5'>
 												Contacts
 											</h5><a
-													href='tel:+91 91000 56979, +91 91000 86979'
+													href='tel:+919100056979'
 													class='footer-block__contacts-text'
-													aria-label='+91 91000 56979, +91 91000 86979'
+													aria-label='+91 91000 56979'
 												>
-													+91 91000 56979, +91 91000 86979
+													+91 91000 56979
+												</a>, <a
+													href='tel:+919100086979'
+													class='footer-block__contacts-text'
+													aria-label='+91 91000 86979'
+												>
+													+91 91000 86979
 												</a><a
 													href='mailto:hello@h2houseofhealth.com'
 													class='footer-block__contacts-text'
@@ -4927,13 +4933,14 @@ account-icon {
     background: #f8f4ef;
     border: 1px solid #d7c7b8;
     border-radius: 14px;
-    padding: 18px 22px;
+    padding: 16px 22px;
     box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-    z-index: 9999;
+    z-index: 10000;
+    box-sizing: border-box;
 }
 
 .cookie-banner.hidden {
-    display: none;
+    display: none !important;
 }
 
 .cookie-banner__content {
@@ -4941,25 +4948,30 @@ account-icon {
     justify-content: space-between;
     align-items: center;
     gap: 20px;
-    flex-wrap: wrap;
+    box-sizing: border-box;
 }
 
 .cookie-banner p {
     margin: 0;
     color: #4b3b34;
-    line-height: 1.6;
-    flex: 1;
+    font-size: 14px;
+    line-height: 1.55;
+    flex: 1 1 auto;
+    min-width: 260px;
 }
 
 .cookie-banner a {
     color: #ae5431;
     font-weight: 600;
-    text-decoration: none;
+    text-decoration: underline;
+    text-underline-offset: 2px;
 }
 
 .cookie-banner__actions {
     display: flex;
-    gap: 12px;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
 }
 
 .btn-primary,
@@ -4968,7 +4980,10 @@ account-icon {
     border-radius: 999px;
     cursor: pointer;
     font-weight: 600;
+    font-size: 13.5px;
     border: none;
+    white-space: nowrap;
+    transition: all 0.2s ease;
 }
 
 .btn-primary {
@@ -4988,6 +5003,46 @@ account-icon {
 
 .btn-secondary:hover {
     background: #f3ebe6;
+}
+
+@media screen and (max-width: 768px) {
+    .cookie-banner {
+        bottom: 12px;
+        width: calc(100% - 24px);
+        max-width: 480px;
+        padding: 16px;
+        border-radius: 12px;
+    }
+
+    .cookie-banner__content {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 14px;
+        text-align: left;
+    }
+
+    .cookie-banner p {
+        min-width: 0;
+        width: 100%;
+        font-size: 13.5px;
+        line-height: 1.5;
+        flex: none;
+        text-align: left;
+    }
+
+    .cookie-banner__actions {
+        width: 100%;
+        display: flex;
+        gap: 10px;
+    }
+
+    .cookie-banner__actions button {
+        flex: 1 1 50%;
+        text-align: center;
+        padding: 11px 12px;
+        font-size: 13px;
+        justify-content: center;
+    }
 }
 /* ===========================
    Mobile Footer Fix

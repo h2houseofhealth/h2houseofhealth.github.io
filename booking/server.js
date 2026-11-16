@@ -103,7 +103,7 @@ const HAS_EXPLICIT_CORS_ORIGINS = FRONTEND_ORIGINS.length > 0 || DEPLOYMENT_ORIG
 console.log('FRONTEND_ORIGINS:', process.env.FRONTEND_ORIGINS || '');
 console.log('HAS_EXPLICIT_CORS_ORIGINS:', HAS_EXPLICIT_CORS_ORIGINS);
 console.log('ALLOWED_CORS_ORIGINS:', ALLOWED_CORS_ORIGINS);
-const ADMIN_DISCOUNT_GATE_PASSWORD = normalizeEnvValue(process.env.ADMIN_DISCOUNT_GATE_PASSWORD || 'H2-FOUNDERS-2026');
+const ADMIN_DISCOUNT_GATE_PASSWORD = normalizeEnvValue(process.env.ADMIN_DISCOUNT_GATE_PASSWORD || '');
 const RAZORPAY_KEY_ID = normalizeEnvValue(process.env.RAZORPAY_KEY_ID);
 const RAZORPAY_KEY_SECRET = normalizeEnvValue(process.env.RAZORPAY_KEY_SECRET);
 const RAZORPAY_MODE = normalizeEnvValue(process.env.RAZORPAY_MODE || '').toLowerCase() || (RAZORPAY_KEY_ID.startsWith('rzp_live_') ? 'live' : 'test');
@@ -3246,6 +3246,106 @@ app.delete('/api/admin/discount-phones/:id', requireAuth, requireAdmin, (req, re
   res.json({ message: 'Discount phone removed.' });
 });
 
+function parseCouponScopeRules(raw) {
+  if (!raw) return null;
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function validateAndNormalizeScopeRules(rawScopeRules, portal) {
+  if (rawScopeRules === undefined || rawScopeRules === null) {
+    return { rules: null, error: null };
+  }
+  let parsed = rawScopeRules;
+  if (typeof rawScopeRules === 'string') {
+    const trimmed = rawScopeRules.trim();
+    if (!trimmed) return { rules: null, error: null };
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      return { rules: null, error: 'Invalid scopeRules JSON.' };
+    }
+  }
+  if (!Array.isArray(parsed)) {
+    return { rules: null, error: 'scopeRules must be an array.' };
+  }
+  if (parsed.length === 0) {
+    return { rules: null, error: null };
+  }
+  if (portal !== 'merch') {
+    return { rules: null, error: 'Scope rules are only supported for merch coupons.' };
+  }
+
+  const normalized = [];
+  const seenScopes = new Set();
+
+  for (let i = 0; i < parsed.length; i++) {
+    const rule = parsed[i];
+    if (!rule || typeof rule !== 'object') {
+      return { rules: null, error: `Rule at index ${i} must be an object.` };
+    }
+    const scope = String(rule.scope || '').trim().toLowerCase();
+    if (!scope) {
+      return { rules: null, error: `Rule at index ${i} is missing scope.` };
+    }
+    if (seenScopes.has(scope)) {
+      return { rules: null, error: `Duplicate scope "${scope}" in scopeRules.` };
+    }
+    seenScopes.add(scope);
+
+    const isCategory = /^category:[a-z0-9_\-]+$/i.test(scope);
+    const isProduct = /^product:\d+$/i.test(scope);
+    const isVariant = /^variant:\d+$/i.test(scope);
+    const isBundle = /^bundle:[a-z0-9_\-:+]+$/i.test(scope);
+    if (!isCategory && !isProduct && !isVariant && !isBundle) {
+      return { rules: null, error: `Rule at index ${i} has invalid scope format: "${scope}".` };
+    }
+
+    const discountType = String(rule.discountType || 'percentage').trim().toLowerCase();
+    if (!['percentage', 'flat'].includes(discountType)) {
+      return { rules: null, error: `Rule at index ${i} discountType must be "percentage" or "flat".` };
+    }
+    const discountValue = Number(rule.discountValue ?? 0);
+    if (!Number.isFinite(discountValue) || discountValue < 0) {
+      return { rules: null, error: `Rule at index ${i} discountValue cannot be negative.` };
+    }
+    if (discountType === 'percentage' && discountValue > 100) {
+      return { rules: null, error: `Rule at index ${i} percentage discount cannot exceed 100%.` };
+    }
+
+    let commissionType = 'flat';
+    let commissionValue = 0;
+    if (rule.commissionType !== undefined || rule.commissionValue !== undefined) {
+      commissionType = String(rule.commissionType || 'flat').trim().toLowerCase();
+      if (!['flat', 'percentage'].includes(commissionType)) {
+        return { rules: null, error: `Rule at index ${i} commissionType must be "flat" or "percentage".` };
+      }
+      commissionValue = Number(rule.commissionValue ?? 0);
+      if (!Number.isFinite(commissionValue) || commissionValue < 0) {
+        return { rules: null, error: `Rule at index ${i} commissionValue cannot be negative.` };
+      }
+      if (commissionType === 'percentage' && commissionValue > 100) {
+        return { rules: null, error: `Rule at index ${i} percentage commission cannot exceed 100%.` };
+      }
+    }
+
+    normalized.push({
+      scope,
+      discountType,
+      discountValue,
+      commissionType,
+      commissionValue,
+    });
+  }
+
+  return { rules: normalized, error: null };
+}
+
 app.get('/api/admin/coupons', requireAuth, requireAdmin, (req, res) => {
   const portal = String(req.query?.portal || 'booking')
     .trim()
@@ -3259,6 +3359,7 @@ app.get('/api/admin/coupons', requireAuth, requireAdmin, (req, res) => {
               c.discount_value AS discountValue,
               c.commission_per_order_paise AS commissionPerOrderPaise,
               c.commission_by_product_json AS commissionByProductJson,
+              c.scope_rules_json AS scopeRulesJson,
               c.applies_to AS appliesTo,
               c.max_redemptions AS maxRedemptions,
               c.per_user_limit AS perUserLimit,
@@ -3524,6 +3625,12 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     .trim()
     .toLowerCase();
   const portal = ['booking', 'merch'].includes(portalRaw) ? portalRaw : 'booking';
+  const rawScopeRules = req.body?.scopeRules ?? req.body?.scope_rules_json ?? req.body?.scopeRulesJson;
+  const { rules: validatedScopeRules, error: scopeRulesError } = validateAndNormalizeScopeRules(rawScopeRules, portal);
+  if (scopeRulesError) {
+    return res.status(400).json({ message: scopeRulesError });
+  }
+  const scopeRulesJson = validatedScopeRules ? JSON.stringify(validatedScopeRules) : null;
   if (portal === 'merch' && productAppliesTo) {
     for (const productId of productIds) {
       const product = db.prepare('SELECT id FROM merch_products WHERE id = ?').get(productId);
@@ -3626,10 +3733,10 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
 
   db.prepare(
     `INSERT INTO coupons (
-      code, description, discount_type, discount_value, commission_type, commission_rate, commission_per_order_paise, commission_by_product_json, applies_to, max_redemptions, per_user_limit, expires_at, active,
+      code, description, discount_type, discount_value, commission_type, commission_rate, commission_per_order_paise, commission_by_product_json, scope_rules_json, applies_to, max_redemptions, per_user_limit, expires_at, active,
       coupon_type, assigned_user_email, used_by, is_active, valid_from, valid_till,
       recipient_email, recipient_name, festival_name, emailed_at, email_status, email_error, portal, influencer_id, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(code) DO UPDATE SET
       description = excluded.description,
       discount_type = excluded.discount_type,
@@ -3638,6 +3745,7 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
       commission_rate = excluded.commission_rate,
       commission_per_order_paise = excluded.commission_per_order_paise,
       commission_by_product_json = excluded.commission_by_product_json,
+      scope_rules_json = excluded.scope_rules_json,
       applies_to = excluded.applies_to,
       max_redemptions = excluded.max_redemptions,
       per_user_limit = excluded.per_user_limit,
@@ -3663,6 +3771,7 @@ app.post('/api/admin/coupons', requireAuth, requireAdmin, async (req, res) => {
     commissionRate,
     commissionPerOrderPaise,
     commissionByProductJson,
+    scopeRulesJson,
     appliesTo,
     maxRedemptions,
     perUserLimit,
@@ -3786,6 +3895,19 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
     .trim()
     .toLowerCase();
   const portal = ['booking', 'merch'].includes(portalRaw) ? portalRaw : 'booking';
+
+  const hasScopeRulesParam = Object.prototype.hasOwnProperty.call(req.body || {}, 'scopeRules') ||
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'scopeRulesJson') ||
+    Object.prototype.hasOwnProperty.call(req.body || {}, 'scope_rules_json');
+  let scopeRulesJson = existing.scopeRulesJson || null;
+  if (hasScopeRulesParam) {
+    const rawScopeRules = req.body?.scopeRules ?? req.body?.scope_rules_json ?? req.body?.scopeRulesJson;
+    const { rules: validatedScopeRules, error: scopeRulesError } = validateAndNormalizeScopeRules(rawScopeRules, portal);
+    if (scopeRulesError) {
+      return res.status(400).json({ message: scopeRulesError });
+    }
+    scopeRulesJson = validatedScopeRules ? JSON.stringify(validatedScopeRules) : null;
+  }
   if (portal === 'merch' && productAppliesTo) {
     for (const productId of productIds) {
       if (!db.prepare('SELECT id FROM merch_products WHERE id = ?').get(productId)) {
@@ -3893,6 +4015,7 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
         commission_rate = ?,
         commission_per_order_paise = ?,
         commission_by_product_json = ?,
+        scope_rules_json = ?,
         applies_to = ?,
         max_redemptions = ?,
         coupon_type = ?,
@@ -3918,6 +4041,7 @@ app.put('/api/admin/coupons/:id', requireAuth, requireAdmin, (req, res) => {
       commissionRate || 0,
       commissionPerOrderPaise,
       commissionByProductJson,
+      scopeRulesJson,
       appliesTo,
       maxRedemptions,
       couponType,
@@ -11376,6 +11500,8 @@ function mapCouponRow(row) {
   const validTill = row?.validTill || row?.expiresAt || null;
   const isActiveFlag = row?.isActive == null ? Number(row?.active || 0) === 1 : Number(row?.isActive || 0) === 1;
   const usedBy = parseCouponUsedBy(row?.usedBy);
+  const scopeRulesJson = row?.scope_rules_json || row?.scopeRulesJson || null;
+  const scopeRules = parseCouponScopeRules(scopeRulesJson);
   return {
     id: Number(row.id),
     code: row.code || '',
@@ -11386,6 +11512,8 @@ function mapCouponRow(row) {
     commissionRate: Number(row.commissionRate || 0),
     commissionPerOrderPaise: Math.max(0, Number(row.commissionPerOrderPaise || 0)),
     commissionByProduct: parseCommissionByProduct(row.commissionByProductJson),
+    scopeRulesJson,
+    scopeRules,
     appliesTo: row.appliesTo || 'all',
     maxRedemptions: row.maxRedemptions == null ? null : Number(row.maxRedemptions),
     perUserLimit: Number(row.perUserLimit || 1),
@@ -11447,6 +11575,7 @@ function getCouponByCode(code) {
               c.commission_rate AS commissionRate,
               c.commission_per_order_paise AS commissionPerOrderPaise,
               c.commission_by_product_json AS commissionByProductJson,
+              c.scope_rules_json AS scopeRulesJson,
               c.applies_to AS appliesTo,
               c.max_redemptions AS maxRedemptions,
               c.per_user_limit AS perUserLimit,
@@ -11493,6 +11622,7 @@ function getCouponById(couponId) {
               c.commission_rate AS commissionRate,
               c.commission_per_order_paise AS commissionPerOrderPaise,
               c.commission_by_product_json AS commissionByProductJson,
+              c.scope_rules_json AS scopeRulesJson,
               c.applies_to AS appliesTo,
               c.max_redemptions AS maxRedemptions,
               c.per_user_limit AS perUserLimit,
@@ -11656,7 +11786,8 @@ function validateCouponForUser({ code, userId, appliesTo, productIds = [], produ
   const variantIdSet = new Set((Array.isArray(variantIds) ? variantIds : [variantIds]).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0));
   const appliesToProduct = Boolean(productRestriction || categoryRestriction) && restrictedProductIds.some((id) => productIdSet.has(id));
   const appliesToVariant = Boolean(variantRestriction) && restrictedVariantIds.some((id) => variantIdSet.has(id));
-  if (!['all', appliesTo].includes(couponAppliesTo) && !appliesToProduct && !appliesToVariant) {
+  const hasScopeRules = coupon.portal === 'merch' && Array.isArray(coupon.scopeRules) && coupon.scopeRules.length > 0;
+  if (!hasScopeRules && !['all', appliesTo].includes(couponAppliesTo) && !appliesToProduct && !appliesToVariant) {
     return { error: 'This coupon is not valid for this payment.' };
   }
   const restrictedVariantSubtotalPaise = variantRestriction
@@ -11708,6 +11839,15 @@ function validateCouponForUser({ code, userId, appliesTo, productIds = [], produ
     Number(coupon.maxRedemptions || 0) === 1 &&
     Number(singleBookingAmountPaise || 0) > 0;
   const subtotalPaise = Math.max(0, Math.round(Number(subtotalAmountPaise || 0)));
+  if (hasScopeRules) {
+    return {
+      coupon,
+      couponCode: normalizedCode,
+      originalAmountPaise: subtotalPaise,
+      discountAmountPaise: 0,
+      finalAmountPaise: subtotalPaise,
+    };
+  }
   const discountBasePaise = Math.max(
     0,
     Math.round(Number(isAssignedSingleBookingServiceCoupon
@@ -16524,6 +16664,9 @@ function migrate() {
   if (hasTable('coupons') && !hasColumn('coupons', 'influencer_id')) {
     db.exec('ALTER TABLE coupons ADD COLUMN influencer_id INTEGER REFERENCES merch_influencers(id)');
   }
+  if (hasTable('coupons') && !hasColumn('coupons', 'scope_rules_json')) {
+    db.exec('ALTER TABLE coupons ADD COLUMN scope_rules_json TEXT');
+  }
   if (hasTable('coupons')) {
     db.exec(`
       UPDATE coupons
@@ -16755,20 +16898,29 @@ function seedDoctors() {
 }
 
 function seedAdmin() {
-  const email = normalizeEnvValue(process.env.ADMIN_LOGIN_EMAIL || 'admin@h2health.local').toLowerCase();
+  const email = normalizeEnvValue(process.env.ADMIN_LOGIN_EMAIL || 'h2houseofhealth@gmail.com').toLowerCase();
   const initialPassword = normalizeEnvValue(process.env.ADMIN_INITIAL_PASSWORD);
-  if (IS_PRODUCTION && !initialPassword) {
-    console.warn('ADMIN_INITIAL_PASSWORD is not configured; skipping automatic production admin creation/reset.');
+  if (!email || !initialPassword) {
+    if (IS_PRODUCTION) {
+      console.warn('ADMIN_INITIAL_PASSWORD is not configured; skipping automatic production admin creation/reset.');
+    }
     return;
   }
-  const defaultPasswordHash = bcrypt.hashSync(initialPassword || 'Admin@12345', 10);
+  const defaultPasswordHash = bcrypt.hashSync(initialPassword, 10);
   const existing = db.prepare('SELECT id, password_hash FROM users WHERE email = ?').get(email);
 
   if (!existing) {
+    const legacyAdmin = db.prepare("SELECT id FROM users WHERE email = 'admin@h2health.local'").get();
+    if (legacyAdmin) {
+      db.prepare("UPDATE users SET email = ?, password_hash = ?, role = 'admin' WHERE id = ?")
+        .run(email, defaultPasswordHash, legacyAdmin.id);
+      return;
+    }
+
     db.prepare(
       `INSERT INTO users (name, email, password_hash, role, created_at)
        VALUES (?, ?, ?, 'admin', datetime('now'))`
-    ).run('Portal Admin', email, defaultPasswordHash);
+    ).run('H2', email, defaultPasswordHash);
     return;
   }
 
