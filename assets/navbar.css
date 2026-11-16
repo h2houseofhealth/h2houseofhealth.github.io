@@ -57,10 +57,59 @@
   box-shadow: var(--h2-nav-shadow) !important;
 }
 
-@media screen and (min-width: 1400px) {
+@media screen and (min-width: 1280px) {
   .h2-navbar {
     width: calc(100% - 48px) !important;
     gap: 20px !important;
+  }
+}
+
+/* Fluid compact desktop / laptop layout (1024px to 1279px) */
+@media screen and (min-width: 1024px) and (max-width: 1279px) {
+  .h2-navbar {
+    width: calc(100% - 24px) !important;
+    padding: 6px 14px !important;
+    gap: 10px !important;
+  }
+
+  .h2-navbar__left {
+    gap: 12px !important;
+  }
+
+  .h2-navbar__logo {
+    flex: 0 0 115px !important;
+    width: 115px !important;
+    max-width: 115px !important;
+  }
+
+  .h2-navbar__logo img {
+    width: 115px !important;
+    max-width: 115px !important;
+  }
+
+  .h2-navbar__links {
+    gap: clamp(6px, 0.8vw, 12px) !important;
+  }
+
+  .h2-navbar__link {
+    font-size: 10.5px !important;
+    padding: 6px 2px !important;
+    letter-spacing: 0 !important;
+  }
+
+  .h2-navbar__actions {
+    gap: 6px !important;
+  }
+
+  .h2-navbar__action-btn {
+    width: 32px !important;
+    height: 32px !important;
+  }
+
+  .h2-navbar__btn {
+    height: 34px !important;
+    padding: 0 12px !important;
+    font-size: 11px !important;
   }
 }
 
@@ -427,7 +476,7 @@
    Responsive Breakpoints
    ========================================================================== */
 
-@media screen and (max-width: 1399px) {
+@media screen and (max-width: 1023px) {
   .h2-navbar__nav {
     display: none !important;
   }

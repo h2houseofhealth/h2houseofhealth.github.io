@@ -2942,10 +2942,14 @@ body.merch-admin-page {
   font-weight: 700;
   letter-spacing: .08em;
 }
-.admin-profile-dropdown__identity > div { min-width: 0; display: grid; gap: 3px; }
-.admin-profile-dropdown__identity strong { font-size: 15px; }
-.admin-profile-dropdown__identity span,
-.admin-profile-dropdown__identity small { color: var(--admin-muted); font-size: 12px; overflow-wrap: anywhere; }
+.admin-profile-dropdown__identity > div,
+.admin-profile-dropdown__details { min-width: 0; display: grid; gap: 3px; }
+.admin-profile-dropdown__identity strong,
+.admin-profile-dropdown__name { font-size: 15px; color: var(--admin-text, #111); }
+.admin-profile-dropdown__details span,
+.admin-profile-dropdown__details small,
+.admin-profile-dropdown__email,
+.admin-profile-dropdown__role { color: var(--admin-muted, #717171); font-size: 12px; overflow-wrap: anywhere; word-break: break-all; }
 .admin-profile-dropdown__actions { display: grid; gap: 4px; padding-top: 10px; }
 .admin-profile-dropdown__actions button {
   width: 100%;
@@ -3991,5 +3995,156 @@ textarea,
     justify-content: center;
     padding-left: 0;
     padding-right: 0;
+  }
+}
+
+/* Product Rules for Influencer Coupons */
+.admin-scope-rules-header {
+  margin-bottom: 8px;
+}
+
+.admin-scope-rules-title {
+  font-weight: 600;
+  display: block;
+  font-size: 13px;
+  color: var(--admin-text);
+}
+
+.admin-scope-rules-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.admin-scope-rule-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 2.2fr) 90px 115px 150px 120px auto;
+  gap: 10px;
+  align-items: end;
+  background: #fbf9f7;
+  padding: 12px 14px;
+  border-radius: var(--admin-radius-sm, 12px);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.admin-scope-rule-col {
+  display: grid;
+  gap: 5px;
+}
+
+.admin-scope-rule-col .admin-select,
+.admin-scope-rule-col .admin-input {
+  min-height: 44px;
+  height: auto;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.4;
+  box-sizing: border-box;
+}
+
+.admin-scope-rule-col .admin-select {
+  padding-right: 32px;
+}
+
+.admin-scope-rule-col .admin-btn {
+  min-height: 44px;
+  height: auto;
+  padding: 10px 14px;
+  font-size: 13px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.admin-scope-rule-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--admin-text-subtle, #6b635b);
+  white-space: nowrap;
+}
+
+.admin-scope-rule-col--bundle-note {
+  grid-column: span 2;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+
+.admin-scope-rule-col--bundle-note span {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--admin-muted, #7e7368);
+  font-style: italic;
+}
+
+/* Dimmed single fields when product rules are active */
+.admin-field--dimmed {
+  opacity: 0.38;
+  filter: grayscale(0.5);
+  transition: opacity 0.2s ease, filter 0.2s ease;
+}
+
+.admin-field--dimmed .admin-input,
+.admin-field--dimmed .admin-select {
+  background: #f5f2ee;
+}
+
+@media (max-width: 900px) {
+  .admin-scope-rule-row {
+    grid-template-columns: minmax(100px, 1fr) minmax(110px, 1fr) minmax(150px, 1.3fr) minmax(110px, 1fr);
+    gap: 10px;
+    padding: 12px;
+  }
+  .admin-scope-rule-col--scope {
+    grid-column: 1 / 4;
+  }
+  .admin-scope-rule-col--actions {
+    grid-column: 4 / 5;
+    align-self: end;
+  }
+  .admin-scope-rule-col--discount-type {
+    grid-column: 1;
+  }
+  .admin-scope-rule-col--discount-val {
+    grid-column: 2;
+  }
+  .admin-scope-rule-col--commission-type {
+    grid-column: 3;
+  }
+  .admin-scope-rule-col--commission-val {
+    grid-column: 4;
+  }
+  .admin-scope-rule-col--bundle-note {
+    grid-column: 3 / 5;
+  }
+}
+
+@media (max-width: 580px) {
+  .admin-scope-rule-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .admin-scope-rule-col--scope {
+    grid-column: 1 / -1;
+  }
+  .admin-scope-rule-col--actions {
+    grid-column: 1 / -1;
+  }
+  .admin-scope-rule-col--discount-type {
+    grid-column: 1;
+  }
+  .admin-scope-rule-col--discount-val {
+    grid-column: 2;
+  }
+  .admin-scope-rule-col--commission-type {
+    grid-column: 1;
+  }
+  .admin-scope-rule-col--commission-val {
+    grid-column: 2;
+  }
+  .admin-scope-rule-col--bundle-note {
+    grid-column: 1 / -1;
   }
 }

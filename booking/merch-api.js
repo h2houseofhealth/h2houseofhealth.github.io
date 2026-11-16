@@ -14,7 +14,7 @@ const bcrypt = require('bcryptjs');
 const router = express.Router();
 
 const FIXED_ADMIN_EMAIL = 'h2houseofhealth@gmail.com';
-const ADMIN_DISCOUNT_GATE_PASSWORD = String(process.env.ADMIN_DISCOUNT_GATE_PASSWORD || 'admin-H2-2026').trim();
+const ADMIN_DISCOUNT_GATE_PASSWORD = String(process.env.ADMIN_DISCOUNT_GATE_PASSWORD || '').trim();
 
 const MERCH_HYPE_LABELS = [
   'Most Selling Product',
@@ -848,6 +848,20 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
   }
 
+  // Backfill: Fix orders that were falsely marked payment_status = 'refunded' upon cancellation
+  try {
+    db.exec(`
+      UPDATE merch_orders
+      SET payment_status = CASE
+        WHEN razorpay_payment_id IS NOT NULL AND razorpay_payment_id != '' THEN 'paid'
+        ELSE 'cancelled'
+      END
+      WHERE status = 'cancelled' AND payment_status = 'refunded'
+    `);
+  } catch (e) {
+    console.warn('[Merch] cancelled payment_status backfill notice:', e?.message);
+  }
+
   if (!hasColumn('merch_influencers', 'avatar_url')) {
     db.exec('ALTER TABLE merch_influencers ADD COLUMN avatar_url TEXT');
   }
@@ -875,6 +889,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
   if (hasTable('coupons') && !hasColumn('coupons', 'commission_rate')) {
     db.exec('ALTER TABLE coupons ADD COLUMN commission_rate REAL NOT NULL DEFAULT 0');
+  }
+  if (hasTable('coupons') && !hasColumn('coupons', 'scope_rules_json')) {
+    db.exec('ALTER TABLE coupons ADD COLUMN scope_rules_json TEXT');
   }
 
   if (!hasTable('merch_influencer_commission_payments')) {
@@ -1746,8 +1763,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   function verifyAdminAuthorization(req, password) {
     const inputPass = String(password || '').trim();
     if (!inputPass) return false;
-    if (inputPass === ADMIN_DISCOUNT_GATE_PASSWORD) return true;
-    if (inputPass === 'Admin@12345') return true;
+    if (ADMIN_DISCOUNT_GATE_PASSWORD && inputPass === ADMIN_DISCOUNT_GATE_PASSWORD) return true;
 
     const adminUserId = Number(req?.user?.sub);
     if (Number.isInteger(adminUserId) && adminUserId > 0) {
@@ -6246,6 +6262,286 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     };
   }
 
+  function parseCouponScopeRules(raw) {
+    if (!raw) return null;
+    try {
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  function matchScopePart(item, scopePart) {
+    const target = String(scopePart || '').trim().toLowerCase();
+    if (target.startsWith('variant:')) {
+      return Number(item.variantId) === Number(target.slice(8).trim());
+    }
+    if (target.startsWith('product:')) {
+      return Number(item.productId) === Number(target.slice(8).trim());
+    }
+    const cat = target.startsWith('category:') ? target.slice(9).trim() : target;
+    const itemCat = String(item.category || '').trim().toLowerCase();
+    return itemCat === cat || (itemCat + 's' === cat) || (itemCat === cat + 's');
+  }
+
+  function enrichCartItem(item, dbInstance) {
+    const variantId = Number(item.variantId || item.variant_id || item.id || 0);
+    let productId = Number(item.productId || item.product_id || 0);
+    let category = String(item.category || '').trim().toLowerCase();
+    let productName = String(item.productName || item.name || '').trim();
+    const quantity = Math.max(0, Number(item.quantity || 0));
+    let unitPrice = Number(item.unitPrice || item.price || 0);
+    let lineTotal = Number(item.lineTotal || 0);
+
+    const activeDb = dbInstance || (typeof db !== 'undefined' ? db : null);
+    if (activeDb && (!category || !productId)) {
+      if (variantId > 0) {
+        try {
+          const row = activeDb.prepare(`
+            SELECT v.id AS variant_id, v.product_id, v.price, p.category, p.name AS product_name
+            FROM merch_variants v
+            JOIN merch_products p ON p.id = v.product_id
+            WHERE v.id = ?
+          `).get(variantId);
+          if (row) {
+            if (!productId) productId = Number(row.product_id);
+            if (!category && row.category) category = String(row.category).trim().toLowerCase();
+            if (!productName && row.product_name) productName = String(row.product_name).trim();
+            if (!unitPrice && row.price) unitPrice = Number(row.price);
+          }
+        } catch {}
+      } else if (productId > 0) {
+        try {
+          const row = activeDb.prepare('SELECT category, name FROM merch_products WHERE id = ?').get(productId);
+          if (row) {
+            if (!category && row.category) category = String(row.category).trim().toLowerCase();
+            if (!productName && row.name) productName = String(row.name).trim();
+          }
+        } catch {}
+      }
+    }
+
+    if (unitPrice > 0 && unitPrice < 100000 && !lineTotal) {
+      unitPrice = unitPrice * 100;
+    }
+    if (!lineTotal && unitPrice > 0 && quantity > 0) {
+      lineTotal = unitPrice * quantity;
+    }
+
+    return {
+      variantId,
+      productId,
+      category,
+      productName,
+      quantity,
+      unitPrice,
+      lineTotal,
+      rawItem: item,
+    };
+  }
+
+  function evaluateMerchCouponPricing(coupon, items = [], options = {}) {
+    const scopeRules = Array.isArray(coupon?.scopeRules)
+      ? coupon.scopeRules
+      : parseCouponScopeRules(coupon?.scope_rules_json || coupon?.scopeRulesJson);
+
+    if (!scopeRules || scopeRules.length === 0) {
+      return {
+        isValid: false,
+        error: 'Coupon has no scope rules',
+        totalDiscountPaise: 0,
+        totalCommissionPaise: 0,
+        lineDiscounts: new Map(),
+        lineCommissions: new Map(),
+        matchingItemCount: 0,
+      };
+    }
+
+    const activeDb = options.db || (typeof db !== 'undefined' ? db : null);
+    const enrichedItems = (items || []).map((it) => enrichCartItem(it, activeDb));
+
+    const bundleRules = [];
+    const itemRules = [];
+    for (const rule of scopeRules) {
+      if (String(rule.scope || '').trim().toLowerCase().startsWith('bundle:')) {
+        bundleRules.push(rule);
+      } else {
+        itemRules.push(rule);
+      }
+    }
+
+    function getRuleSpecificity(rule) {
+      const s = String(rule.scope || '').trim().toLowerCase();
+      if (s.startsWith('variant:')) return 3;
+      if (s.startsWith('product:')) return 2;
+      return 1;
+    }
+    itemRules.sort((a, b) => getRuleSpecificity(b) - getRuleSpecificity(a));
+
+    const itemMatches = enrichedItems.map((item) => {
+      let matchedRule = null;
+      for (const rule of itemRules) {
+        if (matchScopePart(item, rule.scope)) {
+          matchedRule = rule;
+          break;
+        }
+      }
+      return { item, matchedRule };
+    });
+
+    const bundleAllocations = new Map();
+    for (let i = 0; i < enrichedItems.length; i++) {
+      bundleAllocations.set(i, 0);
+    }
+
+    for (const bRule of bundleRules) {
+      const rawScope = String(bRule.scope || '').slice(7).trim();
+      const parts = rawScope.split('+').map((s) => s.trim());
+      if (parts.length !== 2) continue;
+      const [partA, partB] = parts;
+
+      const indicesA = [];
+      let qtyA = 0;
+      const indicesB = [];
+      let qtyB = 0;
+
+      for (let i = 0; i < enrichedItems.length; i++) {
+        const it = enrichedItems[i];
+        if (matchScopePart(it, partA)) {
+          indicesA.push(i);
+          qtyA += it.quantity;
+        } else if (matchScopePart(it, partB)) {
+          indicesB.push(i);
+          qtyB += it.quantity;
+        }
+      }
+
+      const bundleCount = Math.min(qtyA, qtyB);
+      if (bundleCount > 0) {
+        let remainingA = bundleCount;
+        for (const idx of indicesA) {
+          const it = enrichedItems[idx];
+          const avail = it.quantity - bundleAllocations.get(idx);
+          const take = Math.min(remainingA, avail);
+          bundleAllocations.set(idx, bundleAllocations.get(idx) + take);
+          remainingA -= take;
+          if (remainingA <= 0) break;
+        }
+
+        let remainingB = bundleCount;
+        for (const idx of indicesB) {
+          const it = enrichedItems[idx];
+          const avail = it.quantity - bundleAllocations.get(idx);
+          const take = Math.min(remainingB, avail);
+          bundleAllocations.set(idx, bundleAllocations.get(idx) + take);
+          remainingB -= take;
+          if (remainingB <= 0) break;
+        }
+
+        bRule._activeBundleCount = bundleCount;
+        bRule._partA = partA;
+        bRule._partB = partB;
+      }
+    }
+
+    const lineDiscounts = new Map();
+    const lineCommissions = new Map();
+    let totalDiscountPaise = 0;
+    let totalCommissionPaise = 0;
+    let totalMatchedUnits = 0;
+
+    for (let i = 0; i < enrichedItems.length; i++) {
+      const { item, matchedRule } = itemMatches[i];
+      const key = Number(item.variantId || item.productId || i);
+      const bundledUnits = bundleAllocations.get(i) || 0;
+      const unbundledUnits = Math.max(0, item.quantity - bundledUnits);
+
+      let itemDiscount = 0;
+      let itemCommission = 0;
+      let matchedAnything = false;
+
+      if (bundledUnits > 0) {
+        matchedAnything = true;
+        for (const bRule of bundleRules) {
+          if (bRule._activeBundleCount > 0 && (matchScopePart(item, bRule._partA) || matchScopePart(item, bRule._partB))) {
+            const bDiscountType = String(bRule.discountType || 'percentage').toLowerCase();
+            const bDiscountVal = Number(bRule.discountValue || 0);
+            if (bDiscountType === 'percentage') {
+              const bundledLineTotal = bundledUnits * item.unitPrice;
+              itemDiscount += Math.round(bundledLineTotal * (bDiscountVal / 100));
+            } else {
+              const unitFlat = bDiscountVal > 10000 ? bDiscountVal : bDiscountVal * 100;
+              itemDiscount += Math.min(bundledUnits * item.unitPrice, bundledUnits * unitFlat);
+            }
+            break;
+          }
+        }
+      }
+
+      if (matchedRule) {
+        matchedAnything = true;
+        if (unbundledUnits > 0) {
+          const dType = String(matchedRule.discountType || 'percentage').toLowerCase();
+          const dVal = Number(matchedRule.discountValue || 0);
+          if (dType === 'percentage') {
+            const unbundledLineTotal = unbundledUnits * item.unitPrice;
+            itemDiscount += Math.round(unbundledLineTotal * (dVal / 100));
+          } else {
+            const unitFlat = dVal > 10000 ? dVal : dVal * 100;
+            itemDiscount += Math.min(unbundledUnits * item.unitPrice, unbundledUnits * unitFlat);
+          }
+        }
+
+        const cType = String(matchedRule.commissionType || 'flat').toLowerCase();
+        const cVal = Number(matchedRule.commissionValue || 0);
+        if (cType === 'percentage') {
+          itemCommission = Math.round(item.lineTotal * (cVal / 100));
+        } else {
+          itemCommission = Math.round(cVal * item.quantity);
+        }
+      }
+
+      itemDiscount = Math.min(item.lineTotal, Math.max(0, itemDiscount));
+      itemCommission = Math.max(0, itemCommission);
+
+      if (matchedAnything) {
+        totalMatchedUnits += item.quantity;
+      }
+
+      lineDiscounts.set(key, (lineDiscounts.get(key) || 0) + itemDiscount);
+      lineCommissions.set(key, (lineCommissions.get(key) || 0) + itemCommission);
+      totalDiscountPaise += itemDiscount;
+      totalCommissionPaise += itemCommission;
+    }
+
+    if (totalMatchedUnits === 0) {
+      return {
+        isValid: false,
+        error: 'This coupon is not valid for the items in your cart.',
+        totalDiscountPaise: 0,
+        totalCommissionPaise: 0,
+        lineDiscounts: new Map(),
+        lineCommissions: new Map(),
+        matchingItemCount: 0,
+      };
+    }
+
+    return {
+      isValid: true,
+      error: null,
+      totalDiscountPaise,
+      totalCommissionPaise,
+      lineDiscounts,
+      lineCommissions,
+      matchingItemCount: totalMatchedUnits,
+    };
+  }
+
+  mountMerchApi.evaluateMerchCouponPricing = evaluateMerchCouponPricing;
+  mountMerchApi.parseCouponScopeRules = parseCouponScopeRules;
+
   function validateMerchCouponForUser(args) {
     if (typeof validateCouponForUser !== 'function') {
       return { error: 'Coupon validation is unavailable.' };
@@ -6360,6 +6656,33 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       ? formatVariantScopeMessage(targetVariants, allProductVariants.length, campaign.productName || 'bottle')
       : '';
 
+    if (result.coupon && !result.coupon.scopeRules && (result.coupon.scope_rules_json || result.coupon.scopeRulesJson)) {
+      result.coupon.scopeRules = parseCouponScopeRules(result.coupon.scope_rules_json || result.coupon.scopeRulesJson);
+    }
+    const hasScopeRules = Boolean(result.coupon?.scopeRules && result.coupon.scopeRules.length > 0);
+
+    if (hasScopeRules) {
+      const pricing = evaluateMerchCouponPricing(result.coupon, items, { subtotalAmountPaise: args.subtotalAmountPaise, db });
+      if (pricing.error) {
+        return { error: pricing.error };
+      }
+      const subtotalPaise = Math.max(0, Math.round(Number(args.subtotalAmountPaise || result.originalAmountPaise || 0))) || items.reduce((sum, it) => sum + (Number(it.lineTotal) || (Number(it.unitPrice || it.price || 0) * Number(it.quantity || 1))), 0);
+
+      result.discountAmountPaise = pricing.totalDiscountPaise;
+      result.finalAmountPaise = Math.max(0, subtotalPaise - pricing.totalDiscountPaise);
+      result.totalDiscountPaise = pricing.totalDiscountPaise;
+      result.totalCommissionPaise = pricing.totalCommissionPaise;
+      result.lineDiscounts = pricing.lineDiscounts;
+      result.lineCommissions = pricing.lineCommissions;
+      result.scopePricing = pricing;
+
+      if (result.coupon) {
+        result.coupon.influencerName = campaign?.influencerName || result.coupon.influencerName || '';
+        result.coupon.campaignSlug = campaign?.slug || args.campaignSlug || '';
+      }
+      return result;
+    }
+
     const isRyan = isRyanAttribution({
       coupon: result.coupon,
       influencerId: result.coupon?.influencerId,
@@ -6448,6 +6771,15 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   }
 
   function getMerchCommissionSnapshot(coupon, items = [], attribution = {}) {
+    if (coupon && !coupon.scopeRules && (coupon.scope_rules_json || coupon.scopeRulesJson)) {
+      coupon.scopeRules = parseCouponScopeRules(coupon.scope_rules_json || coupon.scopeRulesJson);
+    }
+    const hasScopeRules = Boolean(coupon?.scopeRules && coupon.scopeRules.length > 0);
+    if (hasScopeRules) {
+      const pricing = evaluateMerchCouponPricing(coupon, items, { db });
+      return { total: pricing.totalCommissionPaise, byProduct: pricing.lineCommissions };
+    }
+
     const isRyan = attribution.forceRyan || isRyanAttribution({ coupon, ...attribution });
     if (isRyan) {
       const lineCommissions = new Map();
@@ -6645,7 +6977,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function getMerchPurchaseVariant(variantId) {
     const variant = db.prepare(`
-      SELECT v.*, p.name AS product_name, p.gst_rate, p.is_combo
+      SELECT v.*, p.name AS product_name, p.gst_rate, p.is_combo, p.category
       FROM merch_variants v
       JOIN merch_products p ON p.id = v.product_id
       WHERE v.id = ? AND v.is_active = 1 AND p.is_active = 1 AND p.deleted_at IS NULL
@@ -7029,6 +7361,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         variantId: variant.id,
         productId: Number(variant.product_id),
         productName: variant.product_name,
+        category: variant.category || '',
         variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '),
         sku: variant.sku,
         unitPrice,
@@ -7065,17 +7398,20 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const { campaignId, influencerId } = resolveOrderCampaignAttribution(req, couponResult);
     // Orders from the /ryan landing page always get Ryan's pricing and commission, with or without a coupon.
     const isRyanLanding = String(req.body?.landingPage || '').trim().toLowerCase() === 'ryan';
-    const isRyan = isRyanLanding || isRyanAttribution({
+    const hasScopeRules = Boolean(couponResult?.coupon?.scopeRules?.length > 0);
+    const isRyan = !hasScopeRules && (isRyanLanding || isRyanAttribution({
       coupon: couponResult?.coupon,
       influencerId,
       campaignId,
       campaignSlug: campaignSlug || req.body?.campaignSlug,
-    });
-    const finalInfluencerId = isRyan
-      ? (Number(couponResult?.coupon?.influencerId || influencerId || 0) || getActiveRyanInfluencerId() || null)
-      : influencerId;
+    }));
+    const finalInfluencerId = hasScopeRules
+      ? (Number(couponResult?.coupon?.influencerId || couponResult?.coupon?.influencer_id || influencerId || 0) || null)
+      : (isRyan
+        ? (Number(couponResult?.coupon?.influencerId || influencerId || 0) || getActiveRyanInfluencerId() || null)
+        : influencerId);
 
-    const hasActiveCoupon = Boolean(couponResult?.coupon && (Number(couponResult.discountAmountPaise || 0) > 0 || isRyan));
+    const hasActiveCoupon = Boolean(couponResult?.coupon && (Number(couponResult.discountAmountPaise || 0) > 0 || isRyan || hasScopeRules));
     const isCouponInfluencer = Boolean(
       couponResult?.coupon &&
       (
@@ -7083,20 +7419,23 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         couponResult.coupon.influencer_name ||
         couponResult.coupon.influencer ||
         isInfluencerCampaignActive ||
-        isRyan
+        isRyan ||
+        hasScopeRules
       )
     );
     const hasActiveInfluencerCoupon = Boolean(
       isCouponInfluencer &&
-      (Number(couponResult?.discountAmountPaise || 0) > 0 || isRyan)
+      (Number(couponResult?.discountAmountPaise || 0) > 0 || isRyan || hasScopeRules)
     );
-    const bundleDiscountPaise = (hasActiveInfluencerCoupon && !isRyan) ? 0 : getMerchBundleDiscountPaise(bundleCode, validatedItems);
+    const bundleDiscountPaise = (hasActiveInfluencerCoupon && !isRyan && !hasScopeRules) ? 0 : getMerchBundleDiscountPaise(bundleCode, validatedItems);
     const shippingCharge = 0; // Free shipping by default as of now
-    const discountAmount = isRyan
-      ? Math.max(0, getRyanPricing(validatedItems).bundleDiscountPaise + getRyanPricing(validatedItems).individualDiscountPaise)
-      : (hasActiveInfluencerCoupon
-        ? Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
-        : (bundleDiscountPaise > 0 ? bundleDiscountPaise : Math.max(0, Math.round(Number(couponResult?.discountAmountPaise || 0)))));
+    const discountAmount = hasScopeRules
+      ? Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
+      : (isRyan
+        ? Math.max(0, getRyanPricing(validatedItems).bundleDiscountPaise + getRyanPricing(validatedItems).individualDiscountPaise)
+        : (hasActiveInfluencerCoupon
+          ? Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
+          : (bundleDiscountPaise > 0 ? bundleDiscountPaise : Math.max(0, Math.round(Number(couponResult?.discountAmountPaise || 0))))));
     const discountedSubtotal = Math.max(0, subtotal - discountAmount);
     // Product prices are GST-inclusive; derive included GST on discounted amount.
     const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
@@ -7664,6 +8003,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         productId: Number(variant.product_id),
         variantId: variant.id,
         productName: variant.product_name,
+        category: variant.category || '',
         variantLabel: [variant.size, variant.color].filter(Boolean).join(' / '),
         sku: variant.sku,
         unitPrice: variant.price,
@@ -7712,17 +8052,20 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const { campaignId, influencerId } = resolveOrderCampaignAttribution(req, couponResult);
     // Orders from the /ryan landing page always get Ryan's pricing and commission, with or without a coupon.
     const isRyanLanding = String(req.body?.landingPage || '').trim().toLowerCase() === 'ryan';
-    const isRyan = isRyanLanding || isRyanAttribution({
+    const hasScopeRules = Boolean(couponResult?.coupon?.scopeRules?.length > 0);
+    const isRyan = !hasScopeRules && (isRyanLanding || isRyanAttribution({
       coupon: couponResult?.coupon,
       influencerId,
       campaignId,
       campaignSlug: campaignSlug || req.body?.campaignSlug,
-    });
-    const finalInfluencerId = isRyan
-      ? (Number(couponResult?.coupon?.influencerId || influencerId || 0) || getActiveRyanInfluencerId() || null)
-      : influencerId;
+    }));
+    const finalInfluencerId = hasScopeRules
+      ? (Number(couponResult?.coupon?.influencerId || couponResult?.coupon?.influencer_id || influencerId || 0) || null)
+      : (isRyan
+        ? (Number(couponResult?.coupon?.influencerId || influencerId || 0) || getActiveRyanInfluencerId() || null)
+        : influencerId);
 
-    const hasActiveCoupon = Boolean(couponResult?.coupon && (Number(couponResult.discountAmountPaise || 0) > 0 || isRyan));
+    const hasActiveCoupon = Boolean(couponResult?.coupon && (Number(couponResult.discountAmountPaise || 0) > 0 || isRyan || hasScopeRules));
     const isCouponInfluencer = Boolean(
       couponResult?.coupon &&
       (
@@ -7730,23 +8073,26 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         couponResult.coupon.influencer_name ||
         couponResult.coupon.influencer ||
         isInfluencerCampaignActive ||
-        isRyan
+        isRyan ||
+        hasScopeRules
       )
     );
     const hasActiveInfluencerCoupon = Boolean(
       isCouponInfluencer &&
-      (Number(couponResult?.discountAmountPaise || 0) > 0 || isRyan)
+      (Number(couponResult?.discountAmountPaise || 0) > 0 || isRyan || hasScopeRules)
     );
 
-    const bundleDiscountPaise = (hasActiveInfluencerCoupon && !isRyan) ? 0 : getMerchBundleDiscountPaise(bundleCode, validatedItems);
+    const bundleDiscountPaise = (hasActiveInfluencerCoupon && !isRyan && !hasScopeRules) ? 0 : getMerchBundleDiscountPaise(bundleCode, validatedItems);
 
     const shippingCharge = 0; // Free shipping by default as of now
     const codSurcharge = 5000; // ₹50
-    const discountAmount = isRyan
-      ? Math.max(0, getRyanPricing(validatedItems).bundleDiscountPaise + getRyanPricing(validatedItems).individualDiscountPaise)
-      : (hasActiveInfluencerCoupon
-        ? Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
-        : (bundleDiscountPaise > 0 ? bundleDiscountPaise : Math.max(0, Math.round(Number(couponResult?.discountAmountPaise || 0)))));
+    const discountAmount = hasScopeRules
+      ? Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
+      : (isRyan
+        ? Math.max(0, getRyanPricing(validatedItems).bundleDiscountPaise + getRyanPricing(validatedItems).individualDiscountPaise)
+        : (hasActiveInfluencerCoupon
+          ? Math.max(0, Math.round(Number(couponResult.discountAmountPaise || 0)))
+          : (bundleDiscountPaise > 0 ? bundleDiscountPaise : Math.max(0, Math.round(Number(couponResult?.discountAmountPaise || 0))))));
     const discountedSubtotal = Math.max(0, subtotal - discountAmount);
     // Product prices are GST-inclusive; derive included GST on discounted amount.
     const gstAmount = Math.max(0, discountedSubtotal - Math.round(discountedSubtotal / 1.18));
@@ -8471,7 +8817,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         SET status = 'cancelled',
             cancelled_by = 'customer',
             cancelled_at = datetime('now'),
-            payment_status = CASE WHEN payment_status IN ('paid', 'cod_pending') THEN 'refunded' ELSE payment_status END,
+            payment_status = CASE WHEN payment_status = 'cod_pending' THEN 'cancelled' ELSE payment_status END,
             updated_at = datetime('now')
         WHERE id = ? AND status NOT IN ('delivered', 'returned', 'cancelled')
       `).run(order.id);
@@ -10048,6 +10394,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       updates.push('cancelled_by = ?');
       params.push('admin');
       updates.push("cancelled_at = datetime('now')");
+      if (!payment_status && String(existingOrder.payment_status || '').toLowerCase() === 'cod_pending') {
+        updates.push("payment_status = 'cancelled'");
+      }
     }
     if (payment_status) {
       updates.push('payment_status = ?');
