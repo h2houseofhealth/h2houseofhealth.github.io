@@ -6659,27 +6659,37 @@
               ? (entity?.commissionRate ?? '')
               : (entity?.commissionPerOrderPaise ? Number(entity.commissionPerOrderPaise) / 100 : (entity?.commissionPerOrder ?? ''));
             return `
-              <label class="admin-field"><span>Discount Type</span>
+              <label class="admin-field" data-coupon-single-field data-coupon-discount-type-field><span>Discount Type</span>
                 <select class="admin-select" name="discountType" data-coupon-discount-type>
                   <option value="flat" ${!isPercentDiscount ? 'selected' : ''}>Rupees (₹)</option>
                   <option value="percentage" ${isPercentDiscount ? 'selected' : ''}>Percentage (%)</option>
                 </select>
               </label>
-              <label class="admin-field"><span data-coupon-discount-label>Discount ${isPercentDiscount ? '(%)' : '(₹)'}</span>
+              <label class="admin-field" data-coupon-single-field data-coupon-discount-field><span data-coupon-discount-label>Discount ${isPercentDiscount ? '(%)' : '(₹)'}</span>
                 <input class="admin-input" name="discount" data-coupon-discount-input type="number" min="1" ${isPercentDiscount ? 'max="100"' : ''} step="1" value="${escapeHtml(String(discountVal))}" placeholder="${isPercentDiscount ? 'e.g. 10' : 'e.g. 1000'}" required />
               </label>
-              <label class="admin-field" data-coupon-commission-type-field><span>Commission Type</span>
+              <label class="admin-field" data-coupon-single-field data-coupon-commission-type-field><span>Commission Type</span>
                 <select class="admin-select" name="commissionType" data-coupon-commission-type>
-                  <option value="flat" ${!isPercentComm ? 'selected' : ''}>Rupees (₹)</option>
+                  <option value="flat" ${!isPercentComm ? 'selected' : ''}>Rupees (₹ per unit)</option>
                   <option value="percentage" ${isPercentComm ? 'selected' : ''}>Percentage (%)</option>
                 </select>
               </label>
-              <label class="admin-field" data-coupon-commission-field><span data-coupon-commission-label>Commission per Order ${isPercentComm ? '(%)' : '(₹)'}</span>
+              <label class="admin-field" data-coupon-single-field data-coupon-commission-field><span data-coupon-commission-label>Commission per Order ${isPercentComm ? '(%)' : '(₹ per unit)'}</span>
                 <input class="admin-input" name="commissionValue" data-coupon-commission type="number" min="0" ${isPercentComm ? 'max="100"' : ''} step="${isPercentComm ? '0.5' : '1'}" value="${escapeHtml(String(commVal))}" placeholder="${isPercentComm ? 'e.g. 10' : 'e.g. 100'}" />
                 <small class="admin-field__hint" data-coupon-commission-hint></small>
               </label>
             `;
           })()}
+          <div class="admin-field admin-field--wide" data-coupon-scope-rules-section hidden>
+            <div class="admin-scope-rules-header">
+              <span class="admin-scope-rules-title">Product rules</span>
+              <small class="admin-field__hint">If you add product rules, the single discount and commission fields are ignored.</small>
+            </div>
+            <div class="admin-scope-rules-container" data-scope-rules-container></div>
+            <div style="margin-top: 8px;">
+              <button type="button" class="admin-btn admin-btn--soft admin-btn--sm" data-action="add-scope-rule">+ Add product rule</button>
+            </div>
+          </div>
           <label class="admin-field" data-coupon-usage-type-field hidden><span>Usage Type</span>
             <select class="admin-select" name="usageType" data-coupon-usage-type>
               <option value="limited" ${getCouponUsageTypeValue(entity) === 'limited' ? 'selected' : ''}>Limited</option>
@@ -6805,6 +6815,217 @@
     }
   }
 
+  function getCouponScopeOptions() {
+    const categoriesMap = new Map();
+    for (const cat of (Array.isArray(state.categories) ? state.categories : [])) {
+      const slug = String(cat.slug || cat.id || '').trim().toLowerCase();
+      const name = cat.name || slug;
+      if (slug && !categoriesMap.has(slug)) {
+        categoriesMap.set(slug, { slug, name });
+      }
+    }
+    for (const prod of (Array.isArray(state.products) ? state.products : [])) {
+      const slug = String(prod.categorySlug || prod.category || '').trim().toLowerCase();
+      const name = prod.category || slug;
+      if (slug && !categoriesMap.has(slug)) {
+        categoriesMap.set(slug, { slug, name });
+      }
+    }
+
+    const categories = [];
+    for (const [slug, item] of categoriesMap.entries()) {
+      categories.push({
+        value: `category:${slug}`,
+        label: item.name,
+        slug,
+        name: item.name,
+      });
+    }
+
+    const bundles = [];
+    const catArray = [...categoriesMap.values()];
+    const getShortCatName = (name) => {
+      let s = String(name || '').trim();
+      s = s.replace(/^Hydrogen\s+Water\s+/i, '');
+      s = s.replace(/^Hydrogen\s+/i, '');
+      return s || name;
+    };
+
+    for (let i = 0; i < catArray.length; i++) {
+      for (let j = i + 1; j < catArray.length; j++) {
+        const catA = catArray[i];
+        const catB = catArray[j];
+        const shortA = getShortCatName(catA.name);
+        const shortB = getShortCatName(catB.name);
+        bundles.push({
+          value: `bundle:${catA.slug}+${catB.slug}`,
+          label: `${shortA} + ${shortB}`,
+          slugA: catA.slug,
+          slugB: catB.slug,
+        });
+      }
+    }
+
+    return { categories, bundles };
+  }
+
+  function createScopeRuleRowElement(rule = null, scopeOptions = null, onRowChange = null) {
+    if (!scopeOptions) scopeOptions = getCouponScopeOptions();
+    const row = document.createElement('div');
+    row.className = 'admin-scope-rule-row';
+    row.setAttribute('data-scope-rule-row', '');
+
+    const ruleScope = String(rule?.scope || '').trim();
+    const isBundle = ruleScope.toLowerCase().startsWith('bundle:');
+    const discountType = String(rule?.discountType || 'percentage').toLowerCase();
+    const discountValue = rule?.discountValue != null ? String(rule.discountValue) : '';
+    const commissionType = String(rule?.commissionType || 'flat').toLowerCase();
+    const rawCommVal = rule?.commissionValue;
+    const commissionValue = rawCommVal != null && rawCommVal !== ''
+      ? (commissionType === 'percentage' ? String(rawCommVal) : String(Number(rawCommVal) / 100))
+      : '';
+
+    let selectedScope = ruleScope;
+    if (isBundle && !scopeOptions.bundles.some((b) => b.value.toLowerCase() === selectedScope.toLowerCase())) {
+      const parts = ruleScope.slice(7).split('+').map((s) => s.trim().toLowerCase());
+      if (parts.length === 2) {
+        const reversed = `bundle:${parts[1]}+${parts[0]}`;
+        const match = scopeOptions.bundles.find((b) => b.value.toLowerCase() === reversed);
+        if (match) selectedScope = match.value;
+      }
+    }
+
+    let customScopeOption = '';
+    const isCategory = scopeOptions.categories.some((c) => c.value.toLowerCase() === selectedScope.toLowerCase());
+    const isKnownBundle = scopeOptions.bundles.some((b) => b.value.toLowerCase() === selectedScope.toLowerCase());
+
+    if (ruleScope && !isCategory && !isKnownBundle) {
+      let customLabel = ruleScope;
+      if (ruleScope.toLowerCase().startsWith('product:')) {
+        const pId = Number(ruleScope.slice(8).trim());
+        const prod = (Array.isArray(state.products) ? state.products : []).find(
+          (p) => Number(p.productId || p.parentProductId || p.id) === pId
+        );
+        customLabel = prod ? `Product: ${prod.name}` : `Product #${pId}`;
+      } else if (ruleScope.toLowerCase().startsWith('variant:')) {
+        const vId = Number(ruleScope.slice(8).trim());
+        let foundLabel = '';
+        for (const p of (Array.isArray(state.products) ? state.products : [])) {
+          const v = (p.variants || []).find((item) => Number(item.id || item.variantId) === vId);
+          if (v) {
+            foundLabel = `Variant: ${p.name} (${v.title || v.name || v.size || v.color || `#${vId}`})`;
+            break;
+          }
+        }
+        customLabel = foundLabel || `Variant #${vId}`;
+      }
+      customScopeOption = `<option value="${escapeHtml(ruleScope)}" selected>${escapeHtml(customLabel)}</option>`;
+    }
+
+    row.innerHTML = `
+      <div class="admin-scope-rule-col admin-scope-rule-col--scope">
+        <label class="admin-scope-rule-label">Scope</label>
+        <select class="admin-select" data-rule-scope>
+          <option value="">Select scope...</option>
+          ${customScopeOption}
+          ${scopeOptions.categories.length ? `<optgroup label="Categories">
+            ${scopeOptions.categories.map((c) => `<option value="${escapeHtml(c.value)}" ${selectedScope.toLowerCase() === c.value.toLowerCase() ? 'selected' : ''}>${escapeHtml(c.label)}</option>`).join('')}
+          </optgroup>` : ''}
+          ${scopeOptions.bundles.length ? `<optgroup label="Bundles">
+            ${scopeOptions.bundles.map((b) => `<option value="${escapeHtml(b.value)}" ${selectedScope.toLowerCase() === b.value.toLowerCase() ? 'selected' : ''}>${escapeHtml(b.label)}</option>`).join('')}
+          </optgroup>` : ''}
+        </select>
+      </div>
+      <div class="admin-scope-rule-col admin-scope-rule-col--discount-type">
+        <label class="admin-scope-rule-label">Discount Type</label>
+        <select class="admin-select" data-rule-discount-type>
+          <option value="percentage" ${discountType === 'percentage' ? 'selected' : ''}>%</option>
+          <option value="flat" ${discountType === 'flat' ? 'selected' : ''}>₹</option>
+        </select>
+      </div>
+      <div class="admin-scope-rule-col admin-scope-rule-col--discount-val">
+        <label class="admin-scope-rule-label" data-rule-discount-label>Discount ${discountType === 'percentage' ? '(%)' : '(₹)'}</label>
+        <input class="admin-input" type="number" min="0" ${discountType === 'percentage' ? 'max="100"' : ''} step="any" data-rule-discount-value placeholder="${discountType === 'percentage' ? '5' : '500'}" value="${escapeHtml(discountValue)}" />
+      </div>
+      <div class="admin-scope-rule-col admin-scope-rule-col--commission-type" data-rule-commission-col ${isBundle ? 'style="display:none;"' : ''}>
+        <label class="admin-scope-rule-label">Commission Type</label>
+        <select class="admin-select" data-rule-commission-type>
+          <option value="flat" ${commissionType === 'flat' ? 'selected' : ''}>₹ per unit</option>
+          <option value="percentage" ${commissionType === 'percentage' ? 'selected' : ''}>%</option>
+        </select>
+      </div>
+      <div class="admin-scope-rule-col admin-scope-rule-col--commission-val" data-rule-commission-col ${isBundle ? 'style="display:none;"' : ''}>
+        <label class="admin-scope-rule-label" data-rule-commission-label>${commissionType === 'percentage' ? 'Commission (%)' : 'Commission (₹/unit)'}</label>
+        <input class="admin-input" type="number" min="0" ${commissionType === 'percentage' ? 'max="100"' : ''} step="any" data-rule-commission-value placeholder="${commissionType === 'percentage' ? '10' : '2300'}" value="${escapeHtml(commissionValue)}" />
+      </div>
+      <div class="admin-scope-rule-col admin-scope-rule-col--bundle-note" data-rule-bundle-note ${isBundle ? '' : 'style="display:none;"'}>
+        <span class="admin-table__muted">No commission for bundles</span>
+      </div>
+      <div class="admin-scope-rule-col admin-scope-rule-col--actions">
+        <button type="button" class="admin-btn admin-btn--ghost admin-btn--danger" data-action="delete-scope-rule" title="Delete rule">Delete</button>
+      </div>
+    `;
+
+    const scopeSelect = row.querySelector('[data-rule-scope]');
+    const discTypeSelect = row.querySelector('[data-rule-discount-type]');
+    const discInput = row.querySelector('[data-rule-discount-value]');
+    const discLabel = row.querySelector('[data-rule-discount-label]');
+    const commTypeSelect = row.querySelector('[data-rule-commission-type]');
+    const commInput = row.querySelector('[data-rule-commission-value]');
+    const commLabel = row.querySelector('[data-rule-commission-label]');
+    const commCols = row.querySelectorAll('[data-rule-commission-col]');
+    const bundleNote = row.querySelector('[data-rule-bundle-note]');
+    const deleteBtn = row.querySelector('[data-action="delete-scope-rule"]');
+
+    discTypeSelect?.addEventListener('change', () => {
+      const isPct = discTypeSelect.value === 'percentage';
+      if (discLabel) discLabel.textContent = `Discount ${isPct ? '(%)' : '(₹)'}`;
+      if (discInput) {
+        if (isPct) {
+          discInput.setAttribute('max', '100');
+          discInput.placeholder = '5';
+          if (Number(discInput.value) > 100) discInput.value = '100';
+        } else {
+          discInput.removeAttribute('max');
+          discInput.placeholder = '500';
+        }
+      }
+    });
+
+    commTypeSelect?.addEventListener('change', () => {
+      const isPct = commTypeSelect.value === 'percentage';
+      if (commLabel) commLabel.textContent = isPct ? 'Commission (%)' : 'Commission (₹/unit)';
+      if (commInput) {
+        if (isPct) {
+          commInput.setAttribute('max', '100');
+          commInput.placeholder = '10';
+          if (Number(commInput.value) > 100) commInput.value = '100';
+        } else {
+          commInput.removeAttribute('max');
+          commInput.placeholder = '2300';
+        }
+      }
+    });
+
+    scopeSelect?.addEventListener('change', () => {
+      const isCurBundle = String(scopeSelect.value || '').trim().toLowerCase().startsWith('bundle:');
+      commCols.forEach((col) => {
+        col.style.display = isCurBundle ? 'none' : '';
+      });
+      if (bundleNote) {
+        bundleNote.style.display = isCurBundle ? '' : 'none';
+      }
+      onRowChange?.();
+    });
+
+    deleteBtn?.addEventListener('click', () => {
+      row.remove();
+      onRowChange?.();
+    });
+
+    return row;
+  }
+
   function initializeCouponCategoryForm(form, entity = null) {
     const categorySelect = form.querySelector('[name="couponCategory"]');
     const codeInput = form.querySelector('[name="code"]');
@@ -6831,6 +7052,62 @@
     const commissionHint = form.querySelector('[data-coupon-commission-hint]');
     const commissionLabel = form.querySelector('[data-coupon-commission-label]');
 
+    const scopeRulesSection = form.querySelector('[data-coupon-scope-rules-section]');
+    const scopeRulesContainer = form.querySelector('[data-scope-rules-container]');
+    const addScopeRuleBtn = form.querySelector('[data-action="add-scope-rule"]');
+
+    const existingScopeRules = Array.isArray(entity?.scopeRules)
+      ? entity.scopeRules
+      : (() => {
+          const raw = entity?.scopeRulesJson || entity?.scope_rules_json;
+          if (!raw) return null;
+          try {
+            const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
+          } catch {
+            return null;
+          }
+        })();
+
+    const syncSingleFieldsDimState = () => {
+      const isInfluencer = String(categorySelect?.value || '').trim().toLowerCase() === 'influencer';
+      if (!isInfluencer || !scopeRulesContainer) {
+        form.querySelectorAll('[data-coupon-single-field]').forEach((f) => f.classList.remove('admin-field--dimmed'));
+        return;
+      }
+      const rows = scopeRulesContainer.querySelectorAll('[data-scope-rule-row]');
+      let hasActiveScope = false;
+      rows.forEach((row) => {
+        const val = String(row.querySelector('[data-rule-scope]')?.value || '').trim();
+        if (val) hasActiveScope = true;
+      });
+      form.querySelectorAll('[data-coupon-single-field]').forEach((f) => {
+        f.classList.toggle('admin-field--dimmed', hasActiveScope);
+      });
+    };
+
+    let scopeRulesLoaded = false;
+    const populateScopeRules = () => {
+      if (scopeRulesLoaded || !scopeRulesContainer) return;
+      scopeRulesLoaded = true;
+      scopeRulesContainer.innerHTML = '';
+      const scopeOptions = getCouponScopeOptions();
+      if (existingScopeRules && existingScopeRules.length > 0) {
+        existingScopeRules.forEach((rule) => {
+          scopeRulesContainer.appendChild(createScopeRuleRowElement(rule, scopeOptions, syncSingleFieldsDimState));
+        });
+      } else {
+        scopeRulesContainer.appendChild(createScopeRuleRowElement(null, scopeOptions, syncSingleFieldsDimState));
+      }
+      syncSingleFieldsDimState();
+    };
+
+    addScopeRuleBtn?.addEventListener('click', () => {
+      const scopeOptions = getCouponScopeOptions();
+      scopeRulesContainer?.appendChild(createScopeRuleRowElement(null, scopeOptions, syncSingleFieldsDimState));
+      syncSingleFieldsDimState();
+    });
+
     const updateDiscountUI = () => {
       const type = String(discountTypeSelect?.value || 'flat').toLowerCase();
       const isPercent = type === 'percentage';
@@ -6850,7 +7127,7 @@
     const updateCommissionUI = () => {
       const type = String(commissionTypeSelect?.value || 'flat').toLowerCase();
       const isPercent = type === 'percentage';
-      if (commissionLabel) commissionLabel.textContent = `Commission per Order ${isPercent ? '(%)' : '(₹)'}`;
+      if (commissionLabel) commissionLabel.textContent = `Commission per Order ${isPercent ? '(%)' : '(₹ per unit)'}`;
       if (commissionInput) {
         if (isPercent) {
           commissionInput.setAttribute('max', '100');
@@ -6971,6 +7248,14 @@
         if (expiryInput) expiryInput.value = '';
       }
 
+      if (scopeRulesSection) {
+        scopeRulesSection.hidden = !isInfluencer;
+        if (isInfluencer) {
+          populateScopeRules();
+        }
+      }
+      syncSingleFieldsDimState();
+
       if (activeInput && !entity) activeInput.checked = true;
       if (regenerateCode && !isInfluencer) generateCodeForCategory();
     };
@@ -6980,7 +7265,6 @@
     usageTypeSelect?.addEventListener('change', () => applyCategory({ overwriteDefaults: false }));
     generateButton?.addEventListener('click', () => generateCodeForCategory());
   }
-
   function renderInfluencerAssignmentModal(influencer) {
     if (!influencer) return;
     const assignedCoupons = normalizeCouponCodes(influencer.coupons || []);
@@ -7201,6 +7485,43 @@
           return categorySlugs.length ? `category:${categorySlugs.join(',')}` : (existing?.appliesTo || 'merch');
         })();
 
+    let scopeRules = null;
+    if (couponCategory === 'influencer') {
+      const rows = form.querySelectorAll('[data-scope-rule-row]');
+      const parsedRules = [];
+      rows.forEach((row) => {
+        const scope = String(row.querySelector('[data-rule-scope]')?.value || '').trim();
+        if (!scope) return;
+        const rDiscType = String(row.querySelector('[data-rule-discount-type]')?.value || 'percentage').trim().toLowerCase();
+        const rDiscVal = Number(row.querySelector('[data-rule-discount-value]')?.value || 0);
+
+        const isBundle = scope.toLowerCase().startsWith('bundle:');
+        let rCommType = 'flat';
+        let rCommVal = 0;
+        if (!isBundle) {
+          rCommType = String(row.querySelector('[data-rule-commission-type]')?.value || 'flat').trim().toLowerCase();
+          const rawVal = Number(row.querySelector('[data-rule-commission-value]')?.value || 0);
+          rCommVal = rCommType === 'percentage'
+            ? Math.min(100, Math.max(0, rawVal))
+            : Math.max(0, Math.round(rawVal * 100));
+        }
+
+        parsedRules.push({
+          scope,
+          discountType: rDiscType,
+          discountValue: rDiscVal,
+          commissionType: rCommType,
+          commissionValue: rCommVal,
+        });
+      });
+
+      if (parsedRules.length > 0) {
+        scopeRules = parsedRules;
+      } else if (existing?.scopeRules || existing?.scopeRulesJson || existing?.scope_rules_json) {
+        scopeRules = [];
+      }
+    }
+
     return {
       id: existing?.id || Date.now(),
       code: String(fd.get('code') || '').trim().toUpperCase(),
@@ -7211,6 +7532,7 @@
       commissionType,
       commissionRate,
       commissionPerOrderPaise,
+      scopeRules,
       usageCount: isUnlimitedInfluencer ? null : Number.isFinite(usageCount) && usageCount > 0 ? usageCount : null,
       expiry: isUnlimitedInfluencer ? '' : String(fd.get('expiry') || '').trim(),
       usageType,
@@ -7226,7 +7548,6 @@
       couponCategory,
     };
   }
-
   function updateInfluencerFromForm(form, existing = null) {
     const fd = new FormData(form);
     return {
@@ -10642,15 +10963,27 @@
     if (type === 'coupon') {
       const existingCoupon = existingId ? state.coupons.find((item) => Number(item.id) === existingId) : null;
       const entity = updateCouponFromForm(form, existingCoupon);
-      if (!entity.code || !entity.discountValue) {
+
+      const prevErrorBanner = form.querySelector('[data-form-error-banner]');
+      if (prevErrorBanner) prevErrorBanner.remove();
+
+      const hasScopeRules = Array.isArray(entity.scopeRules) && entity.scopeRules.length > 0;
+      if (!entity.code) {
+        toast('Missing details', 'Coupon code is required.', 'warning');
+        return;
+      }
+      if (!entity.discountValue && !hasScopeRules) {
         toast('Missing details', 'Coupon code and discount are required.', 'warning');
         return;
       }
-      if (entity.discountType === 'percentage' && (entity.discountValue < 1 || entity.discountValue > 100)) {
+      if (hasScopeRules && !entity.discountValue) {
+        entity.discountValue = entity.scopeRules[0].discountValue || 1;
+      }
+      if (!hasScopeRules && entity.discountType === 'percentage' && (entity.discountValue < 1 || entity.discountValue > 100)) {
         toast('Invalid discount', 'Percentage discount must be between 1% and 100%.', 'warning');
         return;
       }
-      if (entity.couponCategory === 'influencer' && entity.commissionType === 'percentage' && (entity.commissionRate < 0 || entity.commissionRate > 100)) {
+      if (!hasScopeRules && entity.couponCategory === 'influencer' && entity.commissionType === 'percentage' && (entity.commissionRate < 0 || entity.commissionRate > 100)) {
         toast('Invalid commission', 'Commission percentage must be between 0% and 100%.', 'warning');
         return;
       }
@@ -10699,7 +11032,8 @@
         maxRedemptions: entity.usageCount,
         perUserLimit: entity.couponType === 'private' && Number.isFinite(entity.usageCount) && entity.usageCount > 0 ? entity.usageCount : 1,
         active: entity.status === 'active' ? 1 : 0,
-        portal: 'merch'
+        portal: 'merch',
+        scopeRules: entity.scopeRules !== undefined ? entity.scopeRules : null,
       };
       const method = existingId ? 'PUT' : 'POST';
       const path = existingId ? `/api/admin/coupons/${encodeURIComponent(existingId)}` : '/api/admin/coupons';
@@ -10721,10 +11055,19 @@
         await loadReportData();
       } catch (error) {
         toast('Coupon not saved', error.message || 'Unable to save the coupon.', 'danger');
+        let errorBanner = form.querySelector('[data-form-error-banner]');
+        if (!errorBanner) {
+          errorBanner = document.createElement('div');
+          errorBanner.setAttribute('data-form-error-banner', '');
+          errorBanner.className = 'admin-field admin-field--wide';
+          errorBanner.style.cssText = 'color: #c53030; background: #fff5f5; border: 1px solid #feb2b2; padding: 10px 12px; border-radius: 6px; font-size: 13px; font-weight: 500; margin-bottom: 8px;';
+          form.querySelector('.admin-form__grid')?.prepend(errorBanner);
+        }
+        errorBanner.textContent = error.message || 'Unable to save the coupon.';
+        errorBanner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
       return;
     }
-
     if (type === 'influencer') {
       if (form.dataset.submitting === 'true') return;
       const entity = updateInfluencerFromForm(form, existingId ? state.influencers.find((item) => Number(item.id) === existingId) : null);
