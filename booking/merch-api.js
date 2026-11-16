@@ -14,7 +14,7 @@ const bcrypt = require('bcryptjs');
 const router = express.Router();
 
 const FIXED_ADMIN_EMAIL = 'h2houseofhealth@gmail.com';
-const ADMIN_DISCOUNT_GATE_PASSWORD = String(process.env.ADMIN_DISCOUNT_GATE_PASSWORD || 'admin-H2-2026').trim();
+const ADMIN_DISCOUNT_GATE_PASSWORD = String(process.env.ADMIN_DISCOUNT_GATE_PASSWORD || '').trim();
 
 const MERCH_HYPE_LABELS = [
   'Most Selling Product',
@@ -846,6 +846,20 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     } catch (e) {
       console.warn('[Merch] stock_deducted backfill notice:', e?.message);
     }
+  }
+
+  // Backfill: Fix orders that were falsely marked payment_status = 'refunded' upon cancellation
+  try {
+    db.exec(`
+      UPDATE merch_orders
+      SET payment_status = CASE
+        WHEN razorpay_payment_id IS NOT NULL AND razorpay_payment_id != '' THEN 'paid'
+        ELSE 'cancelled'
+      END
+      WHERE status = 'cancelled' AND payment_status = 'refunded'
+    `);
+  } catch (e) {
+    console.warn('[Merch] cancelled payment_status backfill notice:', e?.message);
   }
 
   if (!hasColumn('merch_influencers', 'avatar_url')) {
@@ -1746,8 +1760,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   function verifyAdminAuthorization(req, password) {
     const inputPass = String(password || '').trim();
     if (!inputPass) return false;
-    if (inputPass === ADMIN_DISCOUNT_GATE_PASSWORD) return true;
-    if (inputPass === 'Admin@12345') return true;
+    if (ADMIN_DISCOUNT_GATE_PASSWORD && inputPass === ADMIN_DISCOUNT_GATE_PASSWORD) return true;
 
     const adminUserId = Number(req?.user?.sub);
     if (Number.isInteger(adminUserId) && adminUserId > 0) {
@@ -8471,7 +8484,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         SET status = 'cancelled',
             cancelled_by = 'customer',
             cancelled_at = datetime('now'),
-            payment_status = CASE WHEN payment_status IN ('paid', 'cod_pending') THEN 'refunded' ELSE payment_status END,
+            payment_status = CASE WHEN payment_status = 'cod_pending' THEN 'cancelled' ELSE payment_status END,
             updated_at = datetime('now')
         WHERE id = ? AND status NOT IN ('delivered', 'returned', 'cancelled')
       `).run(order.id);
@@ -10048,6 +10061,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       updates.push('cancelled_by = ?');
       params.push('admin');
       updates.push("cancelled_at = datetime('now')");
+      if (!payment_status && String(existingOrder.payment_status || '').toLowerCase() === 'cod_pending') {
+        updates.push("payment_status = 'cancelled'");
+      }
     }
     if (payment_status) {
       updates.push('payment_status = ?');

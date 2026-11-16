@@ -126,6 +126,13 @@
     if (!drawer) return;
 
     function openDrawer() {
+      // Close other drawers if open
+      if (typeof window.closeCart === 'function') {
+        window.closeCart();
+      }
+      if (typeof window.closeAccountDrawer === 'function') {
+        window.closeAccountDrawer();
+      }
       drawer.classList.add('is-open');
       backdrop?.classList.add('is-open');
       toggleBtn?.setAttribute('aria-expanded', 'true');
@@ -145,12 +152,19 @@
     closeBtn?.addEventListener('click', closeDrawer);
     backdrop?.addEventListener('click', closeDrawer);
 
+    // Close drawer when any navigation link inside it is clicked
+    drawer.querySelectorAll('.h2-navbar__drawer-link').forEach((link) => {
+      link.addEventListener('click', closeDrawer);
+    });
+
     // Close on ESC
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && drawer.classList.contains('is-open')) {
         closeDrawer();
       }
     });
+
+    window.closeNavDrawer = closeDrawer;
   }
 
   // --- 4. Cross-Page Action Interceptors ---
@@ -161,6 +175,7 @@
     // Search Action
     document.querySelectorAll('#searchToggleBtn').forEach((btn) => {
       btn.addEventListener('click', function (e) {
+        if (typeof window.closeNavDrawer === 'function') window.closeNavDrawer();
         if (isMerchPage) {
           if (typeof window.openSearch === 'function') {
             e.preventDefault();
@@ -176,6 +191,7 @@
     // Cart Action
     document.querySelectorAll('#cartToggleBtn').forEach((btn) => {
       btn.addEventListener('click', function (e) {
+        if (typeof window.closeNavDrawer === 'function') window.closeNavDrawer();
         if (isBookingPage) {
           e.preventDefault();
           if (typeof window.openBookingCart === 'function') {
@@ -198,6 +214,7 @@
     // Wishlist Action
     document.querySelectorAll('#wishlistToggleBtn').forEach((btn) => {
       btn.addEventListener('click', function (e) {
+        if (typeof window.closeNavDrawer === 'function') window.closeNavDrawer();
         if (isMerchPage) {
           if (typeof window.openAccountDrawer === 'function') {
             e.preventDefault();

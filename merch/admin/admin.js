@@ -151,13 +151,15 @@
   }
 
   function initials(name) {
-    return String(name || '')
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean)
+    const raw = String(name || '').trim();
+    if (!raw) return 'H2';
+    if (/^h2\b/i.test(raw)) return 'H2';
+    const parts = raw.split(/\s+/).filter(Boolean);
+    if (parts.length === 1 && parts[0].length <= 2) return parts[0].toUpperCase();
+    return parts
       .slice(0, 2)
       .map((part) => part[0]?.toUpperCase() || '')
-      .join('') || 'AH';
+      .join('') || 'H2';
   }
 
   function slugify(value) {
@@ -1967,6 +1969,22 @@
       if (String(result?.user?.role || '').toLowerCase() !== 'admin') {
         throw new Error('Admin access is required.');
       }
+      state.currentUser = result.user || {};
+      const profileEmail = result.user?.email || 'h2houseofhealth@gmail.com';
+      const adminName = result.user?.name || 'H2';
+      const metaEl = document.querySelector('.admin-profile__meta small');
+      if (metaEl) metaEl.textContent = profileEmail;
+      const metaName = document.querySelector('.admin-profile__meta strong');
+      if (metaName) metaName.textContent = adminName;
+      const dropEmailEl = document.getElementById('adminDropdownEmail') || document.querySelector('.admin-profile-dropdown__email');
+      if (dropEmailEl) dropEmailEl.textContent = profileEmail;
+      const dropNameEl = document.querySelector('.admin-profile-dropdown__name');
+      if (dropNameEl) dropNameEl.textContent = adminName;
+      const avatarText = initials(adminName);
+      const avatar1 = document.getElementById('profileAvatar');
+      if (avatar1) avatar1.textContent = avatarText;
+      const avatar2 = document.getElementById('adminDropdownAvatar');
+      if (avatar2) avatar2.textContent = avatarText;
       return true;
     } catch (error) {
       toast('Admin sign-in required', error.message || 'Please sign in with the admin account.', 'warning');
@@ -3929,7 +3947,7 @@
                         <td><strong>${escapeHtml(money(order.totalAmount))}</strong></td>
                         <td>
                           <span class="admin-badge ${statusClass(orderDisplayStatus)}">${escapeHtml(getStatusLabel(orderDisplayStatus))}</span>
-                          ${order.fulfillmentStatus || orderIsAwaitingRestock ? `
+                          ${(order.fulfillmentStatus || orderIsAwaitingRestock) && String(order.fulfillmentStatus).toLowerCase() !== 'cancelled' && String(order.fulfillmentStatus).toLowerCase() !== String(orderDisplayStatus).toLowerCase() ? `
                             <br><span class="admin-badge ${fulfillmentClass}" style="margin-top:3px;font-size:10px;">${escapeHtml(fulfillmentLabel)}</span>
                           ` : ''}
                           ${orderIsActionRequired ? `
@@ -3989,7 +4007,7 @@
                       <button class="admin-btn admin-btn--ghost" type="button" data-action="ship-order" data-id="${selectedOrder?.id || ''}" ${selectedOrder?.isFulfillmentBlocked ? 'disabled title="Stock unavailable"' : ''}>Ship</button>
                       <button class="admin-btn admin-btn--ghost" type="button" data-action="deliver-order" data-id="${selectedOrder?.id || ''}">Deliver</button>
                       <button class="admin-btn admin-btn--danger" type="button" data-action="cancel-order" data-id="${selectedOrder?.id || ''}" ${['delivered', 'returned', 'cancelled'].includes(normalizeOrderStatus(selectedOrder?.status)) ? 'disabled title="Delivered and returned orders cannot be cancelled"' : ''}>Cancel</button>
-                      <button class="admin-btn admin-btn--soft" type="button" data-action="refund-order" data-id="${selectedOrder?.id || ''}">Refund</button>
+                      <button class="admin-btn admin-btn--soft" type="button" data-action="refund-order" data-id="${selectedOrder?.id || ''}" ${String(selectedOrder?.paymentStatus).toLowerCase() === 'refunded' ? 'disabled title="Order is already refunded"' : ''}>Refund</button>
                     </div>
                   </div>
                 </article>
@@ -6177,7 +6195,7 @@
 
   // ── Change Password (3-step: send OTP → verify OTP → set new password) ──
   function renderChangePasswordModal(step = 'email', ctx = {}) {
-    const adminEmail = 'admin@h2health.local';
+    const adminEmail = state.currentUser?.email || 'h2houseofhealth@gmail.com';
 
     const steps = {
       email: {
@@ -7614,7 +7632,9 @@
 
   function cancelOrder(order) {
     order.status = 'cancelled';
-    order.paymentStatus = 'refunded';
+    if (String(order.paymentStatus || '').toLowerCase() === 'cod_pending') {
+      order.paymentStatus = 'cancelled';
+    }
     order.timeline.unshift({
       label: 'Cancelled',
       note: 'Admin cancelled this order from the dashboard',
@@ -7768,7 +7788,7 @@
 
   function renderAll() {
     els.pageTitle.textContent = SECTION_TITLES[state.view] || 'Dashboard';
-    if (els.profileAvatar) els.profileAvatar.textContent = initials('Admin House');
+    if (els.profileAvatar) els.profileAvatar.textContent = initials(state.currentUser?.name || 'H2');
 
     document.querySelectorAll('.admin-nav__item').forEach((button) => {
       button.classList.toggle('is-active', button.dataset.navView === state.view);
@@ -9853,7 +9873,7 @@
           if (action === 'bulk-order-invoice') await openOrderInvoice(selectedOrder.id);
           if (action === 'bulk-order-email') await emailOrderInvoice(selectedOrder.id);
           if (action === 'bulk-order-download') await downloadOrderInvoice(selectedOrder.id);
-          if (action === 'bulk-order-cancel') await updateOrderOnServer(selectedOrder, { status: 'cancelled', payment_status: 'refunded' });
+          if (action === 'bulk-order-cancel') await updateOrderOnServer(selectedOrder, { status: 'cancelled' });
         }
         if (['bulk-order-cancel', 'bulk-order-refund'].includes(action)) await loadOrderData();
         return;
@@ -10002,7 +10022,7 @@
       case 'cancel-order':
         if (order) {
           try {
-            await updateOrderOnServer(order, { status: 'cancelled', payment_status: 'refunded' });
+            await updateOrderOnServer(order, { status: 'cancelled' });
             toast('Order cancelled', `${order.orderNumber} has been marked cancelled.`, 'warning');
           } catch (error) {
             toast('Order update failed', error.message || 'Unable to cancel the order.', 'warning');
