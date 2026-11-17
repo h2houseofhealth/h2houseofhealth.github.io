@@ -1673,6 +1673,7 @@ function attachEvents() {
     });
   }
   window.openBookingCart = openBookingCart;
+  window.openProfileDialog = openProfileDialog;
 
   elements.userTabCart?.addEventListener('click', async () => {
     await openBookingCart();
@@ -1686,6 +1687,8 @@ function attachEvents() {
   document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       if (btn.classList.contains('h2-navbar__btn--profile')) {
+        e.preventDefault();
+        openProfileDialog();
         return;
       }
       e.preventDefault();
@@ -13224,15 +13227,22 @@ function syncNavbarAuth(user = state.user) {
   }
   const authBtns = document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn');
   if (user) {
-    const displayName = (user.name || user.email || 'My Account').split(' ')[0];
-    const initials = (displayName.length === 1 ? displayName : displayName.substring(0, 2)).toUpperCase();
+    const rawName = String(user.name || user.email || 'My Account').trim();
+    const firstName = rawName.split(' ')[0];
+    const displayName = firstName ? (firstName.charAt(0).toUpperCase() + firstName.slice(1)) : 'My Account';
+    const initials = getInitials(rawName);
+    const avatarUrl = user.avatarUrl ? normalizeAvatarUrl(user.avatarUrl) : '';
+    const avatarStyle = avatarUrl ? `style="background-image: url('${avatarUrl}'); background-size: cover; background-position: center; color: transparent;"` : '';
     authBtns.forEach((btn) => {
-      btn.innerHTML = `<span class="h2-navbar__avatar">${initials}</span> <span>${displayName}</span>`;
+      btn.innerHTML = `<span class="h2-navbar__avatar" ${avatarStyle}>${initials}</span> <span>${displayName}</span>`;
       btn.classList.remove('h2-navbar__btn--outline');
       btn.classList.add('h2-navbar__btn--profile');
-      btn.setAttribute('href', '/booking/');
+      btn.setAttribute('href', '#');
       btn.setAttribute('aria-label', `Account of ${displayName}`);
-      btn.onclick = null;
+      btn.onclick = (e) => {
+        e.preventDefault();
+        openProfileDialog();
+      };
     });
   } else {
     authBtns.forEach((btn) => {
@@ -13270,9 +13280,14 @@ function withCacheBuster(urlValue) {
 }
 
 function getInitials(name) {
-  const parts = String(name).trim().split(/\s+/).filter(Boolean).slice(0, 2);
+  const raw = String(name || '').trim();
+  if (!raw) return 'U';
+  const parts = raw.split(/\s+/).filter(Boolean);
   if (parts.length === 0) return 'U';
-  return parts.map((part) => part[0].toUpperCase()).join('');
+  if (parts.length === 1) {
+    return (parts[0].length >= 2 ? parts[0].substring(0, 2) : parts[0]).toUpperCase();
+  }
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
 function renderStats(bookings) {

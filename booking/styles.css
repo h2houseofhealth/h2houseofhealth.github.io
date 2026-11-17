@@ -547,8 +547,8 @@ h1, h2, h3 {
   width: 40px;
   height: 40px;
   border-radius: 999px;
-  background: var(--brand-primary-light);
-  color: var(--brand-primary);
+  background: var(--brand-primary);
+  color: #ffffff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -9577,24 +9577,27 @@ table tbody td {
 
   .top-actions {
     width: 100%;
-    flex-direction: column;
-    align-items: stretch;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
   }
 
-  .profile-btn,
-  .top-actions .btn {
-    width: 100%;
+  .top-actions .profile-btn {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
     justify-content: flex-start;
   }
 
+  .top-actions #logoutBtn {
+    flex: 0 0 auto;
+    width: auto;
+  }
+
   .top-actions .cart-btn {
-    position: relative;
-    width: var(--cart-btn-size) !important;
-    height: var(--cart-btn-size);
-    min-height: var(--cart-btn-size);
-    padding: 0;
-    justify-content: center !important;
-    align-self: auto;
+    display: none !important;
   }
 
   .stats-grid,
@@ -13903,13 +13906,24 @@ img {
 
   .top-actions {
     width: 100%;
-    justify-content: flex-start;
-    flex-wrap: wrap;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     gap: 8px;
   }
 
-  .profile-btn {
+  .top-actions .profile-btn {
+    flex: 1 1 auto;
+    min-width: 0;
     max-width: 100%;
+  }
+
+  .top-actions #logoutBtn {
+    flex: 0 0 auto;
+  }
+
+  .top-actions .cart-btn {
+    display: none !important;
   }
 
   .profile-meta {
@@ -14272,13 +14286,27 @@ img {
   }
 
   .top-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    width: 100% !important;
   }
 
-  .top-actions .profile-btn,
+  .top-actions .profile-btn {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    width: auto !important;
+  }
+
   .top-actions #logoutBtn {
-    grid-column: 1 / -1;
+    flex: 0 0 auto !important;
+    width: auto !important;
+  }
+
+  .top-actions .cart-btn {
+    display: none !important;
   }
 
   .stats-grid,
@@ -16649,82 +16677,103 @@ body.auth-mode .portal {
   }
 
   .top-actions {
-    display: grid !important;
-    grid-template-columns: var(--cart-btn-size) minmax(0, 1fr) !important;
-    gap: 10px !important;
-    width: 100%;
-    align-items: center;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    width: 100% !important;
   }
 
   .top-actions .profile-btn {
-    grid-column: 1 / -1;
-    width: 100%;
-    min-height: 50px;
-    height: auto;
-    justify-content: flex-start;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 12px 8px 10px;
-    border-radius: 18px;
-    border-color: rgba(var(--brand-primary-rgb), 0.12);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 244, 239, 0.96));
-    box-shadow: 0 10px 24px rgba(var(--brand-primary-rgb), 0.08);
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    width: auto !important;
+    min-height: 44px !important;
+    height: auto !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 10px !important;
+    padding: 6px 14px 6px 8px !important;
+    border-radius: 999px !important;
+    border: 1px solid rgba(var(--brand-primary-rgb), 0.16) !important;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 244, 239, 0.96)) !important;
+    box-shadow: 0 4px 14px rgba(var(--brand-primary-rgb), 0.06) !important;
   }
 
   .top-actions .profile-avatar {
-    width: 36px;
-    height: 36px;
-    flex: 0 0 36px;
+    width: 32px !important;
+    height: 32px !important;
+    flex: 0 0 32px !important;
+    border-radius: 50% !important;
+    background: var(--brand-primary) !important;
+    color: #ffffff !important;
+    font-size: 11.5px !important;
+    font-weight: 700 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
   }
 
   .top-actions .profile-meta {
-    min-width: 0;
-    gap: 4px;
-    line-height: 1.08;
+    min-width: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 2px !important;
+    line-height: 1.15 !important;
   }
 
   .top-actions .profile-meta strong {
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 0.96rem;
+    max-width: 100% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    font-size: 0.88rem !important;
+    font-weight: 700 !important;
+    color: var(--text, #2c2523) !important;
   }
 
   .top-actions .profile-badges {
-    min-width: 0;
-    gap: 6px;
+    display: flex !important;
+    align-items: center !important;
+    gap: 4px !important;
   }
 
   .top-actions .role-chip,
   .top-actions .membership-badge {
-    max-width: 100%;
-    line-height: 1;
-    font-size: 0.6rem;
-    padding: 0.2rem 0.5rem;
+    max-width: 100% !important;
+    line-height: 1 !important;
+    font-size: 0.58rem !important;
+    padding: 2px 6px !important;
+    border-radius: 999px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.04em !important;
   }
 
   .top-actions .cart-btn {
-    grid-column: 1;
-    width: var(--cart-btn-size) !important;
-    height: var(--cart-btn-size);
-    min-height: var(--cart-btn-size);
-    align-self: stretch;
+    display: none !important;
   }
 
   .top-actions #logoutBtn {
-    grid-column: 2;
-    width: 100%;
-    min-height: 44px;
-    justify-content: center;
-    gap: 0.45rem;
-    padding: 0 14px;
-    border-radius: 14px;
-    border-color: rgba(var(--brand-primary-rgb), 0.18);
-    background: rgba(var(--brand-primary-rgb), 0.08);
-    color: var(--brand-primary);
-    box-shadow: 0 8px 18px rgba(var(--brand-primary-rgb), 0.08);
-    font-weight: 700;
+    flex: 0 0 auto !important;
+    width: auto !important;
+    min-height: 38px !important;
+    height: 38px !important;
+    justify-content: center !important;
+    align-items: center !important;
+    padding: 0 14px !important;
+    border-radius: 999px !important;
+    border: 1px solid rgba(var(--brand-primary-rgb), 0.22) !important;
+    background: rgba(var(--brand-primary-rgb), 0.08) !important;
+    color: var(--brand-primary) !important;
+    box-shadow: none !important;
+    font-size: 0.78rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.02em !important;
+    display: inline-flex !important;
   }
 
   #userTabNav.user-tab-nav {
@@ -16751,23 +16800,28 @@ body.auth-mode .portal {
 
 @media (max-width: 380px) {
   .top-actions {
-    grid-template-columns: 48px minmax(0, 1fr) !important;
-    gap: 8px !important;
+    gap: 6px !important;
   }
 
   .top-actions .profile-btn {
-    padding-left: 8px;
-    padding-right: 10px;
+    padding-left: 6px !important;
+    padding-right: 10px !important;
+    gap: 8px !important;
   }
 
   .top-actions .profile-meta strong {
-    font-size: 0.92rem;
+    font-size: 0.82rem !important;
   }
 
   .top-actions .role-chip,
   .top-actions .membership-badge {
-    font-size: 0.58rem;
-    padding: 0.18rem 0.45rem;
+    font-size: 0.54rem !important;
+    padding: 2px 4px !important;
+  }
+
+  .top-actions #logoutBtn {
+    padding: 0 10px !important;
+    font-size: 0.74rem !important;
   }
 
   #userTabNav.user-tab-nav {
