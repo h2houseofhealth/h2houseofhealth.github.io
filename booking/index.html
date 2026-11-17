@@ -1471,7 +1471,7 @@
         <div id="bookingCustomerStep" class="form-grid" hidden>
           <label>
             Customer Name
-            <input id="bookingCustomerName" type="text" maxlength="80" placeholder="Enter customer name" />
+            <input id="bookingCustomerName" type="text" maxlength="80" placeholder="Enter customer name" pattern="[A-Za-z\s'\-]+" title="Customer name can only contain letters, spaces, and hyphens" autocomplete="name" />
           </label>
           <label>
             Customer Email
@@ -1492,11 +1492,11 @@
             <select id="serviceName" required></select>
             <div id="experienceServiceLabel" class="experience-service-label" hidden>Hydrogen Therapy</div>
           </label>
-          <label>
+          <label id="bookingDateLabel">
             Date
             <select id="bookingDate" required></select>
           </label>
-          <label>
+          <label id="bookingTimeLabel">
             Time Slot
             <select id="bookingTime" required></select>
           </label>
