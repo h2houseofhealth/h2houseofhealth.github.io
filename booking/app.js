@@ -1391,6 +1391,7 @@ function attachEvents() {
     }
 
     state.user = null;
+    syncNavbarAuth(null);
     state.bookings = [];
     state.adminMembershipOrders = [];
     state.adminDiscountPhones = [];
@@ -1684,6 +1685,9 @@ function attachEvents() {
   });
   document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
+      if (btn.classList.contains('h2-navbar__btn--profile')) {
+        return;
+      }
       e.preventDefault();
       openAuthFromLanding();
     });
@@ -2940,6 +2944,7 @@ async function loadCurrentUser() {
     syncPostLoginChoiceWithMembership();
   } catch (error) {
     state.user = null;
+    syncNavbarAuth(null);
     if (Number(error?.status || 0) === 401) {
       storeAuthToken('');
     }
@@ -8356,6 +8361,7 @@ function render() {
   elements.authCard.hidden = !showAuthCard;
   elements.appArea.hidden = !isAppUser;
   renderMemberChoiceGateCta();
+  syncNavbarAuth(state.user);
 
   document.querySelectorAll('.app-only').forEach((el) => {
     el.hidden = !isAppUser;
@@ -13112,6 +13118,35 @@ function renderProfileAvatar() {
   } else {
     elements.profileAvatar.style.backgroundImage = '';
     elements.profileAvatar.classList.remove('has-image');
+  }
+}
+
+function syncNavbarAuth(user = state.user) {
+  if (typeof window.syncGlobalNavbarAuth === 'function') {
+    window.syncGlobalNavbarAuth(user);
+    return;
+  }
+  const authBtns = document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn');
+  if (user) {
+    const displayName = (user.name || user.email || 'My Account').split(' ')[0];
+    const initials = (displayName.length === 1 ? displayName : displayName.substring(0, 2)).toUpperCase();
+    authBtns.forEach((btn) => {
+      btn.innerHTML = `<span class="h2-navbar__avatar">${initials}</span> <span>${displayName}</span>`;
+      btn.classList.remove('h2-navbar__btn--outline');
+      btn.classList.add('h2-navbar__btn--profile');
+      btn.setAttribute('href', '/booking/');
+      btn.setAttribute('aria-label', `Account of ${displayName}`);
+      btn.onclick = null;
+    });
+  } else {
+    authBtns.forEach((btn) => {
+      btn.classList.remove('h2-navbar__btn--profile');
+      btn.classList.add('h2-navbar__btn--outline');
+      btn.innerHTML = 'Sign Up / Sign In';
+      btn.setAttribute('href', '/booking/?auth=1');
+      btn.setAttribute('aria-label', 'Sign Up or Sign In');
+      btn.onclick = null;
+    });
   }
 }
 
