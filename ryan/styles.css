@@ -460,8 +460,6 @@ button {
     max-height: 100%;
     object-fit: cover;
     object-position: right center;
-    mask-image: linear-gradient(to right, transparent 0%, black 15%);
-    -webkit-mask-image: linear-gradient(to right, transparent 0%, black 15%);
   }
 }
 
