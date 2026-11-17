@@ -6513,7 +6513,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       const offerInfo = variant ? getVariantOfferDetails(variant, product) : null;
       const effectivePrice = offerInfo ? offerInfo.offerPrice : Number(variant?.price || product.price || 0);
       const originalPrice = offerInfo ? offerInfo.originalPrice : (product.basePrice && product.basePrice > effectivePrice ? product.basePrice : null);
-      // Strictly require an actual promotional discount so regular products (e.g. ₹11,900 Mist) are NEVER displayed as an offer
+      // Strictly require an actual promotional discount so regular products (e.g. ₹11,990 Mist) are NEVER displayed as an offer
       return Boolean(originalPrice && originalPrice > effectivePrice);
     });
 
@@ -6528,7 +6528,7 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       const bottleVariant = getDefaultPurchasableVariant(bottleProduct);
       const mistVariant = getDefaultPurchasableVariant(mistProduct);
       const bottlePrice = Number(bottleVariant?.price || bottleProduct.basePrice || 22990);
-      const mistPrice = Number(mistVariant?.price || mistProduct.basePrice || 11900);
+      const mistPrice = Number(mistVariant?.price || mistProduct.basePrice || 11990);
       const regularTotal = bottlePrice + mistPrice;
       const discountRate = Number(bundleDef.discount || 0.85);
       const bundleOfferPrice = Math.round(regularTotal * discountRate);
