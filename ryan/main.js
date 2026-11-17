@@ -1371,9 +1371,6 @@ function renderCheckoutPage() {
 
   container.innerHTML = `
     <div class="shopify-checkout-nav-bar">
-      <a href="#collection" class="shopify-checkout-nav-logo" data-action="return-to-shop" aria-label="Return to store">
-        <img src="assets/H2_Logo_brand.png" alt="H2 House of Health" />
-      </a>
       <div class="shopify-checkout-breadcrumbs">
         <span>Cart</span>
         <span>&rsaquo;</span>

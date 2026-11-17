@@ -260,6 +260,30 @@ function enforceTenDigitMobileInput(input) {
   });
 }
 
+function enforceNameInput(input) {
+  if (!input) return;
+  try {
+    input.pattern = "[A-Za-z\\s'\\-]+";
+    input.autocomplete = 'name';
+  } catch {
+    // Ignore attribute assignment failures.
+  }
+  input.addEventListener('input', (event) => {
+    const target = event?.target;
+    if (!target) return;
+    const clean = String(target.value || '').replace(/[^a-zA-Z\s'-]/g, '');
+    if (target.value !== clean) target.value = clean;
+  });
+}
+
+function isValidCustomerName(name) {
+  const clean = String(name || '').trim();
+  if (!clean || clean.length < 2 || clean.length > 80) return false;
+  if (!/^[a-zA-Z\s'-]+$/.test(clean)) return false;
+  const letterCount = (clean.match(/[a-zA-Z]/g) || []).length;
+  return letterCount >= 2;
+}
+
 const adminRescheduleSearchPlaceholderQuery = window.matchMedia
   ? window.matchMedia('(max-width: 600px)')
   : null;
@@ -1532,6 +1556,10 @@ function attachEvents() {
   enforceTenDigitMobileInput(elements.adminDiscountPhone);
   enforceTenDigitMobileInput(elements.adminCustomerPhone);
   enforceTenDigitMobileInput(elements.membershipAddPersonContact);
+  enforceNameInput(elements.profileName);
+  enforceNameInput(elements.adminCustomerName);
+  enforceNameInput(elements.membershipAddPersonName);
+  enforceNameInput(elements.authName);
   elements.membershipMembersGrid?.addEventListener('input', (event) => {
     const target = event?.target;
     if (!target || !(target instanceof HTMLInputElement)) return;
@@ -2194,6 +2222,7 @@ function attachEvents() {
   elements.bookingCustomerName?.addEventListener('input', syncAdminCustomerFromBookingModal);
   elements.bookingCustomerEmail?.addEventListener('input', syncAdminCustomerFromBookingModal);
   elements.bookingCustomerPhone?.addEventListener('input', syncAdminCustomerFromBookingModal);
+  enforceNameInput(elements.bookingCustomerName);
   enforceTenDigitMobileInput(elements.bookingCustomerPhone);
   elements.closeDialogBtn?.addEventListener('click', closeDialog);
   elements.cancelDialogBtn?.addEventListener('click', closeDialog);
@@ -2799,6 +2828,10 @@ async function submitAuth() {
         elements.authError.textContent = 'Name is required.';
         return;
       }
+      if (!isValidCustomerName(name)) {
+        elements.authError.textContent = 'Name can only contain letters, spaces, and hyphens.';
+        return;
+      }
       pendingSignupName = name;
       let result;
       if (signupMethod === 'mobile') {
@@ -2943,6 +2976,7 @@ function getAdminCustomerValidationMessage() {
   const email = String(state.adminCustomerForm.email || '').trim();
   const phone = normalizeTenDigitMobile(state.adminCustomerForm.phone || '');
   if (!name) return 'Customer name is required.';
+  if (!isValidCustomerName(name)) return 'Customer name can only contain letters, spaces, and hyphens.';
   if (!email || !isValidEmail(email)) return 'Enter a valid customer email.';
   if (!phone || phone.length !== 10) return 'Enter a valid 10-digit contact number.';
   return '';
@@ -3020,7 +3054,7 @@ function syncAdminCustomerFromBookingModal() {
   const prevName = String(state.adminCustomerForm?.name || '').trim();
   const prevEmail = String(state.adminCustomerForm?.email || '').trim();
   const prevPhone = normalizeTenDigitMobile(state.adminCustomerForm?.phone || '');
-  const nextName = String(elements.bookingCustomerName?.value || '').trim().slice(0, 80);
+  const nextName = String(elements.bookingCustomerName?.value || '').replace(/[^a-zA-Z\s'-]/g, '').trim().slice(0, 80);
   const nextEmail = String(elements.bookingCustomerEmail?.value || '').trim();
   const nextPhone = normalizeTenDigitMobile(elements.bookingCustomerPhone?.value || '');
   state.adminCustomerForm = {
@@ -5636,8 +5670,13 @@ async function saveProfile() {
     throw new Error('Age must be between 1 and 120.');
   }
 
+  const trimmedName = elements.profileName.value.trim();
+  if (trimmedName && !isValidCustomerName(trimmedName)) {
+    throw new Error('Name can only contain letters, spaces, and hyphens.');
+  }
+
   const payload = {
-    name: elements.profileName.value.trim(),
+    name: trimmedName,
     age: normalizedAge,
     gender: elements.profileGender.value,
     mobile: normalizedMobile,
@@ -5791,6 +5830,12 @@ async function upsertBooking() {
   // For non-admin users phone is required; email remains optional.
   if (!isAdmin) {
     const contactFallback = getCurrentUserBookingContactFallback(elements.bookingId?.value || '');
+    const enteredName = String(elements.bookingCustomerName?.value || '').trim();
+    if (enteredName && !isValidCustomerName(enteredName)) {
+      showNotice({ title: 'Invalid name', body: 'Customer name can only contain letters, spaces, and hyphens.' });
+      elements.bookingCustomerName?.focus();
+      return;
+    }
     const email = String(elements.bookingCustomerEmail?.value || '').trim() || contactFallback.email;
     const phone = normalizeTenDigitMobile(String(elements.bookingCustomerPhone?.value || '')) || contactFallback.phone;
     if (!phone) {
@@ -5808,7 +5853,7 @@ async function upsertBooking() {
       elements.bookingCustomerPhone?.focus();
       return;
     }
-    payload.customerName = String(elements.bookingCustomerName?.value || '').trim() || contactFallback.name;
+    payload.customerName = enteredName || contactFallback.name;
     payload.customerEmail = email;
     payload.customerPhone = phone;
   }
@@ -6231,7 +6276,7 @@ async function payBooking(id) {
 async function payAllUserBookings() {
   const payButton = elements.bookingsPayAllBtn;
   const originalLabel = payButton?.textContent || 'Pay Now';
-  const couponCode = String(elements.userCouponCode?.value || '').trim();
+  const couponCode = state.cartCouponPreview?.code ? String(state.cartCouponPreview.code).trim() : '';
 
   if (payButton) {
     payButton.disabled = true;

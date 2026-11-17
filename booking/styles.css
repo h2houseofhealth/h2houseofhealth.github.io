@@ -14389,9 +14389,7 @@ img {
     font-size: 12px;
   }
 
-  .dialog-head,
-  #bookingNotesDialog .dialog-head,
-  #adminUserSessionDialog .dialog-head {
+  #bookingNotesDialog .dialog-head {
     flex-direction: column;
     align-items: flex-start;
   }
@@ -18160,3 +18158,89 @@ body:not(.auth-mode) main.portal:not(:has(#memberChoiceGate:not([hidden]))) >
     font-size: 16px !important;
   }
 }
+
+/* ==========================================================================
+   Booking Modal & Form Responsive Cleanups (Mobile & Cross-Device)
+   ========================================================================== */
+
+/* 1. Modal header: ensure title and close button stay on one row */
+.dialog-head,
+.booking-dialog .dialog-head,
+#bookingDialog .dialog-head {
+  display: flex !important;
+  flex-direction: row !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  width: 100% !important;
+  margin-bottom: 0.85rem !important;
+}
+
+#dialogTitle,
+.dialog-head h2 {
+  margin: 0 !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+#closeDialogBtn,
+.dialog-head .icon-btn {
+  margin-left: auto !important;
+  flex: 0 0 auto !important;
+  align-self: center !important;
+  cursor: pointer !important;
+}
+
+/* 2. Scheduler Section: Keep Date & Time Slot side-by-side so dropdown never covers Time Slot */
+#bookingSchedulerSection {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 0.75rem !important;
+}
+
+#bookingSchedulerSection .booking-service-select-field,
+#bookingSchedulerSection .full-width,
+#bookingSchedulerSection #addOnServiceLabel,
+#bookingSchedulerSection #bookingHydrogenAddOnScheduler,
+#bookingSchedulerSection label:has(#bookingNotes) {
+  grid-column: 1 / -1 !important;
+}
+
+#bookingDateLabel,
+#bookingTimeLabel,
+#bookingSchedulerSection label:has(#bookingDate),
+#bookingSchedulerSection label:has(#bookingTime),
+#bookingSchedulerSection label:has(#addOnDate),
+#bookingSchedulerSection label:has(#addOnTime) {
+  grid-column: span 1 !important;
+  min-width: 0 !important;
+}
+
+#bookingSchedulerSection select {
+  width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+/* 3. Booking dialog padding & action buttons bottom clearance */
+#bookingDialog {
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+
+#bookingForm {
+  padding: 1.25rem 1.25rem 2rem 1.25rem !important;
+  box-sizing: border-box !important;
+}
+
+#bookingDialog .dialog-actions {
+  margin-top: 1.25rem !important;
+  margin-bottom: 0.5rem !important;
+  padding-bottom: 0.5rem !important;
+}
+
+@media (max-width: 600px) {
+  #bookingForm {
+    padding: 1rem 1rem 2rem 1rem !important;
+  }
+}
+
