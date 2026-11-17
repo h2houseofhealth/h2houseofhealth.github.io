@@ -244,6 +244,17 @@
     // Auth Action (Sign Up / Sign In)
     document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn').forEach((btn) => {
       btn.addEventListener('click', function (e) {
+        if (btn.classList.contains('h2-navbar__btn--profile')) {
+          if (isMerchPage) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (typeof window.closeNavDrawer === 'function') window.closeNavDrawer();
+            if (typeof window.openAccountDrawer === 'function') {
+              window.openAccountDrawer('account-profile');
+            }
+          }
+          return;
+        }
         if (isBookingPage) {
           e.preventDefault();
           if (typeof window.openAuthFromLanding === 'function') {
@@ -307,12 +318,14 @@
         btn.classList.add('h2-navbar__btn--profile');
         if (window.location.pathname.startsWith('/merch')) {
           btn.setAttribute('href', '#');
-          btn.addEventListener('click', function (e) {
+          btn.onclick = function (e) {
             e.preventDefault();
+            e.stopPropagation();
+            if (typeof window.closeNavDrawer === 'function') window.closeNavDrawer();
             if (typeof window.openAccountDrawer === 'function') {
-              window.openAccountDrawer();
+              window.openAccountDrawer('account-profile');
             }
-          });
+          };
         } else {
           btn.setAttribute('href', '/booking/');
         }
