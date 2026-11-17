@@ -2055,11 +2055,32 @@ function openOrderSuccessModal(paymentId, orderId, amount, customer) {
 }
 function closeOrderSuccessModal() { returnToShop(); }
 function initRazorpayCheckout() {
-  window.addEventListener('hashchange', () => {
+  function syncCheckoutWithHash() {
     if (window.location.hash === '#checkout') {
       showCheckoutPage();
+    } else {
+      const checkoutPage = document.getElementById('checkoutPage');
+      if (checkoutPage && !checkoutPage.hidden) {
+        const mainContent = document.getElementById('mainContent');
+        const bookingConfirmation = document.getElementById('bookingConfirmation');
+        checkoutPage.hidden = true;
+        if (bookingConfirmation) bookingConfirmation.hidden = true;
+        if (mainContent) mainContent.hidden = false;
+
+        const hash = window.location.hash.replace(/^#/, '');
+        if (hash) {
+          const target = document.getElementById(hash);
+          if (target) {
+            requestAnimationFrame(() => {
+              target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+          }
+        }
+      }
     }
-  });
+  }
+
+  window.addEventListener('hashchange', syncCheckoutWithHash);
 }
 
 /* ==========================================================================

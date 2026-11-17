@@ -460,8 +460,6 @@ button {
     max-height: 100%;
     object-fit: cover;
     object-position: right center;
-    mask-image: linear-gradient(to right, transparent 0%, black 15%);
-    -webkit-mask-image: linear-gradient(to right, transparent 0%, black 15%);
   }
 }
 
@@ -2442,13 +2440,6 @@ button {
   color: var(--h2-terracotta);
   letter-spacing: 0.05em;
   text-transform: uppercase;
-}
-
-.best-offers-explore {
-  font-size: 11.5px;
-  font-weight: 500;
-  color: #756D69;
-  text-transform: none;
 }
 
 .best-offers-underline {
