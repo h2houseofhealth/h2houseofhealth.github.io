@@ -6260,6 +6260,18 @@ body.is-auth-loading .merch-auth-cta {
   padding: 0;
 }
 
+.merch-page-container[hidden] {
+  display: none !important;
+}
+
+/* Hide storefront container when SPA views (checkout, detail, confirmation, tracking) are active */
+body:has(#checkoutPage:not([hidden])) .merch-page-container,
+body:has(#productDetail:not([hidden])) .merch-page-container,
+body:has(#bookingConfirmation:not([hidden])) .merch-page-container,
+body:has(#orderTracking:not([hidden])) .merch-page-container {
+  display: none !important;
+}
+
 /* ─── Hero Banner ─── */
 .merch-hero {
   --hero-rust: #b5551f;

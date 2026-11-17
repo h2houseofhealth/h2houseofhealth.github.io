@@ -160,7 +160,12 @@ function isStandaloneBottle(item) {
   return Boolean(
     item &&
     !isPreMadeBundle(item) &&
-    (item.productId === 'bottle' || /bottle/i.test(String(item.name || '')))
+    (
+      item.productId === 'bottle' ||
+      String(item.id || '').startsWith('bottle') ||
+      /bottle/i.test(String(item.name || '')) ||
+      /bottle/i.test(String(item.productId || ''))
+    )
   );
 }
 
@@ -794,6 +799,7 @@ function renderCartDrawer() {
   const unbundledMistDiscount = roundRs(unbundledMists * H2_CATALOGUE[1].price * RYAN_INDIVIDUAL_DISCOUNT_RATE);
 
   const hasEligibleItems = (getCartTotalBottleCount() > 0 || getCartStandaloneMistCount() > 0);
+  const hasBottleInCart = getCartTotalBottleCount() > 0 || currentCart.some((item) => isStandaloneBottle(item) || isPreMadeBundle(item) || /bottle/i.test(String(item.name || item.productId || item.id || '')));
   const isCouponValid = Boolean(appliedCoupon && VALID_RYAN_CODES.includes(appliedCoupon) && hasEligibleItems);
   // Ryan Fernando exclusive coupon: 5% off each unbundled bottle / mist
   const ryanCustomerDiscount = isCouponValid ? roundRs((unbundledBottles * H2_CATALOGUE[0].price + unbundledMists * H2_CATALOGUE[1].price) * RYAN_INDIVIDUAL_DISCOUNT_RATE) : 0;
@@ -1301,6 +1307,7 @@ function renderCheckoutPage() {
   const unbundledMistDiscount = roundRs(unbundledMists * H2_CATALOGUE[1].price * RYAN_INDIVIDUAL_DISCOUNT_RATE);
 
   const hasEligibleItems = (getCartTotalBottleCount() > 0 || getCartStandaloneMistCount() > 0);
+  const hasBottleInCart = getCartTotalBottleCount() > 0 || currentCart.some((item) => isStandaloneBottle(item) || isPreMadeBundle(item) || /bottle/i.test(String(item.name || item.productId || item.id || '')));
   const isCouponValid = Boolean(appliedCoupon && VALID_RYAN_CODES.includes(appliedCoupon) && hasEligibleItems);
   const ryanCustomerDiscount = isCouponValid ? roundRs((unbundledBottles * H2_CATALOGUE[0].price + unbundledMists * H2_CATALOGUE[1].price) * RYAN_INDIVIDUAL_DISCOUNT_RATE) : 0;
 
@@ -1537,9 +1544,6 @@ function renderCheckoutPage() {
           <a href="/pages/contact.html" target="_blank">Terms of Service</a>, 
           <a href="/pages/contact.html" target="_blank">Privacy Policy</a>, and 
           <a href="/pages/contact.html" target="_blank">Warranty Policy</a>.
-          <div class="shopify-disclaimer-box">
-            <strong>Bottle Color Disclaimer:</strong> Bottle color availability may vary slightly depending on stock. All products are authentic and backed by H2 House of Health warranty.
-          </div>
         </div>
       </form>
 
@@ -1552,6 +1556,11 @@ function renderCheckoutPage() {
         </div>
 
         <div class="shopify-pricing">
+          ${hasBottleInCart ? `
+            <div class="shopify-disclaimer-box shopify-summary-disclaimer">
+              <strong>Bottle Color Disclaimer:</strong> Bottle color availability may vary slightly depending on stock. All products are authentic and backed by H2 House of Health warranty.
+            </div>
+          ` : ''}
           <div class="shopify-price-row">
             <span>Original subtotal</span>
             <strong>₹${formatRs(fullRetailSubtotal)}</strong>
