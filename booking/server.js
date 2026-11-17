@@ -2710,6 +2710,9 @@ app.post('/api/admin/users', requireAuth, requireAdmin, (req, res) => {
   if (!name || !email || !mobile) {
     return res.status(400).json({ message: 'Name, email, and phone are required.' });
   }
+  if (!isValidPersonName(name)) {
+    return res.status(400).json({ message: 'Customer name can only contain letters, spaces, and hyphens.' });
+  }
   if (!isValidEmail(email)) {
     return res.status(400).json({ message: 'A valid email address is required.' });
   }
@@ -7852,8 +7855,8 @@ app.post('/api/guest/checkout', async (req, res) => {
   const { guestName, guestEmail, guestPhone, bookings, couponCode } = req.body;
 
   // Validate guest information
-  if (!guestName || typeof guestName !== 'string' || guestName.trim().length < 2 || guestName.trim().length > 80) {
-    return res.status(400).json({ message: 'Valid guest name (2-80 characters) is required' });
+  if (!guestName || typeof guestName !== 'string' || !isValidPersonName(guestName)) {
+    return res.status(400).json({ message: 'Valid guest name (letters and spaces only, 2-80 characters) is required' });
   }
 
   if (!guestEmail || typeof guestEmail !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail.trim())) {
@@ -12044,6 +12047,10 @@ function resolveAdminCustomerContext({ userId, customerName, customerEmail, cust
   const normalizedPhone = String(customerPhone || '').trim();
   const numericUserId = Number(userId);
 
+  if (normalizedName && !isValidPersonName(normalizedName)) {
+    return { error: 'Customer name can only contain letters, spaces, and hyphens' };
+  }
+
   if (normalizedEmail && !isValidEmail(normalizedEmail)) {
     return { error: 'valid customerEmail is required' };
   }
@@ -14535,6 +14542,11 @@ function validateBookingPayload(body, user, options = {}) {
   const bookingDate = String(body.bookingDate || '').trim();
   const bookingTime = String(body.bookingTime || '').trim();
   const notes = String(body.notes || '').trim();
+  const customerName = String(body.customerName || '').trim();
+
+  if (customerName && !isValidPersonName(customerName)) {
+    return { error: 'Customer name can only contain letters, spaces, and hyphens.' };
+  }
 
   if (!serviceName || !bookingDate || !bookingTime) {
     return { error: 'serviceName, bookingDate, bookingTime are required' };
@@ -15643,6 +15655,14 @@ function getTransporter() {
     secure: port === 465,
     auth: { user, pass },
   });
+}
+
+function isValidPersonName(name) {
+  const clean = String(name || '').trim();
+  if (!clean || clean.length < 2 || clean.length > 80) return false;
+  if (!/^[a-zA-Z\s'-]+$/.test(clean)) return false;
+  const letterCount = (clean.match(/[a-zA-Z]/g) || []).length;
+  return letterCount >= 2;
 }
 
 function isValidEmail(email) {

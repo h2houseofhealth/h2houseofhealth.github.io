@@ -405,12 +405,12 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       slug: 'h2-mist-spray',
       description: 'Compact hydrogen mist spray for skin rejuvenation. Antioxidant-rich hydrogen water delivery.',
       category: 'sprays',
-      basePrice: 1190000,
+      basePrice: 1199000,
       image: '/cdn/shop/files/hero/h2-mist-transparent-source.png',
       weight: 150,
       variants: [
-        ['HM-SPR-013-WHT', '13ml', 'White', 1190000, 50, '/cdn/shop/files/hero/h2-mist-transparent-source.png'],
-        ['HM-SPR-013-BLK', '13ml', 'Black', 1190000, 50, '/cdn/shop/files/products/mist-black.png'],
+        ['HM-SPR-013-WHT', '13ml', 'White', 1199000, 50, '/cdn/shop/files/hero/h2-mist-transparent-source.png'],
+        ['HM-SPR-013-BLK', '13ml', 'Black', 1199000, 50, '/cdn/shop/files/products/mist-black.png'],
       ],
     },
   ];
@@ -524,7 +524,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       },
       {
         slug: 'h2-mist-spray',
-        price: 1190000,
+        price: 1199000,
         oldSkus: ['HM-SPR-050-WHT', 'HM-SPR-100-WHT', 'HM-SPR-050-RSG', 'HM-SPR-100-RSG'],
         specifications: {
           'Product Name': 'Hydrogen Mist Sprayer',
