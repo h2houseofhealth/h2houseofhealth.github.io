@@ -17186,12 +17186,17 @@ body.auth-mode .portal {
     padding: 48px 32px;
   }
 
-  #userCartSection #cartEmptyState {
+  #userCartSection #cartEmptyState:not([hidden]) {
     display: grid !important;
     grid-template-columns: 1fr !important;
     grid-auto-flow: row !important;
     place-items: center;
     width: 100%;
+  }
+
+  #userCartSection #cartEmptyState[hidden],
+  #cartEmptyState[hidden] {
+    display: none !important;
   }
 
   #userCartSection #cartEmptyState > * {

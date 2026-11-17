@@ -3401,10 +3401,20 @@ function loadStoredGuestCart() {
       ? parsed.filter((booking) => {
           if (!booking || typeof booking !== 'object') return false;
           if (String(booking.status || '').trim().toLowerCase() === 'cancelled') return false;
-          return String(booking.paymentStatus || 'unpaid').trim().toLowerCase() !== 'paid';
+          if (String(booking.paymentStatus || 'unpaid').trim().toLowerCase() === 'paid') return false;
+          const bDate = String(booking.bookingDate || '').trim();
+          const bTime = normalizeSlotStartTime(String(booking.bookingTime || '').trim()) || '23:59';
+          if (bDate && (bDate < getTodayIsoDate() || isBookingSlotInPast(bDate, bTime))) return false;
+          return true;
         })
       : [];
-    return normalizeGuestCartComboGroups(cart);
+    const normalized = normalizeGuestCartComboGroups(cart);
+    if (Array.isArray(parsed) && parsed.length !== normalized.length) {
+      try {
+        localStorage.setItem('h2_guest_cart', JSON.stringify(normalized));
+      } catch {}
+    }
+    return normalized;
   } catch {
     return [];
   }
@@ -3587,6 +3597,9 @@ function buildGuestCartBookingsFromPayload(payload = {}) {
   const serviceName = String(payload.serviceName || '').trim();
   const bookingDate = String(payload.bookingDate || '').trim();
   const bookingTime = normalizeSlotStartTime(String(payload.bookingTime || '').trim());
+  if (bookingDate && (bookingDate < getTodayIsoDate() || isBookingSlotInPast(bookingDate, bookingTime))) {
+    return [];
+  }
   const addOnServiceName = String(payload.addOnServiceName || payload.addOnService || '').trim();
   const bookingGroupId = String(payload.bookingGroupId || '').trim() || (addOnServiceName ? `guest_combo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` : '');
   const bookings = [];
@@ -3668,8 +3681,14 @@ function buildGuestCartBookingsFromPayload(payload = {}) {
 
 function addGuestCartBookings(bookings = []) {
   const nextBookings = (Array.isArray(bookings) ? bookings : [bookings]).filter(
-    (booking) => booking?.serviceName && booking?.bookingDate && booking?.bookingTime
+    (booking) =>
+      booking?.serviceName &&
+      booking?.bookingDate &&
+      booking?.bookingTime &&
+      String(booking.bookingDate).trim() >= getTodayIsoDate() &&
+      !isBookingSlotInPast(booking.bookingDate, booking.bookingTime)
   );
+  if (!nextBookings.length) return [];
   state.cart = [...getGuestCartBookings(), ...nextBookings];
   persistGuestCart();
   return nextBookings;
@@ -5746,6 +5765,16 @@ async function upsertBooking() {
     bookingTime: elements.bookingTime.value,
     notes: elements.bookingNotes.value.trim(),
   };
+
+  const isAdmin = state.user?.role === 'admin';
+  if (!isAdmin && payload.bookingDate && payload.bookingDate < getTodayIsoDate()) {
+    showNotice({ title: 'Invalid date', body: 'Booking date cannot be in the past.' });
+    return;
+  }
+  if (!isAdmin && payload.bookingDate && isBookingSlotInPast(payload.bookingDate, payload.bookingTime)) {
+    showNotice({ title: 'Slot unavailable', body: 'The selected time slot has already passed for today.' });
+    return;
+  }
   
   const selectedAddOnName = elements.addOnService?.value;
   if (selectedAddOnName) {
@@ -5784,7 +5813,6 @@ async function upsertBooking() {
     ? Number(selectedAddOnService.effectivePriceInr || selectedAddOnService.priceInr || 0)
     : 0;
   
-  const isAdmin = state.user?.role === 'admin';
   console.log("MODE:", state.adminBookingMode);
   if (isAdmin) {
    if (state.adminBookingMode === 'new') {
@@ -6411,6 +6439,17 @@ async function saveHydrogenPackBookings({ serviceName, extraSessions, slots, add
     return;
   }
   clearHydrogenComposerNotice();
+  const pastSlot = (Array.isArray(slots) ? slots : []).find(
+    (s) => !isAdmin && (String(s?.bookingDate || '').trim() < getTodayIsoDate() || isBookingSlotInPast(s?.bookingDate, s?.bookingTime))
+  );
+  if (pastSlot) {
+    setHydrogenComposerNotice(
+      `Session slot ${pastSlot.bookingDate} ${formatBookingTimeLabel(pastSlot.bookingTime)} is in the past. Please select an upcoming slot.`,
+      'error'
+    );
+    renderServices();
+    return;
+  }
   const duplicateSlot = findDuplicateHydrogenSlotClient(slots);
   if (duplicateSlot) {
     setHydrogenComposerNotice(
@@ -6558,6 +6597,18 @@ async function saveHydrogenPackBookings({ serviceName, extraSessions, slots, add
 
 async function updateHydrogenPackBookings({ bookingGroupId, serviceName, extraSessions, slots, addOnServiceName, addOnSessionIndex }) {
   clearHydrogenComposerNotice();
+  const isAdmin = state.user?.role === 'admin';
+  const pastSlot = (Array.isArray(slots) ? slots : []).find(
+    (s) => !isAdmin && (String(s?.bookingDate || '').trim() < getTodayIsoDate() || isBookingSlotInPast(s?.bookingDate, s?.bookingTime))
+  );
+  if (pastSlot) {
+    setHydrogenComposerNotice(
+      `Session slot ${pastSlot.bookingDate} ${formatBookingTimeLabel(pastSlot.bookingTime)} is in the past. Please select an upcoming slot.`,
+      'error'
+    );
+    renderServices();
+    return;
+  }
   const duplicateSlot = findDuplicateHydrogenSlotClient(slots);
   if (duplicateSlot) {
     setHydrogenComposerNotice(
@@ -9704,7 +9755,12 @@ function renderHydrogenUnifiedComposer({ detailsContainer, services, category, i
 
     dateInput.addEventListener('change', () => {
       clearHydrogenComposerNotice();
-      const nextDate = dateInput.value || getTodayIsoDate();
+      let nextDate = String(dateInput.value || '').trim() || getTodayIsoDate();
+      if (nextDate < getTodayIsoDate()) {
+        setHydrogenComposerNotice('Booking date cannot be in the past.', 'error');
+        nextDate = getTodayIsoDate();
+        dateInput.value = nextDate;
+      }
       state.activeHydrogenSessionIndex = storageIndex;
       if (state.selectedHydrogenAddOnServiceName) {
         state.selectedHydrogenAddOnSessionIndex = storageIndex;
@@ -10110,7 +10166,12 @@ function renderIvUnifiedComposer({ detailsContainer, services, category }) {
   };
 
   dateInput.addEventListener('change', () => {
-    const nextDate = dateInput.value || getTodayIsoDate();
+    let nextDate = String(dateInput.value || '').trim() || getTodayIsoDate();
+    if (nextDate < getTodayIsoDate()) {
+      showNotice({ title: 'Invalid date', body: 'Booking date cannot be in the past.' });
+      nextDate = getTodayIsoDate();
+      dateInput.value = nextDate;
+    }
     const selectedServiceName = state.serviceDetailSelections[category]?.selectedPlanName || selectedService.name;
     populateAvailableTimeOptions(
       timeSelect,
@@ -10462,10 +10523,22 @@ function renderIvUnifiedComposer({ detailsContainer, services, category }) {
   stickyButton.disabled = selectedServiceIsMembershipOnly && !selectedServiceHasMemberAccess;
   stickyButton.addEventListener('click', async () => {
     try {
+      const selectedDateVal = String(dateInput.value || '').trim() || getTodayIsoDate();
+      const isAdmin = state.user?.role === 'admin';
+      if (!isAdmin && selectedDateVal < getTodayIsoDate()) {
+        showNotice({ title: 'Invalid date', body: 'Booking date cannot be in the past.' });
+        dateInput.value = getTodayIsoDate();
+        return;
+      }
+      const selectedTimeVal = timeSelect.value || SLOT_OPTIONS[0].value;
+      if (!isAdmin && isBookingSlotInPast(selectedDateVal, selectedTimeVal)) {
+        showNotice({ title: 'Slot unavailable', body: 'The selected time slot has already passed for today.' });
+        return;
+      }
       const payload = {
         serviceName: selectedService.name,
-        bookingDate: dateInput.value || getTodayIsoDate(),
-        bookingTime: timeSelect.value || SLOT_OPTIONS[0].value,
+        bookingDate: selectedDateVal,
+        bookingTime: selectedTimeVal,
         addOnServiceName: selectedAddOnService ? selectedAddOnService.name : '',
         addOnBookingDate: selectedAddOnService
           ? isHydrogenAddOn
@@ -10479,6 +10552,10 @@ function renderIvUnifiedComposer({ detailsContainer, services, category }) {
           : '',
         addOnHydrogenSlots: selectedAddOnService && isHydrogenAddOn ? getHydrogenAddOnSlots() : [],
       };
+      if (!isAdmin && payload.addOnServiceName && payload.addOnBookingDate && payload.addOnBookingDate < getTodayIsoDate()) {
+        showNotice({ title: 'Invalid date', body: 'Add-on booking date cannot be in the past.' });
+        return;
+      }
       if (isEditingIvBooking) {
         await updateIvUnifiedBooking({
           bookingId: editingBookingId,
@@ -10515,7 +10592,20 @@ async function saveIvUnifiedBookingToCart({
   const safeDate = String(bookingDate || '').trim();
   const safeTime = String(bookingTime || '').trim();
   if (!safeDate || !safeTime) {
-    showNotice({ title: 'Notice', body: 'Set hydrogen session date and time first.' });
+    showNotice({ title: 'Notice', body: 'Set session date and time first.' });
+    return;
+  }
+  const isUserAdmin = state.user?.role === 'admin';
+  if (!isUserAdmin && safeDate < getTodayIsoDate()) {
+    showNotice({ title: 'Invalid date', body: 'Booking date cannot be in the past.' });
+    return;
+  }
+  if (!isUserAdmin && isBookingSlotInPast(safeDate, safeTime)) {
+    showNotice({ title: 'Slot unavailable', body: 'The selected time slot has already passed for today.' });
+    return;
+  }
+  if (!isUserAdmin && addOnServiceName && addOnBookingDate && String(addOnBookingDate).trim() < getTodayIsoDate()) {
+    showNotice({ title: 'Invalid date', body: 'Add-on booking date cannot be in the past.' });
     return;
   }
   if (addOnServiceName && (!String(addOnBookingDate || '').trim() || !String(addOnBookingTime || '').trim())) {
@@ -11650,6 +11740,12 @@ function shiftAdminAllBookingDateFilters(daysToAdd = 0) {
     startDate: addDaysToIsoDate(effectiveStart, daysToAdd) || effectiveStart,
     endDate: addDaysToIsoDate(effectiveEnd, daysToAdd) || effectiveEnd,
   };
+}
+
+function isBookingDateInPast(bookingDate) {
+  const normalizedDate = String(bookingDate || '').trim();
+  if (!normalizedDate) return false;
+  return normalizedDate < getTodayIsoDate();
 }
 
 function isBookingSlotInPast(bookingDate, bookingTime) {
@@ -14221,6 +14317,9 @@ function getUserCartPayableBookings(bookings = state.bookings) {
     if (String(booking.status || '').toLowerCase() === 'cancelled') return false;
     if (isBookingPaid(booking)) return false;
     if (booking.holdExpired) return false;
+    const bookingDate = String(booking.bookingDate || '').trim();
+    const bookingTime = normalizeSlotStartTime(String(booking.bookingTime || '').trim()) || '23:59';
+    if (bookingDate && isBookingSlotInPast(bookingDate, bookingTime)) return false;
     const service = getServiceCatalogEntry(booking.serviceName);
     return !service?.membershipOnly;
   });
@@ -17092,11 +17191,28 @@ async function api(url, options = {}) {
       url = normalizedUrl.replace('/api/services/availability', '/api/public/services/availability');
     } else if (method === 'POST' && normalizedUrl === '/api/bookings') {
       const payload = JSON.parse(String(options.body || '{}'));
+      const targetDate = String(payload.bookingDate || '').trim();
+      const targetTime = normalizeSlotStartTime(String(payload.bookingTime || '').trim());
+      if (targetDate && (targetDate < getTodayIsoDate() || isBookingSlotInPast(targetDate, targetTime))) {
+        throw new Error('Booking date/time cannot be in the past. Please select an upcoming slot.');
+      }
       const bookings = buildGuestCartBookingsFromPayload(payload);
+      if (!bookings.length) {
+        throw new Error('Unable to add booking: slot is in the past or invalid.');
+      }
       addGuestCartBookings(bookings);
       return { booking: bookings[0] || null, bookings };
     } else if (method === 'POST' && normalizedUrl === '/api/hydrogen/book-pack') {
       const payload = JSON.parse(String(options.body || '{}'));
+      const slots = Array.isArray(payload.slots) ? payload.slots : [];
+      const hasPastSlot = slots.some((slot) => {
+        const slotDate = String(slot?.bookingDate || '').trim();
+        const slotTime = normalizeSlotStartTime(String(slot?.bookingTime || '').trim());
+        return slotDate < getTodayIsoDate() || isBookingSlotInPast(slotDate, slotTime);
+      });
+      if (hasPastSlot) {
+        throw new Error('One or more selected session slots are in the past. Please select future slots.');
+      }
       const bookingGroupId = String(payload.bookingGroupId || '').trim() || `guest_combo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const baseBookings = (Array.isArray(payload.slots) ? payload.slots : []).map((slot) =>
         createGuestCartBooking({
