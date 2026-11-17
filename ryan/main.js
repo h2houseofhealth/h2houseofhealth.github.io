@@ -2671,20 +2671,19 @@ async function initAuthSystem() {
   }
 
   // Bind Header Account Button & Dropdown
-  const headerAccountBtn = document.getElementById('headerAccountBtn');
+  const authBtn = document.getElementById('h2AuthBtn') || document.getElementById('headerAccountBtn');
   const accountDropdownMenu = document.getElementById('accountDropdownMenu');
   const accountSignOutBtn = document.getElementById('accountSignOutBtn');
   const accountViewOrdersBtn = document.getElementById('accountViewOrdersBtn');
 
-  if (headerAccountBtn) {
-    headerAccountBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
+  if (authBtn) {
+    authBtn.addEventListener('click', (e) => {
       if (currentAuthUser && !currentAuthUser.isGuest) {
+        e.preventDefault();
+        e.stopPropagation();
         if (accountDropdownMenu) {
           accountDropdownMenu.hidden = !accountDropdownMenu.hidden;
         }
-      } else {
-        openAuthModal('signin');
       }
     });
   }
@@ -3000,35 +2999,82 @@ async function fetchAuthUser() {
   updateAuthHeaderUI();
 }
 
+function getInitials(name) {
+  if (!name) return 'U';
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 function updateAuthHeaderUI() {
-  const headerAccountBtn = document.getElementById('headerAccountBtn');
+  const authBtn = document.getElementById('h2AuthBtn') || document.getElementById('headerAccountBtn');
+  const drawerAuthBtn = document.getElementById('h2DrawerAuthBtn');
   const dropdownUserName = document.getElementById('dropdownUserName');
   const dropdownUserEmail = document.getElementById('dropdownUserEmail');
   const accountDropdownMenu = document.getElementById('accountDropdownMenu');
 
   if (currentAuthUser && !currentAuthUser.isGuest) {
-    if (headerAccountBtn) {
-      headerAccountBtn.classList.add('is-signed-in');
-      const tooltip = currentAuthUser.name ? `Account (${currentAuthUser.name})` : 'Account';
-      headerAccountBtn.setAttribute('title', tooltip);
-      headerAccountBtn.setAttribute('aria-label', tooltip);
+    const rawName = String(currentAuthUser.name || currentAuthUser.email || 'Account').trim();
+    const firstName = rawName.split(' ')[0];
+    const displayName = firstName ? (firstName.charAt(0).toUpperCase() + firstName.slice(1)) : 'Account';
+    const initials = getInitials(rawName);
+    const tooltip = currentAuthUser.name ? `Account (${currentAuthUser.name})` : 'Account';
+
+    if (authBtn) {
+      authBtn.className = 'h2-navbar__btn h2-navbar__btn--profile';
+      authBtn.href = '#';
+      authBtn.setAttribute('title', tooltip);
+      authBtn.setAttribute('aria-label', tooltip);
+      authBtn.innerHTML = `<span class="h2-navbar__avatar">${initials}</span> <span>${displayName}</span>`;
     }
+
+    if (drawerAuthBtn) {
+      drawerAuthBtn.innerHTML = `<span class="h2-navbar__avatar" style="width:24px;height:24px;font-size:10px;margin-right:8px;">${initials}</span> <span>${currentAuthUser.name || displayName}</span>`;
+      drawerAuthBtn.href = '#';
+      drawerAuthBtn.onclick = (e) => {
+        e.preventDefault();
+        if (confirm(`Signed in as ${currentAuthUser.name || currentAuthUser.email}. Would you like to sign out?`)) {
+          handleSignOut();
+        }
+      };
+    }
+
     if (dropdownUserName) dropdownUserName.textContent = currentAuthUser.name || 'H2 Customer';
     if (dropdownUserEmail) dropdownUserEmail.textContent = currentAuthUser.email || '';
   } else if (currentAuthUser && currentAuthUser.isGuest) {
-    if (headerAccountBtn) {
-      headerAccountBtn.classList.add('is-signed-in');
-      headerAccountBtn.setAttribute('title', 'Guest Account');
-      headerAccountBtn.setAttribute('aria-label', 'Guest Account');
+    if (authBtn) {
+      authBtn.className = 'h2-navbar__btn h2-navbar__btn--outline';
+      authBtn.href = `/merch/auth.html?returnTo=${encodeURIComponent('/ryan/')}`;
+      authBtn.setAttribute('title', 'Guest Account — Sign In');
+      authBtn.setAttribute('aria-label', 'Guest Account');
+      authBtn.innerHTML = 'Sign Up / Sign In';
+    }
+    if (drawerAuthBtn) {
+      drawerAuthBtn.className = 'mobile-nav-link mobile-nav-auth';
+      drawerAuthBtn.href = `/merch/auth.html?returnTo=${encodeURIComponent('/ryan/')}`;
+      drawerAuthBtn.innerHTML = 'Sign Up / Sign In';
+      drawerAuthBtn.onclick = null;
     }
     if (dropdownUserName) dropdownUserName.textContent = currentAuthUser.name || 'Guest Customer';
     if (dropdownUserEmail) dropdownUserEmail.textContent = 'Guest Checkout Mode';
   } else {
-    if (headerAccountBtn) {
-      headerAccountBtn.classList.remove('is-signed-in');
-      headerAccountBtn.setAttribute('title', 'Account / Sign In');
-      headerAccountBtn.setAttribute('aria-label', 'Account / Sign In');
+    if (authBtn) {
+      authBtn.className = 'h2-navbar__btn h2-navbar__btn--outline';
+      authBtn.href = `/merch/auth.html?returnTo=${encodeURIComponent('/ryan/')}`;
+      authBtn.setAttribute('title', 'Sign Up / Sign In');
+      authBtn.setAttribute('aria-label', 'Sign Up or Sign In');
+      authBtn.innerHTML = 'Sign Up / Sign In';
     }
+
+    if (drawerAuthBtn) {
+      drawerAuthBtn.className = 'mobile-nav-link mobile-nav-auth';
+      drawerAuthBtn.href = `/merch/auth.html?returnTo=${encodeURIComponent('/ryan/')}`;
+      drawerAuthBtn.innerHTML = 'Sign Up / Sign In';
+      drawerAuthBtn.onclick = null;
+    }
+
     if (accountDropdownMenu) accountDropdownMenu.hidden = true;
   }
 }
