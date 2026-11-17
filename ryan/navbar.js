@@ -12,6 +12,45 @@
 
   // Highlight active link and handle smooth scrolling for anchor links
   function initActiveNavLinks() {
+    function navigateToSection(targetId, e) {
+      if (e) e.preventDefault();
+
+      const mainContent = document.getElementById('mainContent');
+      const checkoutPage = document.getElementById('checkoutPage');
+      const bookingConfirmation = document.getElementById('bookingConfirmation');
+
+      if (checkoutPage) checkoutPage.hidden = true;
+      if (bookingConfirmation) bookingConfirmation.hidden = true;
+      if (mainContent) mainContent.hidden = false;
+
+      // Close mobile menu drawer if open
+      const drawer = document.getElementById('mobileNavDrawer');
+      const backdrop = document.getElementById('mobileNavBackdrop');
+      const toggleBtn = document.getElementById('mobileMenuToggle');
+      if (drawer && drawer.classList.contains('open')) {
+        drawer.classList.remove('open');
+        if (backdrop) backdrop.classList.remove('open');
+        if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
+        drawer.setAttribute('aria-hidden', 'true');
+        document.body.style.overflow = '';
+        document.documentElement.style.overflow = '';
+      }
+
+      if (targetId) {
+        const targetEl = document.getElementById(targetId);
+        if (targetEl) {
+          requestAnimationFrame(() => {
+            targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          });
+        }
+        try {
+          history.pushState(null, '', '#' + targetId);
+        } catch {
+          window.location.hash = targetId;
+        }
+      }
+    }
+
     const navLinks = document.querySelectorAll('.nav-link, .mobile-nav-link');
     navLinks.forEach((link) => {
       const linkHref = link.getAttribute('href');
@@ -20,26 +59,17 @@
       if (linkHref.startsWith('#')) {
         link.addEventListener('click', (e) => {
           const targetId = linkHref.substring(1);
-          const targetEl = document.getElementById(targetId);
-          if (targetEl) {
-            e.preventDefault();
-            targetEl.scrollIntoView({ behavior: 'smooth' });
-          }
+          navigateToSection(targetId, e);
         });
       }
     });
 
-    // Handle Shop Now CTA button on Home Page
-    const ryanBtn = document.getElementById('headerRyanBtn');
-    if (ryanBtn) {
-      ryanBtn.addEventListener('click', (e) => {
-        const collectionSec = document.getElementById('collection');
-        if (collectionSec) {
-          e.preventDefault();
-          collectionSec.scrollIntoView({ behavior: 'smooth' });
-        }
+    // Handle Shop Now CTA button on Home Page and mobile drawer
+    document.querySelectorAll('#headerRyanBtn, .mobile-nav-footer .btn-ryans-collection').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        navigateToSection('collection', e);
       });
-    }
+    });
   }
 
   // Accessible Mobile Menu Drawer
