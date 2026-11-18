@@ -18,7 +18,8 @@ const H2_CATALOGUE = [
     offerDiscount: '5% OFF',
     image: 'assets/products/card-bottle-silver.jpg',
     inStock: true,
-    targetCardSelector: '[data-product="bottle"]',
+    url: '#product-bottle',
+    targetCardSelector: '#product-bottle',
     keywords: ['bottle', 'water', 'molecular', 'hydrogen', 'h2', 'silver', 'black', 'gold', 'blue', '460ml', 'flask']
   },
   {
@@ -32,7 +33,8 @@ const H2_CATALOGUE = [
     offerDiscount: '2% OFF',
     image: 'assets/products/card-mist-white.jpg',
     inStock: true,
-    targetCardSelector: '[data-product="mist"]',
+    url: '#product-mist',
+    targetCardSelector: '#product-mist',
     keywords: ['mist', 'spray', 'face', 'hydrogen', 'h2', 'white', 'black', 'ultrasonic', 'skincare', '13ml']
   },
   {
@@ -46,7 +48,8 @@ const H2_CATALOGUE = [
     offerDiscount: 'Sold Out',
     image: 'assets/products/card-hoodie-terracotta.jpg',
     inStock: false,
-    targetCardSelector: '[data-product="hoodie"]',
+    url: '#product-hoodie',
+    targetCardSelector: '#product-hoodie',
     keywords: ['hoodie', 'apparel', 'sweatshirt', 'cotton', 'terracotta', 'merch', 'h2', 'wear']
   }
 ];
@@ -399,9 +402,14 @@ document.addEventListener('DOMContentLoaded', () => {
   syncPricesFromServer();
 
   if (window.location.hash) {
-    const target = document.querySelector(window.location.hash);
-    if (target) {
-      setTimeout(() => target.scrollIntoView({ behavior: 'instant', block: 'start' }), 50);
+    const hash = window.location.hash;
+    if (hash.startsWith('#product-')) {
+      setTimeout(() => navigateToProductCard(hash), 100);
+    } else {
+      const target = document.querySelector(hash);
+      if (target) {
+        setTimeout(() => target.scrollIntoView({ behavior: 'instant', block: 'start' }), 50);
+      }
     }
   }
 
@@ -455,6 +463,20 @@ function initSearchInteraction() {
   if (!searchBtn || !searchDropdown || !searchInput) return;
 
   function openSearch() {
+    // Close mobile navigation drawer if open
+    const mobileDrawer = document.getElementById('mobileNavDrawer');
+    const mobileBackdrop = document.getElementById('mobileNavBackdrop');
+    if (mobileDrawer && mobileDrawer.classList.contains('open')) {
+      mobileDrawer.classList.remove('open');
+      if (mobileBackdrop) mobileBackdrop.classList.remove('open');
+      document.body.style.overflow = '';
+      document.documentElement.style.overflow = '';
+    }
+    // Close cart drawer if open
+    if (typeof closeCartDrawer === 'function') {
+      closeCartDrawer();
+    }
+
     searchDropdown.hidden = false;
     searchBtn.setAttribute('aria-expanded', 'true');
     searchInput.focus();
@@ -496,10 +518,24 @@ function initSearchInteraction() {
     filterSearchResults(query);
   });
 
+  // Handle Enter key in search input to filter Ryan's curated collection
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const query = searchInput.value.trim();
+      closeSearch();
+      filterCollectionBySearch(query);
+    }
+  });
+
   function filterSearchResults(query) {
     const q = query.toLowerCase();
+
     if (searchQueryLabel) {
       searchQueryLabel.textContent = query || 'all products';
+    }
+    if (searchViewAllBtn) {
+      searchViewAllBtn.setAttribute('href', '#collection');
     }
 
     let matches = H2_CATALOGUE;
@@ -530,36 +566,43 @@ function initSearchInteraction() {
     searchResultsList.innerHTML = items
       .map(
         (product) => `
-        <div class="search-result-item" role="option" data-target="${product.targetCardSelector}">
+        <a class="search-result-item" role="option" href="${product.url}" data-target="${product.targetCardSelector}" data-product-id="${product.id}">
           <img src="${product.image}" alt="${product.name}" class="search-item-thumb" />
           <div class="search-item-info">
             <h4 class="search-item-name">${product.name}</h4>
             <div class="search-item-price">₹${product.price.toLocaleString('en-IN')}</div>
           </div>
           <span class="search-item-arrow" aria-hidden="true">&rsaquo;</span>
-        </div>
+        </a>
       `
       )
       .join('');
 
     searchResultsList.querySelectorAll('.search-result-item').forEach((itemEl) => {
-      itemEl.addEventListener('click', () => {
-        const selector = itemEl.dataset.target;
+      itemEl.addEventListener('click', (e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey) return;
+        e.preventDefault();
+        const targetSelector = itemEl.dataset.target || itemEl.getAttribute('href');
         closeSearch();
-        navigateToProductCard(selector);
+        navigateToProductCard(targetSelector);
+        if (targetSelector && targetSelector.startsWith('#')) {
+          try {
+            history.pushState(null, '', targetSelector);
+          } catch (_) {
+            window.location.hash = targetSelector;
+          }
+        }
       });
     });
   }
 
   if (searchViewAllBtn) {
     searchViewAllBtn.addEventListener('click', (e) => {
+      if (e.metaKey || e.ctrlKey || e.shiftKey) return;
       e.preventDefault();
+      const currentQuery = searchInput.value.trim();
       closeSearch();
-      const collection = document.getElementById('collection');
-      if (collection) {
-        collection.scrollIntoView({ behavior: 'smooth' });
-        collection.focus();
-      }
+      filterCollectionBySearch(currentQuery);
     });
   }
 
@@ -576,20 +619,108 @@ function initSearchInteraction() {
       searchBtn.focus();
     }
   });
+
+  // Bind clear collection filter button
+  const clearFilterBtn = document.getElementById('clearCollectionFilterBtn');
+  if (clearFilterBtn) {
+    clearFilterBtn.addEventListener('click', () => {
+      resetCollectionFilter();
+    });
+  }
+}
+
+function ensureMainContentVisible() {
+  const mainContent = document.getElementById('mainContent');
+  const checkoutPage = document.getElementById('checkoutPage');
+  const bookingConfirmation = document.getElementById('bookingConfirmation');
+
+  if (checkoutPage) checkoutPage.hidden = true;
+  if (bookingConfirmation) bookingConfirmation.hidden = true;
+  if (mainContent) mainContent.hidden = false;
 }
 
 function navigateToProductCard(selector) {
   if (!selector) return;
-  const targetCard = document.querySelector(selector);
+  ensureMainContentVisible();
+  resetCollectionFilter();
+
+  const cleanKey = selector.replace(/^#product-|^#/, '');
+  const targetCard = document.querySelector(selector) || document.querySelector(`[data-product="${cleanKey}"]`);
   if (targetCard) {
-    targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    requestAnimationFrame(() => {
+      targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
     targetCard.classList.remove('pulse-highlight');
     void targetCard.offsetWidth; // Trigger reflow
     targetCard.classList.add('pulse-highlight');
     setTimeout(() => {
       targetCard.classList.remove('pulse-highlight');
-    }, 1500);
+    }, 1800);
   }
+}
+
+function filterCollectionBySearch(query) {
+  ensureMainContentVisible();
+  const q = String(query || '').trim().toLowerCase();
+  const banner = document.getElementById('collectionFilterBanner');
+  const querySpan = document.getElementById('collectionFilterQuery');
+  const collectionSection = document.getElementById('collection');
+  const cards = document.querySelectorAll('.collection-grid .product-card');
+
+  if (!q) {
+    resetCollectionFilter();
+    if (collectionSection) {
+      collectionSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    return;
+  }
+
+  let matchCount = 0;
+  cards.forEach((card) => {
+    const productKey = card.dataset.product;
+    const catItem = H2_CATALOGUE.find((p) => p.id === productKey);
+    const matches = catItem && (
+      catItem.name.toLowerCase().includes(q) ||
+      catItem.shortName.toLowerCase().includes(q) ||
+      catItem.keywords.some((kw) => kw.includes(q))
+    );
+
+    if (matches) {
+      card.hidden = false;
+      card.style.display = '';
+      card.classList.remove('pulse-highlight');
+      void card.offsetWidth;
+      card.classList.add('pulse-highlight');
+      setTimeout(() => card.classList.remove('pulse-highlight'), 1800);
+      matchCount++;
+    } else {
+      card.hidden = true;
+      card.style.display = 'none';
+    }
+  });
+
+  if (banner && querySpan) {
+    querySpan.textContent = query;
+    banner.hidden = false;
+  }
+
+  if (collectionSection) {
+    collectionSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  try {
+    history.pushState(null, '', '#collection');
+  } catch (_) {}
+}
+
+function resetCollectionFilter() {
+  const banner = document.getElementById('collectionFilterBanner');
+  if (banner) banner.hidden = true;
+  const cards = document.querySelectorAll('.collection-grid .product-card');
+  cards.forEach((card) => {
+    card.hidden = false;
+    card.style.display = '';
+  });
 }
 
 /* ==========================================================================
@@ -680,6 +811,13 @@ function openCartDrawer() {
   const cartDrawer = document.getElementById('cartDrawer');
   const cartBackdrop = document.getElementById('cartBackdrop');
   if (!cartDrawer || !cartBackdrop) return;
+
+  const searchDropdown = document.getElementById('searchDropdown');
+  const searchBtn = document.getElementById('searchToggleBtn');
+  if (searchDropdown && !searchDropdown.hidden) {
+    searchDropdown.hidden = true;
+    if (searchBtn) searchBtn.setAttribute('aria-expanded', 'false');
+  }
 
   cartBackdrop.hidden = false;
   cartDrawer.hidden = false;
