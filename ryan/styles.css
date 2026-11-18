@@ -984,6 +984,52 @@ button {
   line-height: 1.55;
 }
 
+/* Product Search Filter Banner in Ryan Collection */
+.collection-filter-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #FAF4EE;
+  border: 1px solid rgba(174, 84, 49, 0.22);
+  border-radius: 12px;
+  padding: 12px 18px;
+  margin-bottom: 24px;
+  gap: 16px;
+  animation: searchPopoverFadeIn 0.2s var(--ease-smooth);
+}
+
+.collection-filter-banner[hidden] {
+  display: none !important;
+}
+
+.collection-filter-text {
+  font-size: 14px;
+  color: var(--h2-charcoal);
+  font-family: var(--font-sans);
+}
+
+.collection-filter-text strong {
+  color: var(--h2-terracotta);
+}
+
+.btn-clear-collection-filter {
+  background: transparent;
+  border: 1px solid var(--h2-terracotta);
+  color: var(--h2-terracotta);
+  border-radius: 20px;
+  padding: 5px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.btn-clear-collection-filter:hover {
+  background: var(--h2-terracotta);
+  color: #FFFFFF;
+}
+
 /* Product Cards Grid */
 .collection-grid {
   display: grid;
@@ -1002,6 +1048,7 @@ button {
   box-shadow: 0 8px 24px rgba(96, 62, 34, 0.04);
   transition: transform 0.3s var(--ease-smooth), box-shadow 0.3s var(--ease-smooth), border-color 0.3s ease;
   position: relative;
+  scroll-margin-top: calc(var(--header-height) + 32px);
 }
 
 .product-card:hover {
@@ -1830,10 +1877,22 @@ button {
   color: inherit;
   transition: background-color var(--transition-fast);
   cursor: pointer;
+  width: 100%;
+  box-sizing: border-box;
 }
 
-.search-result-item:hover {
+.search-result-item:hover,
+.search-result-item:focus-visible {
   background-color: #FAF4EE;
+  outline: none;
+}
+
+.search-result-item .search-item-thumb,
+.search-result-item .search-item-info,
+.search-result-item .search-item-name,
+.search-result-item .search-item-price,
+.search-result-item .search-item-arrow {
+  pointer-events: none;
 }
 
 .search-item-thumb {
@@ -1875,7 +1934,8 @@ button {
   margin-left: 6px;
 }
 
-.search-result-item:hover .search-item-arrow {
+.search-result-item:hover .search-item-arrow,
+.search-result-item:focus-visible .search-item-arrow {
   transform: translateX(3px);
   color: var(--h2-terracotta);
 }
@@ -1894,10 +1954,17 @@ button {
   text-decoration: none;
   gap: 8px;
   transition: background-color var(--transition-fast);
+  cursor: pointer;
 }
 
-.search-view-all-link:hover {
+.search-view-all-link * {
+  pointer-events: none;
+}
+
+.search-view-all-link:hover,
+.search-view-all-link:focus-visible {
   background-color: #FAF4EE;
+  outline: none;
 }
 
 .search-empty-state {
