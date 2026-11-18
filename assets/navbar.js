@@ -168,6 +168,13 @@
       }
     });
 
+    // Close on window resize to desktop (>= 1400px)
+    window.addEventListener('resize', () => {
+      if (window.innerWidth >= 1400 && drawer.classList.contains('is-open')) {
+        closeDrawer();
+      }
+    });
+
     window.closeNavDrawer = closeDrawer;
   }
 
