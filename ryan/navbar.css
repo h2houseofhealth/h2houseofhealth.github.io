@@ -136,6 +136,7 @@ header.site-header .nav-link.active::after {
 header.site-header .header-actions {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 12px;
   flex-shrink: 0;
 }
@@ -168,32 +169,73 @@ header.site-header .header-icon-btn:active {
   transform: translateY(0);
 }
 
-/* User Profile Account Icon Button - Terracotta Brand Color (#AE5431) */
-header.site-header .header-icon-btn.account-icon-btn {
-  color: #AE5431;
-}
-
-header.site-header .header-icon-btn.account-icon-btn svg {
-  stroke: #AE5431;
-  color: #AE5431;
-  stroke-width: 1.8;
-  display: block;
-}
-
-header.site-header .header-icon-btn.account-icon-btn:hover {
-  background-color: var(--nav-terracotta-subtle);
-  color: var(--nav-terracotta-hover);
-}
-
-header.site-header .header-icon-btn.account-icon-btn:hover svg {
-  stroke: var(--nav-terracotta-hover);
-}
-
+/* Auth Buttons (Unified across all pages) */
 .user-account-wrapper {
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+}
+
+.h2-navbar__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 40.5px;
+  padding: 0 16px;
+  min-width: 90px;
+  border-radius: 9999px;
+  text-decoration: none;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.15s ease, box-shadow 0.18s ease;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.h2-navbar__btn--outline {
+  background-color: transparent;
+  border: 1px solid rgba(174, 84, 49, 0.3);
+  color: var(--nav-terracotta, #AE5431);
+}
+
+.h2-navbar__btn--outline:hover {
+  background-color: var(--nav-terracotta-subtle, rgba(174, 84, 49, 0.08));
+  border-color: var(--nav-terracotta, #AE5431);
+  color: var(--nav-terracotta, #AE5431);
+  transform: translateY(-1px);
+}
+
+.h2-navbar__btn--profile {
+  background-color: var(--nav-terracotta-subtle, rgba(174, 84, 49, 0.08));
+  border: 1px solid rgba(174, 84, 49, 0.25);
+  color: var(--nav-terracotta, #AE5431);
+  gap: 8px;
+  padding: 0 14px;
+}
+
+.h2-navbar__btn--profile:hover {
+  background-color: rgba(174, 84, 49, 0.14);
+  border-color: var(--nav-terracotta, #AE5431);
+  transform: translateY(-1px);
+}
+
+.h2-navbar__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background-color: var(--nav-terracotta, #AE5431);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
   flex-shrink: 0;
 }
 
@@ -406,6 +448,27 @@ header.site-header .mobile-menu-toggle[aria-expanded="true"] .hamburger-bar:nth-
   background-color: var(--nav-terracotta-subtle);
 }
 
+.mobile-nav-divider {
+  height: 1px;
+  background-color: var(--nav-border);
+  margin: 10px 0;
+  list-style: none;
+}
+
+.mobile-nav-auth {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  color: var(--nav-terracotta) !important;
+}
+
+.mobile-nav-auth .h2-navbar__avatar {
+  width: 26px;
+  height: 26px;
+  font-size: 11px;
+}
+
 .mobile-nav-link.active {
   color: var(--nav-terracotta);
   background-color: var(--nav-terracotta-subtle);
@@ -482,6 +545,45 @@ header.site-header .mobile-menu-toggle[aria-expanded="true"] .hamburger-bar:nth-
     font-size: 13px;
     line-height: 20px;
   }
+
+  .h2-navbar__btn {
+    height: 36px;
+    padding: 0 12px;
+    font-size: 12.5px;
+    min-width: 80px;
+  }
+}
+
+/* Screen width where text auth button hides to prevent crowding (≤ 640px) */
+@media screen and (max-width: 640px) {
+  /* Logged out: hide text outline button in top header bar (prominently available in drawer) */
+  .h2-navbar__btn--outline {
+    display: none !important;
+  }
+
+  /* Logged in: compact circular avatar-only badge that fits without crowding */
+  .h2-navbar__btn--profile {
+    width: 32px !important;
+    height: 32px !important;
+    min-width: 32px !important;
+    max-width: 32px !important;
+    padding: 0 !important;
+    border-radius: 50% !important;
+    justify-content: center !important;
+    gap: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  .h2-navbar__btn--profile span:not(.h2-navbar__avatar) {
+    display: none !important;
+  }
+
+  .h2-navbar__btn--profile .h2-navbar__avatar {
+    width: 26px !important;
+    height: 26px !important;
+    font-size: 10.5px !important;
+    margin: 0 !important;
+  }
 }
 
 /* Compact Mobile (≤ 540px) */
@@ -545,6 +647,19 @@ header.site-header .mobile-menu-toggle[aria-expanded="true"] .hamburger-bar:nth-
     line-height: 18px;
     letter-spacing: 0;
   }
+
+  .h2-navbar__btn--profile {
+    width: 30px !important;
+    height: 30px !important;
+    min-width: 30px !important;
+    max-width: 30px !important;
+  }
+
+  .h2-navbar__btn--profile .h2-navbar__avatar {
+    width: 24px !important;
+    height: 24px !important;
+    font-size: 10px !important;
+  }
 }
 
 /* Extra Small Phones (≤ 375px) */
@@ -588,5 +703,18 @@ header.site-header .mobile-menu-toggle[aria-expanded="true"] .hamburger-bar:nth-
     padding: 5px 8px;
     font-size: 11px;
     line-height: 16px;
+  }
+
+  .h2-navbar__btn--profile {
+    width: 28px !important;
+    height: 28px !important;
+    min-width: 28px !important;
+    max-width: 28px !important;
+  }
+
+  .h2-navbar__btn--profile .h2-navbar__avatar {
+    width: 22px !important;
+    height: 22px !important;
+    font-size: 9.5px !important;
   }
 }

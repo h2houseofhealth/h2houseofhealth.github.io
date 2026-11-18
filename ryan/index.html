@@ -140,59 +140,6 @@
             </div>
           </div>
 
-          <!-- User Account / Sign In Control -->
-          <div class="user-account-wrapper" id="userAccountWrapper">
-            <button
-              class="header-icon-btn account-icon-btn"
-              id="headerAccountBtn"
-              type="button"
-              aria-label="Account / Sign In"
-              aria-expanded="false"
-              aria-haspopup="dialog"
-              title="Account / Sign In"
-            >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#AE5431"
-                stroke-width="1.8"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                <circle cx="12" cy="7" r="4"></circle>
-              </svg>
-            </button>
-
-            <!-- Account Dropdown Menu for Logged-In User -->
-            <div class="account-dropdown-menu" id="accountDropdownMenu" hidden>
-              <div class="account-dropdown-head">
-                <div class="account-user-name" id="dropdownUserName">Signed In User</div>
-                <div class="account-user-email" id="dropdownUserEmail">user@example.com</div>
-              </div>
-              <div class="account-dropdown-divider"></div>
-              <button type="button" class="account-dropdown-item" id="accountViewOrdersBtn">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
-                  <line x1="3" y1="6" x2="21" y2="6"></line>
-                  <path d="M16 10a4 4 0 0 1-8 0"></path>
-                </svg>
-                <span>My Orders</span>
-              </button>
-              <button type="button" class="account-dropdown-item" id="accountSignOutBtn">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                  <polyline points="16 17 21 12 16 7"></polyline>
-                  <line x1="21" y1="12" x2="9" y2="12"></line>
-                </svg>
-                <span>Sign Out</span>
-              </button>
-            </div>
-          </div>
-
           <!-- Cart Icon Button with Live Counter Badge -->
           <button
             class="header-icon-btn cart-icon-btn"
@@ -223,6 +170,41 @@
           <a href="#collection" class="btn btn-ryans-collection" id="headerRyanBtn">
             Shop Now
           </a>
+
+          <!-- User Account / Sign In Control -->
+          <div class="user-account-wrapper" id="userAccountWrapper">
+            <a
+              class="h2-navbar__btn h2-navbar__btn--outline"
+              id="h2AuthBtn"
+              href="/merch/auth.html?returnTo=/ryan/"
+              aria-label="Sign Up or Sign In"
+            >Sign Up / Sign In</a>
+
+            <!-- Account Dropdown Menu for Logged-In User -->
+            <div class="account-dropdown-menu" id="accountDropdownMenu" hidden>
+              <div class="account-dropdown-head">
+                <div class="account-user-name" id="dropdownUserName">Signed In User</div>
+                <div class="account-user-email" id="dropdownUserEmail">user@example.com</div>
+              </div>
+              <div class="account-dropdown-divider"></div>
+              <button type="button" class="account-dropdown-item" id="accountViewOrdersBtn">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
+                  <line x1="3" y1="6" x2="21" y2="6"></line>
+                  <path d="M16 10a4 4 0 0 1-8 0"></path>
+                </svg>
+                <span>My Orders</span>
+              </button>
+              <button type="button" class="account-dropdown-item" id="accountSignOutBtn">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                  <polyline points="16 17 21 12 16 7"></polyline>
+                  <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+                <span>Sign Out</span>
+              </button>
+            </div>
+          </div>
 
           <!-- Mobile Menu Hamburger Toggle -->
           <button
@@ -260,6 +242,10 @@
             <li><a href="#heroSection" class="mobile-nav-link">Why Ryan Trusts H2</a></li>
             <li><a href="#approachSection" class="mobile-nav-link">The H2 Approach</a></li>
             <li><a href="#collection" class="mobile-nav-link">The Collection</a></li>
+            <li class="mobile-nav-divider"></li>
+            <li id="drawerAuthItem">
+              <a href="/merch/auth.html?returnTo=/ryan/" class="mobile-nav-link mobile-nav-auth" id="h2DrawerAuthBtn">Sign Up / Sign In</a>
+            </li>
           </ul>
         </nav>
 
@@ -788,7 +774,6 @@
             <div class="best-offers-title-wrap">
               <h4 class="best-offers-title">
                 <span class="best-offers-title-text">BEST OFFERS</span>
-                <span class="best-offers-explore">Explore more</span>
               </h4>
               <div class="best-offers-underline" aria-hidden="true"></div>
             </div>

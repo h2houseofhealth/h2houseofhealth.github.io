@@ -1391,6 +1391,7 @@ function attachEvents() {
     }
 
     state.user = null;
+    syncNavbarAuth(null);
     state.bookings = [];
     state.adminMembershipOrders = [];
     state.adminDiscountPhones = [];
@@ -1672,6 +1673,7 @@ function attachEvents() {
     });
   }
   window.openBookingCart = openBookingCart;
+  window.openProfileDialog = openProfileDialog;
 
   elements.userTabCart?.addEventListener('click', async () => {
     await openBookingCart();
@@ -1684,6 +1686,11 @@ function attachEvents() {
   });
   document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
+      if (btn.classList.contains('h2-navbar__btn--profile')) {
+        e.preventDefault();
+        openProfileDialog();
+        return;
+      }
       e.preventDefault();
       openAuthFromLanding();
     });
@@ -2940,6 +2947,7 @@ async function loadCurrentUser() {
     syncPostLoginChoiceWithMembership();
   } catch (error) {
     state.user = null;
+    syncNavbarAuth(null);
     if (Number(error?.status || 0) === 401) {
       storeAuthToken('');
     }
@@ -3396,10 +3404,20 @@ function loadStoredGuestCart() {
       ? parsed.filter((booking) => {
           if (!booking || typeof booking !== 'object') return false;
           if (String(booking.status || '').trim().toLowerCase() === 'cancelled') return false;
-          return String(booking.paymentStatus || 'unpaid').trim().toLowerCase() !== 'paid';
+          if (String(booking.paymentStatus || 'unpaid').trim().toLowerCase() === 'paid') return false;
+          const bDate = String(booking.bookingDate || '').trim();
+          const bTime = normalizeSlotStartTime(String(booking.bookingTime || '').trim()) || '23:59';
+          if (bDate && (bDate < getTodayIsoDate() || isBookingSlotInPast(bDate, bTime))) return false;
+          return true;
         })
       : [];
-    return normalizeGuestCartComboGroups(cart);
+    const normalized = normalizeGuestCartComboGroups(cart);
+    if (Array.isArray(parsed) && parsed.length !== normalized.length) {
+      try {
+        localStorage.setItem('h2_guest_cart', JSON.stringify(normalized));
+      } catch {}
+    }
+    return normalized;
   } catch {
     return [];
   }
@@ -3582,6 +3600,9 @@ function buildGuestCartBookingsFromPayload(payload = {}) {
   const serviceName = String(payload.serviceName || '').trim();
   const bookingDate = String(payload.bookingDate || '').trim();
   const bookingTime = normalizeSlotStartTime(String(payload.bookingTime || '').trim());
+  if (bookingDate && (bookingDate < getTodayIsoDate() || isBookingSlotInPast(bookingDate, bookingTime))) {
+    return [];
+  }
   const addOnServiceName = String(payload.addOnServiceName || payload.addOnService || '').trim();
   const bookingGroupId = String(payload.bookingGroupId || '').trim() || (addOnServiceName ? `guest_combo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` : '');
   const bookings = [];
@@ -3663,8 +3684,14 @@ function buildGuestCartBookingsFromPayload(payload = {}) {
 
 function addGuestCartBookings(bookings = []) {
   const nextBookings = (Array.isArray(bookings) ? bookings : [bookings]).filter(
-    (booking) => booking?.serviceName && booking?.bookingDate && booking?.bookingTime
+    (booking) =>
+      booking?.serviceName &&
+      booking?.bookingDate &&
+      booking?.bookingTime &&
+      String(booking.bookingDate).trim() >= getTodayIsoDate() &&
+      !isBookingSlotInPast(booking.bookingDate, booking.bookingTime)
   );
+  if (!nextBookings.length) return [];
   state.cart = [...getGuestCartBookings(), ...nextBookings];
   persistGuestCart();
   return nextBookings;
@@ -5741,6 +5768,16 @@ async function upsertBooking() {
     bookingTime: elements.bookingTime.value,
     notes: elements.bookingNotes.value.trim(),
   };
+
+  const isAdmin = state.user?.role === 'admin';
+  if (!isAdmin && payload.bookingDate && payload.bookingDate < getTodayIsoDate()) {
+    showNotice({ title: 'Invalid date', body: 'Booking date cannot be in the past.' });
+    return;
+  }
+  if (!isAdmin && payload.bookingDate && isBookingSlotInPast(payload.bookingDate, payload.bookingTime)) {
+    showNotice({ title: 'Slot unavailable', body: 'The selected time slot has already passed for today.' });
+    return;
+  }
   
   const selectedAddOnName = elements.addOnService?.value;
   if (selectedAddOnName) {
@@ -5779,7 +5816,6 @@ async function upsertBooking() {
     ? Number(selectedAddOnService.effectivePriceInr || selectedAddOnService.priceInr || 0)
     : 0;
   
-  const isAdmin = state.user?.role === 'admin';
   console.log("MODE:", state.adminBookingMode);
   if (isAdmin) {
    if (state.adminBookingMode === 'new') {
@@ -6406,6 +6442,17 @@ async function saveHydrogenPackBookings({ serviceName, extraSessions, slots, add
     return;
   }
   clearHydrogenComposerNotice();
+  const pastSlot = (Array.isArray(slots) ? slots : []).find(
+    (s) => !isAdmin && (String(s?.bookingDate || '').trim() < getTodayIsoDate() || isBookingSlotInPast(s?.bookingDate, s?.bookingTime))
+  );
+  if (pastSlot) {
+    setHydrogenComposerNotice(
+      `Session slot ${pastSlot.bookingDate} ${formatBookingTimeLabel(pastSlot.bookingTime)} is in the past. Please select an upcoming slot.`,
+      'error'
+    );
+    renderServices();
+    return;
+  }
   const duplicateSlot = findDuplicateHydrogenSlotClient(slots);
   if (duplicateSlot) {
     setHydrogenComposerNotice(
@@ -6553,6 +6600,18 @@ async function saveHydrogenPackBookings({ serviceName, extraSessions, slots, add
 
 async function updateHydrogenPackBookings({ bookingGroupId, serviceName, extraSessions, slots, addOnServiceName, addOnSessionIndex }) {
   clearHydrogenComposerNotice();
+  const isAdmin = state.user?.role === 'admin';
+  const pastSlot = (Array.isArray(slots) ? slots : []).find(
+    (s) => !isAdmin && (String(s?.bookingDate || '').trim() < getTodayIsoDate() || isBookingSlotInPast(s?.bookingDate, s?.bookingTime))
+  );
+  if (pastSlot) {
+    setHydrogenComposerNotice(
+      `Session slot ${pastSlot.bookingDate} ${formatBookingTimeLabel(pastSlot.bookingTime)} is in the past. Please select an upcoming slot.`,
+      'error'
+    );
+    renderServices();
+    return;
+  }
   const duplicateSlot = findDuplicateHydrogenSlotClient(slots);
   if (duplicateSlot) {
     setHydrogenComposerNotice(
@@ -8356,6 +8415,7 @@ function render() {
   elements.authCard.hidden = !showAuthCard;
   elements.appArea.hidden = !isAppUser;
   renderMemberChoiceGateCta();
+  syncNavbarAuth(state.user);
 
   document.querySelectorAll('.app-only').forEach((el) => {
     el.hidden = !isAppUser;
@@ -9698,7 +9758,12 @@ function renderHydrogenUnifiedComposer({ detailsContainer, services, category, i
 
     dateInput.addEventListener('change', () => {
       clearHydrogenComposerNotice();
-      const nextDate = dateInput.value || getTodayIsoDate();
+      let nextDate = String(dateInput.value || '').trim() || getTodayIsoDate();
+      if (nextDate < getTodayIsoDate()) {
+        setHydrogenComposerNotice('Booking date cannot be in the past.', 'error');
+        nextDate = getTodayIsoDate();
+        dateInput.value = nextDate;
+      }
       state.activeHydrogenSessionIndex = storageIndex;
       if (state.selectedHydrogenAddOnServiceName) {
         state.selectedHydrogenAddOnSessionIndex = storageIndex;
@@ -10104,7 +10169,12 @@ function renderIvUnifiedComposer({ detailsContainer, services, category }) {
   };
 
   dateInput.addEventListener('change', () => {
-    const nextDate = dateInput.value || getTodayIsoDate();
+    let nextDate = String(dateInput.value || '').trim() || getTodayIsoDate();
+    if (nextDate < getTodayIsoDate()) {
+      showNotice({ title: 'Invalid date', body: 'Booking date cannot be in the past.' });
+      nextDate = getTodayIsoDate();
+      dateInput.value = nextDate;
+    }
     const selectedServiceName = state.serviceDetailSelections[category]?.selectedPlanName || selectedService.name;
     populateAvailableTimeOptions(
       timeSelect,
@@ -10456,10 +10526,22 @@ function renderIvUnifiedComposer({ detailsContainer, services, category }) {
   stickyButton.disabled = selectedServiceIsMembershipOnly && !selectedServiceHasMemberAccess;
   stickyButton.addEventListener('click', async () => {
     try {
+      const selectedDateVal = String(dateInput.value || '').trim() || getTodayIsoDate();
+      const isAdmin = state.user?.role === 'admin';
+      if (!isAdmin && selectedDateVal < getTodayIsoDate()) {
+        showNotice({ title: 'Invalid date', body: 'Booking date cannot be in the past.' });
+        dateInput.value = getTodayIsoDate();
+        return;
+      }
+      const selectedTimeVal = timeSelect.value || SLOT_OPTIONS[0].value;
+      if (!isAdmin && isBookingSlotInPast(selectedDateVal, selectedTimeVal)) {
+        showNotice({ title: 'Slot unavailable', body: 'The selected time slot has already passed for today.' });
+        return;
+      }
       const payload = {
         serviceName: selectedService.name,
-        bookingDate: dateInput.value || getTodayIsoDate(),
-        bookingTime: timeSelect.value || SLOT_OPTIONS[0].value,
+        bookingDate: selectedDateVal,
+        bookingTime: selectedTimeVal,
         addOnServiceName: selectedAddOnService ? selectedAddOnService.name : '',
         addOnBookingDate: selectedAddOnService
           ? isHydrogenAddOn
@@ -10473,6 +10555,10 @@ function renderIvUnifiedComposer({ detailsContainer, services, category }) {
           : '',
         addOnHydrogenSlots: selectedAddOnService && isHydrogenAddOn ? getHydrogenAddOnSlots() : [],
       };
+      if (!isAdmin && payload.addOnServiceName && payload.addOnBookingDate && payload.addOnBookingDate < getTodayIsoDate()) {
+        showNotice({ title: 'Invalid date', body: 'Add-on booking date cannot be in the past.' });
+        return;
+      }
       if (isEditingIvBooking) {
         await updateIvUnifiedBooking({
           bookingId: editingBookingId,
@@ -10509,7 +10595,20 @@ async function saveIvUnifiedBookingToCart({
   const safeDate = String(bookingDate || '').trim();
   const safeTime = String(bookingTime || '').trim();
   if (!safeDate || !safeTime) {
-    showNotice({ title: 'Notice', body: 'Set hydrogen session date and time first.' });
+    showNotice({ title: 'Notice', body: 'Set session date and time first.' });
+    return;
+  }
+  const isUserAdmin = state.user?.role === 'admin';
+  if (!isUserAdmin && safeDate < getTodayIsoDate()) {
+    showNotice({ title: 'Invalid date', body: 'Booking date cannot be in the past.' });
+    return;
+  }
+  if (!isUserAdmin && isBookingSlotInPast(safeDate, safeTime)) {
+    showNotice({ title: 'Slot unavailable', body: 'The selected time slot has already passed for today.' });
+    return;
+  }
+  if (!isUserAdmin && addOnServiceName && addOnBookingDate && String(addOnBookingDate).trim() < getTodayIsoDate()) {
+    showNotice({ title: 'Invalid date', body: 'Add-on booking date cannot be in the past.' });
     return;
   }
   if (addOnServiceName && (!String(addOnBookingDate || '').trim() || !String(addOnBookingTime || '').trim())) {
@@ -11644,6 +11743,12 @@ function shiftAdminAllBookingDateFilters(daysToAdd = 0) {
     startDate: addDaysToIsoDate(effectiveStart, daysToAdd) || effectiveStart,
     endDate: addDaysToIsoDate(effectiveEnd, daysToAdd) || effectiveEnd,
   };
+}
+
+function isBookingDateInPast(bookingDate) {
+  const normalizedDate = String(bookingDate || '').trim();
+  if (!normalizedDate) return false;
+  return normalizedDate < getTodayIsoDate();
 }
 
 function isBookingSlotInPast(bookingDate, bookingTime) {
@@ -13115,6 +13220,42 @@ function renderProfileAvatar() {
   }
 }
 
+function syncNavbarAuth(user = state.user) {
+  if (typeof window.syncGlobalNavbarAuth === 'function') {
+    window.syncGlobalNavbarAuth(user);
+    return;
+  }
+  const authBtns = document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn');
+  if (user) {
+    const rawName = String(user.name || user.email || 'My Account').trim();
+    const firstName = rawName.split(' ')[0];
+    const displayName = firstName ? (firstName.charAt(0).toUpperCase() + firstName.slice(1)) : 'My Account';
+    const initials = getInitials(rawName);
+    const avatarUrl = user.avatarUrl ? normalizeAvatarUrl(user.avatarUrl) : '';
+    const avatarStyle = avatarUrl ? `style="background-image: url('${avatarUrl}'); background-size: cover; background-position: center; color: transparent;"` : '';
+    authBtns.forEach((btn) => {
+      btn.innerHTML = `<span class="h2-navbar__avatar" ${avatarStyle}>${initials}</span> <span>${displayName}</span>`;
+      btn.classList.remove('h2-navbar__btn--outline');
+      btn.classList.add('h2-navbar__btn--profile');
+      btn.setAttribute('href', '#');
+      btn.setAttribute('aria-label', `Account of ${displayName}`);
+      btn.onclick = (e) => {
+        e.preventDefault();
+        openProfileDialog();
+      };
+    });
+  } else {
+    authBtns.forEach((btn) => {
+      btn.classList.remove('h2-navbar__btn--profile');
+      btn.classList.add('h2-navbar__btn--outline');
+      btn.innerHTML = 'Sign Up / Sign In';
+      btn.setAttribute('href', '/booking/?auth=1');
+      btn.setAttribute('aria-label', 'Sign Up or Sign In');
+      btn.onclick = null;
+    });
+  }
+}
+
 function normalizeAvatarUrl(urlValue) {
   const raw = String(urlValue || '').trim();
   if (!raw) return '';
@@ -13139,9 +13280,14 @@ function withCacheBuster(urlValue) {
 }
 
 function getInitials(name) {
-  const parts = String(name).trim().split(/\s+/).filter(Boolean).slice(0, 2);
+  const raw = String(name || '').trim();
+  if (!raw) return 'U';
+  const parts = raw.split(/\s+/).filter(Boolean);
   if (parts.length === 0) return 'U';
-  return parts.map((part) => part[0].toUpperCase()).join('');
+  if (parts.length === 1) {
+    return (parts[0].length >= 2 ? parts[0].substring(0, 2) : parts[0]).toUpperCase();
+  }
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
 function renderStats(bookings) {
@@ -14186,6 +14332,9 @@ function getUserCartPayableBookings(bookings = state.bookings) {
     if (String(booking.status || '').toLowerCase() === 'cancelled') return false;
     if (isBookingPaid(booking)) return false;
     if (booking.holdExpired) return false;
+    const bookingDate = String(booking.bookingDate || '').trim();
+    const bookingTime = normalizeSlotStartTime(String(booking.bookingTime || '').trim()) || '23:59';
+    if (bookingDate && isBookingSlotInPast(bookingDate, bookingTime)) return false;
     const service = getServiceCatalogEntry(booking.serviceName);
     return !service?.membershipOnly;
   });
@@ -17057,11 +17206,28 @@ async function api(url, options = {}) {
       url = normalizedUrl.replace('/api/services/availability', '/api/public/services/availability');
     } else if (method === 'POST' && normalizedUrl === '/api/bookings') {
       const payload = JSON.parse(String(options.body || '{}'));
+      const targetDate = String(payload.bookingDate || '').trim();
+      const targetTime = normalizeSlotStartTime(String(payload.bookingTime || '').trim());
+      if (targetDate && (targetDate < getTodayIsoDate() || isBookingSlotInPast(targetDate, targetTime))) {
+        throw new Error('Booking date/time cannot be in the past. Please select an upcoming slot.');
+      }
       const bookings = buildGuestCartBookingsFromPayload(payload);
+      if (!bookings.length) {
+        throw new Error('Unable to add booking: slot is in the past or invalid.');
+      }
       addGuestCartBookings(bookings);
       return { booking: bookings[0] || null, bookings };
     } else if (method === 'POST' && normalizedUrl === '/api/hydrogen/book-pack') {
       const payload = JSON.parse(String(options.body || '{}'));
+      const slots = Array.isArray(payload.slots) ? payload.slots : [];
+      const hasPastSlot = slots.some((slot) => {
+        const slotDate = String(slot?.bookingDate || '').trim();
+        const slotTime = normalizeSlotStartTime(String(slot?.bookingTime || '').trim());
+        return slotDate < getTodayIsoDate() || isBookingSlotInPast(slotDate, slotTime);
+      });
+      if (hasPastSlot) {
+        throw new Error('One or more selected session slots are in the past. Please select future slots.');
+      }
       const bookingGroupId = String(payload.bookingGroupId || '').trim() || `guest_combo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const baseBookings = (Array.isArray(payload.slots) ? payload.slots : []).map((slot) =>
         createGuestCartBooking({

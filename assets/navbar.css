@@ -490,6 +490,16 @@
     width: calc(100% - 20px) !important;
   }
 
+  .h2-navbar__left {
+    flex: 0 0 auto !important;
+    flex-shrink: 0 !important;
+  }
+
+  .h2-navbar__actions {
+    flex: 0 0 auto !important;
+    flex-shrink: 0 !important;
+  }
+
   .h2-navbar__btn {
     height: 36px !important;
     padding: 0 14px !important;
@@ -503,30 +513,71 @@
   }
 }
 
-@media screen and (max-width: 540px) {
-  .h2-navbar__btn--outline {
-    display: none !important;
-  }
-
-  .h2-navbar__logo {
-    flex: 0 0 80px !important;
-    width: 80px !important;
-    max-width: 80px !important;
-  }
-
-  .h2-navbar__logo img {
-    width: 80px !important;
-    max-width: 80px !important;
-  }
-
+@media screen and (max-width: 768px) {
   .h2-navbar {
-    padding: 5px 12px !important;
+    padding: 6px 12px !important;
+    width: calc(100% - 16px) !important;
     gap: 8px !important;
-    min-height: 48px !important;
   }
 
   .h2-navbar__left {
+    flex: 0 0 auto !important;
+    flex-shrink: 0 !important;
     gap: 8px !important;
+  }
+
+  .h2-navbar__actions {
+    flex: 0 0 auto !important;
+    flex-shrink: 0 !important;
+    gap: 6px !important;
+  }
+
+  .h2-navbar__wishlist-btn,
+  #wishlistToggleBtn {
+    display: none !important;
+  }
+}
+
+@media screen and (max-width: 540px) {
+  .h2-navbar-wrapper {
+    padding: 0 !important;
+  }
+
+  .h2-navbar {
+    width: calc(100% - 16px) !important;
+    margin: 6px auto !important;
+    padding: 4px 10px !important;
+    gap: 6px !important;
+    min-height: 44px !important;
+  }
+
+  .h2-navbar__left {
+    flex: 0 0 auto !important;
+    flex-shrink: 0 !important;
+    gap: 6px !important;
+  }
+
+  .h2-navbar__drawer-toggle {
+    width: 30px !important;
+    height: 30px !important;
+  }
+
+  .h2-navbar__logo {
+    flex: 0 0 76px !important;
+    width: 76px !important;
+    max-width: 76px !important;
+  }
+
+  .h2-navbar__logo img {
+    width: 76px !important;
+    max-width: 76px !important;
+    height: auto !important;
+  }
+
+  .h2-navbar__actions {
+    flex: 0 0 auto !important;
+    flex-shrink: 0 !important;
+    gap: 4px !important;
   }
 
   .h2-navbar__action-btn {
@@ -535,18 +586,81 @@
   }
 
   .h2-navbar__action-btn svg {
-    width: 17px !important;
-    height: 17px !important;
+    width: 16px !important;
+    height: 16px !important;
   }
 
-  .h2-navbar__actions {
+  .h2-navbar__wishlist-btn,
+  #wishlistToggleBtn {
+    display: none !important;
+  }
+
+  /* Logged out: hide text outline Sign In button (it is in the drawer) */
+  .h2-navbar__btn--outline {
+    display: none !important;
+  }
+
+  /* Logged in: compact circular avatar-only profile badge */
+  .h2-navbar__btn--profile {
+    width: 30px !important;
+    height: 30px !important;
+    min-width: 30px !important;
+    max-width: 30px !important;
+    padding: 0 !important;
+    border-radius: 50% !important;
+    justify-content: center !important;
+    gap: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  .h2-navbar__btn--profile span:not(.h2-navbar__avatar) {
+    display: none !important;
+  }
+
+  .h2-navbar__btn--profile .h2-navbar__avatar {
+    width: 26px !important;
+    height: 26px !important;
+    font-size: 10.5px !important;
+    margin: 0 !important;
+  }
+
+  /* Compact Book Now button */
+  #h2BookNowBtn,
+  .h2-navbar__btn--primary {
+    height: 30px !important;
+    padding: 0 10px !important;
+    font-size: 11px !important;
+    min-width: 0 !important;
+    line-height: 30px !important;
+  }
+}
+
+@media screen and (max-width: 360px) {
+  .h2-navbar {
+    width: calc(100% - 10px) !important;
+    padding: 3px 6px !important;
     gap: 4px !important;
   }
 
-  .h2-navbar__btn {
-    height: 32px !important;
-    padding: 0 12px !important;
-    font-size: 11.5px !important;
+  .h2-navbar__logo {
+    flex: 0 0 70px !important;
+    width: 70px !important;
+    max-width: 70px !important;
+  }
+
+  .h2-navbar__logo img {
+    width: 70px !important;
+    max-width: 70px !important;
+  }
+
+  #searchToggleBtn {
+    display: none !important;
+  }
+
+  #h2BookNowBtn,
+  .h2-navbar__btn--primary {
+    padding: 0 8px !important;
+    font-size: 10px !important;
   }
 }
 
