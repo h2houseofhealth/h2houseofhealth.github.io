@@ -57,59 +57,18 @@
   box-shadow: var(--h2-nav-shadow) !important;
 }
 
-@media screen and (min-width: 1280px) {
+@media screen and (min-width: 1400px) {
   .h2-navbar {
     width: calc(100% - 48px) !important;
     gap: 20px !important;
   }
-}
 
-/* Fluid compact desktop / laptop layout (1024px to 1279px) */
-@media screen and (min-width: 1024px) and (max-width: 1279px) {
-  .h2-navbar {
-    width: calc(100% - 24px) !important;
-    padding: 6px 14px !important;
-    gap: 10px !important;
+  .h2-navbar__nav {
+    display: block !important;
   }
 
-  .h2-navbar__left {
-    gap: 12px !important;
-  }
-
-  .h2-navbar__logo {
-    flex: 0 0 115px !important;
-    width: 115px !important;
-    max-width: 115px !important;
-  }
-
-  .h2-navbar__logo img {
-    width: 115px !important;
-    max-width: 115px !important;
-  }
-
-  .h2-navbar__links {
-    gap: clamp(6px, 0.8vw, 12px) !important;
-  }
-
-  .h2-navbar__link {
-    font-size: 10.5px !important;
-    padding: 6px 2px !important;
-    letter-spacing: 0 !important;
-  }
-
-  .h2-navbar__actions {
-    gap: 6px !important;
-  }
-
-  .h2-navbar__action-btn {
-    width: 32px !important;
-    height: 32px !important;
-  }
-
-  .h2-navbar__btn {
-    height: 34px !important;
-    padding: 0 12px !important;
-    font-size: 11px !important;
+  .h2-navbar__drawer-toggle {
+    display: none !important;
   }
 }
 
@@ -476,7 +435,8 @@
    Responsive Breakpoints
    ========================================================================== */
 
-@media screen and (max-width: 1023px) {
+/* Tablet & Mobile: below 1400px, desktop navigation is hidden, drawer toggle active */
+@media screen and (max-width: 1399px) {
   .h2-navbar__nav {
     display: none !important;
   }
@@ -485,11 +445,6 @@
     display: inline-flex !important;
   }
 
-  .h2-navbar {
-    padding: 6px 14px !important;
-    width: calc(100% - 20px) !important;
-  }
-
   .h2-navbar__left {
     flex: 0 0 auto !important;
     flex-shrink: 0 !important;
@@ -498,6 +453,40 @@
   .h2-navbar__actions {
     flex: 0 0 auto !important;
     flex-shrink: 0 !important;
+  }
+}
+
+/* Tablet / Compact Laptop Tier (769px to 1399px) */
+@media screen and (min-width: 769px) and (max-width: 1399px) {
+  .h2-navbar {
+    padding: 6px 16px !important;
+    width: calc(100% - 24px) !important;
+    gap: 12px !important;
+  }
+
+  .h2-navbar__left {
+    gap: 12px !important;
+  }
+
+  .h2-navbar__logo {
+    flex: 0 0 120px !important;
+    width: 120px !important;
+    max-width: 120px !important;
+  }
+
+  .h2-navbar__logo img {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
+  .h2-navbar__actions {
+    gap: 8px !important;
+  }
+
+  .h2-navbar__action-btn {
+    width: 34px !important;
+    height: 34px !important;
   }
 
   .h2-navbar__btn {
@@ -506,13 +495,9 @@
     font-size: 12px !important;
     min-width: 0 !important;
   }
-
-  .h2-navbar__action-btn {
-    width: 32px !important;
-    height: 32px !important;
-  }
 }
 
+/* Mobile Tier: 768px and below */
 @media screen and (max-width: 768px) {
   .h2-navbar {
     padding: 6px 12px !important;
@@ -521,17 +506,40 @@
   }
 
   .h2-navbar__left {
-    flex: 0 0 auto !important;
-    flex-shrink: 0 !important;
     gap: 8px !important;
   }
 
+  .h2-navbar__logo {
+    flex: 0 0 100px !important;
+    width: 100px !important;
+    max-width: 100px !important;
+  }
+
+  .h2-navbar__logo img {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
   .h2-navbar__actions {
-    flex: 0 0 auto !important;
-    flex-shrink: 0 !important;
     gap: 6px !important;
   }
 
+  .h2-navbar__action-btn {
+    width: 32px !important;
+    height: 32px !important;
+  }
+
+  .h2-navbar__btn {
+    height: 34px !important;
+    padding: 0 12px !important;
+    font-size: 11.5px !important;
+    min-width: 0 !important;
+  }
+}
+
+/* Mid-range Mobile: 680px and below (hide wishlist button from pill, available in drawer/merch) */
+@media screen and (max-width: 680px) {
   .h2-navbar__wishlist-btn,
   #wishlistToggleBtn {
     display: none !important;
@@ -552,8 +560,6 @@
   }
 
   .h2-navbar__left {
-    flex: 0 0 auto !important;
-    flex-shrink: 0 !important;
     gap: 6px !important;
   }
 
@@ -569,14 +575,12 @@
   }
 
   .h2-navbar__logo img {
-    width: 76px !important;
-    max-width: 76px !important;
+    width: 100% !important;
+    max-width: 100% !important;
     height: auto !important;
   }
 
   .h2-navbar__actions {
-    flex: 0 0 auto !important;
-    flex-shrink: 0 !important;
     gap: 4px !important;
   }
 
@@ -643,14 +647,14 @@
   }
 
   .h2-navbar__logo {
-    flex: 0 0 70px !important;
-    width: 70px !important;
-    max-width: 70px !important;
+    flex: 0 0 68px !important;
+    width: 68px !important;
+    max-width: 68px !important;
   }
 
   .h2-navbar__logo img {
-    width: 70px !important;
-    max-width: 70px !important;
+    width: 100% !important;
+    max-width: 100% !important;
   }
 
   #searchToggleBtn {
