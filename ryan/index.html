@@ -133,7 +133,7 @@
                     <circle cx="11" cy="11" r="7"></circle>
                     <path d="M16.5 16.5 21 21"></path>
                   </svg>
-                  <span>View all results for "<span id="searchQueryLabel">h2</span>"</span>
+                  <span>View all results for "<span id="searchQueryLabel">all products</span>"</span>
                   <span class="search-arrow" aria-hidden="true">&rarr;</span>
                 </a>
               </div>
@@ -393,10 +393,20 @@
             </p>
           </div>
 
+          <!-- Active Search Filter Banner for Ryan's Curated Collection -->
+          <div class="collection-filter-banner" id="collectionFilterBanner" hidden>
+            <span class="collection-filter-text">
+              Showing matching products for "<strong id="collectionFilterQuery"></strong>" in Ryan’s Collection
+            </span>
+            <button type="button" class="btn-clear-collection-filter" id="clearCollectionFilterBtn" aria-label="Show all products">
+              Show All Products &times;
+            </button>
+          </div>
+
           <!-- Product Cards Grid -->
           <div class="collection-grid">
             <!-- Product Card 1: H2 Molecular Hydrogen Water Bottle -->
-            <article class="product-card" data-product="bottle">
+            <article class="product-card" data-product="bottle" id="product-bottle">
               <div class="product-image-box">
                 <span class="product-badge best-seller-badge">★ Best Seller</span>
                 <img
@@ -516,7 +526,7 @@
             </article>
 
             <!-- Product Card 2: H2 Hydrogen Mist Spray -->
-            <article class="product-card" data-product="mist">
+            <article class="product-card" data-product="mist" id="product-mist">
               <div class="product-image-box">
                 <img
                   id="mistMainImg"
@@ -597,7 +607,7 @@
             </article>
 
             <!-- Product Card 3: H2 Hoodie -->
-            <article class="product-card product-card-soldout" data-product="hoodie">
+            <article class="product-card product-card-soldout" data-product="hoodie" id="product-hoodie">
               <div class="product-image-box">
                 <span class="product-badge sold-out-badge">Sold Out</span>
                 <img
