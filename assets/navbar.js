@@ -8,9 +8,13 @@
   'use strict';
 
   function getInitials(name) {
-    if (!name) return 'H2';
-    const parts = name.trim().split(/\s+/);
-    if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+    const raw = String(name || '').trim();
+    if (!raw) return 'H2';
+    const parts = raw.split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return 'H2';
+    if (parts.length === 1) {
+      return (parts[0].length >= 2 ? parts[0].substring(0, 2) : parts[0]).toUpperCase();
+    }
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   }
 
@@ -252,6 +256,13 @@
             if (typeof window.openAccountDrawer === 'function') {
               window.openAccountDrawer('account-profile');
             }
+          } else if (isBookingPage) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (typeof window.closeNavDrawer === 'function') window.closeNavDrawer();
+            if (typeof window.openProfileDialog === 'function') {
+              window.openProfileDialog();
+            }
           }
           return;
         }
@@ -300,39 +311,92 @@
   }
 
   // --- 6. Global Auth State Detection ---
-  async function checkAuth() {
+  function resetAuthButtons() {
+    const isMerch = window.location.pathname.startsWith('/merch');
+    const authBtns = document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn');
+    authBtns.forEach((btn) => {
+      btn.classList.remove('h2-navbar__btn--profile');
+      btn.classList.add('h2-navbar__btn--outline');
+      btn.innerHTML = 'Sign Up / Sign In';
+      btn.setAttribute(
+        'href',
+        isMerch
+          ? '/merch/auth.html?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search)
+          : '/booking/?auth=1'
+      );
+      btn.setAttribute('aria-label', 'Sign Up or Sign In');
+      btn.onclick = null;
+    });
+  }
 
+  function setAuthButtonsUser(user) {
+    if (!user) {
+      resetAuthButtons();
+      return;
+    }
+    const isMerch = window.location.pathname.startsWith('/merch');
+    const isBooking = window.location.pathname.startsWith('/booking');
+    const authBtns = document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn');
+    authBtns.forEach((btn) => {
+      const rawName = String(user.name || user.email || 'My Account').trim();
+      const firstName = rawName.split(' ')[0];
+      const displayName = firstName ? (firstName.charAt(0).toUpperCase() + firstName.slice(1)) : 'My Account';
+      const initials = getInitials(rawName);
+      const avatarUrl = user.avatarUrl ? String(user.avatarUrl).trim() : '';
+      const avatarStyle = avatarUrl ? `style="background-image: url('${avatarUrl}'); background-size: cover; background-position: center; color: transparent;"` : '';
+      btn.innerHTML = `<span class="h2-navbar__avatar" ${avatarStyle}>${initials}</span> <span>${displayName}</span>`;
+      btn.classList.remove('h2-navbar__btn--outline');
+      btn.classList.add('h2-navbar__btn--profile');
+      if (isMerch) {
+        btn.setAttribute('href', '#');
+        btn.onclick = function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (typeof window.closeNavDrawer === 'function') window.closeNavDrawer();
+          if (typeof window.openAccountDrawer === 'function') {
+            window.openAccountDrawer('account-profile');
+          }
+        };
+      } else if (isBooking) {
+        btn.setAttribute('href', '#');
+        btn.onclick = function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (typeof window.closeNavDrawer === 'function') window.closeNavDrawer();
+          if (typeof window.openProfileDialog === 'function') {
+            window.openProfileDialog();
+          }
+        };
+      } else {
+        btn.setAttribute('href', '/booking/');
+        btn.onclick = null;
+      }
+      btn.setAttribute('aria-label', `Account of ${displayName}`);
+    });
+  }
+
+  async function checkAuth() {
     try {
       const res = await fetch('/api/auth/me', { credentials: 'include' });
-      if (!res.ok) return;
+      if (!res.ok) {
+        resetAuthButtons();
+        return;
+      }
       const data = await res.json();
       const user = data?.user;
-      if (!user) return;
-
-      const authBtns = document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn, .h2-navbar__btn--outline');
-      authBtns.forEach((btn) => {
-        const displayName = (user.name || user.email || 'My Account').split(' ')[0];
-        const initials = getInitials(displayName);
-        btn.innerHTML = `<span class="h2-navbar__avatar">${initials}</span> <span>${displayName}</span>`;
-        btn.classList.remove('h2-navbar__btn--outline');
-        btn.classList.add('h2-navbar__btn--profile');
-        if (window.location.pathname.startsWith('/merch')) {
-          btn.setAttribute('href', '#');
-          btn.onclick = function (e) {
-            e.preventDefault();
-            e.stopPropagation();
-            if (typeof window.closeNavDrawer === 'function') window.closeNavDrawer();
-            if (typeof window.openAccountDrawer === 'function') {
-              window.openAccountDrawer('account-profile');
-            }
-          };
-        } else {
-          btn.setAttribute('href', '/booking/');
-        }
-        btn.setAttribute('aria-label', `Account of ${displayName}`);
-      });
-    } catch {}
+      if (!user) {
+        resetAuthButtons();
+        return;
+      }
+      setAuthButtonsUser(user);
+    } catch {
+      resetAuthButtons();
+    }
   }
+
+  window.syncGlobalNavbarAuth = setAuthButtonsUser;
+  window.refreshGlobalNavbarAuth = checkAuth;
+  window.resetGlobalNavbarAuth = resetAuthButtons;
 
   // --- Initialization ---
   function init() {
