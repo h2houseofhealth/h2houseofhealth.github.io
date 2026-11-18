@@ -4250,14 +4250,14 @@
 #shopify-section-template--18594170798198__collapsible_content_VRdJUD .collapsible-content__wrapper {
 	flex-direction: column !important;
 	gap: 0 !important;
-	max-width: 1100px;
+	max-width: 1320px;
 	margin: 0 auto;
 	width: 100%;
 }
 
 #shopify-section-template--18594170798198__collapsible_content_VRdJUD .collapsible-content__wrapper > div:first-child {
 	width: 100% !important;
-	max-width: 1100px !important;
+	max-width: 1320px !important;
 	flex: none !important;
 	margin: 0 auto 28px auto !important;
 }
@@ -4276,25 +4276,35 @@
 
 #shopify-section-template--18594170798198__collapsible_content_VRdJUD .collapsible-content-main-container {
 	width: 100% !important;
-	max-width: 1100px !important;
+	max-width: 1320px !important;
 	margin: 0 auto !important;
 	flex: none !important;
 }
 
 #shopify-section-template--18594170798198__collapsible_content_VRdJUD .collapsible-content__items {
-	display: flex !important;
-	flex-direction: column !important;
+	display: grid !important;
+	grid-template-columns: 1fr !important;
 	gap: 16px !important;
+	align-items: start !important;
+}
+
+@media screen and (min-width: 768px) {
+	#shopify-section-template--18594170798198__collapsible_content_VRdJUD .collapsible-content__items {
+		grid-template-columns: repeat(2, 1fr) !important;
+		gap: 20px !important;
+		align-items: start !important;
+	}
 }
 
 #shopify-section-template--18594170798198__collapsible_content_VRdJUD .collapsible-content__item {
 	background: #ffffff !important;
 	border: 1px solid rgba(0, 0, 0, 0.08) !important;
-	border-radius: 12px !important;
+	border-radius: 18px !important;
 	padding: clamp(18px, 2vw, 24px) clamp(20px, 2.5vw, 28px) !important;
-	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03) !important;
+	box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03) !important;
 	transition: border-color 0.25s ease, box-shadow 0.25s ease !important;
 	margin: 0 !important;
+	box-sizing: border-box !important;
 }
 
 #shopify-section-template--18594170798198__collapsible_content_VRdJUD .collapsible-content__item:first-child {
@@ -4325,11 +4335,24 @@
 }
 
 #shopify-section-template--18594170798198__collapsible_content_VRdJUD .collapsible-content__question {
-	font-size: clamp(16px, 1.5vw, 18px) !important;
-	font-weight: 600 !important;
-	color: #1a1a1a !important;
-	line-height: 1.45 !important;
+	font-family: var(--font-heading-family, "DM Sans", -apple-system, BlinkMacSystemFont, sans-serif) !important;
+	font-size: clamp(17px, 1.3vw, 19.5px) !important;
+	font-weight: 400 !important;
+	color: #221F1E !important;
+	line-height: 1.38 !important;
+	letter-spacing: -0.015em !important;
 	margin: 0 !important;
+	transition: color 0.2s ease !important;
+}
+
+#shopify-section-template--18594170798198__collapsible_content_VRdJUD .collapsible-content__item:hover .collapsible-content__question,
+#shopify-section-template--18594170798198__collapsible_content_VRdJUD .collapsible-content__item.active .collapsible-content__question {
+	color: var(--h2-terracotta, #ae5431) !important;
+}
+
+#shopify-section-template--18594170798198__collapsible_content_VRdJUD .collapsible-content__toggle-group {
+	text-align: left !important;
+	max-width: calc(100% - 44px) !important;
 }
 
 #shopify-section-template--18594170798198__collapsible_content_VRdJUD .collapsible-content__icon {
@@ -4401,7 +4424,7 @@
 									aria-label='⁠What is concierge primary healthcare, and how is it different from traditional primary care?'
 								>
 									<div class='collapsible-content__toggle-group'>
-											<h4 class='collapsible-content__question h4 font-weight-medium'>
+											<h4 class='collapsible-content__question h4'>
 												⁠What is concierge primary healthcare, and how is it different from traditional primary care?
 											</h4></div>
 									<div class='collapsible-content__icon icon-style--secondary'>
@@ -4447,7 +4470,7 @@
 									aria-label='Does concierge primary care replace my existing doctors or specialists?'
 								>
 									<div class='collapsible-content__toggle-group'>
-											<h4 class='collapsible-content__question h4 font-weight-medium'>
+											<h4 class='collapsible-content__question h4'>
 												Does concierge primary care replace my existing doctors or specialists?
 											</h4></div>
 									<div class='collapsible-content__icon icon-style--secondary'>
@@ -4491,7 +4514,7 @@
 									aria-label='Who is concierge primary care best suited for?'
 								>
 									<div class='collapsible-content__toggle-group'>
-											<h4 class='collapsible-content__question h4 font-weight-medium'>
+											<h4 class='collapsible-content__question h4'>
 												Who is concierge primary care best suited for?
 											</h4></div>
 									<div class='collapsible-content__icon icon-style--secondary'>
@@ -4535,7 +4558,7 @@
 									aria-label='What does Medicine 3.0 mean, and how is it applied in your clinic?'
 								>
 									<div class='collapsible-content__toggle-group'>
-											<h4 class='collapsible-content__question h4 font-weight-medium'>
+											<h4 class='collapsible-content__question h4'>
 												What does Medicine 3.0 mean, and how is it applied in your clinic?
 											</h4></div>
 									<div class='collapsible-content__icon icon-style--secondary'>
@@ -4579,7 +4602,7 @@
 									aria-label='What is H₂ (Molecular Hydrogen) Therapy, and why is it part of your medical model?'
 								>
 									<div class='collapsible-content__toggle-group'>
-											<h4 class='collapsible-content__question h4 font-weight-medium'>
+											<h4 class='collapsible-content__question h4'>
 												What is H₂ (Molecular Hydrogen) Therapy, and why is it part of your medical model?
 											</h4></div>
 									<div class='collapsible-content__icon icon-style--secondary'>
@@ -4623,7 +4646,7 @@
 									aria-label='⁠Is H₂ Therapy safe, and is it scientifically supported?'
 								>
 									<div class='collapsible-content__toggle-group'>
-											<h4 class='collapsible-content__question h4 font-weight-medium'>
+											<h4 class='collapsible-content__question h4'>
 												⁠Is H₂ Therapy safe, and is it scientifically supported?
 											</h4></div>
 									<div class='collapsible-content__icon icon-style--secondary'>
@@ -4667,7 +4690,7 @@
 									aria-label='What conditions or wellness goals can H₂ Therapy support?'
 								>
 									<div class='collapsible-content__toggle-group'>
-											<h4 class='collapsible-content__question h4 font-weight-medium'>
+											<h4 class='collapsible-content__question h4'>
 												What conditions or wellness goals can H₂ Therapy support?
 											</h4></div>
 									<div class='collapsible-content__icon icon-style--secondary'>
@@ -4711,7 +4734,7 @@
 									aria-label='⁠What should I expect during and after an H₂ Therapy session?'
 								>
 									<div class='collapsible-content__toggle-group'>
-											<h4 class='collapsible-content__question h4 font-weight-medium'>
+											<h4 class='collapsible-content__question h4'>
 												⁠What should I expect during and after an H₂ Therapy session?
 											</h4></div>
 									<div class='collapsible-content__icon icon-style--secondary'>

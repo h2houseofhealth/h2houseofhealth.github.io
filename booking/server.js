@@ -7885,6 +7885,27 @@ app.post('/api/guest/checkout', async (req, res) => {
         continue;
       }
 
+      const selectedDate = new Date(`${bookingDate}T00:00:00`);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(bookingDate).trim()) || Number.isNaN(selectedDate.getTime())) {
+        errors.push(`Invalid booking date: ${bookingDate}`);
+        continue;
+      }
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (selectedDate < today) {
+        errors.push(`Booking date cannot be in the past: ${bookingDate}`);
+        continue;
+      }
+      const normalizedTime = normalizeSlotStartTime(bookingTime);
+      if (!normalizedTime) {
+        errors.push(`Invalid booking time: ${bookingTime}`);
+        continue;
+      }
+      if (isBookingSlotInPast(bookingDate, normalizedTime)) {
+        errors.push(`Booking time cannot be in the past: ${bookingDate} ${bookingTime}`);
+        continue;
+      }
+
       // Validate service exists
       const service = getServiceByName(serviceName);
       if (!service) {
