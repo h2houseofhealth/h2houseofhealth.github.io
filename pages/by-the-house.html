@@ -1986,6 +1986,498 @@
 			role='main'
 			tabindex='-1'
 		>
+			<section id="shopify-section-h2-by-the-house-brief" class="shopify-section h2-by-the-house-brief-section spaced-section">
+				<style data-theme-style>
+					.h2-by-the-house-brief-section {
+						padding-top: 3.5rem;
+						padding-bottom: 3.5rem;
+						background: transparent;
+					}
+					@media screen and (min-width: 750px) {
+						.h2-by-the-house-brief-section {
+							padding-top: 4.8rem;
+							padding-bottom: 4.8rem;
+						}
+					}
+					.h2-brief-grid {
+						display: grid;
+						grid-template-columns: 1fr;
+						gap: 3rem;
+						align-items: start;
+					}
+					@media screen and (min-width: 990px) {
+						.h2-brief-grid {
+							grid-template-columns: 1fr 1.08fr;
+							gap: 4.5rem;
+						}
+					}
+					.h2-brief-left {
+						display: flex;
+						flex-direction: column;
+					}
+					@media screen and (min-width: 990px) {
+						.h2-brief-left {
+							position: sticky;
+							top: 110px;
+						}
+					}
+					.h2-brief-subheading-wrap {
+						margin-bottom: 1.4rem;
+					}
+					.h2-brief-subheading {
+						display: inline-flex;
+						align-items: center;
+						gap: 0.8rem;
+						color: #AE5431 !important;
+						font-size: 0.88rem;
+						font-weight: 700;
+						letter-spacing: 0.14em;
+						text-transform: uppercase;
+					}
+					.h2-brief-subheading::before {
+						content: "";
+						display: inline-block;
+						width: 8px;
+						height: 8px;
+						border-radius: 50%;
+						background-color: #AE5431;
+					}
+					.h2-brief-title {
+						font-family: var(--font-heading-family, "DM Sans", sans-serif);
+						font-size: clamp(2rem, 3.2vw, 3.2rem);
+						line-height: 1.16;
+						color: #1C1817;
+						margin: 0 0 1.8rem;
+						font-weight: 500;
+						letter-spacing: -0.02em;
+					}
+					.h2-brief-text {
+						font-size: clamp(1rem, 1.1vw, 1.125rem);
+						line-height: 1.74;
+						color: #433B38;
+						display: flex;
+						flex-direction: column;
+						gap: 1.3rem;
+					}
+					.h2-brief-text p {
+						margin: 0;
+					}
+					.h2-brief-callout {
+						padding: 1.25rem 1.45rem;
+						background: rgba(174, 84, 49, 0.05);
+						border-left: 3.5px solid #AE5431;
+						border-radius: 0 12px 12px 0;
+						font-weight: 500;
+						color: #221F1E;
+						margin-top: 0.4rem;
+						line-height: 1.65;
+					}
+					.h2-brief-callout strong {
+						color: #AE5431;
+						font-weight: 700;
+					}
+
+					/* Right Column: Doctor Slideshow */
+					.h2-dr-slideshow {
+						position: relative;
+						width: 100%;
+					}
+					.h2-dr-controls {
+						display: flex;
+						align-items: center;
+						justify-content: space-between;
+						margin-bottom: 1.2rem;
+						gap: 1rem;
+						flex-wrap: wrap;
+					}
+					.h2-dr-tabs {
+						display: flex;
+						gap: 0.6rem;
+					}
+					.h2-dr-tab {
+						display: inline-flex;
+						align-items: center;
+						gap: 0.5rem;
+						padding: 0.55rem 1.25rem;
+						border-radius: 999px;
+						background: #FAF7F2;
+						border: 1.5px solid rgba(174, 84, 49, 0.18);
+						color: #5A524D;
+						font-size: 0.88rem;
+						font-weight: 600;
+						cursor: pointer;
+						transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+						font-family: inherit;
+					}
+					.h2-dr-tab:hover {
+						border-color: #AE5431;
+						color: #AE5431;
+						background: #FFFFFF;
+					}
+					.h2-dr-tab.active {
+						background: #AE5431;
+						border-color: #AE5431;
+						color: #FFFFFF;
+						box-shadow: 0 4px 14px rgba(174, 84, 49, 0.25);
+					}
+					.h2-dr-tab-dot {
+						width: 6px;
+						height: 6px;
+						border-radius: 50%;
+						background: currentColor;
+						opacity: 0.8;
+					}
+					.h2-dr-arrows {
+						display: flex;
+						align-items: center;
+						gap: 0.5rem;
+					}
+					.h2-dr-arrow-btn {
+						width: 38px;
+						height: 38px;
+						border-radius: 50%;
+						display: flex;
+						align-items: center;
+						justify-content: center;
+						background: #FAF7F2;
+						border: 1.5px solid rgba(174, 84, 49, 0.18);
+						color: #433B38;
+						cursor: pointer;
+						transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+					}
+					.h2-dr-arrow-btn:hover {
+						background: #AE5431;
+						border-color: #AE5431;
+						color: #FFFFFF;
+						transform: scale(1.06);
+					}
+					.h2-dr-viewport {
+						width: 100%;
+						overflow: hidden;
+						position: relative;
+						border-radius: 20px;
+						background: #FAF7F2;
+						border: 1px solid rgba(174, 84, 49, 0.12);
+						padding: 1.6rem;
+						box-shadow: 0 10px 32px rgba(174, 84, 49, 0.05);
+						transition: box-shadow 0.3s ease;
+					}
+					@media screen and (min-width: 750px) {
+						.h2-dr-viewport {
+							padding: 2.2rem;
+						}
+					}
+					.h2-dr-viewport:hover {
+						box-shadow: 0 14px 40px rgba(174, 84, 49, 0.09);
+					}
+					.h2-dr-track {
+						display: flex;
+						transition: transform 0.55s cubic-bezier(0.25, 1, 0.5, 1);
+						will-change: transform;
+						width: 100%;
+					}
+					.h2-dr-slide {
+						width: 100%;
+						flex-shrink: 0;
+						opacity: 0.25;
+						transition: opacity 0.45s ease;
+						display: flex;
+						flex-direction: column;
+					}
+					.h2-dr-slide.active {
+						opacity: 1;
+					}
+					.h2-dr-image-container {
+						width: 100%;
+						height: 380px;
+						max-height: 50vh;
+						border-radius: 16px;
+						overflow: hidden;
+						background: #EDE6DC;
+						position: relative;
+						box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+					}
+					@media screen and (max-width: 600px) {
+						.h2-dr-image-container {
+							height: 300px;
+						}
+					}
+					.h2-dr-photo {
+						width: 100%;
+						height: 100%;
+						object-fit: cover;
+						object-position: center 20%;
+						display: block;
+						transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+					}
+					.h2-dr-image-container:hover .h2-dr-photo {
+						transform: scale(1.04);
+					}
+					.h2-dr-content {
+						margin-top: 1.6rem;
+						display: flex;
+						flex-direction: column;
+					}
+					.h2-dr-tag {
+						font-size: 0.8rem;
+						font-weight: 800;
+						letter-spacing: 0.14em;
+						color: #AE5431;
+						text-transform: uppercase;
+						margin-bottom: 0.35rem;
+					}
+					.h2-dr-name {
+						font-family: var(--font-heading-family, "DM Sans", sans-serif);
+						font-size: clamp(1.4rem, 2vw, 1.85rem);
+						line-height: 1.22;
+						color: #1C1817;
+						margin: 0;
+						font-weight: 700;
+					}
+					.h2-dr-role {
+						font-size: 0.98rem;
+						color: #756D69;
+						font-weight: 600;
+						margin-top: 0.25rem;
+						margin-bottom: 1.2rem;
+						padding-bottom: 0.8rem;
+						border-bottom: 1px solid rgba(174, 84, 49, 0.12);
+					}
+					.h2-dr-bio {
+						font-size: 0.97rem;
+						line-height: 1.68;
+						color: #433B38;
+						display: flex;
+						flex-direction: column;
+						gap: 0.95rem;
+					}
+					.h2-dr-bio p {
+						margin: 0;
+					}
+					.h2-dr-dots {
+						display: flex;
+						justify-content: center;
+						gap: 8px;
+						margin-top: 1.2rem;
+					}
+					.h2-dr-dot {
+						width: 28px;
+						height: 4px;
+						border-radius: 2px;
+						background: rgba(174, 84, 49, 0.2);
+						border: none;
+						cursor: pointer;
+						transition: all 0.3s ease;
+						padding: 0;
+					}
+					.h2-dr-dot.active {
+						background: #AE5431;
+						width: 44px;
+					}
+				</style>
+
+				<div class="container">
+					<div class="h2-brief-grid">
+						<!-- Left Side: H2 House of Health Brief -->
+						<div class="h2-brief-left">
+							<div class="h2-brief-subheading-wrap">
+								<span class="h2-brief-subheading">H2 HOUSE OF HEALTH BRIEF</span>
+							</div>
+							<h2 class="h2-brief-title">Care Built for Longevity &amp; Precision</h2>
+							<div class="h2-brief-text">
+								<p>H2 House of Health is a concierge primary care clinic in Jubilee Hills, Hyderabad, where a dedicated doctor who knows you replaces rushed, fragmented visits.</p>
+								<p>Care is built on Medicine 3.0: early risk identification, advanced diagnostics and personalized prevention, all aimed at extending healthspan, not just lifespan.</p>
+								<p>Its signature offering is medical-grade molecular hydrogen (H₂) therapy, a calm, non-invasive session that supports cellular balance, recovery, sleep and mental clarity.</p>
+								<div class="h2-brief-callout">
+									<strong>Global standards, personal care:</strong> because you shouldn’t wait for your body to break down before you service it.
+								</div>
+							</div>
+						</div>
+
+						<!-- Right Side: Doctor Slideshow -->
+						<div class="h2-dr-slideshow" id="h2DrSlideshow">
+							<div class="h2-dr-controls">
+								<div class="h2-dr-tabs" role="tablist" aria-label="Doctors at H2 House of Health">
+									<button type="button" class="h2-dr-tab active" data-slide="0" role="tab" aria-selected="true">
+										<span class="h2-dr-tab-dot"></span>
+										<span>Dr. Apoorv</span>
+									</button>
+									<button type="button" class="h2-dr-tab" data-slide="1" role="tab" aria-selected="false">
+										<span class="h2-dr-tab-dot"></span>
+										<span>Dr. Sandhya</span>
+									</button>
+								</div>
+								<div class="h2-dr-arrows">
+									<button type="button" class="h2-dr-arrow-btn" id="h2DrPrevBtn" aria-label="Previous Doctor">
+										<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+									</button>
+									<button type="button" class="h2-dr-arrow-btn" id="h2DrNextBtn" aria-label="Next Doctor">
+										<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+									</button>
+								</div>
+							</div>
+
+							<div class="h2-dr-viewport">
+								<div class="h2-dr-track" id="h2DrTrack">
+									<!-- Slide 1: Dr. Apoorv -->
+									<div class="h2-dr-slide active" data-slide-index="0">
+										<div class="h2-dr-image-container">
+											<img src="../cdn/shop/files/dr-venkat-apoorv.jpg" alt="Dr. Venkat Apoorv Thungathurthi - Founder, H2 House of Health" class="h2-dr-photo" loading="eager">
+										</div>
+										<div class="h2-dr-content">
+											<div class="h2-dr-tag">DR APOORV</div>
+											<h3 class="h2-dr-name">Dr. Venkat Apoorv Thungathurthi</h3>
+											<div class="h2-dr-role">Founder, H2 House of Health</div>
+											<div class="h2-dr-bio">
+												<p>Dr. Venkat Apoorv Thungathurthi is an internist and the Founder of H2 House of Health, a practice built on the belief that strong medicine begins with the first doctor a patient trusts, one who sees the whole person and not just the presenting complaint.</p>
+												<p>His grounding in adult medicine shapes a patient-first approach to everyday care: listening closely, connecting the dots and guiding people through their health with clarity and continuity.</p>
+												<p>He is equally driven by the role of technology in modern healthcare. He draws on data, digital tools and smarter systems to sharpen decisions, streamline care and make every interaction count.</p>
+												<p>Under his leadership, H2 House of Health pairs this approach with Medicine 3.0, a forward-looking model centered on early risk detection, advanced diagnostics and personalized prevention. It is complemented by molecular hydrogen (H₂) therapy, a non-invasive, medically supervised modality that supports cellular balance, recovery and overall vitality.</p>
+												<p>His vision is to pair clinical judgment with innovation, so patients receive care that is more precise, more accessible and more effective.</p>
+											</div>
+										</div>
+									</div>
+
+									<!-- Slide 2: Dr. Sandhya -->
+									<div class="h2-dr-slide" data-slide-index="1">
+										<div class="h2-dr-image-container">
+											<img src="../cdn/shop/files/dr-sai-sandhya.jpg" alt="Dr. Sai Sandhya Puli - Co-Founder, H2 House of Health" class="h2-dr-photo" loading="lazy">
+										</div>
+										<div class="h2-dr-content">
+											<div class="h2-dr-tag">DR SANDHYA</div>
+											<h3 class="h2-dr-name">Dr. Sai Sandhya Puli</h3>
+											<div class="h2-dr-role">Co-Founder, H2 House of Health</div>
+											<div class="h2-dr-bio">
+												<p>Dr. Sai Sandhya Puli is an MBBS graduate and the Co-Founder at H2 House of Health, where she builds and leads care around the principles of Medicine 3.0: a proactive, personalized approach that puts prevention ahead of late-stage treatment.</p>
+												<p>Her work brings together modern clinical medicine and the science of longevity. Where traditional care waits for disease to appear, Medicine 3.0 aims to delay or prevent chronic conditions such as cardiovascular disease, metabolic dysfunction and cognitive decline. Longevity principles guide how this is done: understanding each person's individual risk, measuring what matters early, and building daily habits around nutrition, movement, sleep, stress resilience and recovery.</p>
+												<p>She ensures these principles are delivered consistently in practice, shaping the clinical standards, patient experience and care pathways that turn evidence-based prevention into everyday results.</p>
+												<p>The goal is healthspan, not just lifespan: more years lived with energy, strength, mental clarity and independence.</p>
+											</div>
+										</div>
+									</div>
+								</div>
+
+								<div class="h2-dr-dots">
+									<button type="button" class="h2-dr-dot active" data-slide="0" aria-label="Go to Dr. Apoorv"></button>
+									<button type="button" class="h2-dr-dot" data-slide="1" aria-label="Go to Dr. Sandhya"></button>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<script>
+					(function() {
+						function initDrSlideshow() {
+							const slideshow = document.getElementById('h2DrSlideshow');
+							if (!slideshow) return;
+
+							const track = document.getElementById('h2DrTrack');
+							const slides = slideshow.querySelectorAll('.h2-dr-slide');
+							const tabs = slideshow.querySelectorAll('.h2-dr-tab');
+							const dots = slideshow.querySelectorAll('.h2-dr-dot');
+							const prevBtn = document.getElementById('h2DrPrevBtn');
+							const nextBtn = document.getElementById('h2DrNextBtn');
+							let currentIndex = 0;
+							let autoTimer = null;
+							const slideCount = slides.length;
+
+							function goToSlide(index) {
+								currentIndex = (index + slideCount) % slideCount;
+								if (track) {
+									track.style.transform = 'translateX(-' + (currentIndex * 100) + '%)';
+								}
+								slides.forEach(function(s, idx) {
+									s.classList.toggle('active', idx === currentIndex);
+								});
+								tabs.forEach(function(t, idx) {
+									var isActive = idx === currentIndex;
+									t.classList.toggle('active', isActive);
+									t.setAttribute('aria-selected', isActive ? 'true' : 'false');
+								});
+								dots.forEach(function(d, idx) {
+									d.classList.toggle('active', idx === currentIndex);
+								});
+							}
+
+							function startAutoPlay() {
+								stopAutoPlay();
+								autoTimer = setInterval(function() {
+									goToSlide(currentIndex + 1);
+								}, 8500);
+							}
+
+							function stopAutoPlay() {
+								if (autoTimer) {
+									clearInterval(autoTimer);
+									autoTimer = null;
+								}
+							}
+
+							if (prevBtn) {
+								prevBtn.addEventListener('click', function() {
+									goToSlide(currentIndex - 1);
+									startAutoPlay();
+								});
+							}
+							if (nextBtn) {
+								nextBtn.addEventListener('click', function() {
+									goToSlide(currentIndex + 1);
+									startAutoPlay();
+								});
+							}
+							tabs.forEach(function(tab) {
+								tab.addEventListener('click', function() {
+									var idx = parseInt(this.getAttribute('data-slide'), 10);
+									goToSlide(idx);
+									startAutoPlay();
+								});
+							});
+							dots.forEach(function(dot) {
+								dot.addEventListener('click', function() {
+									var idx = parseInt(this.getAttribute('data-slide'), 10);
+									goToSlide(idx);
+									startAutoPlay();
+								});
+							});
+
+							slideshow.addEventListener('mouseenter', stopAutoPlay);
+							slideshow.addEventListener('mouseleave', startAutoPlay);
+							slideshow.addEventListener('touchstart', stopAutoPlay, { passive: true });
+							slideshow.addEventListener('touchend', startAutoPlay, { passive: true });
+
+							// Touch swipe support
+							var touchStartX = 0;
+							var touchEndX = 0;
+							slideshow.addEventListener('touchstart', function(e) {
+								if (e.changedTouches && e.changedTouches[0]) {
+									touchStartX = e.changedTouches[0].screenX;
+								}
+							}, { passive: true });
+							slideshow.addEventListener('touchend', function(e) {
+								if (e.changedTouches && e.changedTouches[0]) {
+									touchEndX = e.changedTouches[0].screenX;
+									if (touchStartX - touchEndX > 45) {
+										goToSlide(currentIndex + 1);
+									} else if (touchEndX - touchStartX > 45) {
+										goToSlide(currentIndex - 1);
+									}
+								}
+								startAutoPlay();
+							}, { passive: true });
+
+							startAutoPlay();
+						}
+
+						if (document.readyState === 'loading') {
+							document.addEventListener('DOMContentLoaded', initDrSlideshow);
+						} else {
+							initDrSlideshow();
+						}
+					})();
+				</script>
+			</section>
+
 			<div id="shopify-section-template--18594171158646__image_with_text_GzdheW" class="shopify-section image-with-text-section spaced-section"><link href="../cdn/shop/t/2/assets/section-image-with-text6db3.css?v=158843924763379946001767860007" rel="stylesheet" type="text/css" media="all" />
 <style data-theme-style> #shopify-section-template--18594171158646__image_with_text_GzdheW
 {
