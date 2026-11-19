@@ -3411,33 +3411,49 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
   }
 
   function renderAccountTrigger() {
-    const authBtns = document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn');
+    const navbarBtn = document.getElementById('h2AuthBtn');
+    const drawerAuthBtn = document.getElementById('h2DrawerAuthBtn');
+    const drawerItem = drawerAuthBtn?.closest('li');
+    const drawerDivider = document.querySelector('.h2-navbar__drawer-divider');
     if (state.currentUser) {
+      document.body.classList.add('is-logged-in');
       const profile = getMerchantProfile();
       const displayName = (profile.fullName || state.currentUser.name || state.currentUser.email || 'My Account').split(' ')[0];
       const initials = escapeHtml(getInitials(displayName));
-      authBtns.forEach((btn) => {
-        btn.innerHTML = `<span class="h2-navbar__avatar">${initials}</span> <span>${escapeHtml(displayName)}</span>`;
-        btn.classList.remove('h2-navbar__btn--outline');
-        btn.classList.add('h2-navbar__btn--profile');
-        btn.setAttribute('href', '#');
-        btn.setAttribute('aria-label', `Account of ${displayName}`);
-        btn.onclick = (e) => {
+      if (navbarBtn) {
+        navbarBtn.innerHTML = `<span class="h2-navbar__avatar">${initials}</span> <span>${escapeHtml(displayName)}</span>`;
+        navbarBtn.classList.remove('h2-navbar__btn--outline');
+        navbarBtn.classList.add('h2-navbar__btn--profile');
+        navbarBtn.setAttribute('href', '#');
+        navbarBtn.setAttribute('aria-label', `Account of ${displayName}`);
+        navbarBtn.onclick = (e) => {
           e.preventDefault();
           e.stopPropagation();
           if (typeof window.closeNavDrawer === 'function') window.closeNavDrawer();
           openAccountDrawer('account-profile');
         };
-      });
+      }
+      if (drawerItem) drawerItem.style.display = 'none';
+      if (drawerDivider) drawerDivider.style.display = 'none';
     } else if (state.authResolved) {
-      authBtns.forEach((btn) => {
-        btn.classList.add('h2-navbar__btn--outline');
-        btn.classList.remove('h2-navbar__btn--profile');
-        btn.innerHTML = 'Sign Up / Sign In';
-        btn.setAttribute('href', '/merch/auth.html?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search));
-        btn.setAttribute('aria-label', 'Sign Up or Sign In');
-        btn.onclick = null;
-      });
+      document.body.classList.remove('is-logged-in');
+      if (navbarBtn) {
+        navbarBtn.classList.add('h2-navbar__btn--outline');
+        navbarBtn.classList.remove('h2-navbar__btn--profile');
+        navbarBtn.innerHTML = 'Sign Up / Sign In';
+        navbarBtn.setAttribute('href', '/merch/auth.html?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search));
+        navbarBtn.setAttribute('aria-label', 'Sign Up or Sign In');
+        navbarBtn.onclick = null;
+      }
+      if (drawerAuthBtn) {
+        drawerAuthBtn.classList.remove('h2-navbar__btn--profile');
+        drawerAuthBtn.innerHTML = 'Sign Up / Sign In';
+        drawerAuthBtn.setAttribute('href', '/merch/auth.html?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search));
+        drawerAuthBtn.setAttribute('aria-label', 'Sign Up or Sign In');
+        drawerAuthBtn.onclick = null;
+      }
+      if (drawerItem) drawerItem.style.display = '';
+      if (drawerDivider) drawerDivider.style.display = '';
     }
 
     if (!els.merchAuthCta) return;
