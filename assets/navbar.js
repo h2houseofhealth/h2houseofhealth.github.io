@@ -319,21 +319,43 @@
 
   // --- 6. Global Auth State Detection ---
   function resetAuthButtons() {
+    document.body.classList.remove('is-logged-in');
     const isMerch = window.location.pathname.startsWith('/merch');
-    const authBtns = document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn');
-    authBtns.forEach((btn) => {
-      btn.classList.remove('h2-navbar__btn--profile');
-      btn.classList.add('h2-navbar__btn--outline');
-      btn.innerHTML = 'Sign Up / Sign In';
-      btn.setAttribute(
+    const navbarBtn = document.getElementById('h2AuthBtn');
+    if (navbarBtn) {
+      navbarBtn.classList.remove('h2-navbar__btn--profile');
+      navbarBtn.classList.add('h2-navbar__btn--outline');
+      navbarBtn.innerHTML = 'Sign Up / Sign In';
+      navbarBtn.setAttribute(
         'href',
         isMerch
           ? '/merch/auth.html?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search)
           : '/booking/?auth=1'
       );
-      btn.setAttribute('aria-label', 'Sign Up or Sign In');
-      btn.onclick = null;
-    });
+      navbarBtn.setAttribute('aria-label', 'Sign Up or Sign In');
+      navbarBtn.onclick = null;
+    }
+
+    const drawerAuthBtn = document.getElementById('h2DrawerAuthBtn');
+    if (drawerAuthBtn) {
+      drawerAuthBtn.classList.remove('h2-navbar__btn--profile');
+      drawerAuthBtn.innerHTML = 'Sign Up / Sign In';
+      drawerAuthBtn.setAttribute(
+        'href',
+        isMerch
+          ? '/merch/auth.html?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search)
+          : '/booking/?auth=1'
+      );
+      drawerAuthBtn.setAttribute('aria-label', 'Sign Up or Sign In');
+      drawerAuthBtn.onclick = null;
+      const drawerItem = drawerAuthBtn.closest('li');
+      if (drawerItem) drawerItem.style.display = '';
+    }
+
+    const drawerDivider = document.querySelector('.h2-navbar__drawer-divider');
+    if (drawerDivider) {
+      drawerDivider.style.display = '';
+    }
   }
 
   function setAuthButtonsUser(user) {
@@ -341,22 +363,25 @@
       resetAuthButtons();
       return;
     }
+    document.body.classList.add('is-logged-in');
     const isMerch = window.location.pathname.startsWith('/merch');
     const isBooking = window.location.pathname.startsWith('/booking');
-    const authBtns = document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn');
-    authBtns.forEach((btn) => {
+
+    // 1. Keep profile in navbar ONLY (mobile & desktop)
+    const navbarBtn = document.getElementById('h2AuthBtn');
+    if (navbarBtn) {
       const rawName = String(user.name || user.email || 'My Account').trim();
       const firstName = rawName.split(' ')[0];
       const displayName = firstName ? (firstName.charAt(0).toUpperCase() + firstName.slice(1)) : 'My Account';
       const initials = getInitials(rawName);
       const avatarUrl = user.avatarUrl ? String(user.avatarUrl).trim() : '';
       const avatarStyle = avatarUrl ? `style="background-image: url('${avatarUrl}'); background-size: cover; background-position: center; color: transparent;"` : '';
-      btn.innerHTML = `<span class="h2-navbar__avatar" ${avatarStyle}>${initials}</span> <span>${displayName}</span>`;
-      btn.classList.remove('h2-navbar__btn--outline');
-      btn.classList.add('h2-navbar__btn--profile');
+      navbarBtn.innerHTML = `<span class="h2-navbar__avatar" ${avatarStyle}>${initials}</span> <span>${displayName}</span>`;
+      navbarBtn.classList.remove('h2-navbar__btn--outline');
+      navbarBtn.classList.add('h2-navbar__btn--profile');
       if (isMerch) {
-        btn.setAttribute('href', '#');
-        btn.onclick = function (e) {
+        navbarBtn.setAttribute('href', '#');
+        navbarBtn.onclick = function (e) {
           e.preventDefault();
           e.stopPropagation();
           if (typeof window.closeNavDrawer === 'function') window.closeNavDrawer();
@@ -365,8 +390,8 @@
           }
         };
       } else if (isBooking) {
-        btn.setAttribute('href', '#');
-        btn.onclick = function (e) {
+        navbarBtn.setAttribute('href', '#');
+        navbarBtn.onclick = function (e) {
           e.preventDefault();
           e.stopPropagation();
           if (typeof window.closeNavDrawer === 'function') window.closeNavDrawer();
@@ -375,11 +400,23 @@
           }
         };
       } else {
-        btn.setAttribute('href', '/booking/');
-        btn.onclick = null;
+        navbarBtn.setAttribute('href', '/booking/');
+        navbarBtn.onclick = null;
       }
-      btn.setAttribute('aria-label', `Account of ${displayName}`);
-    });
+      navbarBtn.setAttribute('aria-label', `Account of ${displayName}`);
+    }
+
+    // 2. Hide from drawer — do not duplicate in hamburger drawer!
+    const drawerAuthBtn = document.getElementById('h2DrawerAuthBtn');
+    if (drawerAuthBtn) {
+      drawerAuthBtn.classList.remove('h2-navbar__btn--profile');
+      const drawerItem = drawerAuthBtn.closest('li');
+      if (drawerItem) drawerItem.style.display = 'none';
+    }
+    const drawerDivider = document.querySelector('.h2-navbar__drawer-divider');
+    if (drawerDivider) {
+      drawerDivider.style.display = 'none';
+    }
   }
 
   async function checkAuth() {
