@@ -4,16 +4,19 @@
 @media screen and (max-width: 768px) {
   .slideshow-slide__img img,
   .hero-slide-img {
-    object-position: 78% center !important;
+    object-position: 80% center !important;
   }
 
   .slideshow-slide-mobile--top-left .slideshow-slide__text {
-    background: linear-gradient(180deg, rgba(254, 252, 248, 0.94) 0%, rgba(254, 252, 248, 0.82) 65%, rgba(254, 252, 248, 0.25) 100%) !important;
-    border-radius: 16px;
-    padding: 1.15rem 1rem !important;
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
+    background: rgba(254, 252, 248, 0.96) !important;
+    border-radius: 20px !important;
+    padding: 1.4rem 1.25rem !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    box-shadow: 0 10px 30px rgba(44, 38, 35, 0.08) !important;
+    border: 1px solid rgba(174, 84, 49, 0.12) !important;
     margin-top: calc(var(--header-height, 60px) + 0.75rem) !important;
+    max-width: calc(100% - 1rem) !important;
   }
 }
 
