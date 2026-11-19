@@ -2114,9 +2114,9 @@
         </div>
         <form method="post" action="/api/contact" id="contact_form" accept-charset="UTF-8" class="contact-form" data-static-form="contact">
           <div class="self-host-contact-form">
-            <label class="self-host-contact-field">Name*<input type="text" name="name" placeholder="Your name" required></label>
+            <label class="self-host-contact-field">Name*<input type="text" name="name" placeholder="Your name" required maxlength="50" pattern="^[a-zA-Z\s]+$" title="Name can only contain letters and spaces"></label>
             <label class="self-host-contact-field">Email*<input type="email" name="email" placeholder="your@email.com" autocomplete="email" required></label>
-            <label class="self-host-contact-field">Phone<input type="tel" name="phone" placeholder="Your phone number" autocomplete="tel"></label>
+            <label class="self-host-contact-field">Phone<input type="tel" name="phone" placeholder="10-digit phone number" autocomplete="tel" maxlength="10" inputmode="numeric" pattern="^\d{10}$" title="Phone number must be 10 digits"></label>
             <label class="self-host-contact-field">Message*<textarea name="message" placeholder="Write your message here..." required></textarea></label>
             <button type="submit">Send message</button>
           </div>
@@ -2129,19 +2129,82 @@
   </div>
 </section>
 <script>
+  (function initContactFormSanitization() {
+    function setupInputs() {
+      var form = document.querySelector('[data-static-form="contact"]');
+      if (!form) return;
+      var nameInput = form.querySelector('[name="name"]');
+      var phoneInput = form.querySelector('[name="phone"]');
+
+      if (nameInput) {
+        nameInput.addEventListener('input', function() {
+          // Reject any character that is not a letter or space
+          var clean = this.value.replace(/[^a-zA-Z\s]/g, '');
+          if (this.value !== clean) {
+            this.value = clean;
+          }
+        });
+      }
+
+      if (phoneInput) {
+        phoneInput.addEventListener('input', function() {
+          // Reject any character that is not a digit, and restrict to max 10 digits
+          var clean = this.value.replace(/\D/g, '').slice(0, 10);
+          if (this.value !== clean) {
+            this.value = clean;
+          }
+        });
+      }
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', setupInputs);
+    } else {
+      setupInputs();
+    }
+  })();
+
   document.addEventListener('submit', function (event) {
     var form = event.target.closest('[data-static-form="contact"]');
     if (!form) return;
     event.preventDefault();
+
+    var nameInput = form.querySelector('[name="name"]');
+    var emailInput = form.querySelector('[name="email"]');
+    var phoneInput = form.querySelector('[name="phone"]');
+    var messageInput = form.querySelector('[name="message"]');
+
+    var nameVal = (nameInput ? nameInput.value : '').trim();
+    var emailVal = (emailInput ? emailInput.value : '').trim();
+    var phoneVal = (phoneInput ? phoneInput.value : '').trim();
+    var messageVal = (messageInput ? messageInput.value : '').trim();
+
+    if (!nameVal || !emailVal || !messageVal) {
+      alert('Please fill in all required fields (Name, Email, Message).');
+      return;
+    }
+
+    if (!/^[a-zA-Z\s]{2,50}$/.test(nameVal)) {
+      alert('Please enter a valid name (letters and spaces only, at least 2 characters).');
+      if (nameInput) nameInput.focus();
+      return;
+    }
+
+    if (phoneVal && !/^\d{10}$/.test(phoneVal)) {
+      alert('Please enter a valid 10-digit phone number.');
+      if (phoneInput) phoneInput.focus();
+      return;
+    }
+
     var btn = form.querySelector('button[type="submit"]');
     var originalText = btn.textContent;
     btn.disabled = true;
     btn.textContent = 'Sending...';
     var data = {
-      name: form.querySelector('[name="name"]').value,
-      email: form.querySelector('[name="email"]').value,
-      phone: form.querySelector('[name="phone"]').value || '',
-      message: form.querySelector('[name="message"]').value
+      name: nameVal,
+      email: emailVal,
+      phone: phoneVal,
+      message: messageVal
     };
     fetch('/api/contact', {
       method: 'POST',
