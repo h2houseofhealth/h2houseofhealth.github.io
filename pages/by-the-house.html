@@ -82,7 +82,6 @@
        url("../cdn/fonts/dm_sans/dmsans_n4.87bdd914d8a61247b911147ae68e754d695c58a6.woff") format("woff");
 }
 
-			Liquid error (layout/theme line 88): font_face can only be used with a font drop
 			@font-face {
   font-family: "Roboto Mono";
   font-weight: 500;
@@ -1969,11 +1968,7 @@
 		if (header) headerObserver.observe(header);
 	}
 
-	calcHeader();;
-						breadcrumbsObserver.observe(breadcrumbs);
-					}
-				};
-				calcBreadcrumbs();;
+	calcHeader();
 			</script>
 		</div>
 	
@@ -2726,6 +2721,26 @@
 
 } }
 
+#shopify-section-template--18594171158646__multicolumn_nh7ye6 .multicolumn-card__picture {
+	width: 100% !important;
+	display: block !important;
+	border-radius: 8px !important;
+	overflow: hidden !important;
+	aspect-ratio: 16 / 9 !important;
+	background: #f4ede6;
+}
+#shopify-section-template--18594171158646__multicolumn_nh7ye6 .multicolumn-card__light-mode {
+	width: 100% !important;
+	height: 100% !important;
+	display: block !important;
+}
+#shopify-section-template--18594171158646__multicolumn_nh7ye6 .multicolumn-card__picture img {
+	width: 100% !important;
+	height: 100% !important;
+	object-fit: cover !important;
+	aspect-ratio: 16 / 9 !important;
+	display: block !important;
+}
 </style>
 
 
@@ -2744,11 +2759,7 @@
 										class='multicolumn-card__picture 16/9'
 									><div class='multicolumn-card__light-mode  dark-image-blank '>
 												
-												<img src="../cdn/shop/files/WhatsApp_Image_2026-01-31_at_13.47.30ca31.jpg?v=1769851837&amp;width=3840" alt="" width="1536" height="1024.0" loading="lazy" sizes="100vw (min-width: 767px) 50vw" class="jarallax-img full" style="--slide-height: ;
-											
-													aspect-ratio: 16/9;
-											
-">
+												<img src="../cdn/shop/files/WhatsApp_Image_2026-01-31_at_13.47.30ca31.jpg?v=1769851837&amp;width=3840" alt="H₂ Inhalation Therapy" width="1536" height="1024.0" loading="eager" class="full" style="width: 100%; height: 100%; aspect-ratio: 16/9; object-fit: cover; display: block;">
 </div>
 
 										<div class='multicolumn-card__dark-mode  image-blank '></div>
@@ -2769,11 +2780,7 @@
 										class='multicolumn-card__picture 16/9'
 									><div class='multicolumn-card__light-mode  dark-image-blank '>
 												
-												<img src="../cdn/shop/files/H2..._1c245.jpg?v=1769761713&amp;width=3840" alt="" width="1075" height="716.0" loading="lazy" sizes="100vw (min-width: 767px) 50vw" class="jarallax-img full" style="--slide-height: ;
-											
-													aspect-ratio: 16/9;
-											
-">
+												<img src="../cdn/shop/files/H2-iv-drip-therapy-1c245.jpg?v=1769761713&amp;width=3840" alt="IV- Drip Therapy" width="1075" height="716.0" loading="eager" class="full" style="width: 100%; height: 100%; aspect-ratio: 16/9; object-fit: cover; display: block;">
 </div>
 
 										<div class='multicolumn-card__dark-mode  image-blank '></div>
@@ -2794,11 +2801,7 @@
 										class='multicolumn-card__picture 16/9'
 									><div class='multicolumn-card__light-mode  dark-image-blank '>
 												
-												<img src="../cdn/shop/files/H2.._1c245.jpg?v=1769761713&amp;width=3840" alt="" width="1238" height="830.0" loading="lazy" sizes="100vw (min-width: 767px) 50vw" class="jarallax-img full" style="--slide-height: ;
-											
-													aspect-ratio: 16/9;
-											
-">
+												<img src="../cdn/shop/files/H2-iv-push-therapy-1c245.jpg?v=1769761713&amp;width=3840" alt="IV- Push Therapy" width="1238" height="830.0" loading="eager" class="full" style="width: 100%; height: 100%; aspect-ratio: 16/9; object-fit: cover; display: block;">
 </div>
 
 										<div class='multicolumn-card__dark-mode  image-blank '></div>
@@ -2814,6 +2817,75 @@
 		</div>
 	</div>
 </div>
+
+<script>
+	(function() {
+		function initMulticolumnSwiperMobile() {
+			var section = document.getElementById('shopify-section-template--18594171158646__multicolumn_nh7ye6');
+			if (!section) return;
+			var slider = section.querySelector('.swiper--multicolumn');
+			if (!slider) return;
+
+			if (window.innerWidth < 990) {
+				if (!slider.swiper && typeof Swiper !== 'undefined') {
+					var wrapper = slider.querySelector('.multicolumn-list__wrapper');
+					var slides = slider.querySelectorAll('.multicolumn-list__item');
+					slider.classList.add('swiper');
+					if (wrapper) wrapper.classList.add('swiper-wrapper');
+					if (slides.length > 1) {
+						slides.forEach(function(s) { s.classList.add('swiper-slide'); });
+					}
+					slider.style.overflow = 'hidden';
+					slider.style.position = 'relative';
+
+					new Swiper(slider, {
+						loop: false,
+						speed: 600,
+						autoHeight: true,
+						observer: true,
+						observeParents: true,
+						watchOverflow: true,
+						breakpoints: {
+							320: { slidesPerView: 1, slidesPerGroup: 1, spaceBetween: 16 },
+							750: { slidesPerView: 2, slidesPerGroup: 2, spaceBetween: 16 }
+						},
+						pagination: {
+							el: slider.querySelector('.multicolumn__pagination'),
+							clickable: true,
+							type: 'custom',
+							renderCustom: function(swiper, current, total) {
+								var out = '';
+								for (var i = 1; i <= total; i++) {
+									if (i === current) {
+										out += '<span class="swiper-pagination-bullet swiper-pagination-bullet-active" tabindex="0" role="button" aria-label="Go to slide ' + i + '"></span>';
+									} else {
+										out += '<span class="swiper-pagination-bullet" tabindex="0" role="button" aria-label="Go to slide ' + i + '"></span>';
+									}
+								}
+								return out;
+							}
+						},
+						on: {
+							init: function() {
+								this.updateAutoHeight(0);
+							},
+							slideChangeTransitionEnd: function() {
+								this.updateAutoHeight(200);
+							}
+						}
+					});
+				}
+			}
+		}
+
+		if (document.readyState === 'loading') {
+			document.addEventListener('DOMContentLoaded', initMulticolumnSwiperMobile);
+		} else {
+			initMulticolumnSwiperMobile();
+		}
+		window.addEventListener('resize', initMulticolumnSwiperMobile);
+	})();
+</script>
 
 
 </section>
