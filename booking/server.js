@@ -11332,6 +11332,14 @@ app.post('/api/contact', async (req, res) => {
     return res.status(400).json({ message: 'Name, email, and message are required.' });
   }
 
+  if (!/^[a-zA-Z\s]{2,50}$/.test(name)) {
+    return res.status(400).json({ message: 'Name can only contain letters and spaces (2-50 characters).' });
+  }
+
+  if (phone && !/^\d{10}$/.test(phone)) {
+    return res.status(400).json({ message: 'Phone number must be a valid 10-digit number.' });
+  }
+
   const CONTACT_TO_EMAIL = 'hello@h2houseofhealth.com';
   const CONTACT_FROM_EMAIL = MAIL_FROM || 'noreply@h2houseofhealth.com';
 
