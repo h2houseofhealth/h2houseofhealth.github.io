@@ -685,3 +685,11 @@
   color: var(--h2-nav-accent) !important;
   font-weight: 600 !important;
 }
+
+/* When user is logged in, hide drawer auth link & divider so profile is kept in navbar only */
+body.is-logged-in .h2-navbar__drawer-divider,
+body.is-logged-in .h2-navbar__drawer-auth,
+body.is-logged-in #h2DrawerAuthBtn,
+.h2-navbar__drawer-auth.h2-navbar__btn--profile {
+  display: none !important;
+}

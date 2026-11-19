@@ -13225,34 +13225,50 @@ function syncNavbarAuth(user = state.user) {
     window.syncGlobalNavbarAuth(user);
     return;
   }
-  const authBtns = document.querySelectorAll('#h2AuthBtn, #h2DrawerAuthBtn');
+  const navbarBtn = document.getElementById('h2AuthBtn');
+  const drawerAuthBtn = document.getElementById('h2DrawerAuthBtn');
+  const drawerItem = drawerAuthBtn?.closest('li');
+  const drawerDivider = document.querySelector('.h2-navbar__drawer-divider');
   if (user) {
+    document.body.classList.add('is-logged-in');
     const rawName = String(user.name || user.email || 'My Account').trim();
     const firstName = rawName.split(' ')[0];
     const displayName = firstName ? (firstName.charAt(0).toUpperCase() + firstName.slice(1)) : 'My Account';
     const initials = getInitials(rawName);
     const avatarUrl = user.avatarUrl ? normalizeAvatarUrl(user.avatarUrl) : '';
     const avatarStyle = avatarUrl ? `style="background-image: url('${avatarUrl}'); background-size: cover; background-position: center; color: transparent;"` : '';
-    authBtns.forEach((btn) => {
-      btn.innerHTML = `<span class="h2-navbar__avatar" ${avatarStyle}>${initials}</span> <span>${displayName}</span>`;
-      btn.classList.remove('h2-navbar__btn--outline');
-      btn.classList.add('h2-navbar__btn--profile');
-      btn.setAttribute('href', '#');
-      btn.setAttribute('aria-label', `Account of ${displayName}`);
-      btn.onclick = (e) => {
+    if (navbarBtn) {
+      navbarBtn.innerHTML = `<span class="h2-navbar__avatar" ${avatarStyle}>${initials}</span> <span>${displayName}</span>`;
+      navbarBtn.classList.remove('h2-navbar__btn--outline');
+      navbarBtn.classList.add('h2-navbar__btn--profile');
+      navbarBtn.setAttribute('href', '#');
+      navbarBtn.setAttribute('aria-label', `Account of ${displayName}`);
+      navbarBtn.onclick = (e) => {
         e.preventDefault();
         openProfileDialog();
       };
-    });
+    }
+    if (drawerItem) drawerItem.style.display = 'none';
+    if (drawerDivider) drawerDivider.style.display = 'none';
   } else {
-    authBtns.forEach((btn) => {
-      btn.classList.remove('h2-navbar__btn--profile');
-      btn.classList.add('h2-navbar__btn--outline');
-      btn.innerHTML = 'Sign Up / Sign In';
-      btn.setAttribute('href', '/booking/?auth=1');
-      btn.setAttribute('aria-label', 'Sign Up or Sign In');
-      btn.onclick = null;
-    });
+    document.body.classList.remove('is-logged-in');
+    if (navbarBtn) {
+      navbarBtn.classList.remove('h2-navbar__btn--profile');
+      navbarBtn.classList.add('h2-navbar__btn--outline');
+      navbarBtn.innerHTML = 'Sign Up / Sign In';
+      navbarBtn.setAttribute('href', '/booking/?auth=1');
+      navbarBtn.setAttribute('aria-label', 'Sign Up or Sign In');
+      navbarBtn.onclick = null;
+    }
+    if (drawerAuthBtn) {
+      drawerAuthBtn.classList.remove('h2-navbar__btn--profile');
+      drawerAuthBtn.innerHTML = 'Sign Up / Sign In';
+      drawerAuthBtn.setAttribute('href', '/booking/?auth=1');
+      drawerAuthBtn.setAttribute('aria-label', 'Sign Up or Sign In');
+      drawerAuthBtn.onclick = null;
+    }
+    if (drawerItem) drawerItem.style.display = '';
+    if (drawerDivider) drawerDivider.style.display = '';
   }
 }
 
