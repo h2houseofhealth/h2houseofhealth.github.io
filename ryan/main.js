@@ -3169,14 +3169,9 @@ function updateAuthHeaderUI() {
     }
 
     if (drawerAuthBtn) {
-      drawerAuthBtn.innerHTML = `<span class="h2-navbar__avatar" style="width:24px;height:24px;font-size:10px;margin-right:8px;">${initials}</span> <span>${currentAuthUser.name || displayName}</span>`;
-      drawerAuthBtn.href = '#';
-      drawerAuthBtn.onclick = (e) => {
-        e.preventDefault();
-        if (confirm(`Signed in as ${currentAuthUser.name || currentAuthUser.email}. Would you like to sign out?`)) {
-          handleSignOut();
-        }
-      };
+      drawerAuthBtn.style.display = 'none';
+      const drawerItem = drawerAuthBtn.closest('li');
+      if (drawerItem) drawerItem.style.display = 'none';
     }
 
     if (dropdownUserName) dropdownUserName.textContent = currentAuthUser.name || 'H2 Customer';
