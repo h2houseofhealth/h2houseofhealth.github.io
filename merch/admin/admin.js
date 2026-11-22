@@ -3520,6 +3520,21 @@
     if (rangeEnd) rangeEnd.setDate(rangeEnd.getDate() + 1);
 
     return [...state.orders].filter((order) => {
+      // Filter out test orders and unpaid checkouts from the admin dashboard
+      const orderNum = String(order.orderNumber || order.order_number || '').toUpperCase();
+      const custName = String(order.customerName || order.customer_name || '').toLowerCase();
+      const custEmail = String(order.customerEmail || order.customer_email || order.email || '').toLowerCase();
+      const totalAmt = Number(order.totalAmount ?? order.total_amount ?? 0);
+      const isTest = orderNum.includes('TEST') || orderNum.includes('SMOKE') ||
+        custName.includes('test') || custEmail.includes('test') ||
+        custEmail.endsWith('@example.com') || custEmail.endsWith('@h2houseofhealth.local') ||
+        (totalAmt > 0 && totalAmt <= 100);
+      if (isTest) return false;
+
+      const paymentStatus = String(order.paymentStatus || order.payment_status || '').toLowerCase();
+      const isPaid = ['paid', 'cod_pending', 'refunded'].includes(paymentStatus);
+      if (!isPaid) return false;
+
       const isTodayFilter = state.ordersStatus === 'today' || Boolean(state.ordersTodayOnly);
       let matchesStatus = false;
       if (state.ordersStatus === 'all' || isTodayFilter) {
@@ -4129,6 +4144,12 @@
     const rangeEnd = state.customersAppliedDateTo ? new Date(`${state.customersAppliedDateTo}T00:00:00`) : null;
     if (rangeEnd) rangeEnd.setDate(rangeEnd.getDate() + 1);
     const filtered = state.customers.filter((customer) => {
+      const custName = String(customer.name || customer.fullName || '').toLowerCase();
+      const custEmail = String(customer.email || '').toLowerCase();
+      if (custName === 'portal admin' || custName.includes('test')) return false;
+      if (custEmail.includes('test') || custEmail.endsWith('@example.com') || custEmail.endsWith('@h2houseofhealth.local')) return false;
+      if (Number(customer.merchandiseOrders || 0) <= 0 || Number(customer.lifetimeMerchSpend || 0) <= 0) return false;
+
       const matchesQuery = !query || [
         customer.name,
         hasRealEmail(customer.email) ? customer.email : '',
