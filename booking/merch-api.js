@@ -5839,16 +5839,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const orderNumber = String(data.order?.orderNumber || `Order #${data.order?.id}`).trim();
     const totalAmount = formatMerchWhatsAppCurrency(data.order?.totalAmount || 0);
 
-    const trackingOrderId = String(data.order?.id || orderId);
-    const buttonComponent = {
-      type: 'button',
-      sub_type: 'url',
-      index: '0',
-      parameters: [
-        { type: 'text', text: trackingOrderId },
-      ],
-    };
-
     const payload = {
       to,
       type: 'template',
@@ -5864,7 +5854,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
               { type: 'text', text: totalAmount },
             ],
           },
-          buttonComponent,
         ],
       },
     };
@@ -5875,7 +5864,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       customerName,
       orderNumber,
       totalAmount,
-      trackingOrderId,
     });
 
     try {
@@ -5883,9 +5871,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       try {
         result = await sendWhatsAppGraphMessage(config, payload);
       } catch (sendErr) {
-        // If template doesn't yet have dynamic URL button component configured on Meta, retry without button component
+        // If template parameter sending fails, retry with body-only component as fallback
         if (payload.template.components.length > 1 && /button|parameter/i.test(sendErr.message)) {
-          console.warn('[Merch] WhatsApp sending with URL button failed, retrying without button component:', sendErr.message);
+          console.warn('[Merch] WhatsApp sending failed, retrying with body-only component:', sendErr.message);
           const fallbackPayload = {
             ...payload,
             template: {
