@@ -1014,7 +1014,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!ryanId) {
       const res = db.prepare(`
         INSERT INTO merch_influencers (name, handle, email, phone, commission_rate, active, created_at)
-        VALUES ('Ryan Fernando', 'ryan_nutrition_coach', 'ryan@quahealth.com', '9900009080', 10, 1, datetime('now'))
+        VALUES ('Ryan Fernando', 'ryan_nutrition_coach', 'ryan@quahealth.com', '9900009080', 0, 1, datetime('now'))
       `).run();
       ryanId = res.lastInsertRowid;
     } else {
@@ -1024,6 +1024,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
             handle = 'ryan_nutrition_coach',
             email = 'ryan@quahealth.com',
             phone = '9900009080',
+            commission_rate = 0,
             active = 1
         WHERE id = ?
       `).run(ryanId);
