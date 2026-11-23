@@ -2813,6 +2813,14 @@ async function initAuthSystem() {
   const accountDropdownMenu = document.getElementById('accountDropdownMenu');
   const accountSignOutBtn = document.getElementById('accountSignOutBtn');
   const accountViewOrdersBtn = document.getElementById('accountViewOrdersBtn');
+  const accountInfluencerDashboardBtn = document.getElementById('accountInfluencerDashboardBtn');
+
+  if (accountInfluencerDashboardBtn) {
+    accountInfluencerDashboardBtn.addEventListener('click', () => {
+      if (accountDropdownMenu) accountDropdownMenu.hidden = true;
+      window.location.href = '/merch/wellness-products/?action=influencer-dashboard#account-influencer';
+    });
+  }
 
   if (authBtn) {
     authBtn.addEventListener('click', (e) => {
@@ -3176,7 +3184,16 @@ function updateAuthHeaderUI() {
 
     if (dropdownUserName) dropdownUserName.textContent = currentAuthUser.name || 'H2 Customer';
     if (dropdownUserEmail) dropdownUserEmail.textContent = currentAuthUser.email || '';
+
+    const accountInfluencerDashboardBtn = document.getElementById('accountInfluencerDashboardBtn');
+    if (accountInfluencerDashboardBtn) {
+      const email = String(currentAuthUser.email || '').trim().toLowerCase();
+      const isInfluencer = email === 'ryan@quahealth.com' || email.includes('ryan') || Boolean(currentAuthUser.isInfluencer);
+      accountInfluencerDashboardBtn.hidden = !isInfluencer;
+    }
   } else if (currentAuthUser && currentAuthUser.isGuest) {
+    const accountInfluencerDashboardBtn = document.getElementById('accountInfluencerDashboardBtn');
+    if (accountInfluencerDashboardBtn) accountInfluencerDashboardBtn.hidden = true;
     if (authBtn) {
       authBtn.className = 'h2-navbar__btn h2-navbar__btn--outline';
       authBtn.href = `/merch/auth.html?returnTo=${encodeURIComponent('/ryan/')}`;
@@ -3209,6 +3226,8 @@ function updateAuthHeaderUI() {
     }
 
     if (accountDropdownMenu) accountDropdownMenu.hidden = true;
+    const accountInfluencerDashboardBtn = document.getElementById('accountInfluencerDashboardBtn');
+    if (accountInfluencerDashboardBtn) accountInfluencerDashboardBtn.hidden = true;
   }
 }
 
