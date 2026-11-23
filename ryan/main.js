@@ -142,7 +142,7 @@ const RYAN_INDIVIDUAL_DISCOUNT_RATE = 0.05;
 const roundRs = (value) => Math.round(value * 100) / 100;
 const formatRs = (value) => Number(value).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const getRyanPairPrice = () => H2_CATALOGUE[0].price + H2_CATALOGUE[1].price;
-const VALID_RYAN_CODES = ['RYANH2', 'RYAN', 'RYAN100'];
+const VALID_RYAN_CODES = ['RYANH2'];
 
 let currentCart = [];
 let appliedCoupon = DEFAULT_COUPON_CODE;

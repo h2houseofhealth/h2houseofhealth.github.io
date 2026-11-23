@@ -1000,27 +1000,32 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   `);
 
   try {
-    const existingRyan = db.prepare("SELECT id FROM merch_influencers WHERE LOWER(name) = 'ryan' LIMIT 1").get();
+    const existingRyan = db.prepare(`
+      SELECT id FROM merch_influencers
+      WHERE LOWER(handle) = 'ryan_nutrition_coach'
+         OR LOWER(email) = 'ryan@quahealth.com'
+         OR LOWER(handle) = 'ryan_h2'
+         OR LOWER(name) = 'ryan fernando'
+         OR LOWER(name) = 'ryan'
+      ORDER BY id ASC
+      LIMIT 1
+    `).get();
     let ryanId = existingRyan ? existingRyan.id : null;
     if (!ryanId) {
       const res = db.prepare(`
         INSERT INTO merch_influencers (name, handle, email, phone, commission_rate, active, created_at)
-        VALUES ('Ryan', 'ryan_h2', 'ryan@h2houseofhealth.com', '+91 9876543210', 10, 1, datetime('now'))
+        VALUES ('Ryan Fernando', 'ryan_nutrition_coach', 'ryan@quahealth.com', '9900009080', 10, 1, datetime('now'))
       `).run();
       ryanId = res.lastInsertRowid;
-    }
-    const ryanMainCoupon = db.prepare("SELECT id FROM coupons WHERE LOWER(code) = 'ryan' LIMIT 1").get();
-    if (!ryanMainCoupon && ryanId) {
+    } else {
       db.prepare(`
-        INSERT INTO coupons (code, description, portal, discount_type, discount_value, applies_to, is_active, active, coupon_type, influencer_id, created_at)
-        VALUES ('RYAN', 'Ryan influencer discount (5% off bottles/mists, 15% off bottle + mist bundles)', 'merch', 'flat', 1150, 'merch', 1, 1, 'public', ?, datetime('now'))
-      `).run(ryanId);
-    }
-    const ryanCoupon = db.prepare("SELECT id FROM coupons WHERE LOWER(code) = 'ryan100' LIMIT 1").get();
-    if (!ryanCoupon && ryanId) {
-      db.prepare(`
-        INSERT INTO coupons (code, description, portal, discount_type, discount_value, applies_to, is_active, active, coupon_type, influencer_id, created_at)
-        VALUES ('RYAN100', 'Ryan influencer discount (5% off bottles/mists, 15% off bottle + mist bundles)', 'merch', 'flat', 1150, 'merch', 1, 1, 'public', ?, datetime('now'))
+        UPDATE merch_influencers
+        SET name = 'Ryan Fernando',
+            handle = 'ryan_nutrition_coach',
+            email = 'ryan@quahealth.com',
+            phone = '9900009080',
+            active = 1
+        WHERE id = ?
       `).run(ryanId);
     }
     const ryanH2Coupon = db.prepare("SELECT id FROM coupons WHERE LOWER(code) = 'ryanh2' LIMIT 1").get();
@@ -1029,9 +1034,21 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         INSERT INTO coupons (code, description, portal, discount_type, discount_value, applies_to, is_active, active, coupon_type, influencer_id, created_at)
         VALUES ('RYANH2', 'Ryan influencer discount (5% off bottles/mists, 15% off bottle + mist bundles)', 'merch', 'flat', 1150, 'merch', 1, 1, 'public', ?, datetime('now'))
       `).run(ryanId);
+    } else if (ryanH2Coupon && ryanId) {
+      db.prepare("UPDATE coupons SET influencer_id = ?, is_active = 1, active = 1, applies_to = 'merch' WHERE id = ?").run(ryanId, ryanH2Coupon.id);
     }
-    // Ryan pricing now covers bottles and mists, so his coupons must not be limited to the bottle category.
-    db.prepare("UPDATE coupons SET applies_to = 'merch' WHERE UPPER(code) IN ('RYAN', 'RYAN100', 'RYANH2') AND applies_to = 'category:bottles'").run();
+    // Clean up duplicate Ryan coupons if any exist
+    try {
+      db.prepare("DELETE FROM coupons WHERE UPPER(code) IN ('RYAN', 'RYAN100')").run();
+    } catch (_) {}
+    // Clean up duplicate Ryan influencer rows if any exist
+    try {
+      if (ryanId) {
+        db.prepare("DELETE FROM merch_influencers WHERE (LOWER(handle) = 'ryan_h2' OR LOWER(email) = 'ryan@h2houseofhealth.com') AND id != ?").run(ryanId);
+      }
+    } catch (_) {}
+    // Ryan pricing covers bottles and mists, so coupon must not be limited to category:bottles
+    db.prepare("UPDATE coupons SET applies_to = 'merch' WHERE UPPER(code) = 'RYANH2' AND applies_to = 'category:bottles'").run();
     // Ensure RyanH2 campaign persists all 4 bottle variant IDs [569, 570, 571, 572]
     try {
       const ryanH2Campaign = db.prepare("SELECT id, target_variant_ids FROM merch_campaigns WHERE LOWER(slug) = 'ryanh2'").get();
@@ -6170,23 +6187,27 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const code = String(coupon?.code || coupon?.couponCode || '').trim().toUpperCase();
     const infName = String(coupon?.influencerName || coupon?.influencer_name || coupon?.recipientName || coupon?.recipient_name || '').trim().toLowerCase();
 
+    const activeRyanId = getActiveRyanInfluencerId();
+
     // If a coupon is provided, check if the coupon itself is Ryan's coupon
     if (coupon) {
+      if (activeRyanId && infId === activeRyanId) return true;
       if (infId === 10) return true;
       if (code.startsWith('RYAN')) return true;
-      if (infName === 'ryan') return true;
+      if (infName.includes('ryan')) return true;
       return false;
     }
 
+    if (activeRyanId && infId === activeRyanId) return true;
     if (infId === 10) return true;
     if (code.startsWith('RYAN')) return true;
-    if (infName === 'ryan') return true;
+    if (infName.includes('ryan')) return true;
     const slug = String(campaignSlug || '').trim().toLowerCase();
     if (slug.startsWith('ryan')) return true;
     if (campaignId) {
       try {
         const camp = db.prepare('SELECT influencer_id, slug FROM merch_campaigns WHERE id = ?').get(Number(campaignId));
-        if (camp && (Number(camp.influencer_id) === 10 || String(camp.slug || '').toLowerCase().startsWith('ryan'))) {
+        if (camp && ((activeRyanId && Number(camp.influencer_id) === activeRyanId) || Number(camp.influencer_id) === 10 || String(camp.slug || '').toLowerCase().startsWith('ryan'))) {
           return true;
         }
       } catch {}
@@ -6241,9 +6262,21 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   const RYAN_BOTTLE_COMMISSION_PAISE = 230000;
   const RYAN_MIST_COMMISSION_PAISE = 100000;
 
-  // Active Ryan influencer row (by handle/name), used when an order comes from the /ryan landing page without a coupon.
+  // Active Ryan influencer row (by handle/email/name), used when an order comes from the /ryan landing page without a coupon.
   function getActiveRyanInfluencerId() {
-    const row = db.prepare("SELECT id FROM merch_influencers WHERE active = 1 AND (LOWER(handle) = 'ryan_h2' OR LOWER(name) = 'ryan') ORDER BY id LIMIT 1").get();
+    const row = db.prepare(`
+      SELECT id FROM merch_influencers
+      WHERE active = 1
+        AND (
+          LOWER(handle) = 'ryan_nutrition_coach'
+          OR LOWER(email) = 'ryan@quahealth.com'
+          OR LOWER(handle) = 'ryan_h2'
+          OR LOWER(name) = 'ryan fernando'
+          OR LOWER(name) = 'ryan'
+        )
+      ORDER BY id ASC
+      LIMIT 1
+    `).get();
     return row ? Number(row.id) : 0;
   }
 
