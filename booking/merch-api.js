@@ -4054,12 +4054,47 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     };
   }
 
-  function isVisibleMerchOrder(order) {
-    const paymentStatus = String(order?.paymentStatus || order?.payment_status || '').trim().toLowerCase();
-    const status = String(order?.status || '').trim().toLowerCase();
+  function isTestMerchOrder(order) {
+    if (!order) return false;
+    const orderNumber = String(order.orderNumber || order.order_number || '').trim().toUpperCase();
+    const customerName = String(order.customerName || order.customer_name || '').trim().toLowerCase();
+    const customerEmail = String(order.customerEmail || order.customer_email || '').trim().toLowerCase();
+    const guestName = String(order.guestName || order.guest_name || '').trim().toLowerCase();
+    const guestEmail = String(order.guestEmail || order.guest_email || '').trim().toLowerCase();
+    const totalAmount = Number(order.totalAmount ?? order.total_amount ?? 0);
 
-    if (['paid', 'cod_pending', 'refunded'].includes(paymentStatus)) return true;
-    return ['processing', 'shipped', 'delivered', 'cancelled', 'returned'].includes(status);
+    if (orderNumber.includes('TEST') || orderNumber.includes('SMOKE')) return true;
+    if (customerName.includes('test') || guestName.includes('test')) return true;
+    if (customerEmail.includes('test') || guestEmail.includes('test')) return true;
+    if (customerEmail.endsWith('@example.com') || guestEmail.endsWith('@example.com')) return true;
+    if (customerEmail.endsWith('@h2houseofhealth.local') || guestEmail.endsWith('@h2houseofhealth.local')) return true;
+    if (totalAmount > 0 && totalAmount <= 100) return true;
+    return false;
+  }
+
+  function isTestMerchCustomer(customer) {
+    if (!customer) return false;
+    const name = String(customer.name || customer.fullName || '').trim().toLowerCase();
+    const email = String(customer.email || '').trim().toLowerCase();
+    if (name === 'portal admin' || name.includes('test')) return true;
+    if (email.includes('test') || email.endsWith('@example.com') || email.endsWith('@h2houseofhealth.local')) return true;
+    return false;
+  }
+
+  function isVisibleMerchOrder(order, { includeTests = false, includeUnpaid = false } = {}) {
+    if (!order) return false;
+    if (!includeTests && isTestMerchOrder(order)) return false;
+
+    const paymentStatus = String(order?.paymentStatus || order?.payment_status || '').trim().toLowerCase();
+    const isPaid = ['paid', 'cod_pending', 'refunded'].includes(paymentStatus);
+
+    if (!includeUnpaid && !isPaid) return false;
+
+    const status = String(order?.status || '').trim().toLowerCase();
+    if (!isPaid && !['processing', 'shipped', 'delivered', 'cancelled', 'returned'].includes(status)) {
+      return false;
+    }
+    return true;
   }
 
   function loadMerchOrders({
@@ -4069,6 +4104,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     customerUserId = null,
     customerId = null,
     includeUnconfirmed = false,
+    includeTests = false,
   } = {}) {
     const clauses = [];
     const params = [];
@@ -4120,7 +4156,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const orders = db.prepare(sql).all(...params);
     if (!orders.length) return [];
 
-    const visibleOrders = includeUnconfirmed ? orders : orders.filter(isVisibleMerchOrder);
+    const visibleOrders = orders.filter((order) =>
+      isVisibleMerchOrder(order, { includeTests, includeUnpaid: includeUnconfirmed })
+    );
     if (!visibleOrders.length) return [];
 
     const orderIds = visibleOrders.map((order) => Number(order.id));
@@ -4150,9 +4188,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
 
   function buildMerchReports({ startDate = null, endDate = null } = {}) {
     const allOrders = loadMerchOrders({ startDate, endDate });
-    // Reports keep the normal confirmed-order visibility rules, while the live
-    // feed must also see orders immediately after checkout creates them.
-    const notificationOrders = loadMerchOrders({ startDate, endDate, includeUnconfirmed: true });
+    // Reports and live notifications track confirmed, non-test orders
+    const notificationOrders = loadMerchOrders({ startDate, endDate, includeUnconfirmed: false });
     const products = loadMerchProductCatalog({ includeInactive: true });
     const profiles = db
       .prepare(
@@ -4262,7 +4299,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     const recentPayments = allOrders
-      .filter((order) => ['paid', 'cod_pending', 'refunded'].includes(String(order.paymentStatus || '').toLowerCase()) || Number(order.totalAmount || 0) > 0)
+      .filter((order) => !isTestMerchOrder(order) && ['paid', 'cod_pending', 'refunded'].includes(String(order.paymentStatus || '').toLowerCase()))
       .slice(0, 5)
       .map((order) => ({
         id: Number(order.id),
@@ -4289,6 +4326,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       }));
 
     const recentCustomers = profiles
+      .filter((profile) => !isTestMerchCustomer(profile))
       .map((profile) => {
         const profileEmail = normalizeMerchCustomerEmail(profile.email);
         const profileId = Number(profile.id || 0);
@@ -4317,6 +4355,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
             : null,
         };
       })
+      .filter((customer) => customer.merchandiseOrders > 0)
       .sort((left, right) => String(right.registrationDate || right.lastOrder?.createdAt || '').localeCompare(String(left.registrationDate || left.lastOrder?.createdAt || '')))
       .slice(0, 5);
 
@@ -4548,7 +4587,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         shipping,
         netRevenue: Math.max(0, revenue - refunds - discounts),
         averageOrderValue: paidOrders.length ? Math.round(revenue / paidOrders.length) : 0,
-        customerCount: uniqueCustomers.size || profiles.length,
+        customerCount: uniqueCustomers.size,
         repeatCustomerCount: repeatCustomers.size,
         productCount: products.length,
         lowStockCount: products.filter((product) => !product.archived && Number(product.stock || 0) <= LOW_STOCK_THRESHOLD).length,
@@ -5839,16 +5878,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const orderNumber = String(data.order?.orderNumber || `Order #${data.order?.id}`).trim();
     const totalAmount = formatMerchWhatsAppCurrency(data.order?.totalAmount || 0);
 
-    const trackingOrderId = String(data.order?.id || orderId);
-    const buttonComponent = {
-      type: 'button',
-      sub_type: 'url',
-      index: '0',
-      parameters: [
-        { type: 'text', text: trackingOrderId },
-      ],
-    };
-
     const payload = {
       to,
       type: 'template',
@@ -5864,7 +5893,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
               { type: 'text', text: totalAmount },
             ],
           },
-          buttonComponent,
         ],
       },
     };
@@ -5875,7 +5903,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       customerName,
       orderNumber,
       totalAmount,
-      trackingOrderId,
     });
 
     try {
@@ -5883,9 +5910,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       try {
         result = await sendWhatsAppGraphMessage(config, payload);
       } catch (sendErr) {
-        // If template doesn't yet have dynamic URL button component configured on Meta, retry without button component
+        // If template parameter sending fails, retry with body-only component as fallback
         if (payload.template.components.length > 1 && /button|parameter/i.test(sendErr.message)) {
-          console.warn('[Merch] WhatsApp sending with URL button failed, retrying without button component:', sendErr.message);
+          console.warn('[Merch] WhatsApp sending failed, retrying with body-only component:', sendErr.message);
           const fallbackPayload = {
             ...payload,
             template: {
@@ -8865,12 +8892,13 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   });
 
   app.get('/api/merch/admin/orders', requireAdmin, (req, res) => {
-    const { status, startDate, endDate, includeUnconfirmed } = req.query;
+    const { status, startDate, endDate, includeUnconfirmed, includeTests } = req.query;
     const orders = loadMerchOrders({
-      status,
+      status: status === 'all' ? null : status,
       startDate,
       endDate,
-      includeUnconfirmed: includeUnconfirmed === 'true' || includeUnconfirmed === '1' || status === 'all' || status === 'pending',
+      includeUnconfirmed: includeUnconfirmed === 'true' || includeUnconfirmed === '1',
+      includeTests: includeTests === 'true' || includeTests === '1',
     });
     res.json({ orders, total: orders.length });
   });
@@ -9078,6 +9106,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     }
 
     const customers = Array.from(customersByKey.values())
+      .filter((customer) => !isTestMerchCustomer(customer) && customer.merchandiseOrders > 0 && customer.lifetimeMerchSpend > 0)
       .map((customer) => finalizeMerchCustomerRecord(customer))
       .sort((left, right) => {
         const leftTime = getMerchCustomerActivityTimestamp(left.lastOrder?.createdAt || left.registrationDate);
