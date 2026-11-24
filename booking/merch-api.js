@@ -11889,6 +11889,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
       if (!order) return res.status(404).json({ error: 'Order not found' });
 
+      if (['cancelled', 'returned'].includes(String(order.status || '').toLowerCase()) || String(order.shiprocket_status || '').toUpperCase() === 'CANCELLED') {
+        return res.status(400).json({ error: `Cannot check courier rates for order ${order.order_number}: Order is cancelled.` });
+      }
+
       const parsedAddr = parseMerchShippingAddress(order.shipping_address) || {};
       const deliveryPostcode = parsedAddr.postalCode || parsedAddr.postal_code || parsedAddr.pincode || '452001';
       const isCod = String(order.payment_method || '').toLowerCase() === 'cod';
@@ -11903,13 +11907,44 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         ? Math.max(0.01, Number((totalWeightGrams / 1000).toFixed(3)))
         : shiprocket.defaultWeightKg;
 
+      // Ensure order exists in Shiprocket so live declared value, Auto Secured insurance, and dimensions are used
+      let shiprocketOrderId = order.shiprocket_order_id;
+      let shipmentId = order.shiprocket_shipment_id;
+      if (!shiprocketOrderId && shiprocket.isConfigured()) {
+        try {
+          const createRes = await shiprocket.createOrder({ order, items });
+          if (createRes?.orderId) {
+            shiprocketOrderId = String(createRes.orderId);
+            shipmentId = String(createRes.shipmentId || '');
+            db.prepare(`
+              UPDATE merch_orders
+              SET shiprocket_order_id = ?,
+                  shiprocket_shipment_id = ?,
+                  shiprocket_status = ?,
+                  updated_at = datetime('now')
+              WHERE id = ?
+            `).run(shiprocketOrderId, shipmentId, String(createRes.status || 'NEW'), order.id);
+          }
+        } catch (createErr) {
+          console.warn('[Shiprocket] Auto order creation on rate check skipped:', createErr.message);
+        }
+      }
+
       const couriers = await shiprocket.checkServiceability({
         deliveryPostcode,
         weight: orderWeightKg,
         cod: isCod,
+        orderId: shiprocketOrderId || null,
+        shipmentId: shipmentId || null,
       });
 
-      res.json({ success: true, deliveryPostcode, weightKg: orderWeightKg, couriers });
+      res.json({
+        success: true,
+        deliveryPostcode,
+        weightKg: orderWeightKg,
+        shiprocketOrderId,
+        couriers,
+      });
     } catch (err) {
       res.status(500).json({ error: err.message, details: err.details || null });
     }
@@ -11920,6 +11955,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     try {
       const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
       if (!order) return res.status(404).json({ error: 'Order not found' });
+
+      if (['cancelled', 'returned'].includes(String(order.status || '').toLowerCase()) || String(order.shiprocket_status || '').toUpperCase() === 'CANCELLED') {
+        return res.status(400).json({ error: `Cannot fulfill order ${order.order_number}: Order is cancelled.` });
+      }
 
       if (String(order.status).toLowerCase() === 'stock_shortage') {
         return res.status(400).json({ error: `Cannot fulfill order ${order.order_number}: Order is in stock shortage status. Resolve the shortage before shipping.` });
@@ -11976,6 +12015,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     try {
       const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(req.params.id);
       if (!order) return res.status(404).json({ error: 'Order not found' });
+
+      if (['cancelled', 'returned'].includes(String(order.status || '').toLowerCase()) || String(order.shiprocket_status || '').toUpperCase() === 'CANCELLED') {
+        return res.status(400).json({ error: `Cannot ship or assign courier for order ${order.order_number}: Order is cancelled.` });
+      }
 
       if (String(order.status).toLowerCase() === 'stock_shortage') {
         return res.status(400).json({ error: `Cannot fulfill order ${order.order_number}: Order is in stock shortage status. Resolve the shortage before shipping.` });

@@ -3762,7 +3762,9 @@
             ${order.shiprocketPickupToken ? `<strong>Pickup Token:</strong> ${escapeHtml(order.shiprocketPickupToken)}<br>` : ''}
           </div>
           <div class="admin-actions" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-            ${!order.shiprocketAwbCode ? `
+            ${['cancelled', 'returned'].includes(normalizeOrderStatus(order.status)) || String(order.shiprocketStatus || '').toUpperCase() === 'CANCELLED' ? `
+              <span class="admin-badge admin-badge--neutral" style="font-size:12px;padding:4px 10px;font-weight:600;">🚫 Cancelled — Shipping Disabled</span>
+            ` : !order.shiprocketAwbCode ? `
               ${order.isFulfillmentBlocked || isShortageActionRequired || isAwaitingRestock || ['stock_shortage', 'partially_available', 'needs_review'].includes(order.fulfillmentStatus) ? `
                 <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" disabled title="🚫 Shipping blocked: Order has stock shortage or unallocated items" style="opacity:0.5;cursor:not-allowed;">🚫 Ship Blocked (Stock Shortage)</button>
               ` : `
@@ -4012,7 +4014,7 @@
                   </div>
                   <div class="admin-card__foot">
                     <div class="admin-footer-actions">
-                      ${!selectedOrder?.shiprocketAwbCode ? `
+                      ${!['cancelled', 'returned'].includes(normalizeOrderStatus(selectedOrder?.status)) && String(selectedOrder?.shiprocketStatus || '').toUpperCase() !== 'CANCELLED' && !selectedOrder?.shiprocketAwbCode ? `
                         ${selectedOrder?.isFulfillmentBlocked || Boolean(selectedOrder?.hasStockShortage || selectedOrder?.status === 'stock_shortage') ? `
                           <button class="admin-btn admin-btn--primary" type="button" disabled title="🚫 Shipping blocked: Order has stock shortage" style="opacity:0.5;cursor:not-allowed;">🚫 Ship Blocked</button>
                         ` : `
@@ -9034,6 +9036,10 @@
 
   async function openShiprocketFulfillModal(order) {
     if (!order) return;
+    if (['cancelled', 'returned'].includes(normalizeOrderStatus(order.status)) || String(order.shiprocketStatus || '').toUpperCase() === 'CANCELLED') {
+      toast('Cannot Ship', `Order ${order.orderNumber || order.id} is cancelled and cannot be fulfilled.`, 'warning');
+      return;
+    }
     openModal({
       title: `Ship with Shiprocket — ${order.orderNumber || `Order #${order.id}`}`,
       subtitle: `Checking courier rates and serviceability...`,
@@ -9066,31 +9072,51 @@
         return;
       }
 
+      const hasAutoSecured = couriers.some((c) => c.isInsured || (c.coverageCharges > 0));
       const subEl = els.adminModalDialog.querySelector('.admin-modal__sub');
       if (subEl) subEl.textContent = `Select a courier partner for delivery to ${escapeHtml(res.deliveryPostcode)}:`;
 
       const bodyEl = els.adminModalDialog.querySelector('.admin-modal__body');
       if (bodyEl) {
         bodyEl.innerHTML = `
-          <form class="admin-form" data-shiprocket-fulfill-form>
-            <div style="display:flex;flex-direction:column;gap:10px;max-height:360px;overflow-y:auto;padding-right:4px;">
+          <form class="admin-form" data-shiprocket-fulfill-form style="display:block;">
+            ${hasAutoSecured ? `
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:#f0fdf4;border:1px solid #bbf7d0;padding:10px 14px;border-radius:10px;font-size:12px;color:#166534;margin-bottom:14px;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:15px;">🛡️</span>
+                  <span><strong>Auto Secured Shipment:</strong> Live insurance coverage included in pricing.</span>
+                </div>
+                <span style="background:#dcfce7;color:#15803d;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;">Verified</span>
+              </div>
+            ` : ''}
+            <div style="display:flex;flex-direction:column;gap:10px;max-height:480px;overflow-y:auto;padding:2px 6px 2px 2px;">
               ${couriers.map((c, idx) => `
-                <label class="admin-card admin-courier-card" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border:1.5px solid ${idx === 0 ? '#3b82f6' : 'rgba(0,0,0,0.1)'};border-radius:10px;background:${idx === 0 ? 'rgba(59,130,246,0.04)' : 'transparent'};transition:all 0.15s ease;">
-                  <div style="display:flex;align-items:center;gap:14px;">
-                    <input type="radio" name="courier_company_id" value="${c.courierCompanyId}" ${idx === 0 ? 'checked' : ''} style="width:18px;height:18px;accent-color:#3b82f6;" />
-                    <div>
-                      <div style="font-weight:600;font-size:14px;color:var(--admin-text,#1f2937);display:flex;align-items:center;gap:6px;">
+                <label class="admin-courier-card" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border:1.5px solid ${idx === 0 ? '#3b82f6' : 'rgba(0,0,0,0.12)'};border-radius:12px;background:${idx === 0 ? '#f0f7ff' : '#ffffff'};transition:all 0.15s ease;box-shadow:${idx === 0 ? '0 0 0 1px #3b82f6' : '0 1px 3px rgba(0,0,0,0.04)'};flex-shrink:0;box-sizing:border-box;min-height:70px;">
+                  <div style="display:flex;align-items:center;gap:14px;min-width:0;">
+                    <input type="radio" name="courier_company_id" value="${c.courierCompanyId}" ${idx === 0 ? 'checked' : ''} style="width:20px;height:20px;accent-color:#3b82f6;flex-shrink:0;margin:0;cursor:pointer;" />
+                    <div style="min-width:0;">
+                      <div style="font-weight:700;font-size:15px;line-height:1.3;color:#111827;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                         <span>${escapeHtml(c.courierName)}</span>
-                        ${idx === 0 ? '<span style="background:#10b981;color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;font-weight:700;">Lowest Price</span>' : ''}
+                        ${c.isRecommended ? '<span style="background:#ede9fe;color:#6d28d9;border:1px solid #ddd6fe;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:700;">★ Recommended</span>' : ''}
+                        ${idx === 0 && !c.isRecommended ? '<span style="background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:700;">Lowest Price</span>' : ''}
+                        ${c.coverageCharges > 0 ? '<span style="background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600;">🛡️ Insured</span>' : ''}
                       </div>
-                      <div class="admin-table__muted" style="font-size:12px;margin-top:2px;">
-                        Est. Delivery: <strong>${escapeHtml(c.estimatedDeliveryDays || '2-4')} Days</strong> ${c.etd ? `(${escapeHtml(c.etd)})` : ''} · Mode: <strong>${c.isSurface ? 'Surface' : 'Air'}</strong>
+                      <div style="font-size:12px;color:#4b5563;margin-top:4px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                        <span>Est. Delivery: <strong style="color:#111827;">${escapeHtml(c.estimatedDeliveryDays || '2-4')} Days</strong> ${c.etd ? `(${escapeHtml(c.etd)})` : ''}</span>
+                        <span style="color:#d1d5db;">•</span>
+                        <span>Mode: <strong style="color:#111827;">${c.isSurface ? 'Surface' : 'Air'}</strong></span>
+                        ${c.callBeforeDelivery === 'Available' ? '<span style="color:#d1d5db;">•</span><span style="color:#059669;font-weight:600;">📞 Call before delivery</span>' : ''}
                       </div>
                     </div>
                   </div>
-                  <div style="text-align:right;">
-                    <div style="font-size:17px;font-weight:700;color:#10b981;">₹${Number(c.rate || 0).toFixed(2)}</div>
-                    ${c.rating ? `<div style="font-size:11px;color:#f59e0b;font-weight:600;">★ ${escapeHtml(String(c.rating))}</div>` : ''}
+                  <div style="text-align:right;min-width:115px;flex-shrink:0;padding-left:14px;">
+                    <div style="font-size:18px;font-weight:800;color:#059669;line-height:1.2;">₹${Number(c.rate || 0).toFixed(2)}</div>
+                    ${c.rating ? `<div style="font-size:12px;color:#d97706;font-weight:700;margin-top:3px;">★ ${escapeHtml(String(c.rating))}</div>` : ''}
+                    ${c.coverageCharges > 0 ? `
+                      <div style="font-size:10.5px;color:#6b7280;margin-top:2px;">
+                        Freight ₹${Number(c.freightCharge || 0).toFixed(0)} + Ins. ₹${Number(c.coverageCharges).toFixed(0)}
+                      </div>
+                    ` : ''}
                   </div>
                 </label>
               `).join('')}
@@ -9104,10 +9130,12 @@
             const radio = card.querySelector('input[type="radio"]');
             if (radio?.checked) {
               card.style.borderColor = '#3b82f6';
-              card.style.background = 'rgba(59,130,246,0.04)';
+              card.style.background = '#f0f7ff';
+              card.style.boxShadow = '0 0 0 1px #3b82f6';
             } else {
-              card.style.borderColor = 'rgba(0,0,0,0.1)';
-              card.style.background = 'transparent';
+              card.style.borderColor = 'rgba(0,0,0,0.12)';
+              card.style.background = '#ffffff';
+              card.style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)';
             }
           });
         });

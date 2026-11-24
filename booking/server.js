@@ -44,6 +44,30 @@ loadEnvFromFile(path.join(__dirname, '.env'));
 
 const PORT = process.env.PORT || 3000;
 const WEBSITE_ROOT = path.resolve(__dirname, '..');
+
+const H2_INVOICE_LOGO_DATA_URI = (() => {
+  try {
+    const p = path.join(__dirname, 'assets', 'brand', 'H2_Logo.png');
+    if (fs.existsSync(p)) {
+      return `data:image/png;base64,${fs.readFileSync(p).toString('base64')}`;
+    }
+  } catch (err) {
+    console.error('Failed to load H2_Logo.png for invoices:', err);
+  }
+  return '/booking/assets/brand/H2_Logo.png';
+})();
+
+const INVOICE_PAGE_BG_DATA_URI = (() => {
+  try {
+    const p = path.join(__dirname, 'assets', 'invoice-page.png');
+    if (fs.existsSync(p)) {
+      return `data:image/png;base64,${fs.readFileSync(p).toString('base64')}`;
+    }
+  } catch (err) {
+    console.error('Failed to load invoice-page.png for invoices:', err);
+  }
+  return '/booking/assets/invoice-page.png';
+})();
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_super_secret_change_me';
 const IS_PRODUCTION = normalizeEnvValue(process.env.NODE_ENV).toLowerCase() === 'production';
 if (IS_PRODUCTION && !normalizeEnvValue(process.env.JWT_SECRET)) {
@@ -8874,7 +8898,15 @@ function sanitizeInvoiceFilenamePart(value) {
 
 function prepareInvoiceHtmlForPdf(html, req) {
   const origin = getRequestOrigin(req).replace(/\/+$/, '');
-  return String(html || '')
+  let prepared = String(html || '');
+  if (H2_INVOICE_LOGO_DATA_URI && H2_INVOICE_LOGO_DATA_URI.startsWith('data:')) {
+    prepared = prepared.replace(/\/booking\/assets\/brand\/H2_Logo\.png/g, H2_INVOICE_LOGO_DATA_URI);
+  }
+  if (INVOICE_PAGE_BG_DATA_URI && INVOICE_PAGE_BG_DATA_URI.startsWith('data:')) {
+    prepared = prepared.replace(/\/booking\/assets\/invoice-page\.png/g, INVOICE_PAGE_BG_DATA_URI);
+  }
+  prepared = prepared.replace(/<div class="invoice-toolbar"[\s\S]*?<\/div>/i, '');
+  return prepared
     .replace(/<head>/i, `<head><base href="${escapeHtml(origin)}/">`)
     .replace(/url\('\/([^']+)'\)/g, `url('${origin}/$1')`)
     .replace(/url\("\/([^"]+)"\)/g, `url("${origin}/$1")`)
@@ -8883,46 +8915,142 @@ function prepareInvoiceHtmlForPdf(html, req) {
     .replace(/\shref="\/([^"]+)"/g, ` href="${origin}/$1"`);
 }
 
+function findChromeExecutable() {
+  const fs = require('fs');
+  const path = require('path');
+
+  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+
+  const systemCandidates = [
+    '/opt/google/chrome/chrome',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/snap/bin/chromium',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  ];
+  for (const p of systemCandidates) {
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch {}
+  }
+
+  const cacheDirs = [
+    path.join(__dirname, '..', '.cache', 'puppeteer'),
+    path.join(process.env.HOME || '', '.cache', 'puppeteer'),
+    '/root/.cache/puppeteer',
+    '/home/ubuntu/.cache/puppeteer',
+  ];
+
+  for (const base of cacheDirs) {
+    try {
+      if (!fs.existsSync(base)) continue;
+      const searchDirs = [base];
+      while (searchDirs.length > 0) {
+        const curr = searchDirs.pop();
+        let entries = [];
+        try {
+          entries = fs.readdirSync(curr, { withFileTypes: true });
+        } catch {
+          continue;
+        }
+        for (const entry of entries) {
+          const full = path.join(curr, entry.name);
+          if (entry.isDirectory()) {
+            if (entry.name === 'Google Chrome for Testing.app') {
+              const macBin = path.join(full, 'Contents', 'MacOS', 'Google Chrome for Testing');
+              if (fs.existsSync(macBin)) return macBin;
+            } else if (!entry.name.endsWith('.app')) {
+              searchDirs.push(full);
+            }
+          } else if (entry.isFile()) {
+            if (entry.name === 'chrome' || entry.name === 'chrome-headless-shell' || entry.name === 'Google Chrome for Testing') {
+              try {
+                fs.accessSync(full, fs.constants.X_OK);
+                return full;
+              } catch {}
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+  return undefined;
+}
+
+function getPuppeteerLaunchOptions() {
+  const options = {
+    headless: 'new',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--no-first-run',
+      '--no-zygote',
+      '--single-process',
+    ],
+  };
+  const execPath = findChromeExecutable();
+  if (execPath) {
+    options.executablePath = execPath;
+  }
+  return options;
+}
+
 async function sendInvoiceResponse(req, res, html, invoiceNo) {
   if (!shouldDownloadInvoicePdf(req)) {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     return res.send(html);
   }
 
-  if (!puppeteer) {
-    console.error('Invoice PDF generation unavailable: Puppeteer could not be loaded.', puppeteerLoadError);
-    return res.status(503).json({ message: 'Unable to generate the invoice. Please try again later or contact support.' });
-  }
-
-  let browser;
-  try {
-    browser = await puppeteer.launch({
-      headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1200, height: 1600, deviceScaleFactor: 1 });
-    await page.setContent(prepareInvoiceHtmlForPdf(html, req), {
-      waitUntil: ['load', 'networkidle0'],
-    });
-    const pdfBuffer = await page.pdf({
-      width: '240mm',
-      height: '320mm',
-      preferCSSPageSize: true,
-      printBackground: true,
-      margin: { top: '0', right: '0', bottom: '0', left: '0' },
-    });
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename=H2_invoice.pdf');
-    return res.send(pdfBuffer);
-  } catch (error) {
-    console.error('Invoice PDF generation failed:', error);
-    return res.status(500).json({ message: 'Unable to generate the invoice. Please try again later or contact support.' });
-  } finally {
-    if (browser) {
-      await browser.close().catch(() => {});
+  if (puppeteer) {
+    let browser;
+    try {
+      const launchOptions = getPuppeteerLaunchOptions();
+      browser = await puppeteer.launch(launchOptions);
+      const page = await browser.newPage();
+      await page.setViewport({ width: 1200, height: 1600, deviceScaleFactor: 1 });
+      await page.setContent(prepareInvoiceHtmlForPdf(html, req), {
+        waitUntil: ['load', 'domcontentloaded'],
+        timeout: 15000,
+      });
+      const pdfBuffer = await page.pdf({
+        width: '240mm',
+        height: '320mm',
+        preferCSSPageSize: true,
+        printBackground: true,
+        margin: { top: '0', right: '0', bottom: '0', left: '0' },
+      });
+      const safeInvoiceNo = sanitizeInvoiceFilenamePart(invoiceNo || 'invoice');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="H2_invoice_${safeInvoiceNo}.pdf"`);
+      return res.send(pdfBuffer);
+    } catch (error) {
+      console.error('Invoice PDF generation failed via Puppeteer:', error);
+    } finally {
+      if (browser) {
+        await browser.close().catch(() => {});
+      }
     }
   }
+
+  // Never return raw JSON error responses for PDF download requests because browsers
+  // with <a download> or users expecting a PDF file will save the JSON error as a .json file.
+  // Instead, send the HTML invoice with an automatic print trigger so the browser's native Save-as-PDF dialog opens:
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  const printFallbackHtml = html.replace(
+    '</body>',
+    `<script>
+      window.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() { window.print(); }, 400);
+      });
+    </script></body>`
+  );
+  return res.send(printFallbackHtml);
 }
 
 function formatInvoiceInr(amountInr) {
@@ -9342,6 +9470,8 @@ app.get('/invoice/merch', async (req, res) => {
       justify-content:center;
       min-height:42px;
       padding:0 18px;
+      border:none;
+      cursor:pointer;
       border-radius:6px;
       background:#AE5431;
       color:#fff;
@@ -9352,6 +9482,8 @@ app.get('/invoice/merch', async (req, res) => {
       letter-spacing:.04em;
       box-shadow:0 8px 18px rgba(174,84,49,.22);
       pointer-events:auto;
+      font-family:inherit;
+      transition:background 0.15s ease, opacity 0.15s ease;
     }
     .invoice-download-btn:hover,
     .invoice-download-btn:focus-visible{
@@ -9363,7 +9495,7 @@ app.get('/invoice/merch', async (req, res) => {
       margin:18px auto;
       box-sizing:border-box;
       background:#fff;
-      padding:46mm 18mm 18mm 18mm;
+      padding:30mm 18mm 18mm 18mm;
       box-shadow:0 10px 32px rgba(0,0,0,.10);
       overflow:visible;
     }
@@ -9372,7 +9504,7 @@ app.get('/invoice/merch', async (req, res) => {
       position:absolute;
       inset:0 0 auto 0;
       height:120mm;
-      background:url('/booking/assets/invoice-page.png') no-repeat top center;
+      background:url('${INVOICE_PAGE_BG_DATA_URI}') no-repeat top center;
       background-size:100% auto;
       pointer-events:none;
       z-index:0;
@@ -9382,6 +9514,9 @@ app.get('/invoice/merch', async (req, res) => {
       z-index:1;
     }
     .row{display:flex;gap:16px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap}
+    .invoice-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
+    .invoice-logo-wrap{margin-left:auto;text-align:right}
+    .invoice-logo-img{height:52px;width:auto;max-width:180px;object-fit:contain;display:block}
     .title{font-size:18px;margin:0 0 4px;letter-spacing:.02em}
     .muted{color:var(--muted);font-size:13px;line-height:1.35}
     .block{margin-top:10px}
@@ -9620,17 +9755,20 @@ app.get('/invoice/merch', async (req, res) => {
 </head>
 <body>
   <div class="invoice-toolbar">
-    <a class="invoice-download-btn" href="${escapeHtml(invoiceDownloadUrl)}" download>Download Invoice</a>
+    <button class="invoice-download-btn" id="invoiceDownloadBtn" type="button">Download Invoice (PDF)</button>
   </div>
   <div class="page">
     <div class="row invoice-header">
       <div>
-        <div style="font-weight:700;">
+        <div style="font-weight:700;font-size:15px;color:#111;">
            Vasporixus Apex Therapeutics LLP
         </div>
-        <div class="muted">
+        <div class="muted" style="margin-top:2px;">
            GSTIN: 36ABBFV3058K1ZW
         </div>
+      </div>
+      <div class="invoice-logo-wrap">
+        <img class="invoice-logo-img" src="${H2_INVOICE_LOGO_DATA_URI}" alt="H2 House of Health" />
       </div>
     </div>
     <div style="text-align:right;">
@@ -9777,8 +9915,47 @@ app.get('/invoice/merch', async (req, res) => {
       </div>
     </div>
     
-    
   </div>
+  <script>
+    (function() {
+      var btn = document.getElementById('invoiceDownloadBtn');
+      if (!btn) return;
+      var downloadUrl = ${JSON.stringify(invoiceDownloadUrl)};
+      var invoiceNo = ${JSON.stringify(invoiceNo || 'invoice')};
+      btn.addEventListener('click', async function(e) {
+        e.preventDefault();
+        var origText = btn.textContent;
+        btn.textContent = 'Downloading PDF...';
+        btn.style.opacity = '0.7';
+        btn.disabled = true;
+        try {
+          var res = await fetch(downloadUrl);
+          var ct = res.headers.get('content-type') || '';
+          if (res.ok && ct.toLowerCase().indexOf('application/pdf') !== -1) {
+            var blob = await res.blob();
+            var blobUrl = window.URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = 'H2_Invoice_' + String(invoiceNo).replace(/[^a-zA-Z0-9_-]/g, '_') + '.pdf';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(function() { window.URL.revokeObjectURL(blobUrl); }, 2000);
+            btn.textContent = origText;
+            btn.style.opacity = '1';
+            btn.disabled = false;
+            return;
+          }
+        } catch (err) {
+          console.warn('PDF download error:', err);
+        }
+        btn.textContent = origText;
+        btn.style.opacity = '1';
+        btn.disabled = false;
+        window.print();
+      });
+    })();
+  </script>
 </body>
 </html>`;
   return sendInvoiceResponse(req, res, invoiceHtml, invoiceNo);
@@ -9900,6 +10077,7 @@ app.get('/invoice/booking', async (req, res) => {
   const serviceDetailsHtml = buildServiceDetailsHtml(invoiceLineItems, invoiceSummary?.serviceName || booking.serviceName || 'Booking');
   const amountInWordsHtml = buildAmountInWordsHtml(amountInr);
   const invoiceNo = `BK-${booking.id}`;
+  const invoiceDownloadUrl = `/invoice/booking?token=${encodeURIComponent(String(req.query.token || ''))}&format=pdf&download=1`;
   const paidAtLabel = formatInvoiceDateTime(booking.paidAt);
   const generatedAtLabel = formatInvoiceDateTime(new Date());
   const customerName = bookingOwner?.name || booking.guestName || '';
@@ -9926,13 +10104,47 @@ app.get('/invoice/booking', async (req, res) => {
       -webkit-print-color-adjust:exact;
       print-color-adjust:exact;
     }
+    .invoice-toolbar{
+      position:fixed;
+      top:18px;
+      right:18px;
+      z-index:10;
+      display:flex;
+      justify-content:flex-end;
+      pointer-events:none;
+    }
+    .invoice-download-btn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-height:42px;
+      padding:0 18px;
+      border:none;
+      cursor:pointer;
+      border-radius:6px;
+      background:#AE5431;
+      color:#fff;
+      text-decoration:none;
+      font-size:13px;
+      font-weight:800;
+      text-transform:uppercase;
+      letter-spacing:.04em;
+      box-shadow:0 8px 18px rgba(174,84,49,.22);
+      pointer-events:auto;
+      font-family:inherit;
+      transition:background 0.15s ease, opacity 0.15s ease;
+    }
+    .invoice-download-btn:hover,
+    .invoice-download-btn:focus-visible{
+      background:#963f22;
+    }
     .page{
       position:relative;
       width:min(240mm, calc(100% - 24px));
       margin:18px auto;
       box-sizing:border-box;
       background:#fff;
-      padding:46mm 18mm 18mm 18mm;
+      padding:30mm 18mm 18mm 18mm;
       box-shadow:0 10px 32px rgba(0,0,0,.10);
       overflow:visible;
     }
@@ -9941,7 +10153,7 @@ app.get('/invoice/booking', async (req, res) => {
       position:absolute;
       inset:0 0 auto 0;
       height:120mm;
-      background:url('/booking/assets/invoice-page.png') no-repeat top center;
+      background:url('${INVOICE_PAGE_BG_DATA_URI}') no-repeat top center;
       background-size:100% auto;
       pointer-events:none;
       z-index:0;
@@ -9951,6 +10163,9 @@ app.get('/invoice/booking', async (req, res) => {
       z-index:1;
     }
     .row{display:flex;gap:16px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap}
+    .invoice-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
+    .invoice-logo-wrap{margin-left:auto;text-align:right}
+    .invoice-logo-img{height:52px;width:auto;max-width:180px;object-fit:contain;display:block}
     .title{font-size:18px;margin:0 0 4px;letter-spacing:.02em}
     .muted{color:var(--muted);font-size:13px;line-height:1.35}
     .block{margin-top:10px}
@@ -10181,15 +10396,21 @@ app.get('/invoice/booking', async (req, res) => {
   </style>
 </head>
 <body>
+  <div class="invoice-toolbar">
+    <button class="invoice-download-btn" id="invoiceDownloadBtn" type="button">Download Invoice (PDF)</button>
+  </div>
   <div class="page">
     <div class="row invoice-header">
       <div>
-        <div style="font-weight:700;">
+        <div style="font-weight:700;font-size:15px;color:#111;">
            Vasporixus Apex Therapeutics LLP
         </div>
-        <div class="muted">
+        <div class="muted" style="margin-top:2px;">
            GSTIN: 36ABBFV3058K1ZW
         </div>
+      </div>
+      <div class="invoice-logo-wrap">
+        <img class="invoice-logo-img" src="${H2_INVOICE_LOGO_DATA_URI}" alt="H2 House of Health" />
       </div>
     </div>
     <div style="text-align:right;">
@@ -10323,8 +10544,47 @@ app.get('/invoice/booking', async (req, res) => {
       </div>
     </div>
     
-    
   </div>
+  <script>
+    (function() {
+      var btn = document.getElementById('invoiceDownloadBtn');
+      if (!btn) return;
+      var downloadUrl = ${JSON.stringify(invoiceDownloadUrl)};
+      var invoiceNo = ${JSON.stringify(invoiceNo || 'invoice')};
+      btn.addEventListener('click', async function(e) {
+        e.preventDefault();
+        var origText = btn.textContent;
+        btn.textContent = 'Downloading PDF...';
+        btn.style.opacity = '0.7';
+        btn.disabled = true;
+        try {
+          var res = await fetch(downloadUrl);
+          var ct = res.headers.get('content-type') || '';
+          if (res.ok && ct.toLowerCase().indexOf('application/pdf') !== -1) {
+            var blob = await res.blob();
+            var blobUrl = window.URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = 'H2_Invoice_' + String(invoiceNo).replace(/[^a-zA-Z0-9_-]/g, '_') + '.pdf';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(function() { window.URL.revokeObjectURL(blobUrl); }, 2000);
+            btn.textContent = origText;
+            btn.style.opacity = '1';
+            btn.disabled = false;
+            return;
+          }
+        } catch (err) {
+          console.warn('PDF download error:', err);
+        }
+        btn.textContent = origText;
+        btn.style.opacity = '1';
+        btn.disabled = false;
+        window.print();
+      });
+    })();
+  </script>
 </body>
 </html>`;
   return sendInvoiceResponse(req, res, invoiceHtml, invoiceNo);
@@ -10364,6 +10624,7 @@ app.get('/invoice/membership', async (req, res) => {
 
   const user = getUserById(order.userId);
   const invoiceNo = `MB-${escapeHtml(order.orderId)}`;
+  const invoiceDownloadUrl = `/invoice/membership?token=${encodeURIComponent(String(req.query.token || ''))}&format=pdf&download=1`;
   const paidAtLabel = formatInvoiceDateTime(order.paidAt);
   const generatedAtLabel = formatInvoiceDateTime(new Date());
   const originalAmountInr = Math.round(Number(order.originalAmountPaise || 0) / 100);
@@ -10389,18 +10650,55 @@ app.get('/invoice/membership', async (req, res) => {
       -webkit-print-color-adjust:exact;
       print-color-adjust:exact;
     }
+    .invoice-toolbar{
+      position:fixed;
+      top:18px;
+      right:18px;
+      z-index:10;
+      display:flex;
+      justify-content:flex-end;
+      pointer-events:none;
+    }
+    .invoice-download-btn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-height:42px;
+      padding:0 18px;
+      border:none;
+      cursor:pointer;
+      border-radius:6px;
+      background:#AE5431;
+      color:#fff;
+      text-decoration:none;
+      font-size:13px;
+      font-weight:800;
+      text-transform:uppercase;
+      letter-spacing:.04em;
+      box-shadow:0 8px 18px rgba(174,84,49,.22);
+      pointer-events:auto;
+      font-family:inherit;
+      transition:background 0.15s ease, opacity 0.15s ease;
+    }
+    .invoice-download-btn:hover,
+    .invoice-download-btn:focus-visible{
+      background:#963f22;
+    }
     .page{
       width:min(240mm, calc(100% - 24px));
       min-height:320mm;
       margin:18px auto;
       box-sizing:border-box;
-      background:#fff url('/booking/assets/invoice-page.png') no-repeat top center;
+      background:#fff url('${INVOICE_PAGE_BG_DATA_URI}') no-repeat top center;
       background-size:100% 100%;
-      padding:46mm 18mm 18mm 18mm;
+      padding:30mm 18mm 18mm 18mm;
       box-shadow:0 10px 32px rgba(0,0,0,.10);
       overflow:visible;
     }
     .row{display:flex;gap:16px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap}
+    .invoice-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+    .invoice-logo-wrap{margin-left:auto;text-align:right}
+    .invoice-logo-img{height:52px;width:auto;max-width:180px;object-fit:contain;display:block}
     .title{font-size:18px;margin:0 0 4px;letter-spacing:.02em}
     .muted{color:var(--muted);font-size:13px;line-height:1.35}
     .gst{margin-top:6px}
@@ -10477,8 +10775,24 @@ app.get('/invoice/membership', async (req, res) => {
   </style>
 </head>
 <body>
+  <div class="invoice-toolbar">
+    <button class="invoice-download-btn" id="invoiceDownloadBtn" type="button">Download Invoice (PDF)</button>
+  </div>
   <div class="page">
-    <div class="row">
+    <div class="row invoice-header">
+      <div>
+        <div style="font-weight:700;font-size:15px;color:#111;">
+           Vasporixus Apex Therapeutics LLP
+        </div>
+        <div class="muted" style="margin-top:2px;">
+           GSTIN: 36ABBFV3058K1ZW
+        </div>
+      </div>
+      <div class="invoice-logo-wrap">
+        <img class="invoice-logo-img" src="${H2_INVOICE_LOGO_DATA_URI}" alt="H2 House of Health" />
+      </div>
+    </div>
+    <div class="row" style="margin-top:16px;">
       <div>
         <h1 class="title">Membership Invoice</h1>
         <div class="muted">Invoice No: ${invoiceNo}</div>
@@ -10576,6 +10890,46 @@ app.get('/invoice/membership', async (req, res) => {
       </div>
     </div>
   </div>
+  <script>
+    (function() {
+      var btn = document.getElementById('invoiceDownloadBtn');
+      if (!btn) return;
+      var downloadUrl = ${JSON.stringify(invoiceDownloadUrl)};
+      var invoiceNo = ${JSON.stringify(invoiceNo || 'invoice')};
+      btn.addEventListener('click', async function(e) {
+        e.preventDefault();
+        var origText = btn.textContent;
+        btn.textContent = 'Downloading PDF...';
+        btn.style.opacity = '0.7';
+        btn.disabled = true;
+        try {
+          var res = await fetch(downloadUrl);
+          var ct = res.headers.get('content-type') || '';
+          if (res.ok && ct.toLowerCase().indexOf('application/pdf') !== -1) {
+            var blob = await res.blob();
+            var blobUrl = window.URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = 'H2_Invoice_' + String(invoiceNo).replace(/[^a-zA-Z0-9_-]/g, '_') + '.pdf';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(function() { window.URL.revokeObjectURL(blobUrl); }, 2000);
+            btn.textContent = origText;
+            btn.style.opacity = '1';
+            btn.disabled = false;
+            return;
+          }
+        } catch (err) {
+          console.warn('PDF download error:', err);
+        }
+        btn.textContent = origText;
+        btn.style.opacity = '1';
+        btn.disabled = false;
+        window.print();
+      });
+    })();
+  </script>
 </body>
 </html>`;
   return sendInvoiceResponse(req, res, invoiceHtml, invoiceNo);
