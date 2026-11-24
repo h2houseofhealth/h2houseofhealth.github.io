@@ -9055,25 +9055,13 @@
       if (!couriers.length) {
         const bodyEl = els.adminModalDialog.querySelector('.admin-modal__body');
         if (bodyEl) {
-          if (res?.isInternational) {
-            bodyEl.innerHTML = `
-              <div style="text-align:center;padding:24px 16px;">
-                <p style="color:#d97706;font-weight:700;font-size:16px;margin-bottom:8px;">🌍 International Order (USA / Cross-border)</p>
-                <p class="admin-table__muted" style="margin:0 0 16px;">Destination Pincode: <strong>${escapeHtml(res?.deliveryPostcode || 'Unknown')}</strong></p>
-                <p style="font-size:13px;color:#4b5563;line-height:1.5;max-width:440px;margin:0 auto 16px;">
-                  Shiprocket's domestic automated courier API does not service foreign postal codes. Please book international shipping via <strong>Shiprocket X</strong> (or DHL / FedEx / India Post International).
-                </p>
-              </div>
-            `;
-          } else {
-            bodyEl.innerHTML = `
-              <div style="text-align:center;padding:24px 16px;">
-                <p style="color:#ef4444;font-weight:600;font-size:15px;margin-bottom:8px;">⚠️ No couriers currently available</p>
-                <p class="admin-table__muted" style="margin:0 0 16px;">Destination Pincode: <strong>${escapeHtml(res?.deliveryPostcode || 'Unknown')}</strong></p>
-                <p style="font-size:13px;color:#6b7280;line-height:1.5;">Please verify that the delivery pincode is valid and that you have added your Pickup Address in your Shiprocket account.</p>
-              </div>
-            `;
-          }
+          bodyEl.innerHTML = `
+            <div style="text-align:center;padding:24px 16px;">
+              <p style="color:#ef4444;font-weight:600;font-size:15px;margin-bottom:8px;">⚠️ No couriers currently available</p>
+              <p class="admin-table__muted" style="margin:0 0 16px;">Destination Pincode: <strong>${escapeHtml(res?.deliveryPostcode || 'Unknown')}</strong></p>
+              <p style="font-size:13px;color:#6b7280;line-height:1.5;">Please verify that the delivery pincode is valid and that you have added your Pickup Address in your Shiprocket account.</p>
+            </div>
+          `;
         }
         return;
       }

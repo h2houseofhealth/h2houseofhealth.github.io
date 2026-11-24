@@ -11892,8 +11892,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const parsedAddr = parseMerchShippingAddress(order.shipping_address) || {};
       const deliveryPostcode = parsedAddr.postalCode || parsedAddr.postal_code || parsedAddr.pincode || '452001';
       const isCod = String(order.payment_method || '').toLowerCase() === 'cod';
-      const countryStr = String(parsedAddr.country || '').trim().toLowerCase();
-      const isInternational = Boolean(countryStr && !['india', 'in', 'ind'].includes(countryStr));
 
       const items = getOrderItemsWithProductDetails(order.id);
       const totalWeightGrams = items.reduce((sum, item) => {
@@ -11908,7 +11906,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       // Ensure order exists in Shiprocket so live declared value, Auto Secured insurance, and dimensions are used
       let shiprocketOrderId = order.shiprocket_order_id;
       let shipmentId = order.shiprocket_shipment_id;
-      if (!shiprocketOrderId && shiprocket.isConfigured() && !isInternational) {
+      if (!shiprocketOrderId && shiprocket.isConfigured()) {
         try {
           const createRes = await shiprocket.createOrder({ order, items });
           if (createRes?.orderId) {
@@ -11941,7 +11939,6 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         deliveryPostcode,
         weightKg: orderWeightKg,
         shiprocketOrderId,
-        isInternational,
         couriers,
       });
     } catch (err) {
