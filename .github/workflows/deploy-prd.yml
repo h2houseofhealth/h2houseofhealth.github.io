@@ -42,6 +42,7 @@ jobs:
 
           git fetch origin prd && git reset --hard origin/prd \
             && npm install --omit=dev \
+            && (chmod -R a+rX /opt/h2house-prd/.cache 2>/dev/null || true) \
             && systemctl restart h2-booking-prd
           DEPLOY_RC=$?
           NEW=$(git rev-parse HEAD)

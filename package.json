@@ -5,7 +5,8 @@
   "main": "booking/server.js",
   "scripts": {
     "start": "node booking/server.js",
-    "dev": "node --watch booking/server.js"
+    "dev": "node --watch booking/server.js",
+    "postinstall": "npx puppeteer browsers install chrome || true"
   },
   "keywords": [],
   "author": "",
