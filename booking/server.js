@@ -1012,9 +1012,18 @@ const upload = multer({
   },
 });
 
-app.get('/health', (_req, res) => {
-  res.json({ ok: true });
-});
+function healthHandler(_req, res) {
+  res.set('Cache-Control', 'no-store');
+  try {
+    db.prepare('SELECT 1').get();
+    res.json({ ok: true, db: 'up', uptimeSeconds: Math.round(process.uptime()) });
+  } catch (error) {
+    console.error('Health check failed:', error.message);
+    res.status(503).json({ ok: false, db: 'down' });
+  }
+}
+
+app.get(['/health', '/api/health'], healthHandler);
 
 function sanitizeAuthReturnUrl(raw) {
   if (!raw || typeof raw !== 'string') return '/booking/';
