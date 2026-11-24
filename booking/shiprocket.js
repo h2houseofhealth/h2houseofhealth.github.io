@@ -260,15 +260,24 @@ class ShiprocketService {
 
   /**
    * 2. Check available couriers and rates for a shipment
+   * Supports orderId/shipmentId for exact live rate calculation including insurance/coverage and charges.
    */
-  async checkServiceability({ pickupPostcode, deliveryPostcode, weight = 0.5, cod = false }) {
+  async checkServiceability({ pickupPostcode, deliveryPostcode, weight = 0.5, cod = false, orderId = null, shipmentId = null }) {
     const isCod = cod ? 1 : 0;
-    const query = new URLSearchParams({
-      pickup_postcode: String(pickupPostcode || this.getPickupPostcode() || '500033'),
-      delivery_postcode: String(deliveryPostcode),
-      weight: String(weight || 0.5),
-      cod: String(isCod),
-    });
+    const query = new URLSearchParams();
+
+    if (orderId) {
+      query.set('order_id', String(orderId));
+    } else {
+      query.set('pickup_postcode', String(pickupPostcode || this.getPickupPostcode() || '500033'));
+      query.set('delivery_postcode', String(deliveryPostcode));
+      query.set('weight', String(weight || 0.5));
+      query.set('cod', String(isCod));
+    }
+
+    if (shipmentId && !orderId) {
+      query.set('shipment_id', String(shipmentId));
+    }
 
     const result = await this.request(`/courier/serviceability/?${query.toString()}`, {
       method: 'GET',
@@ -276,18 +285,42 @@ class ShiprocketService {
 
     const couriers = result?.data?.available_courier_companies || [];
     return couriers
-      .map((c) => ({
-        courierCompanyId: c.courier_company_id,
-        courierName: c.courier_name,
-        rate: Number(c.rate || 0),
-        etd: c.etd,
-        estimatedDeliveryDays: c.estimated_delivery_days,
-        rating: c.rating,
-        mode: c.mode,
-        trackingPerformance: c.tracking_performance,
-        isSurface: c.is_surface,
-      }))
-      .sort((a, b) => a.rate - b.rate);
+      .map((c) => {
+        const freight = Number(c.rate ?? c.freight_charge ?? 0);
+        const coverage = Number(c.coverage_charges || 0);
+        const whatsapp = Number(c.whatsapp_charges || 0);
+        const other = Number(c.other_charges || 0);
+        const codCharge = Number(c.cod_charges || 0);
+        const entryTax = Number(c.entry_tax || 0);
+        // Total live charge that Shiprocket deducts from wallet and shows in dashboard
+        const totalRate = Number((freight + coverage + whatsapp + other + codCharge + entryTax).toFixed(2));
+
+        return {
+          courierCompanyId: c.courier_company_id,
+          courierName: c.courier_name,
+          rate: totalRate, // Live total matching Shiprocket dashboard
+          freightCharge: freight,
+          coverageCharges: coverage,
+          whatsappCharges: whatsapp,
+          otherCharges: other,
+          codCharges: codCharge,
+          isInsured: coverage > 0 || Boolean(c.is_insured),
+          isRecommended: Boolean(c.is_sr_recommended || c.recommended_by?.id || c.recommended_lt === 1),
+          etd: c.etd,
+          estimatedDeliveryDays: c.estimated_delivery_days,
+          rating: c.rating,
+          mode: c.mode,
+          trackingPerformance: c.tracking_performance,
+          isSurface: c.is_surface,
+          callBeforeDelivery: c.call_before_delivery || null,
+        };
+      })
+      .sort((a, b) => {
+        // If recommended, surface towards top; otherwise sort by total rate
+        if (a.isRecommended && !b.isRecommended) return -1;
+        if (!a.isRecommended && b.isRecommended) return 1;
+        return a.rate - b.rate;
+      });
   }
 
   /**

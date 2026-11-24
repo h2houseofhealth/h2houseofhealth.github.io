@@ -9055,17 +9055,30 @@
       if (!couriers.length) {
         const bodyEl = els.adminModalDialog.querySelector('.admin-modal__body');
         if (bodyEl) {
-          bodyEl.innerHTML = `
-            <div style="text-align:center;padding:24px 16px;">
-              <p style="color:#ef4444;font-weight:600;font-size:15px;margin-bottom:8px;">⚠️ No couriers currently available</p>
-              <p class="admin-table__muted" style="margin:0 0 16px;">Destination Pincode: <strong>${escapeHtml(res?.deliveryPostcode || 'Unknown')}</strong></p>
-              <p style="font-size:13px;color:#6b7280;line-height:1.5;">Please verify that the delivery pincode is valid and that you have added your Pickup Address in your Shiprocket account.</p>
-            </div>
-          `;
+          if (res?.isInternational) {
+            bodyEl.innerHTML = `
+              <div style="text-align:center;padding:24px 16px;">
+                <p style="color:#d97706;font-weight:700;font-size:16px;margin-bottom:8px;">🌍 International Order (USA / Cross-border)</p>
+                <p class="admin-table__muted" style="margin:0 0 16px;">Destination Pincode: <strong>${escapeHtml(res?.deliveryPostcode || 'Unknown')}</strong></p>
+                <p style="font-size:13px;color:#4b5563;line-height:1.5;max-width:440px;margin:0 auto 16px;">
+                  Shiprocket's domestic automated courier API does not service foreign postal codes. Please book international shipping via <strong>Shiprocket X</strong> (or DHL / FedEx / India Post International).
+                </p>
+              </div>
+            `;
+          } else {
+            bodyEl.innerHTML = `
+              <div style="text-align:center;padding:24px 16px;">
+                <p style="color:#ef4444;font-weight:600;font-size:15px;margin-bottom:8px;">⚠️ No couriers currently available</p>
+                <p class="admin-table__muted" style="margin:0 0 16px;">Destination Pincode: <strong>${escapeHtml(res?.deliveryPostcode || 'Unknown')}</strong></p>
+                <p style="font-size:13px;color:#6b7280;line-height:1.5;">Please verify that the delivery pincode is valid and that you have added your Pickup Address in your Shiprocket account.</p>
+              </div>
+            `;
+          }
         }
         return;
       }
 
+      const hasAutoSecured = couriers.some((c) => c.isInsured || (c.coverageCharges > 0));
       const subEl = els.adminModalDialog.querySelector('.admin-modal__sub');
       if (subEl) subEl.textContent = `Select a courier partner for delivery to ${escapeHtml(res.deliveryPostcode)}:`;
 
@@ -9073,19 +9086,34 @@
       if (bodyEl) {
         bodyEl.innerHTML = `
           <form class="admin-form" data-shiprocket-fulfill-form>
+            ${hasAutoSecured ? `
+              <div style="display:flex;align-items:center;gap:8px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);padding:8px 12px;border-radius:8px;font-size:12px;color:#065f46;margin-bottom:12px;">
+                <span style="font-size:16px;">🛡️</span>
+                <div>
+                  <strong>Live Shipment Secured:</strong> Prices below match Shiprocket dashboard including live freight, Auto Secured coverage &amp; tracking.
+                </div>
+              </div>
+            ` : ''}
             <div style="display:flex;flex-direction:column;gap:10px;max-height:360px;overflow-y:auto;padding-right:4px;">
               ${couriers.map((c, idx) => `
                 <label class="admin-card admin-courier-card" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border:1.5px solid ${idx === 0 ? '#3b82f6' : 'rgba(0,0,0,0.1)'};border-radius:10px;background:${idx === 0 ? 'rgba(59,130,246,0.04)' : 'transparent'};transition:all 0.15s ease;">
                   <div style="display:flex;align-items:center;gap:14px;">
                     <input type="radio" name="courier_company_id" value="${c.courierCompanyId}" ${idx === 0 ? 'checked' : ''} style="width:18px;height:18px;accent-color:#3b82f6;" />
                     <div>
-                      <div style="font-weight:600;font-size:14px;color:var(--admin-text,#1f2937);display:flex;align-items:center;gap:6px;">
+                      <div style="font-weight:600;font-size:14px;color:var(--admin-text,#1f2937);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                         <span>${escapeHtml(c.courierName)}</span>
-                        ${idx === 0 ? '<span style="background:#10b981;color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;font-weight:700;">Lowest Price</span>' : ''}
+                        ${c.isRecommended ? '<span style="background:#8b5cf6;color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;font-weight:700;">★ Recommended</span>' : ''}
+                        ${idx === 0 && !c.isRecommended ? '<span style="background:#10b981;color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;font-weight:700;">Lowest Price</span>' : ''}
+                        ${c.coverageCharges > 0 ? '<span style="background:#059669;color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;font-weight:600;">🛡️ Insured</span>' : ''}
                       </div>
                       <div class="admin-table__muted" style="font-size:12px;margin-top:2px;">
                         Est. Delivery: <strong>${escapeHtml(c.estimatedDeliveryDays || '2-4')} Days</strong> ${c.etd ? `(${escapeHtml(c.etd)})` : ''} · Mode: <strong>${c.isSurface ? 'Surface' : 'Air'}</strong>
                       </div>
+                      ${c.coverageCharges > 0 ? `
+                        <div class="admin-table__muted" style="font-size:11px;margin-top:2px;color:#6b7280;">
+                          Freight: ₹${Number(c.freightCharge || 0).toFixed(2)} + Insurance: ₹${Number(c.coverageCharges).toFixed(2)}${c.whatsappCharges ? ` + WA: ₹${Number(c.whatsappCharges).toFixed(2)}` : ''}
+                        </div>
+                      ` : ''}
                     </div>
                   </div>
                   <div style="text-align:right;">

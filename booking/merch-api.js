@@ -11892,6 +11892,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       const parsedAddr = parseMerchShippingAddress(order.shipping_address) || {};
       const deliveryPostcode = parsedAddr.postalCode || parsedAddr.postal_code || parsedAddr.pincode || '452001';
       const isCod = String(order.payment_method || '').toLowerCase() === 'cod';
+      const countryStr = String(parsedAddr.country || '').trim().toLowerCase();
+      const isInternational = Boolean(countryStr && !['india', 'in', 'ind'].includes(countryStr));
 
       const items = getOrderItemsWithProductDetails(order.id);
       const totalWeightGrams = items.reduce((sum, item) => {
@@ -11903,13 +11905,45 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         ? Math.max(0.01, Number((totalWeightGrams / 1000).toFixed(3)))
         : shiprocket.defaultWeightKg;
 
+      // Ensure order exists in Shiprocket so live declared value, Auto Secured insurance, and dimensions are used
+      let shiprocketOrderId = order.shiprocket_order_id;
+      let shipmentId = order.shiprocket_shipment_id;
+      if (!shiprocketOrderId && shiprocket.isConfigured() && !isInternational) {
+        try {
+          const createRes = await shiprocket.createOrder({ order, items });
+          if (createRes?.orderId) {
+            shiprocketOrderId = String(createRes.orderId);
+            shipmentId = String(createRes.shipmentId || '');
+            db.prepare(`
+              UPDATE merch_orders
+              SET shiprocket_order_id = ?,
+                  shiprocket_shipment_id = ?,
+                  shiprocket_status = ?,
+                  updated_at = datetime('now')
+              WHERE id = ?
+            `).run(shiprocketOrderId, shipmentId, String(createRes.status || 'NEW'), order.id);
+          }
+        } catch (createErr) {
+          console.warn('[Shiprocket] Auto order creation on rate check skipped:', createErr.message);
+        }
+      }
+
       const couriers = await shiprocket.checkServiceability({
         deliveryPostcode,
         weight: orderWeightKg,
         cod: isCod,
+        orderId: shiprocketOrderId || null,
+        shipmentId: shipmentId || null,
       });
 
-      res.json({ success: true, deliveryPostcode, weightKg: orderWeightKg, couriers });
+      res.json({
+        success: true,
+        deliveryPostcode,
+        weightKg: orderWeightKg,
+        shiprocketOrderId,
+        isInternational,
+        couriers,
+      });
     } catch (err) {
       res.status(500).json({ error: err.message, details: err.details || null });
     }
