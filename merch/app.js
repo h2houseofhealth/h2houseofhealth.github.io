@@ -3349,6 +3349,14 @@ const estimatedDelivery = deliveryDate.toLocaleDateString('en-GB', {
       showCheckoutPage();
       return true;
     }
+    if (window.location.hash === '#account-influencer' || new URLSearchParams(window.location.search).get('action') === 'influencer-dashboard') {
+      setTimeout(() => openAccountDrawer('account-influencer'), 150);
+      return true;
+    }
+    if (window.location.hash === '#account' || new URLSearchParams(window.location.search).get('action') === 'account') {
+      setTimeout(() => openAccountDrawer('account-profile'), 150);
+      return true;
+    }
     if (window.location.hash === '#merchCategories' || window.location.hash === '#categories' || window.location.hash === '#shop-by-category') {
       showShop();
       setTimeout(() => {
