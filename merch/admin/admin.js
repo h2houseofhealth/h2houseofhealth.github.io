@@ -3762,7 +3762,9 @@
             ${order.shiprocketPickupToken ? `<strong>Pickup Token:</strong> ${escapeHtml(order.shiprocketPickupToken)}<br>` : ''}
           </div>
           <div class="admin-actions" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-            ${!order.shiprocketAwbCode ? `
+            ${['cancelled', 'returned'].includes(normalizeOrderStatus(order.status)) || String(order.shiprocketStatus || '').toUpperCase() === 'CANCELLED' ? `
+              <span class="admin-badge admin-badge--neutral" style="font-size:12px;padding:4px 10px;font-weight:600;">🚫 Cancelled — Shipping Disabled</span>
+            ` : !order.shiprocketAwbCode ? `
               ${order.isFulfillmentBlocked || isShortageActionRequired || isAwaitingRestock || ['stock_shortage', 'partially_available', 'needs_review'].includes(order.fulfillmentStatus) ? `
                 <button class="admin-btn admin-btn--primary admin-btn--sm" type="button" disabled title="🚫 Shipping blocked: Order has stock shortage or unallocated items" style="opacity:0.5;cursor:not-allowed;">🚫 Ship Blocked (Stock Shortage)</button>
               ` : `
@@ -4012,7 +4014,7 @@
                   </div>
                   <div class="admin-card__foot">
                     <div class="admin-footer-actions">
-                      ${!selectedOrder?.shiprocketAwbCode ? `
+                      ${!['cancelled', 'returned'].includes(normalizeOrderStatus(selectedOrder?.status)) && String(selectedOrder?.shiprocketStatus || '').toUpperCase() !== 'CANCELLED' && !selectedOrder?.shiprocketAwbCode ? `
                         ${selectedOrder?.isFulfillmentBlocked || Boolean(selectedOrder?.hasStockShortage || selectedOrder?.status === 'stock_shortage') ? `
                           <button class="admin-btn admin-btn--primary" type="button" disabled title="🚫 Shipping blocked: Order has stock shortage" style="opacity:0.5;cursor:not-allowed;">🚫 Ship Blocked</button>
                         ` : `
@@ -9034,6 +9036,10 @@
 
   async function openShiprocketFulfillModal(order) {
     if (!order) return;
+    if (['cancelled', 'returned'].includes(normalizeOrderStatus(order.status)) || String(order.shiprocketStatus || '').toUpperCase() === 'CANCELLED') {
+      toast('Cannot Ship', `Order ${order.orderNumber || order.id} is cancelled and cannot be fulfilled.`, 'warning');
+      return;
+    }
     openModal({
       title: `Ship with Shiprocket — ${order.orderNumber || `Order #${order.id}`}`,
       subtitle: `Checking courier rates and serviceability...`,
