@@ -187,12 +187,10 @@
     document.querySelectorAll('#searchToggleBtn').forEach((btn) => {
       btn.addEventListener('click', function (e) {
         if (typeof window.closeNavDrawer === 'function') window.closeNavDrawer();
-        if (isMerchPage) {
-          if (typeof window.openSearch === 'function') {
-            e.preventDefault();
-            window.openSearch();
-          }
-        } else {
+        if (isMerchPage && typeof window.openSearch === 'function') {
+          e.preventDefault();
+          window.openSearch();
+        } else if (!isBookingPage) {
           e.preventDefault();
           window.location.href = '/merch/wellness-products/?search=1';
         }
@@ -210,11 +208,9 @@
           } else {
             window.location.hash = '#cart';
           }
-        } else if (isMerchPage) {
-          if (typeof window.openCart === 'function') {
-            e.preventDefault();
-            window.openCart();
-          }
+        } else if (isMerchPage && typeof window.openCart === 'function') {
+          e.preventDefault();
+          window.openCart();
         } else {
           e.preventDefault();
           window.location.href = '/merch/wellness-products/?cart=1';
@@ -226,11 +222,9 @@
     document.querySelectorAll('#wishlistToggleBtn').forEach((btn) => {
       btn.addEventListener('click', function (e) {
         if (typeof window.closeNavDrawer === 'function') window.closeNavDrawer();
-        if (isMerchPage) {
-          if (typeof window.openAccountDrawer === 'function') {
-            e.preventDefault();
-            window.openAccountDrawer('account-wishlist');
-          }
+        if (isMerchPage && typeof window.openAccountDrawer === 'function') {
+          e.preventDefault();
+          window.openAccountDrawer('account-wishlist');
         } else {
           e.preventDefault();
           window.location.href = '/merch/wellness-products/?wishlist=1';
