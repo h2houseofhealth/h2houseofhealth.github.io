@@ -17069,7 +17069,7 @@ async function downloadBookingInvoice(bookingId) {
   const id = Number(bookingId);
   if (!Number.isInteger(id)) return;
   const data = await fetchInvoiceLink(`/api/bookings/${encodeURIComponent(id)}/invoice-link`, `Booking-${id}`);
-  await downloadPortalDocument(data.invoiceDownloadUrl, data.fallbackLabel);
+  await downloadPortalDocument(data.invoiceDownloadUrl, data.fallbackLabel, data.invoiceUrl);
 }
 
 async function downloadMembershipInvoice(orderId) {
@@ -17079,7 +17079,7 @@ async function downloadMembershipInvoice(orderId) {
     `/api/membership-orders/${encodeURIComponent(normalizedOrderId)}/invoice-link`,
     `Membership-${normalizedOrderId}`
   );
-  await downloadPortalDocument(data.invoiceDownloadUrl, data.fallbackLabel);
+  await downloadPortalDocument(data.invoiceDownloadUrl, data.fallbackLabel, data.invoiceUrl);
 }
 
 function getFilenameFromContentDisposition(headerValue, fallbackLabel = 'Invoice') {
@@ -17095,16 +17095,24 @@ function getFilenameFromContentDisposition(headerValue, fallbackLabel = 'Invoice
   return 'H2_invoice.pdf';
 }
 
-async function downloadPortalDocument(url, fallbackLabel = 'Invoice') {
+async function downloadPortalDocument(url, fallbackLabel = 'Invoice', fallbackViewUrl = '') {
   const targetUrl = buildApiUrl(url);
   let response;
   try {
     response = await fetch(targetUrl, { credentials: 'include' });
   } catch {
+    if (fallbackViewUrl) {
+      openPortalDocument(fallbackViewUrl);
+      return;
+    }
     throw new Error('Unable to generate the invoice. Please try again later or contact support.');
   }
   const contentType = response.headers.get('content-type') || '';
   if (!response.ok) {
+    if (fallbackViewUrl) {
+      openPortalDocument(fallbackViewUrl);
+      return;
+    }
     if (contentType.includes('application/json')) {
       await response.json().catch(() => null);
       throw new Error('Unable to generate the invoice. Please try again later or contact support.');
@@ -17113,6 +17121,10 @@ async function downloadPortalDocument(url, fallbackLabel = 'Invoice') {
     throw new Error('Unable to generate the invoice. Please try again later or contact support.');
   }
   if (!contentType.includes('application/pdf')) {
+    if (contentType.includes('text/html') || fallbackViewUrl) {
+      openPortalDocument(fallbackViewUrl || targetUrl);
+      return;
+    }
     throw new Error('Unable to generate the invoice. Please try again later or contact support.');
   }
   const blob = await response.blob();
