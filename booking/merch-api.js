@@ -1041,6 +1041,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     // Clean up duplicate Ryan coupons if any exist
     try {
       db.prepare("DELETE FROM coupons WHERE UPPER(code) IN ('RYAN', 'RYAN100')").run();
+      if (ryanId) {
+        db.prepare("UPDATE coupons SET influencer_id = NULL WHERE influencer_id = ? AND UPPER(code) != 'RYANH2'").run(ryanId);
+      }
     } catch (_) {}
     // Clean up duplicate Ryan influencer rows if any exist
     try {
