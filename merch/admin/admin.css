@@ -2490,6 +2490,10 @@ a {
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
+  position: sticky;
+  top: 0;
+  background: rgba(255, 255, 255, 0.98);
+  z-index: 5;
 }
 
 .admin-modal__title {
@@ -2515,6 +2519,10 @@ a {
   justify-content: flex-end;
   gap: 10px;
   flex-wrap: wrap;
+  position: sticky;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.98);
+  z-index: 5;
 }
 
 .admin-modal__management-actions {
@@ -3014,12 +3022,14 @@ body.merch-admin-page {
 }
 .admin-chart-ring span { position: relative; z-index: 1; }
 .admin-chart-ring--empty::after { display: none; }
-.admin-combo-items { display: grid; gap: 8px; margin-top: 8px; }
-.admin-combo-item { display: flex; align-items: center; gap: 10px; padding: 8px; border: 1px solid var(--admin-border); border-radius: 10px; }
+.admin-combo-items { display: grid; gap: 8px; margin-top: 8px; max-height: 320px; overflow-y: auto; padding-right: 4px; }
+.admin-combo-item { display: flex; align-items: center; gap: 10px; padding: 8px; border: 1px solid var(--admin-border); border-radius: 10px; transition: border-color 0.2s, background 0.2s; }
+.admin-combo-item.is-selected { border-color: var(--admin-primary, #c8652d); background: rgba(200, 101, 45, 0.05); }
 .admin-combo-item img { width: 42px; height: 42px; object-fit: cover; border-radius: 7px; background: #f5f1ed; }
 .admin-combo-item span { display: grid; gap: 2px; }
 .admin-combo-item small { color: var(--admin-muted); }
 .admin-combo-item .admin-input { width: 110px; margin-left: auto; }
+.admin-action-link--primary { color: var(--admin-primary, #c8652d) !important; font-weight: 600; }
 
 
 /* Offer creation: each selected product exposes independently selectable variants. */

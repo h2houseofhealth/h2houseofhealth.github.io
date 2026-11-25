@@ -1932,12 +1932,18 @@
   }
 
   async function apiRequest(path, options = {}) {
+    let token = '';
+    try {
+      token = localStorage.getItem('booking_portal_auth_token') || '';
+    } catch {}
+    const headers = { ...(options.headers || {}) };
+    if (token && !headers.Authorization && !headers.authorization) {
+      headers.Authorization = `Bearer ${token}`;
+    }
     const response = await fetch(buildApiUrl(path), {
       credentials: 'include',
       ...options,
-      headers: {
-        ...(options.headers || {}),
-      },
+      headers,
     });
 
     let data = null;
@@ -2000,6 +2006,7 @@
     { id: 1, name: 'Hoodies', slug: 'hoodies', active: true, productCount: 2, description: 'Heavyweight organic cotton blend hoodies.' },
     { id: 2, name: 'Hydrogen Water Bottles', slug: 'bottles', active: true, productCount: 1, description: 'Portable molecular hydrogen bottle collection.' },
     { id: 3, name: 'Hydrogen Mists / Sprays', slug: 'sprays', active: true, productCount: 1, description: 'Hydrogen mist products for daily refresh.' },
+    { id: 4, name: 'Combos & Bundles', slug: 'combos', active: true, productCount: 1, description: 'Curated H2 combo bundles and packages.' },
   ];
 
   // The merch API is the single source of truth for products and variants.
@@ -3286,7 +3293,8 @@
             </div>
             <div class="admin-toolbar__group">
               <button class="admin-btn admin-btn--soft" type="button" data-action="open-product-modal">Add Product</button>
-              <button class="admin-btn admin-btn--ghost" type="button" data-action="bulk-combo-on" ${selectedCount ? '' : 'disabled'}>Add to Combo</button>
+              <button class="admin-btn admin-btn--primary" type="button" data-action="open-combo-modal">+ Create Combo</button>
+              <button class="admin-btn admin-btn--ghost" type="button" data-action="bulk-combo-on" ${selectedCount ? '' : 'disabled'}>Add Selected to Combo</button>
             </div>
           </div>
 
@@ -3311,12 +3319,12 @@
           </div>
 
           <div class="admin-combo-guide" role="note">
-            <strong>How to create a combo product</strong>
+            <strong>How to create and manage combo products</strong>
             <ol>
-              <li>Select at least two product variants using the checkboxes below.</li>
-              <li>Click <em>Add to Combo</em>, then add the combo image, details, and overall selling price.</li>
+              <li>Click <em>+ Create Combo</em> above (or select product variants with checkboxes and click <em>Add Selected to Combo</em>).</li>
+              <li>Set the combo name, overall selling price, stock, and check which products to include.</li>
               <li>The combo appears here as its own product and on the customer merch page.</li>
-              <li>Customers purchase the combo price from stock allocated separately to the combo.</li>
+              <li>Click <em>Edit Combo</em> on any combo row at any time to modify its price, stock, components, or details.</li>
             </ol>
           </div>
 
@@ -3342,6 +3350,7 @@
                   <th>Stock</th>
                   <th>Status</th>
                   <th>Created Date</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -3349,10 +3358,17 @@
                   <tr>
                     <td><input type="checkbox" data-action="toggle-product-selection" data-id="${product.id}" ${state.selectedProductIds.includes(product.id) ? 'checked' : ''} /></td>
                     <td><img class="admin-thumb" src="${escapeHtml(product.imageUrl || product.image || getProductFallbackImage(product))}" alt="${escapeHtml(product.name)}" onerror="this.onerror=null;this.src='${escapeHtml(getProductFallbackImage(product))}';" /></td>
-                    <td><strong>${escapeHtml(product.name)}</strong><br><span class="admin-table__muted">${escapeHtml(product.description)}</span></td>
+                    <td>
+                      <strong>${escapeHtml(product.name)}</strong>
+                      ${product.isCombo ? `<span class="admin-badge admin-badge--primary" style="margin-left:6px;font-size:10px;text-transform:uppercase;padding:2px 6px;">Combo</span>` : ''}
+                      <br><span class="admin-table__muted">${escapeHtml(product.description)}</span>
+                      ${product.isCombo && Array.isArray(product.comboItems) && product.comboItems.length ? `
+                        <br><span class="admin-table__muted" style="font-size:11.5px;color:var(--admin-primary,#b85d32);"><strong>Included:</strong> ${escapeHtml(product.comboItems.map((item) => item.productName || item.name).join(' + '))}</span>
+                      ` : ''}
+                    </td>
                     <td>${escapeHtml(product.variantLabel || 'Default variant')}</td>
                     <td>${escapeHtml(product.sku)}</td>
-                    <td>${escapeHtml(product.category)}</td>
+                    <td>${escapeHtml(product.isCombo ? 'Combos & Bundles' : product.category)}</td>
                     <td><strong>${escapeHtml(product.priceLabel || catalogPrice(product.price))}</strong></td>
                     <td>
                       <strong class="${getStockClass(product)}">${formatCount(product.stock)}</strong>
@@ -3364,6 +3380,13 @@
                     </td>
                     <td><span class="admin-badge ${statusClass(product.status)}">${escapeHtml(getStatusLabel(product.status))}</span></td>
                     <td>${escapeHtml(dateLabel(product.createdAt))}</td>
+                    <td>
+                      <div class="admin-actions">
+                        <button class="admin-action-link ${product.isCombo ? 'admin-action-link--primary' : ''}" type="button" data-action="${product.isCombo ? 'edit-combo' : 'edit-product'}" data-id="${product.id}" data-product-id="${product.productId || product.id}">
+                          ${product.isCombo ? 'Edit Combo' : 'Edit'}
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -6580,27 +6603,125 @@
     const selectedItems = entity?.comboItems?.length
       ? entity.comboItems
       : components.map((item) => {
-          const source = state.products.find((product) => Number(product.variantId) === Number(item.variantId)) || item;
-          return { variantId: item.variantId, productName: source.name || item.name, imageUrl: source.image || item.imageUrl || getProductFallbackImage(source), sku: source.sku || item.sku, size: source.size || item.size, color: source.color || item.color };
+          const source = state.products.find((product) => Number(product.variantId) === Number(item.variantId || item.id)) || item;
+          return {
+            variantId: Number(item.variantId || item.id),
+            productId: Number(item.productId || item.parentProductId || source.productId || source.parentProductId),
+            productName: source.name || item.name,
+            imageUrl: source.image || item.imageUrl || getProductFallbackImage(source),
+            sku: source.sku || item.sku,
+            size: source.size || item.size,
+            color: source.color || item.color,
+            stock: item.stock ?? (entity ? 10 : 10),
+          };
         });
+
+    const selectedVariantIds = new Set(selectedItems.map((item) => Number(item.variantId || item.id)));
+    const selectedStockMap = new Map(selectedItems.map((item) => [Number(item.variantId || item.id), item.stock]));
+
+    const normalVariants = state.products.filter((product) => !product.isCombo && !product.archived && product.status === 'published');
+    const allAvailableComponents = [];
+    const seenVariantIds = new Set();
+
+    selectedItems.forEach((item) => {
+      const vId = Number(item.variantId || item.id);
+      if (vId && !seenVariantIds.has(vId)) {
+        seenVariantIds.add(vId);
+        allAvailableComponents.push({ ...item, variantId: vId, isIncluded: true });
+      }
+    });
+
+    normalVariants.forEach((variant) => {
+      const vId = Number(variant.variantId || variant.id);
+      if (vId && !seenVariantIds.has(vId)) {
+        seenVariantIds.add(vId);
+        allAvailableComponents.push({
+          variantId: vId,
+          productId: Number(variant.productId || variant.parentProductId || variant.id),
+          productName: variant.name || variant.productName,
+          imageUrl: variant.image || variant.imageUrl || getProductFallbackImage(variant),
+          sku: variant.sku,
+          size: variant.size,
+          color: variant.color,
+          stock: selectedStockMap.get(vId) ?? (entity?.stock ?? 10),
+          isIncluded: selectedVariantIds.has(vId),
+        });
+      }
+    });
+
     // Product rows are expanded from variants, so a combo row's `id` is its
     // variant id. Combo endpoints expect the parent product id instead.
     const comboProductId = entity?.productId || entity?.parentProductId || entity?.id || '';
     const comboVariant = entity?.variants?.[0] || entity || {};
+    const comboStock = entity ? (comboVariant.stock ?? entity.stock ?? 10) : 10;
+    const existingComboImage = entity?.image || entity?.imageUrl || (Array.isArray(entity?.images) ? entity.images[0] : '') || '';
+
     openModal({
       title: entity ? 'Edit Combo' : 'Create Combo',
-      subtitle: 'Combo Products',
+      subtitle: 'Combo Products & Bundles',
       body: `
         <form class="admin-form" data-entity-form="combo" data-entity-id="${escapeHtml(comboProductId)}">
           <div class="admin-form__grid">
-            <label class="admin-field"><span>Combo Name</span><input class="admin-input" name="name" value="${escapeHtml(entity?.name || '')}" required /></label>
-            <label class="admin-field"><span>Overall Combo Price (rupees)</span><input class="admin-input" name="price" type="number" min="1" step="1" value="${escapeHtml(Number(entity?.price || comboVariant.price || 0))}" required /></label>
-            <label class="admin-field admin-field--wide"><span>Combo Image</span><input class="admin-input" name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" /><small class="admin-field__hint">Optional. Upload a JPG, PNG, or WEBP image${entity?.image ? ' to replace the current image' : ''}.</small></label>
-            <label class="admin-field admin-field--wide"><span>Combo Details</span><textarea class="admin-textarea" name="description" placeholder="Optional description">${escapeHtml(entity?.description || '')}</textarea></label>
-            <label class="admin-field"><span>Status</span><select class="admin-select" name="status"><option value="published" ${entity?.status !== 'archived' ? 'selected' : ''}>Published</option><option value="archived" ${entity?.status === 'archived' ? 'selected' : ''}>Archived</option></select></label>
-            <div class="admin-field admin-field--wide"><span>Included products and variants (set combo stock)</span><small class="admin-field__hint">This stock belongs to the combo and does not change the individual products.</small><div class="admin-combo-items">
-              ${selectedItems.map((item) => { const fallback = getProductFallbackImage(item); const image = normalizeAdminImageUrl(item.imageUrl, fallback); const stock = entity ? (comboVariant.stock ?? 10) : 10; return `<label class="admin-combo-item"><input type="hidden" name="componentVariantId" value="${escapeHtml(item.variantId)}" /><img src="${escapeHtml(image)}" alt="" onerror="this.onerror=null;this.src='${escapeHtml(fallback)}';" /><span><strong>${escapeHtml(item.productName || item.name)}</strong><small>${escapeHtml([item.size, item.color].filter(Boolean).join(' / ') || item.sku || 'Default variant')}</small></span><input class="admin-input" name="componentStock" type="number" min="0" value="${escapeHtml(stock)}" aria-label="Combo stock for ${escapeHtml(item.productName || item.name)}" /></label>`; }).join('')}
-            </div></div>
+            <label class="admin-field">
+              <span>Combo Name</span>
+              <input class="admin-input" name="name" value="${escapeHtml(entity?.name || '')}" placeholder="e.g. H2 Bottle & Merch Combo" required />
+            </label>
+            <label class="admin-field">
+              <span>Overall Combo Price (rupees)</span>
+              <input class="admin-input" name="price" type="number" min="1" step="1" value="${escapeHtml(Number(entity?.price || comboVariant.price || 0))}" placeholder="e.g. 24990" required />
+            </label>
+            <label class="admin-field">
+              <span>Overall Combo Stock</span>
+              <input class="admin-input" name="stock" type="number" min="0" step="1" value="${escapeHtml(comboStock)}" placeholder="e.g. 20" required />
+              <small class="admin-field__hint">Inventory units allocated for this combo package.</small>
+            </label>
+            <label class="admin-field">
+              <span>Status</span>
+              <select class="admin-select" name="status">
+                <option value="published" ${entity?.status !== 'archived' ? 'selected' : ''}>Published</option>
+                <option value="archived" ${entity?.status === 'archived' ? 'selected' : ''}>Archived</option>
+              </select>
+            </label>
+            <label class="admin-field admin-field--wide">
+              <span>Combo Image</span>
+              ${existingComboImage ? `
+                <div class="admin-current-images" style="margin-bottom:8px;">
+                  <img src="${escapeHtml(normalizeAdminImageUrl(existingComboImage, getProductFallbackImage(entity)))}" alt="Current combo image" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--admin-border);" onerror="this.onerror=null;this.src='${escapeHtml(getProductFallbackImage(entity))}';" />
+                  <input type="hidden" name="currentImage" value="${escapeHtml(existingComboImage)}" />
+                </div>
+              ` : ''}
+              <input class="admin-input" name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" />
+              <small class="admin-field__hint">Optional. Upload a JPG, PNG, or WEBP image${existingComboImage ? ' to replace the current image' : ''}.</small>
+            </label>
+            <label class="admin-field admin-field--wide">
+              <span>Combo Details</span>
+              <textarea class="admin-textarea" name="description" placeholder="Optional description for the combo">${escapeHtml(entity?.description || '')}</textarea>
+            </label>
+            <div class="admin-field admin-field--wide">
+              <span>Included Products & Variants</span>
+              <small class="admin-field__hint">Check at least two products to include in this combo. You can adjust component stock allocations below.</small>
+              <div class="admin-combo-items" style="max-height:300px;overflow-y:auto;padding-right:4px;">
+                ${allAvailableComponents.length ? allAvailableComponents.map((item) => {
+                  const fallback = getProductFallbackImage(item);
+                  const image = normalizeAdminImageUrl(item.imageUrl, fallback);
+                  const itemStock = selectedStockMap.get(item.variantId) ?? item.stock ?? comboStock;
+                  return `
+                    <label class="admin-combo-item ${item.isIncluded ? 'is-selected' : ''}" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:10px;border:1px solid ${item.isIncluded ? 'var(--admin-primary, #c8652d)' : 'var(--admin-border)'};border-radius:10px;margin-bottom:6px;background:${item.isIncluded ? 'rgba(200, 101, 45, 0.04)' : '#fff'};">
+                      <input type="checkbox" name="componentVariantId" value="${escapeHtml(item.variantId)}" ${item.isIncluded ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--admin-primary,#c8652d);cursor:pointer;" />
+                      <img src="${escapeHtml(image)}" alt="" onerror="this.onerror=null;this.src='${escapeHtml(fallback)}';" style="width:42px;height:42px;object-fit:cover;border-radius:7px;background:#f5f1ed;" />
+                      <span style="flex:1;">
+                        <strong>${escapeHtml(item.productName || item.name)}</strong>
+                        <small style="display:block;color:var(--admin-muted);">${escapeHtml([item.size, item.color].filter(Boolean).join(' / ') || item.sku || 'Default variant')} · SKU: ${escapeHtml(item.sku || '-')}</small>
+                      </span>
+                      <span style="font-size:12px;color:var(--admin-muted);text-align:right;">
+                        Stock:<br>
+                        <input class="admin-input" name="componentStock_${escapeHtml(item.variantId)}" type="number" min="0" value="${escapeHtml(itemStock)}" style="width:75px;padding:4px 8px;font-size:13px;display:inline-block;" aria-label="Component stock" />
+                      </span>
+                    </label>
+                  `;
+                }).join('') : '<p class="admin-table__muted">No active products available to add to combo.</p>'}
+              </div>
+            </div>
           </div>
         </form>
       `,
@@ -7704,7 +7825,7 @@
     try {
       const result = await apiRequest('/api/merch/admin/products');
       const productRows = Array.isArray(result) ? result : (Array.isArray(result?.products) ? result.products : []);
-      const categoryIds = { hoodies: 1, bottles: 2, sprays: 3 };
+      const categoryIds = { hoodies: 1, bottles: 2, sprays: 3, combos: 4 };
       const unknownCategories = new Map();
       const products = productRows.map((product) => {
         const variants = Array.isArray(product.variants) ? product.variants : [];
@@ -9809,6 +9930,10 @@
       case 'open-product-modal':
         renderEntityFormModal('product');
         return;
+      case 'open-combo-modal':
+        renderComboFormModal();
+        return;
+      case 'edit-combo':
       case 'edit-product':
         product?.isCombo ? renderComboFormModal([], product) : renderEntityFormModal('product', product);
         return;
@@ -10874,12 +10999,14 @@
     const type = form.dataset.entityForm;
     const id = form.dataset.entityId ? Number(form.dataset.entityId) : null;
     const existingId = Number.isFinite(id) && id ? id : null;
-    const existingEntity = existingId ? state.products.find((item) => Number(item.id) === existingId) : null;
+    const existingEntity = existingId ? state.products.find((item) =>
+      Number(item.parentProductId || item.productId || item.id) === existingId ||
+      Number(item.id) === existingId
+    ) : null;
 
     if (type === 'combo') {
       const fd = new FormData(form);
       const componentVariantIds = fd.getAll('componentVariantId').map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0);
-      const componentStocks = fd.getAll('componentStock').map((value) => Math.max(0, Math.floor(Number(value || 0))));
       let uploadedImage = '';
       try {
         uploadedImage = (await uploadMerchImages(form))[0] || '';
@@ -10887,17 +11014,22 @@
         toast('Image upload failed', error.message || 'Unable to upload the combo image.', 'danger');
         return;
       }
+      const overallStock = Math.max(0, Math.floor(Number(fd.get('stock') || 10)));
       const payload = {
         name: String(fd.get('name') || '').trim(),
         price: Number(fd.get('price') || 0),
-        image: uploadedImage || String(existingEntity?.image || '').trim(),
+        image: uploadedImage || String(fd.get('currentImage') || existingEntity?.image || existingEntity?.imageUrl || '').trim(),
         description: String(fd.get('description') || '').trim(),
         status: String(fd.get('status') || 'published'),
+        stock: overallStock,
         componentVariantIds,
-        componentStocks: componentVariantIds.map((variantId, index) => ({ variantId, stock: componentStocks[index] ?? 0 })),
+        componentStocks: componentVariantIds.map((variantId) => {
+          const stockVal = fd.get(`componentStock_${variantId}`) || overallStock;
+          return { variantId, stock: Math.max(0, Math.floor(Number(stockVal))) };
+        }),
       };
       if (!payload.name || !Number.isFinite(payload.price) || payload.price <= 0 || componentVariantIds.length < 2) {
-        toast('Combo details incomplete', 'Add a name, price, and at least two product variants.', 'warning');
+        toast('Combo details incomplete', 'Add a name, price, and select at least two product variants.', 'warning');
         return;
       }
       try {

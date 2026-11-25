@@ -366,6 +366,67 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     mergeHoodies();
   }
 
+  // Seed the default H2 Bottle & Merch combo if no combo currently exists.
+  const defaultComboSeedKey = 'seed-default-bottle-hoodie-combo-v1';
+  if (!db.prepare('SELECT migration_key FROM merch_catalog_migrations WHERE migration_key = ?').get(defaultComboSeedKey)) {
+    try {
+      const existingCombo = db.prepare('SELECT id FROM merch_products WHERE is_combo = 1 AND deleted_at IS NULL LIMIT 1').get();
+      if (!existingCombo) {
+        const bottleProduct = db.prepare("SELECT id, name FROM merch_products WHERE (lower(slug) = 'h2-water-bottle' OR lower(category) = 'bottles') AND deleted_at IS NULL LIMIT 1").get();
+        const hoodieProduct = db.prepare("SELECT id, name FROM merch_products WHERE (lower(slug) = 'hoodie' OR lower(category) = 'hoodies') AND deleted_at IS NULL LIMIT 1").get();
+        if (bottleProduct && hoodieProduct) {
+          const bottleVariant = db.prepare('SELECT id, sku FROM merch_variants WHERE product_id = ? AND is_active = 1 AND deleted_at IS NULL ORDER BY stock DESC, id ASC LIMIT 1').get(bottleProduct.id);
+          const hoodieVariant = db.prepare('SELECT id, sku FROM merch_variants WHERE product_id = ? AND is_active = 1 AND deleted_at IS NULL ORDER BY id ASC LIMIT 1').get(hoodieProduct.id);
+          if (bottleVariant && hoodieVariant) {
+            const comboName = 'H2 Bottle & Merch Combo';
+            const comboSlug = 'h2-bottle-merch-combo';
+            const comboDesc = 'Exclusive H2 wellness combo featuring the H2 Molecular Hydrogen Water Bottle and premium H2 Merch Hoodie.';
+            const comboPricePaise = 2499000;
+            const comboImage = '/cdn/shop/files/hero/h2-merch-hero-editorial-transparent-clean.png';
+            const comboStock = 20;
+            const comboSku = 'COMBO-BTL-HOD-460';
+
+            db.transaction(() => {
+              const productResult = db.prepare(`
+                INSERT INTO merch_products (name, slug, description, specifications_json, category, base_price, image_url, images_json, is_active, gst_rate, weight_grams, combo_purchase, is_combo)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 18, 500, 0, 1)
+              `).run(
+                comboName,
+                comboSlug,
+                comboDesc,
+                JSON.stringify({ 'Combo items': `${bottleProduct.name}, ${hoodieProduct.name}` }),
+                'combos',
+                comboPricePaise,
+                comboImage,
+                JSON.stringify([comboImage])
+              );
+              const comboProductId = Number(productResult.lastInsertRowid);
+              db.prepare(`
+                INSERT INTO merch_variants (product_id, sku, size, color, price, stock, is_active, image_url, images_json)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+              `).run(
+                comboProductId,
+                comboSku,
+                'Combo Set',
+                'Default',
+                comboPricePaise,
+                comboStock,
+                comboImage,
+                JSON.stringify([comboImage])
+              );
+              const insertItem = db.prepare('INSERT INTO merch_combo_items (combo_product_id, component_product_id, component_variant_id, quantity) VALUES (?, ?, ?, 1)');
+              insertItem.run(comboProductId, bottleProduct.id, bottleVariant.id);
+              insertItem.run(comboProductId, hoodieProduct.id, hoodieVariant.id);
+            })();
+          }
+        }
+      }
+      db.prepare('INSERT OR IGNORE INTO merch_catalog_migrations (migration_key) VALUES (?)').run(defaultComboSeedKey);
+    } catch (seedErr) {
+      console.warn('[Merch Combo Seed] Notice:', seedErr.message);
+    }
+  }
+
   // Restore the bundled product records if they were removed by the previous
   // soft-delete implementation. Existing stock values are preserved.
   const bundledProductRestores = [
@@ -13013,6 +13074,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       db.transaction(() => {
         if (productUpdates.length) db.prepare(`UPDATE merch_products SET ${productUpdates.join(', ')} WHERE id = ?`).run(...productParams);
         if (price !== null) db.prepare('UPDATE merch_variants SET price = ? WHERE product_id = ?').run(price, comboId);
+        if (body.stock !== undefined) {
+          db.prepare('UPDATE merch_variants SET stock = ? WHERE product_id = ?').run(Math.max(0, Math.floor(Number(body.stock))), comboId);
+        }
         if (componentIds) {
           if (componentIds.length < 2) throw new Error('A combo needs at least two product variants.');
           const ph = componentIds.map(() => '?').join(', ');
@@ -13022,7 +13086,7 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
           const insertItem = db.prepare('INSERT INTO merch_combo_items (combo_product_id, component_product_id, component_variant_id, quantity) VALUES (?, ?, ?, 1)');
           valid.forEach((item) => insertItem.run(comboId, item.productId, item.variantId));
         }
-        if (componentStocks) {
+        if (componentStocks && body.stock === undefined) {
           const stockVariantIds = componentIds || db.prepare('SELECT component_variant_id AS variantId FROM merch_combo_items WHERE combo_product_id = ?').all(comboId).map((item) => Number(item.variantId));
           const stocks = stockVariantIds.filter((variantId) => componentStocks.has(variantId)).map((variantId) => componentStocks.get(variantId));
           if (stocks.length) {
