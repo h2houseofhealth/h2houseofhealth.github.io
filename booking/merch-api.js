@@ -4109,10 +4109,11 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const paymentStatus = String(order?.paymentStatus || order?.payment_status || '').trim().toLowerCase();
     const isPaid = ['paid', 'cod_pending', 'refunded'].includes(paymentStatus);
 
-    if (!includeUnpaid && !isPaid) return false;
+    if (includeUnpaid) return true;
+    if (!isPaid) return false;
 
     const status = String(order?.status || '').trim().toLowerCase();
-    if (!isPaid && !['processing', 'shipped', 'delivered', 'cancelled', 'returned'].includes(status)) {
+    if (!['processing', 'shipped', 'delivered', 'cancelled', 'returned'].includes(status)) {
       return false;
     }
     return true;
@@ -8934,8 +8935,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       status: status === 'all' ? null : status,
       startDate,
       endDate,
-      includeUnconfirmed: includeUnconfirmed === 'true' || includeUnconfirmed === '1',
-      includeTests: includeTests === 'true' || includeTests === '1',
+      includeUnconfirmed: includeUnconfirmed !== 'false' && includeUnconfirmed !== '0',
+      includeTests: includeTests !== 'false' && includeTests !== '0',
     });
     res.json({ orders, total: orders.length });
   });
