@@ -4087,6 +4087,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (orderNumber.includes('TEST') || orderNumber.includes('SMOKE')) return true;
     if (customerName.includes('test') || guestName.includes('test')) return true;
     if (customerEmail.includes('test') || guestEmail.includes('test')) return true;
+    if (customerName.includes('sowmya') || guestName.includes('sowmya') || customerName.includes('daddanala') || guestName.includes('daddanala')) return true;
+    if (customerEmail.includes('sowmya') || guestEmail.includes('sowmya')) return true;
     if (customerEmail.endsWith('@example.com') || guestEmail.endsWith('@example.com')) return true;
     if (customerEmail.endsWith('@h2houseofhealth.local') || guestEmail.endsWith('@h2houseofhealth.local')) return true;
     if (totalAmount > 0 && totalAmount <= 100) return true;
@@ -4097,8 +4099,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!customer) return false;
     const name = String(customer.name || customer.fullName || '').trim().toLowerCase();
     const email = String(customer.email || '').trim().toLowerCase();
-    if (name === 'portal admin' || name.includes('test')) return true;
-    if (email.includes('test') || email.endsWith('@example.com') || email.endsWith('@h2houseofhealth.local')) return true;
+    if (name === 'portal admin' || name.includes('test') || name.includes('sowmya') || name.includes('daddanala')) return true;
+    if (email.includes('test') || email.includes('sowmya') || email.endsWith('@example.com') || email.endsWith('@h2houseofhealth.local')) return true;
     return false;
   }
 
@@ -4109,11 +4111,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     const paymentStatus = String(order?.paymentStatus || order?.payment_status || '').trim().toLowerCase();
     const isPaid = ['paid', 'cod_pending', 'refunded'].includes(paymentStatus);
 
-    if (includeUnpaid) return true;
-    if (!isPaid) return false;
+    if (!includeUnpaid && !isPaid) return false;
 
     const status = String(order?.status || '').trim().toLowerCase();
-    if (!['processing', 'shipped', 'delivered', 'cancelled', 'returned'].includes(status)) {
+    if (!isPaid && !['processing', 'shipped', 'delivered', 'cancelled', 'returned'].includes(status)) {
       return false;
     }
     return true;
@@ -8935,8 +8936,8 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       status: status === 'all' ? null : status,
       startDate,
       endDate,
-      includeUnconfirmed: includeUnconfirmed !== 'false' && includeUnconfirmed !== '0',
-      includeTests: includeTests !== 'false' && includeTests !== '0',
+      includeUnconfirmed: includeUnconfirmed === 'true' || includeUnconfirmed === '1',
+      includeTests: includeTests === 'true' || includeTests === '1',
     });
     res.json({ orders, total: orders.length });
   });
