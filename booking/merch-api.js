@@ -834,6 +834,9 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
   if (!hasColumn('merch_orders', 'cancelled_at')) {
     db.exec('ALTER TABLE merch_orders ADD COLUMN cancelled_at TEXT');
   }
+  if (!hasColumn('merch_orders', 'cancellation_reason')) {
+    db.exec('ALTER TABLE merch_orders ADD COLUMN cancellation_reason TEXT');
+  }
   if (!hasColumn('merch_orders', 'stock_deducted')) {
     db.exec('ALTER TABLE merch_orders ADD COLUMN stock_deducted INTEGER NOT NULL DEFAULT 0');
     try {
@@ -5199,14 +5202,25 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     if (!Number.isInteger(id) || id <= 0) return null;
     const order = db.prepare(`
       SELECT id, order_number AS orderNumber, customer_name AS customerName, customer_email AS customerEmail,
-             customer_phone AS customerPhone, subtotal, gst_amount AS gstAmount, shipping_charge AS shippingCharge,
+             customer_phone AS customerPhone, guest_name AS guestName, guest_email AS guestEmail, guest_phone AS guestPhone,
+             subtotal, gst_amount AS gstAmount, shipping_charge AS shippingCharge,
              discount_amount AS discountAmount, total_amount AS totalAmount, payment_method AS paymentMethod,
-             payment_status AS paymentStatus, shipping_address AS shippingAddress, created_at AS createdAt
+             payment_status AS paymentStatus, status, cancelled_by AS cancelledBy, cancelled_at AS cancelledAt,
+             cancellation_reason AS cancellationReason, shipping_address AS shippingAddress, created_at AS createdAt
       FROM merch_orders
       WHERE id = ?
       LIMIT 1
     `).get(id);
     if (!order) return null;
+    if (!order.customerEmail && order.guestEmail) {
+      order.customerEmail = order.guestEmail;
+    }
+    if (!order.customerName && order.guestName) {
+      order.customerName = order.guestName;
+    }
+    if (!order.customerPhone && order.guestPhone) {
+      order.customerPhone = order.guestPhone;
+    }
     const items = db.prepare(`
       SELECT oi.id, oi.product_name AS productName, oi.variant_label AS variantLabel, oi.sku,
              oi.unit_price AS unitPrice, oi.quantity, oi.line_total AS lineTotal,
@@ -5531,6 +5545,206 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
                     📞 <a href="${escapeHtml(links.phone)}" style="color:#14233b;text-decoration:none;font-weight:600;">+91 91000 56979</a>
                   </p>
                   <p style="margin:0;text-align:center;">📍 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033</p>
+                </div>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+    return { html, text };
+  }
+
+  function buildMerchOrderCancellationText({ order, items, cancelledBy, reason, links }) {
+    const isPaidOnline = ['paid', 'refunded'].includes(String(order.paymentStatus || '').toLowerCase()) && String(order.paymentMethod || '').toLowerCase() !== 'cod';
+    const refundNote = isPaidOnline
+      ? `A refund of ${formatMerchEmailCurrency(order.totalAmount || 0)} has been initiated to your original payment method and will be credited within 5-7 business days.`
+      : (String(order.paymentMethod || '').toLowerCase() === 'cod' ? 'As this was a Cash on Delivery order, no payment was collected.' : 'No charges were incurred for this order.');
+
+    return [
+      `Hi ${order.customerName || 'there'},`,
+      '',
+      `Your H2 House of Health merchandise order ${order.orderNumber || `Order #${order.id}`} has been cancelled.`,
+      '',
+      refundNote,
+      '',
+      `Order ID: ${order.orderNumber || `Order #${order.id}`}`,
+      `Order Date: ${formatMerchEmailDateTime(order.createdAt) || order.createdAt || ''}`,
+      `Cancellation Date: ${formatMerchEmailDateTime(new Date())}`,
+      `Cancelled By: ${cancelledBy === 'admin' ? 'Merchant / Store Admin' : 'Customer'}`,
+      reason ? `Reason: ${reason}` : '',
+      `Total Amount: ${formatMerchEmailCurrency(order.totalAmount || 0)}`,
+      `Payment Status: ${formatMerchEmailPaymentStatus(order.paymentStatus).toUpperCase()}`,
+      `Payment Method: ${String(order.paymentMethod || 'online').toUpperCase()}`,
+      '',
+      'Items in this order:',
+      ...items.map((it) => `- ${it.productName || 'Product'}${it.variantLabel ? ` (${it.variantLabel})` : ''} x ${it.quantity || 1} - ${formatMerchEmailCurrency(it.lineTotal || 0)}`),
+      '',
+      'Need help with your order? Contact hello@h2houseofhealth.com or call +91 91000 56979.',
+      `Shop online: ${links.shop}`,
+      `Visit us: ${links.home}`,
+    ].filter(Boolean).join('\n');
+  }
+
+  function buildMerchOrderCancellationHtml({ order, items, cancelledBy, reason, req }) {
+    const links = buildMerchEmailLinks(req, order.id);
+    const isPaidOnline = ['paid', 'refunded'].includes(String(order.paymentStatus || '').toLowerCase()) && String(order.paymentMethod || '').toLowerCase() !== 'cod';
+    const refundNote = isPaidOnline
+      ? `A refund of <strong>${formatMerchEmailCurrency(order.totalAmount || 0)}</strong> has been initiated to your original payment method. Please allow 5&ndash;7 business days for the credit to appear in your account statement.`
+      : (String(order.paymentMethod || '').toLowerCase() === 'cod' ? 'As this was a Cash on Delivery order, no payment was collected.' : 'No charges were incurred for this cancelled order.');
+
+    const itemRows = items.map((item) => `
+      <tr>
+        <td class="item-name" style="padding:9px 22px;color:#14233b;font-size:14px;line-height:20px;word-break:break-word;">
+          ${escapeHtml(item.productName || 'H2 House Merch')}${item.variantLabel ? `<br><span style="font-size:12px;color:#657384;">${escapeHtml(item.variantLabel)}</span>` : ''}
+        </td>
+        <td class="item-qty" align="center" style="padding:9px 8px;color:#14233b;font-size:14px;line-height:20px;white-space:nowrap;">${escapeHtml(String(item.quantity || 1))}</td>
+        <td class="item-price" align="right" style="padding:9px 22px;color:#14233b;font-size:14px;line-height:20px;white-space:nowrap;">${formatMerchEmailCurrency(item.lineTotal || 0)}</td>
+      </tr>
+    `).join('');
+
+    const text = buildMerchOrderCancellationText({ order, items, cancelledBy, reason, links });
+
+    const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your H2 order has been cancelled</title>
+    <style>
+      body, table, td, p, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+      table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+      img { -ms-interpolation-mode: bicubic; }
+      @media only screen and (max-width: 620px) {
+        .email-shell { width: 100% !important; max-width: 600px !important; }
+        .mobile-pad { padding-left: 20px !important; padding-right: 20px !important; }
+        .mobile-top-pad { padding-top: 22px !important; }
+        .mobile-stack { display: block !important; width: 100% !important; }
+        .mobile-center { text-align: center !important; }
+        .mobile-button { display: block !important; width: 100% !important; min-height: 44px !important; box-sizing: border-box !important; }
+        .mobile-logo { width: 142px !important; max-width: 142px !important; margin: 0 auto !important; }
+      }
+    </style>
+  </head>
+  <body style="margin:0;padding:0;background:#f6f1ec;color:#14233b;font-family:Arial,Helvetica,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f6f1ec;">
+      <tr>
+        <td align="center" style="padding:0;">
+          <table role="presentation" class="email-shell" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:600px;border-collapse:collapse;background:#fffaf7;">
+            <!-- Header -->
+            <tr>
+              <td class="mobile-pad mobile-top-pad" style="padding:32px 32px 18px;background:#fffaf7;text-align:center;">
+                <a href="${escapeHtml(links.home)}" style="text-decoration:none;display:inline-block;">
+                  <img class="mobile-logo" src="${escapeHtml(links.logo)}" width="154" alt="H2 House of Health logo" style="display:block;border:0;width:154px;max-width:154px;height:auto;margin:0 auto;">
+                </a>
+              </td>
+            </tr>
+
+            <!-- Hero Banner -->
+            <tr>
+              <td class="mobile-pad" style="padding:10px 32px 24px;text-align:center;">
+                <div style="display:inline-block;padding:5px 14px;border-radius:20px;background:#fbeae5;color:#b63b20;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:12px;">ORDER CANCELLED</div>
+                <h1 style="margin:0 0 10px;font-family:Georgia,'Times New Roman',serif;font-size:32px;line-height:38px;color:#14233b;">Order Cancellation Notice</h1>
+                <p style="margin:0;color:#657384;font-size:16px;line-height:24px;">Order #${escapeHtml(order.orderNumber || order.id)}</p>
+              </td>
+            </tr>
+
+            <!-- Greeting & Message -->
+            <tr>
+              <td class="mobile-pad" style="padding:0 32px 20px;">
+                <p style="margin:0 0 12px;font-size:16px;line-height:24px;color:#14233b;">Hi <strong>${escapeHtml(order.customerName || 'there')}</strong>,</p>
+                <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#435166;">
+                  This email confirms that your order <strong>${escapeHtml(order.orderNumber || order.id)}</strong> has been cancelled${cancelledBy === 'admin' ? ' by our team' : ''}.
+                </p>
+                ${reason ? `
+                <div style="background:#fef7f5;border-left:4px solid #b63b20;padding:12px 16px;margin:0 0 16px;border-radius:0 6px 6px 0;">
+                  <p style="margin:0;font-size:14px;line-height:20px;color:#8f392b;"><strong>Reason:</strong> ${escapeHtml(reason)}</p>
+                </div>
+                ` : ''}
+              </td>
+            </tr>
+
+            <!-- Refund Notice Box -->
+            <tr>
+              <td class="mobile-pad" style="padding:0 32px 24px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;background:#f5e8e1;border:1px solid #e7cabb;border-radius:8px;">
+                  <tr>
+                    <td style="padding:18px 20px;">
+                      <p style="margin:0 0 6px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:18px;line-height:24px;font-weight:700;">Refund Details</p>
+                      <p style="margin:0;color:#14233b;font-size:14px;line-height:22px;">${refundNote}</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Order Summary Table -->
+            <tr>
+              <td class="mobile-pad" style="padding:0 32px 20px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #ebd9cf;border-radius:8px;overflow:hidden;background:#fffaf7;">
+                  <tr style="background:#f8ede7;">
+                    <th align="left" style="padding:10px 22px;color:#8f392b;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Item</th>
+                    <th align="center" style="padding:10px 8px;color:#8f392b;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Qty</th>
+                    <th align="right" style="padding:10px 22px;color:#8f392b;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">Price</th>
+                  </tr>
+                  ${itemRows}
+                  <tr style="border-top:1px solid #ebd9cf;">
+                    <td colspan="2" style="padding:10px 22px;color:#657384;font-size:14px;">Subtotal</td>
+                    <td align="right" style="padding:10px 22px;color:#14233b;font-size:14px;font-weight:600;">${formatMerchEmailCurrency(order.subtotal || 0)}</td>
+                  </tr>
+                  ${Number(order.discountAmount || 0) > 0 ? `
+                  <tr>
+                    <td colspan="2" style="padding:6px 22px;color:#16a34a;font-size:14px;">Discount</td>
+                    <td align="right" style="padding:6px 22px;color:#16a34a;font-size:14px;font-weight:600;">-${formatMerchEmailCurrency(order.discountAmount || 0)}</td>
+                  </tr>
+                  ` : ''}
+                  <tr>
+                    <td colspan="2" style="padding:6px 22px;color:#657384;font-size:14px;">Shipping</td>
+                    <td align="right" style="padding:6px 22px;color:#14233b;font-size:14px;font-weight:600;">${formatMerchEmailCurrency(order.shippingCharge || 0)}</td>
+                  </tr>
+                  <tr style="border-top:1px solid #ebd9cf;background:#f5e8e1;">
+                    <td colspan="2" style="padding:12px 22px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:18px;font-weight:700;">Total Order Value</td>
+                    <td align="right" style="padding:12px 22px;color:#ad3c22;font-family:Georgia,'Times New Roman',serif;font-size:20px;font-weight:700;">${formatMerchEmailCurrency(order.totalAmount || 0)}</td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Action Buttons -->
+            <tr>
+              <td class="mobile-pad" style="padding:10px 32px 30px;text-align:center;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+                  <tr>
+                    <td class="mobile-stack" style="width:50%;padding-right:6px;padding-bottom:10px;">
+                      <a class="mobile-button" href="${escapeHtml(links.shop)}" style="display:block;text-align:center;padding:14px 16px;border-radius:6px;background:#b63b20;color:#ffffff;text-decoration:none;font-family:Georgia,'Times New Roman',serif;font-size:16px;font-weight:700;">Explore Wellness Products&nbsp;&rarr;</a>
+                    </td>
+                    <td class="mobile-stack" style="width:50%;padding-left:6px;padding-bottom:10px;">
+                      <a class="mobile-button" href="${escapeHtml(links.home)}" style="display:block;text-align:center;padding:14px 16px;border:1px solid #b63b20;border-radius:6px;color:#ad3c22;text-decoration:none;font-family:Georgia,'Times New Roman',serif;font-size:16px;font-weight:700;background:#fffaf7;">Back to Home</a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Footer -->
+            <tr>
+              <td class="mobile-pad" align="center" style="padding:28px 24px 26px;background:#f4eee9;border-top:1px solid #ead8cd;text-align:center;">
+                <div align="center" style="text-align:center;margin:0 auto 14px;">
+                  <a href="${escapeHtml(links.home)}" style="display:inline-block;text-decoration:none;">
+                    <img src="${escapeHtml(links.logo)}" width="140" alt="H2 House of Health logo" style="display:block;border:0;width:140px;max-width:140px;height:auto;margin:0 auto;">
+                  </a>
+                </div>
+                <p style="margin:0 0 12px;color:#14233b;font-family:Georgia,'Times New Roman',serif;font-size:15px;line-height:22px;font-weight:700;letter-spacing:1px;text-align:center;">PREVENTIVE TODAY, HEALTHIER TOMORROW.</p>
+                <div style="border-top:1px solid #d2a08d;margin:16px auto;width:100%;max-width:520px;"></div>
+                <div align="center" style="text-align:center;color:#14233b;font-size:14px;line-height:1.7;margin:0 auto;max-width:520px;">
+                  <p style="margin:0 0 6px;">
+                    ✉️ <a href="${escapeHtml(links.email)}" style="color:#14233b;text-decoration:none;font-weight:600;">hello@h2houseofhealth.com</a>
+                    &nbsp;&bull;&nbsp;
+                    📞 <a href="${escapeHtml(links.phone)}" style="color:#14233b;text-decoration:none;font-weight:600;">+91 91000 56979</a>
+                  </p>
+                  <p style="margin:0;">📍 47A, Journalist Colony, Road No:70, Jubilee Hills, Hyderabad - 500033</p>
                 </div>
               </td>
             </tr>
@@ -5993,6 +6207,35 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     return { status: 'sent' };
   }
 
+  async function sendMerchOrderCancellationEmail(orderId, { cancelledBy = 'admin', reason = '' } = {}, req = null) {
+    const data = getMerchOrderEmailData(orderId);
+    if (!data) {
+      return { status: 'skipped', reason: 'order_not_found' };
+    }
+    const recipientEmail = String(data.order.customerEmail || data.order.guestEmail || '').trim().toLowerCase();
+    if (!isValidMerchEmail(recipientEmail)) {
+      return { status: 'skipped', reason: 'missing_email' };
+    }
+    if (typeof sendMerchEmail !== 'function') {
+      console.warn('[Merch] Order cancellation email skipped: email service is not configured.');
+      return { status: 'skipped', reason: 'missing_config' };
+    }
+    const { html, text } = buildMerchOrderCancellationHtml({
+      order: data.order,
+      items: data.items,
+      cancelledBy,
+      reason,
+      req,
+    });
+    await sendMerchEmail({
+      to: recipientEmail,
+      subject: `Your H2 order has been cancelled - ${data.order.orderNumber || `Order #${data.order.id}`}`,
+      text,
+      html,
+    });
+    return { status: 'sent' };
+  }
+
   async function triggerMerchOrderConfirmationNotifications(orderId, req) {
     const result = {
       email: { status: 'skipped' },
@@ -6118,6 +6361,34 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
         success: false,
         error: error?.message || String(error),
         whatsapp: getLatestMerchWhatsAppMessageStatus(orderId),
+      });
+    }
+  });
+
+  app.post('/api/merch/admin/orders/:id/send-cancellation-email', requireAdmin, async (req, res) => {
+    const orderId = Number(req.params.id);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      return res.status(400).json({ error: 'Invalid order id' });
+    }
+    const order = db.prepare('SELECT id, status, cancelled_by, cancellation_reason FROM merch_orders WHERE id = ?').get(orderId);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    try {
+      const emailResult = await sendMerchOrderCancellationEmail(
+        orderId,
+        {
+          cancelledBy: order.cancelled_by || 'admin',
+          reason: req.body?.reason || order.cancellation_reason || '',
+        },
+        req
+      );
+      return res.json({
+        success: emailResult.status === 'sent',
+        emailResult,
+      });
+    } catch (error) {
+      return res.status(502).json({
+        success: false,
+        error: error?.message || String(error),
       });
     }
   });
@@ -8907,6 +9178,14 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       db.prepare(`UPDATE merch_orders SET shiprocket_status = 'CANCELLED' WHERE id = ?`).run(order.id);
     }
 
+    sendMerchOrderCancellationEmail(
+      order.id,
+      { cancelledBy: 'customer', reason: req.body?.reason || '' },
+      req
+    ).catch((err) => {
+      console.error('[Merch] Customer cancel email notice:', err?.message || err);
+    });
+
     const updated = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(order.id);
     const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(order.id);
     res.json({ success: true, order: buildMerchOrderRecord(updated, items) });
@@ -10462,6 +10741,10 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
       updates.push('cancelled_by = ?');
       params.push('admin');
       updates.push("cancelled_at = datetime('now')");
+      if (req.body?.reason || req.body?.cancel_reason) {
+        updates.push('cancellation_reason = ?');
+        params.push(String(req.body.reason || req.body.cancel_reason).trim());
+      }
       if (!payment_status && String(existingOrder.payment_status || '').toLowerCase() === 'cod_pending') {
         updates.push("payment_status = 'cancelled'");
       }
@@ -10509,6 +10792,16 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     });
     save();
 
+    if (String(status).toLowerCase() === 'cancelled' && existingStatus !== 'cancelled') {
+      sendMerchOrderCancellationEmail(
+        existingOrder.id,
+        { cancelledBy: 'admin', reason: req.body?.reason || req.body?.cancel_reason || '' },
+        req
+      ).catch((err) => {
+        console.error('[Merch] Failed to dispatch admin cancellation email:', err?.message || err);
+      });
+    }
+
     if (String(status).toLowerCase() === 'cancelled' && existingOrder.shiprocket_order_id && shiprocket.isConfigured()) {
       shiprocket.cancelOrder({ shiprocketOrderIds: [existingOrder.shiprocket_order_id] }).catch((err) => {
         console.warn('[Shiprocket] Admin cancel - Shiprocket cancel notice:', err.message);
@@ -10533,12 +10826,22 @@ module.exports = function mountMerchApi(app, { db, razorpay, RAZORPAY_KEY_ID, RA
     db.transaction(() => {
       db.prepare("UPDATE merch_orders SET payment_status = 'refunded', updated_at = datetime('now') WHERE id = ?").run(orderId);
       if (req.body?.cancel_order) {
-        db.prepare("UPDATE merch_orders SET status = 'cancelled', cancelled_by = 'admin', cancelled_at = datetime('now') WHERE id = ?").run(orderId);
+        db.prepare("UPDATE merch_orders SET status = 'cancelled', cancelled_by = 'admin', cancelled_at = datetime('now'), cancellation_reason = 'Order refunded and cancelled by merchant' WHERE id = ?").run(orderId);
       }
       if (shouldRestock && isPreShipment && Number(existingOrder.stock_deducted || 0) === 1) {
         restoreMerchOrderStock(orderId);
       }
     })();
+
+    if (req.body?.cancel_order && String(existingOrder.status || '').toLowerCase() !== 'cancelled') {
+      sendMerchOrderCancellationEmail(
+        orderId,
+        { cancelledBy: 'admin', reason: 'Order refunded and cancelled by merchant' },
+        req
+      ).catch((err) => {
+        console.error('[Merch] Failed to dispatch refund cancellation email:', err?.message || err);
+      });
+    }
 
     const order = db.prepare('SELECT * FROM merch_orders WHERE id = ?').get(orderId);
     const items = db.prepare('SELECT * FROM merch_order_items WHERE order_id = ?').all(orderId);

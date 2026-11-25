@@ -10344,9 +10344,12 @@
             payload.tracking_number = `TRK-${Math.floor(10000 + Math.random() * 90000)}-HM`;
             payload.carrier_name = order.carrier || 'Shiprocket';
           }
+          if (nextStatus === 'cancelled') {
+            payload.reason = 'Cancelled by store administrator';
+          }
           try {
             await updateOrderOnServer(order, payload);
-            toast('Order updated', `${order.orderNumber} moved to ${getStatusLabel(nextStatus)}.`, 'success');
+            toast('Order updated', nextStatus === 'cancelled' ? `${order.orderNumber} cancelled and customer notified via email.` : `${order.orderNumber} moved to ${getStatusLabel(nextStatus)}.`, 'success');
           } catch (error) {
             toast('Order update failed', error.message || 'Unable to update the order status.', 'warning');
             renderOrders();
@@ -10397,12 +10400,19 @@
         return;
       case 'cancel-order':
         if (order) {
-          try {
-            await updateOrderOnServer(order, { status: 'cancelled' });
-            toast('Order cancelled', `${order.orderNumber} has been marked cancelled.`, 'warning');
-          } catch (error) {
-            toast('Order update failed', error.message || 'Unable to cancel the order.', 'warning');
-          }
+          openConfirmModal({
+            title: 'Cancel Order',
+            message: `Are you sure you want to cancel order ${order.orderNumber}? A cancellation notification email will be sent to the customer automatically.`,
+            confirmLabel: 'Cancel Order',
+            onConfirm: async () => {
+              try {
+                await updateOrderOnServer(order, { status: 'cancelled', reason: 'Cancelled by store administrator' });
+                toast('Order cancelled', `${order.orderNumber} has been cancelled and customer notified via email.`, 'success');
+              } catch (error) {
+                toast('Order cancel failed', error.message || 'Unable to cancel the order.', 'warning');
+              }
+            },
+          });
         }
         return;
       case 'refund-order':
